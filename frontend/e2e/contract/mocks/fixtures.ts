@@ -1,5 +1,5 @@
 /**
- * Deterministic API fixtures for the UI sweep. Shapes follow
+ * Deterministic API fixtures for the UI contract. Shapes follow
  * frontend/src/types/*.ts. Every display state deriveState() can produce is
  * reachable here in milliseconds — no orchestrator, no fake agent.
  *
@@ -13,7 +13,7 @@
 
 export type Variant = "default" | "long" | "many" | "empty";
 
-export type DisplayState =
+type DisplayState =
   | "running" | "rate_limited" | "waiting" | "not_started" | "paused" | "gate"
   | "capped" | "budget" | "question" | "escalating" | "escalated" | "done"
   | "abandoned" | "archived";
@@ -41,7 +41,7 @@ export function hex(seed: number): string {
 
 export const T0 = Date.parse("2026-09-13T08:00:00Z");
 export const t = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
-/** Relative to the instant the sweep freezes the page clock at (NG_NOW), for "next check in 4m" style fields. Read at call time: ngItems and this module import each other. */
+/** Relative to the instant the suite freezes the page clock at (NG_NOW), for "next check in 4m" style fields. Read at call time: ngItems and this module import each other. */
 const fromNow = (minutes: number) => new Date(Date.parse(NG_NOW) + minutes * 60_000).toISOString();
 
 /* ── repos ───────────────────────────────────────────────────────────────── */
@@ -95,7 +95,7 @@ const HOOK: Record<string, string> = {
   open_mr: "on.mr.open", ci_poll: "on.ci.poll",
 };
 
-export const DEFAULT_NODES = [
+const DEFAULT_NODES = [
   { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval", reject_to: null },
   { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval", reject_to: "spec" },
   { id: "implement", tasks: ["on.implementation.start"], gate_after: null, fix_loop: "verify_fix_loop" },
@@ -105,7 +105,7 @@ export const DEFAULT_NODES = [
   { id: "open_mr", tasks: ["on.mr.open"], gate_after: "human_review_approval" },
   { id: "ci_poll", tasks: ["on.ci.poll"], gate_after: null },
 ];
-export const QUICK_NODES = [
+const QUICK_NODES = [
   { id: "implement", tasks: ["on.implementation.start"], gate_after: null, fix_loop: "verify_fix_loop" },
   { id: "verify", tasks: ["on.test.run"], gate_after: null },
   { id: "open_mr", tasks: ["on.mr.open"], gate_after: null },
@@ -197,7 +197,7 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
   return out;
 }
 
-export function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBundle {
+function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBundle {
   const long = variant === "long";
   const id = hex(seed);
   const quick = ["done", "paused", "abandoned", "capped"].includes(state);
@@ -577,7 +577,7 @@ export function compareFor(id: string, variant: Variant, ignoreWhitespace = fals
   };
 }
 
-export function documentsFor(item: any, variant: Variant) {
+function documentsFor(item: any, variant: Variant) {
   const long = variant === "long";
   const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, long ? 110 : 40);
   // Two documents attached at intake in every variant, at the real shape (W10.D):
@@ -665,7 +665,7 @@ export function artifactFor(item: any, variant: Variant) {
 
 /* ── settings & instance ─────────────────────────────────────────────────── */
 
-export function settingsFor(variant: Variant, theme: { mode?: string; density?: string; group_by?: string }) {
+function settingsFor(variant: Variant, theme: { mode?: string; density?: string; group_by?: string }) {
   const long = variant === "long";
   const empty = variant === "empty";
   const paths = empty ? [] : long ? LONG_REPO_PATHS : REPO_PATHS;
@@ -725,7 +725,7 @@ export function settingsFor(variant: Variant, theme: { mode?: string; density?: 
   };
 }
 
-export function analyticsFor(variant: Variant) {
+function analyticsFor(variant: Variant) {
   const long = variant === "long"; const empty = variant === "empty";
   const z = (n: number) => (empty ? 0 : n);
   return {

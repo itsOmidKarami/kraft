@@ -95,17 +95,16 @@ point into the maintainer's private issue tracker (beads), which you cannot
 see. Read one as "this was discussed"; the text beside it says what matters.
 Don't add new ones: cite a GitHub issue or pull request number instead.
 
-The frontend, its tests and its sweep carry a second set of references of the
+The frontend and its tests carry a second set of references of the
 same kind. **UX V2** is the design programme behind the 2.0 interface;
 **ux2-W\<n>** (often written just `W<n>` in a comment) is one of its numbered
 waves of work; **spec §n**, **brief**, **Decided n**, **R\<n>** and
 **Ruling n** are a numbered section, decision or review finding in that
 programme's notes; and `design/handoff_*` is a folder of design handoffs. Those
 notes are the maintainer's private ones: `design/` is gitignored and none of it
-can be opened from a clone. Read them as you read a `Kraft-` ID. The exception
-is the earlier fix programme, plain `W0`–`W14`, whose briefs and receipts are
-tracked in `frontend/sweep/` (`briefs/W<n>_BRIEF.md`, `HISTORY.md`,
-`history/`), so a bare `W11` can be looked up there but a `ux2-W11` cannot. The
+can be opened from a clone. Read them as you read a `Kraft-` ID. The earlier
+fix programme, plain `W0`–`W14`, is the same: its briefs and receipts were
+tracked under `frontend/` until the 2.x cleanup and are in git history only. The
 rules the code actually enforces are stated in the tests that enforce them and
 summarised in [`frontend/README.md`](frontend/README.md), so ask there, or in
 an issue, when a comment's own words don't say what a rule is for. Don't add
@@ -115,7 +114,7 @@ new ones.
 
 ```text
 src/kraft/        the orchestrator: api/, executor/, store/, adapters/, worker/, cli/, index/, ...
-frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, sweep/ is a screenshot harness, and sweep/contract/ is the UI contract suite CI runs
+frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, e2e/contract/ the UI contract
 config/           the packaged configuration: the default library, chains, harness profiles and policy, an install's seed
 tests/            backend tests, mirroring src/kraft/ (CLAUDE.md says why that matters)
 dev/              the dev-instance seeder, CI check scripts, release and codegen helpers
@@ -143,18 +142,13 @@ them unless you use the same tools:
 | `.kraft-lite/` | this repo's Kraft Lite hook registry | No |
 | `.gitlab/` | the PR template for GitLab, from before the move to GitHub; a symlink to `.github/`'s | No |
 
-In `frontend/sweep/`, `briefs/`, `WAVES.md` and `HISTORY.md` are the
-maintainer's working notes from past UI fix passes, and the `W<n>` and
-`ux2-` names in `waves/` and `cases/` are those passes. `frontend/sweep/README.md`
-covers the harness itself.
-
 ## Tests
 
 ```bash
 just test       # backend tests affected by your change (testmon); --no-testmon for all
 just e2e        # Playwright (see frontend/e2e/README.md)
-just ui-contract # the SPA's behaviours and icon-only audit in a browser on a mocked API (frontend/sweep/README.md)
-just test-ui    # frontend typecheck and unit tests (see frontend/README.md for when the sweep is required too)
+just ui-contract # the SPA's behaviours and icon-only audit in a browser on a mocked API (frontend/e2e/contract/README.md)
+just test-ui    # frontend typecheck and unit tests (see frontend/README.md for when the browser suites are required too)
 just test-vscode # VS Code extension: schemas current, typecheck, unit tests
 just intent     # check that every enforced-by pin in docs/intent/ still resolves
 just lint       # ruff check + format check
@@ -202,7 +196,7 @@ CI's order, on the full suite.
 | `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
 | `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
 | `playwright` *(code)* | the browser e2e suite against a fixture server | `just e2e-ci` |
-| `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/sweep/contract/`) | `just ui-contract` |
+| `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/e2e/contract/`) | `just ui-contract` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
 | `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |

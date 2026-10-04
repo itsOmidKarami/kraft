@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
-import type { Scenario } from "../fixtures";
-import { lightMode } from "../fixtures";
+import type { Scenario } from "./mocks/fixtures";
+import { lightMode } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, pause, type Row } from "./kit";
 
 /** The shell: the sidebar's pin, reveal and persistence, search, the board's side panel, settings navigation, tooltips. */
@@ -85,7 +85,7 @@ const ROWS: Row[] = [
   },
   {
     name: "sidebar: the footer shows the version and an update notice that opens About [decided]",
-    run: async (p) => { await app(p, "/", { mock: { update: "available" } }); const f = p.getByRole("link", { name: /^Kraft v\d.*update available/ }); await expect(f).toBeVisible({ timeout: 4000 }); await expect(f).toContainText("update"); await f.click(); await pause(p); expect(p.url()).toContain("/settings/about"); },
+    run: async (p) => { await app(p, "/"); const f = p.getByRole("link", { name: /^Kraft v\d.*update available/ }); await expect(f).toBeVisible({ timeout: 4000 }); await expect(f).toContainText("update"); await f.click(); await pause(p); expect(p.url()).toContain("/settings/about"); },
   },
   {
     name: "sidebar: the pin toggle sits top-right of the head, beside the brand [decided]",

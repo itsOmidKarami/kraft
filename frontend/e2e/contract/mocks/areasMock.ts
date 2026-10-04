@@ -3,13 +3,10 @@
  * W13's server does (docsite "Drafts", "Repos ops", "Policy ops", "Intake ops",
  * and W15 A). One instance per page: ops change it, `undo` pops the last,
  * `preview=1` answers without saving, a publish folds the draft into the
- * published state. `variant` seeds the cells' states: `broken` (problems),
- * `stale` (publish answers a 409), `empty` (no repos or schedules), `off`
- * (auto-intake disabled).
- * The product reads none of this: it is the sweep's stand-in for a server.
+ * published state.
+ * The product reads none of this: it is the suite's stand-in for a server.
  */
 
-export type AreaVariant = "default" | "broken" | "stale" | "empty" | "off";
 type Obj = Record<string, any>;
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -100,10 +97,8 @@ function keyChanges(file: string, was: Obj, now: Obj) {
   return out;
 }
 
-export function makeAreas(variant: AreaVariant = "default") {
-  const pub = { repos: repoSeed(), policy: policySeed(), intake: variant === "off" ? { ...intakeSeed(), enabled: false } : intakeSeed() } as Obj;
-  if (variant === "empty") { pub.repos = [{ path: "/Users/me/src/product_root/plugins", name: "plugins", managed: false }]; pub.policy.triggers = []; }
-  if (variant === "broken") pub.policy.maxima.tasks.time_cap_minutes = 60; // under the library's 120 (and the policy's own tasks default 90)
+export function makeAreas() {
+  const pub = { repos: repoSeed(), policy: policySeed(), intake: intakeSeed() } as Obj;
   let draft: Record<string, Obj | null> = { repos: null, policy: null, intake: null };
   const undo: Record<string, string[]> = { repos: [], policy: [], intake: [] };
 
@@ -115,7 +110,6 @@ export function makeAreas(variant: AreaVariant = "default") {
 
   /* the draft of intake spans policy.yaml too: its policy half is `draftPolicy` */
   let draftPolicyForIntake: Obj | null = null;
-  let rebased = false;
 
   /* results */
   function repoResult(s: Obj[]) {
@@ -124,7 +118,6 @@ export function makeAreas(variant: AreaVariant = "default") {
       const set = new Set(Object.keys(e.policy ?? {}));
       const wide = (e.policy?.allowed_tools ?? []).filter((t: string) => !TOOL_CEILING.includes(t));
       if (wide.length) problems.push({ path: "allowed_tools", field: "allowed_tools", message: `'allowed_tools' cannot widen the inherited safety ceiling ${JSON.stringify(TOOL_CEILING).replace(/"/g, "'")}; [${wide.map((t: string) => `'${t}'`).join(", ")}] is not allowed`, file: "repos.yaml", line: 1, col: 1, repo: e.path });
-      if (e.managed !== false && variant === "broken" && e.name === "docs-site") problems.push({ path: "path", field: "path", message: `${e.path} is not a git repository`, file: "repos.yaml", line: 1, col: 1, repo: e.path });
       const entry = Object.fromEntries(Object.entries(e).filter(([k]) => !["managed"].includes(k)));
       return {
         path: e.path, name: e.name ?? null, managed: e.managed !== false, entry,
@@ -204,9 +197,6 @@ export function makeAreas(variant: AreaVariant = "default") {
 
   function intakeResult(i: Obj, p: Obj) {
     const problems: Obj[] = [];
-    (p.triggers ?? []).forEach((t: Obj, n: number) => {
-      if (variant === "broken" && n === 0) problems.push({ path: `triggers[${n}].repo`, field: "repo", message: `${t.repo} is not a connected repo`, file: "policy.yaml", line: 1, col: 1, schedule: n });
-    });
     return {
       model: { "intake.yaml": i, "policy.yaml": p }, problems, sources: {}, impact: null, warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
       resolved: { enabled: i.enabled, interval_s: i.interval_s, max_concurrent: p.max_concurrent ?? 3, priority_ceiling: i.priority_ceiling, repos: i.repos ?? [], schedules: (p.triggers ?? []).map((t: Obj, n: number) => ({ index: n, cron: t.cron, repo: t.repo, chain: t.chain, title: t.title, description: t.description ?? "" })) },
@@ -293,20 +283,19 @@ export function makeAreas(variant: AreaVariant = "default") {
       }
       if (action === "publish") {
         const r = resultOf(area);
-        if (variant === "stale" && !rebased) return [409, { detail: `published since this draft began: ${area === "repos" ? "repos.yaml" : "policy.yaml"}`, files: { [area === "repos" ? "repos.yaml" : "policy.yaml"]: { published: publishedFiles(area)[area === "repos" ? "repos.yaml" : "policy.yaml"], draft: files(area)[area === "repos" ? "repos.yaml" : "policy.yaml"], diff: "--- published/policy.yaml\n+++ draft/policy.yaml\n@@ -1,2 +1,2 @@\n-max_concurrent: 5\n+max_concurrent: 7\n" } } }];
         if (r.problems.length) return [422, { detail: `${r.problems.length} problem(s) to fix before publishing`, problems: r.problems }];
         const written = Object.keys(files(area));
         if (area === "repos") pub.repos = clone(draft.repos); else if (area === "policy") pub.policy = clone(draft.policy); else { pub.intake = clone(draft.intake); pub.policy = clone(draftPolicyForIntake); }
         draft[area] = null; draftPolicyForIntake = null; undo[area] = [];
         return [200, { published: written, result: resultOf(area) }];
       }
-      if (action === "rebase") { rebased = true; return [200, view(area)]; }
+      if (action === "rebase") return [200, view(area)];
       if (action === "undo") {
         const s = undo[area].pop();
         if (s === undefined) return [409, { detail: "nothing to undo" }];
         restore(area, s); settle(area); return [200, view(area)];
       }
-      if (file && method === "PUT") return [200, view(area)]; // the YAML view's typing: the sweep shows the text, not a parse
+      if (file && method === "PUT") return [200, view(area)]; // the YAML view's typing: the mock shows the text, not a parse
       if (action === "ops") {
         const ops: Obj[] = body.ops ?? [];
         const saved = snapshot(area);
@@ -321,7 +310,7 @@ export function makeAreas(variant: AreaVariant = "default") {
       }
       return [200, view(area)];
     },
-    checks: () => variant === "empty" || variant === "off" ? [] : [
+    checks: () => [
       { id: "c3", at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead_id: "kraft-e1", reason: "above_priority_ceiling" }, { bead_id: "kraft-e2", reason: "above_priority_ceiling" }, { bead_id: "kraft-e3", reason: "already_item" }] },
       { id: "c2", at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead_id: "kraft-f1", reason: "max_concurrent" }, { bead_id: "kraft-f2", reason: "max_concurrent" }, { bead_id: "kraft-f3", reason: "max_concurrent" }] },
     ],

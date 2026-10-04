@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { withProducer } from "../fixtures";
+import { withProducer } from "./mocks/fixtures";
 import { app, contract, editorsRoute, focusedName, item, pause, type Row } from "./kit";
 
 /** Review and the document viewer: the gate review, Approve's lock, Esc and focus, Open in editor, search matches. */

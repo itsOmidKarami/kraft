@@ -41,7 +41,7 @@ async function walkTo(s: PhoneScreen) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("every screen is reachable by tapping from the board (P.1)", () => {
-  // A screen whose taps need a seeded item or row is walked by the sweep's flow-ng-phone-reach, against the full mock API.
+  // A screen whose taps need a seeded item or row is walked by the UI contract (e2e/contract/phone.spec.ts), against the full mock API.
   it.each(SCREENS.filter((s) => !s.data))("$id: $taps.length taps from the board land on $route", async (s) => {
     await walkTo(s);
     await waitFor(() => expect(window.location.pathname).toMatch(pattern(s.route)));

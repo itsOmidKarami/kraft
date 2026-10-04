@@ -20,7 +20,7 @@ async function tap(p: Page, t: Tap) {
 for (const s of SCREENS.filter((s) => s.data)) {
   test(`phone: ${s.id} is reached by tapping from the board`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await app(page, "/", { noShell: true, mock: { harnesses: "floor", ngLibrary: "draft", apply: "none" } });
+    await app(page, "/", { noShell: true, mock: { harnesses: "floor", ngLibrary: "draft" } });
     for (const t of s.taps) await tap(page, t);
     const want = new RegExp(`^${s.route.replace(/:[^/]+/g, "[^/]+")}/?$`);
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 6000 }).toMatch(want);

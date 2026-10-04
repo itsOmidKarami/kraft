@@ -1,4 +1,4 @@
-/** Every screen the phone has, and the taps that reach it from the board (W17 brief P.1). Pure data, no imports: the vitest walk (`reach.test.tsx`) and the sweep's `flow-ng-phone-reach` both read it, so "reachable by tapping from the board" is a recorded fact. */
+/** Every screen the phone has, and the taps that reach it from the board (W17 brief P.1). Pure data, no imports: the vitest walk (`reach.test.tsx`) and the UI contract (`e2e/contract/phone.spec.ts`) both read it, so "reachable by tapping from the board" is a recorded fact. */
 
 /** Which seeded item a card tap opens: the harness maps each to an item of its own data. */
 export type Card = "running" | "capped" | "gate" | "escalated";
@@ -14,7 +14,7 @@ export interface PhoneScreen {
   taps: Tap[];
   /** The `<h1>` the screen shows; absent when it is data (an item's title). */
   heading?: string;
-  /** The data the taps need (a card, a row): the vitest walk covers a screen without it, the sweep flow every one. */
+  /** The data the taps need (a card, a row): the vitest walk covers a screen without it, the UI contract's phone rows the rest. */
   data?: boolean;
 }
 

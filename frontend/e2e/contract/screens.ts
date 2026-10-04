@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
-import type { Scenario, Variant } from "../fixtures";
-import { withCapLimit, withFixRoundOutcome, withProducer, withReviewer, withStop, withTestResult } from "../fixtures";
+import type { Scenario, Variant } from "./mocks/fixtures";
+import { withCapLimit, withFixRoundOutcome, withProducer, withReviewer, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
 
 /**
@@ -96,7 +96,7 @@ export const STATES: State[] = [
   { area: "sidebar", state: "collapsed", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); } },
   { area: "sidebar", state: "hover-expand", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverEdge(3)(p); } },
   { area: "sidebar", state: "pinned", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverEdge(3)(p); await appToggle(p); await away(p); } },
-  { area: "sidebar", state: "update", app: (p) => app(p, "/", { mock: { update: "available" } }) },
+  { area: "sidebar", state: "update", app: (p) => app(p, "/") },
 
   // Board
   { area: "board", state: "default", app: (p) => app(p, "/") },

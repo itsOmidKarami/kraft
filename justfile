@@ -284,7 +284,7 @@ smoke-models-hook:
 ui-contract *args:
     cd frontend && [ -d node_modules ] || npm ci
     cd frontend && npx playwright install chromium
-    cd frontend && npx playwright test -c sweep/contract/playwright.config.ts {{args}}
+    cd frontend && npx playwright test -c e2e/contract/playwright.config.ts {{args}}
 
 # Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:

@@ -122,8 +122,8 @@ Two more rules keep the phone's CSS apart (`ng/phone/css.test.ts`):
 - phone CSS never cuts text with `text-overflow`: identifiers wrap.
 
 `phone/screens.ts` lists every phone screen and the taps that reach it from
-the board, as data that a vitest walk (`phone/reach.test.tsx`) and the sweep
-both read, so a new screen is added there. Phone tests stub `matchMedia`
+the board, as data that a vitest walk (`phone/reach.test.tsx`) and the UI contract
+(`e2e/contract/phone.spec.ts`) both read, so a new screen is added there. Phone tests stub `matchMedia`
 themselves (see `phone/App.phone.test.tsx`).
 
 ## Theme tokens
@@ -183,8 +183,8 @@ Any other query fails.
 - **`data-pan`** marks a pannable canvas and may appear only under `ng/graph/`.
 - **`<main>`** is rendered only by the shell, the sign-in cards, the gallery and
   the phone frame; a page inside the shell must not render its own.
-- **`data-allow-ellipsis`** is an allowlist the sweep checks, not a style: see
-  [`sweep/README.md`](sweep/README.md#data-allow-ellipsis--an-allowlist-not-a-style).
+- **`data-allow-ellipsis`** marks a deliberate one-line cut whose whole text is in
+  `title`. Nothing checks it today.
 
 ## Testing
 
@@ -220,14 +220,10 @@ test in the PR) are in [`docs/testing.md`](../docs/testing.md).
 |---|---|---|---|
 | **vitest** | component and pure-logic tests in jsdom, with `fetch` stubbed | **Every change.** New behaviour gets a test beside it. CI's `frontend` job runs `npm run build` and `npm test` | `just test-ui` |
 | **Playwright** (`e2e/`) | a real browser against a real orchestrator with the fake agent: the UI↔server contract, addresses, and layout jsdom cannot show (media queries, tap-target size, sideways overflow) | A change to what the page sends or reads, to an address, or to phone layout. CI's `playwright` job runs it on every code pull request | `just e2e-ci`; see [`e2e/README.md`](e2e/README.md) |
-| **UI contract** (`sweep/contract/`) | the built SPA in a browser on a **mocked** `/api`: what a screen does (the sidebar's pin and reveal, Esc and focus order, the item header's cards, review, the document viewer, tooltips) and that every icon-only control has a name and a tooltip | A change to how a screen behaves, or a new icon-only control. CI's `ui contract` job runs it on every code pull request | `just ui-contract`; see [`sweep/README.md`](sweep/README.md#the-ui-contract) |
-| **sweep** (`sweep/`) | screenshots and machine checks of every screen × data variant × viewport against **mocked** `/api`: overflow, clipped text, small tap targets, console errors | A change to how any screen looks or lays out: CSS, markup, a new screen or state. **CI does not run it**; the author does, and a reviewer reads its report | `node sweep/wave.mjs all`; see [`sweep/README.md`](sweep/README.md) |
+| **UI contract** (`e2e/contract/`) | the built SPA in a browser on a **mocked** `/api`: what a screen does (the sidebar's pin and reveal, Esc and focus order, the item header's cards, review, the document viewer, tooltips) and that every icon-only control has a name and a tooltip | A change to how a screen behaves, or a new icon-only control. CI's `ui contract` job runs it on every code pull request | `just ui-contract`; see [`e2e/contract/README.md`](e2e/contract/README.md) |
 
 Playwright proves the contract and vitest proves component behaviour; do not
-pin the same thing in both. The sweep never asserts: it flags, and the rule is
-that a change adds no newly flagged cells (`DIFF-all.md` lists them). Take its
-baseline on `main` first (`node sweep/wave.mjs all --baseline`), then run it on
-your branch. A new screen or state adds a cases file under `sweep/cases/`.
+pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 

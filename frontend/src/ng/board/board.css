@@ -11,7 +11,7 @@
 .board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: 12px; color: var(--text-sub); }
 .board-more:hover { background: var(--surface-2); color: var(--text); }
 .board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-/* `clip`, not `hidden`: no scroll box, so the sweep's clipped-v check doesn't read it as cut-off text. */
+/* `clip`, not `hidden`: no scroll box, so nothing reads it as cut-off text. */
 .board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
 /* Header (AreaBoard 15–21): the repo crumb menu, the NEED YOU tag. */

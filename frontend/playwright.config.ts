@@ -15,6 +15,8 @@ if (!baseURL) {
 
 export default defineConfig({
   testDir: "./e2e",
+  // e2e/contract/ is the UI contract: its own config, a mocked API, no fixture server.
+  testIgnore: "**/e2e/contract/**",
   timeout: scaledTimeout(120_000),
   // Playwright's fixed 5s default for bare `expect(...)` assertions (no
   // explicit timeout) doesn't scale with KRAFT_E2E_TIMEOUT_SCALE otherwise --

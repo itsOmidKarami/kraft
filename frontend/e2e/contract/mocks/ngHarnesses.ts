@@ -25,7 +25,6 @@ export const PROVIDER_STATUS = [
   { id: "amp", label: "amp", executable: "amp", executable_found: true, efforts: ["low", "medium", "high", "ultra"], models: [], capabilities: {} },
 ];
 
-export type Scenario = "floor" | "problems" | "empty";
 
 interface State {
   access: Record<string, Access>;
@@ -38,7 +37,7 @@ interface State {
   fields: Record<string, { enabled: boolean; executable: string | null; defaults: Record<string, string> }>;
 }
 
-const initial = (scenario: Scenario): State => {
+const initial = (): State => {
   const base: State = {
     access: { claude: "available", "claude-sandbox": "override", codex: "available", cursor: "never", gemini: "never", opencode: "never", amp: "never" },
     tools: ["git", "shell", "editor"],
@@ -52,21 +51,13 @@ const initial = (scenario: Scenario): State => {
     extra: [],
     fields: Object.fromEntries(HARNESSES.map((h) => [h.id, { enabled: true, executable: h.executable ?? null, defaults: { ...h.defaults } }])),
   };
-  if (scenario === "problems") {
-    base.profiles.fast = { claude: { model: "haiku", effort: "low" } };
-    base.escalation = "cursor";
-    base.extra = [t("review.bot.second_opinion", null)];
-  }
-  if (scenario === "empty") return { ...base, profiles: {}, access: Object.fromEntries(Object.keys(base.access).map((k) => [k, "available"])) as Record<string, Access>, escalation: "item" };
   return base;
 };
 
-export function harnessesServer(scenario: Scenario) {
-  const state = initial(scenario);
-  // The `problems` scenario opens with a draft already holding the change that causes them.
-  if (scenario === "problems") state.access.gemini = "never";
-  // The published state the draft is measured against: the problems scenario is a draft that broke a clean install.
-  const original = initial(scenario === "problems" ? "floor" : scenario);
+export function harnessesServer() {
+  const state = initial();
+  // The published state the draft is measured against.
+  const original = initial();
   const tasksOf = (id: string): Task[] => [...HARNESSES.find((h) => h.id === id)!.tasks, ...(id === "gemini" ? state.extra : [])];
 
   const problems = () => {
@@ -107,14 +98,13 @@ export function harnessesServer(scenario: Scenario) {
     }])),
   });
 
-  let clean = false;
   /** Publish: what is published becomes the draft, so the next view has no changes. */
-  const publish = () => { Object.assign(original, structuredClone(state)); clean = true; };
+  const publish = () => { Object.assign(original, structuredClone(state)); };
 
   const view = () => {
     const c = changes();
     return {
-      area: "harnesses", key: "harnesses", draft: c.length > 0 || (scenario === "problems" && !clean),
+      area: "harnesses", key: "harnesses", draft: c.length > 0,
       files: { "harnesses.yaml": harnessesYaml(state), "policy.yaml": policyYaml(state) },
       published: { "harnesses.yaml": harnessesYaml(original), "policy.yaml": policyYaml(original) },
       base: { "harnesses.yaml": "a".repeat(64), "policy.yaml": "b".repeat(64) }, updated_at: "2026-10-01T09:12:00Z",

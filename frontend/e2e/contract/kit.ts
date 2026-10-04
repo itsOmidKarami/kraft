@@ -1,12 +1,12 @@
 import { test, type Page } from "@playwright/test";
-import { buildScenario, type Scenario, type Variant } from "../fixtures";
-import { installMocks, type MockOptions } from "../mockApi";
-import { NG_NOW } from "../ngItems";
+import { buildScenario, type Scenario, type Variant } from "./mocks/fixtures";
+import { installMocks, type MockOptions } from "./mocks/mockApi";
+import { NG_NOW } from "./mocks/ngItems";
 
 /**
  * What the UI contract specs share: the app on its mocked API, the few helpers every row uses, and the
  * runner. The contract is `Row[]`: one plain-language claim per row, run on the built SPA with
- * `/api/**` mocked from sweep/fixtures.ts. `just ui-contract` runs it; sweep/README.md says what it is for.
+ * `/api/**` mocked from mocks/fixtures.ts. `just ui-contract` runs it; README.md says what it is for.
  */
 
 export interface AppOpts {
@@ -19,7 +19,7 @@ export interface AppOpts {
   ready?: (p: Page) => Promise<unknown>;
   /** No desktop sidebar to wait for: the phone. */
   noShell?: boolean;
-  /** Seed the scenario (a seed from sweep/fixtures.ts) before the mocks read it. */
+  /** Seed the scenario (a seed from mocks/fixtures.ts) before the mocks read it. */
   tweak?: (S: Scenario) => void;
 }
 

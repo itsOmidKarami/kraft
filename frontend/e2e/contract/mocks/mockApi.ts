@@ -2,9 +2,9 @@ import type { Page, Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
-import { makeAreas, type AreaVariant } from "./areasMock";
+import { makeAreas } from "./areasMock";
 import { NG_NOW, ngThreads } from "./ngItems";
-import { harnessesServer, PROVIDER_STATUS, type Scenario as HarnessesScenario } from "./ngHarnesses";
+import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -16,21 +16,14 @@ export interface MockOptions {
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
   boardState?: "loading" | "offline";
-  /** ux2-W16: what GET /apply answers. Unset answers nothing pending, so the shell's apply chip stays out of every other cell; `both` is a restart item beside a refused policy.
-   *  After POST /apply/restart it answers nothing pending and /health fails twice, as a server coming back does. */
-  apply?: "none" | "reload" | "restart" | "problem" | "unmanaged" | "both";
-  /** ux2-W16: what GET /update answers: a newer release (default), none, or a feed that did not answer. */
-  update?: "available" | "current" | "unknown";
   /** ux2-W15: the repos, policy and intake drafts, answered as W13's server does (areasMock.ts); the value seeds the cell's state. */
-  areas?: AreaVariant;
-  /** ux2-W14: the Harnesses page's draft (sweep/ngHarnesses.ts): `floor` clean, `problems` (a Never harness with a task, a profile missing an entry, escalation on a Never harness), `empty` (no profiles). Unset: the routes answer as before. */
-  harnesses?: HarnessesScenario;
-  /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
-  bulkFail?: string[];
-  /** ux2-W11: the running item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library). `applied`: none, but its applied draft is in the events. */
-  itemDraft?: "none" | "changes" | "problems" | "passed" | "applied";
-  /** ux2-W12: the Library's draft. `clean`: no draft. `draft`: three changes, one a new component. `blocked`: the draft with problems that name a chain, a repo and a component. */
-  ngLibrary?: "clean" | "draft" | "blocked";
+  areas?: "default";
+  /** ux2-W14: the Harnesses page's draft (ngHarnesses.ts): `floor`, a clean install. Unset: the routes answer as before. */
+  harnesses?: "floor";
+  /** ux2-W11: the running item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library). */
+  itemDraft?: "none" | "changes" | "problems";
+  /** ux2-W12: the Library's draft. `draft`: three changes, one a new component. */
+  ngLibrary?: "draft";
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -41,10 +34,6 @@ const ITEM_DRAFT_SEEDS: Record<string, any[]> = {
     { op: "add_node", after: "work_brief", node: { id: "security_scan", extends: "security_scan" } },
   ],
   problems: [{ op: "override", path: "merge_request.open.open_draft", task_config: { command: "make" } }],
-  passed: [
-    { op: "add_node", after: "implementation", node: { id: "security_scan", extends: "security_scan" } },
-    { op: "override", path: "verification.test.unit_tests", task_config: { model: "opus" } },
-  ],
 };
 
 /** The server's `passed` rule (src/kraft/drafts/item.py): an op is passed once the run stands at or after where it acts. */
@@ -77,30 +66,22 @@ const DRAFTS = JSON.parse(readFileSync(new URL("./draftViews.json", import.meta.
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 /** The Library's draft for ux2-W12, built from the real published library (draftViews.json): the model is each
  *  component's definition as written. `add_component` and `set_field` apply; everything else is a no-op the flows don't send. */
-function libraryState(mode: "clean" | "draft" | "blocked") {
+function libraryState() {
   const model: Record<string, Record<string, any>> = {};
   for (const c of DRAFTS.library.components) (model[c.kind] ??= {})[c.name] = clone(c.definition);
   const changes: any[] = [];
   const problems: any[] = [];
-  let drafted = mode !== "clean";
-  if (drafted) {
-    (model.tasks ??= {}).fixer = { kind: "agent", prompt: "Fix what the review found." };
-    (model.nodes ??= {}).approval = { kind: "gate", message: "Review and approve." };
-    (model.steps ??= {}).checks = { tasks: [{ id: "lint", extends: "verify_changed_scopes" }] };
-    changes.push(
-      { path: "tasks.implementer.prompt", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
-      { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
-      { path: "tasks.fixer", kind: "add", summary: "added", reaches: [] },
-      { path: "nodes.approval", kind: "add", summary: "added", reaches: [] },
-      { path: "steps.checks", kind: "add", summary: "added", reaches: [] },
-    );
-  }
-  if (mode === "blocked")
-    problems.push(
-      { path: "implementation.main.implement", field: "profile", message: "extends tasks.implementer, whose profile 'strong' does not exist", file: "chains/default.yaml", line: 14, col: 9, chain: "default", repo: null, component: "tasks.implementer" },
-      { path: "steering", field: "steering", message: "names the profile 'project-standards', which has no instructions", file: "repos.yaml", line: 8, col: 5, chain: null, repo: "kraft", component: "steering.project-standards" },
-      { path: "tasks.fixer", field: "prompt", message: "Field required", file: "library.yaml", line: 40, col: 5, chain: null, repo: null, component: null },
-    );
+  let drafted = true;
+  (model.tasks ??= {}).fixer = { kind: "agent", prompt: "Fix what the review found." };
+  (model.nodes ??= {}).approval = { kind: "gate", message: "Review and approve." };
+  (model.steps ??= {}).checks = { tasks: [{ id: "lint", extends: "verify_changed_scopes" }] };
+  changes.push(
+    { path: "tasks.implementer.prompt", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
+    { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
+    { path: "tasks.fixer", kind: "add", summary: "added", reaches: [] },
+    { path: "nodes.approval", kind: "add", summary: "added", reaches: [] },
+    { path: "steps.checks", kind: "add", summary: "added", reaches: [] },
+  );
   const state = {
     text: "# library.yaml\n",
     view() {
@@ -182,7 +163,7 @@ const chainView = (key: string) => {
   out.result.model[`chains/${key}.yaml`].id = key;
   return out;
 };
-/** Block YAML of a mapping, for the fragment route's sweep answer only (the server writes the real one). */
+/** Block YAML of a mapping, for the fragment route's mock answer only (the server writes the real one). */
 const yamlOf = (v: unknown, ind = ""): string => {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
   if (v && typeof v === "object") return Object.entries(v).map(([k, x]) => (x && typeof x === "object" ? `${ind}${k}:\n${yamlOf(x, `${ind}  `)}` : `${ind}${k}: ${x}\n`)).join("");
@@ -195,7 +176,7 @@ function fragmentOf(view: ReturnType<typeof chainView>, path: string) {
   for (const seg of rest) at = at?.[seg] ?? at?.steps?.find((s: { id: string }) => s.id === seg) ?? at?.tasks?.find((x: { id: string }) => x.id === seg);
   return at ? yamlOf(at) : `id: ${rest.pop() ?? id}\n`;
 }
-/** An op answered as the server would, for the ops the sweep's flows send. */
+/** An op answered as the server would, for the ops the contract's rows send. */
 function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
   const file = `chains/${view.key}.yaml`;
   const nodes = view.result.model[file].nodes as Record<string, unknown>[];
@@ -234,28 +215,22 @@ const json = (route: Route, body: unknown, status = 200) =>
 
 /**
  * Serve the whole /api surface from the scenario. Mutating verbs return a
- * plausible 200 so a composer's Submit never crashes a shot, but nothing
- * changes — the sweep is about how the UI looks, not what it does.
+ * plausible 200 so a composer's Submit never crashes, but nothing changes.
  */
 export async function installMocks(page: Page, S: Scenario, opts: MockOptions = {}) {
-  // Every sweep page is mocked here, before it navigates: fixed time keeps the app's relative durations ("17d 10h") off the wall clock. Timers still run; a case that needs another instant sets its own after.
+  // Every page is mocked here, before it navigates: fixed time keeps the app's relative durations ("17d 10h") off the wall clock. Timers still run; a row that needs another instant sets its own after.
   await page.clock.setFixedTime(new Date(NG_NOW));
   let restarted = 0;
-  const hs = opts.harnesses ? harnessesServer(opts.harnesses) : null;
+  const hs = opts.harnesses ? harnessesServer() : null;
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
   let listReads = 0;
   const itemDrafts = new Map<string, any[]>();
-  // ux2-W11: an applied draft already on the running item, as its event.
-  if (opts.itemDraft === "applied" && S.ng?.running) {
-    const b = S.bundles[S.ng.running];
-    b?.events.push({ seq: Math.max(0, ...b.events.map((e: any) => e.seq)) + 1, work_item_id: S.ng.running, type: "chain_revised", payload: { gate: null, changes: ITEM_DRAFT_SEEDS.changes.slice(0, 2), diff: [], source: "draft" }, node_id: null, created_at: NG_NOW });
-  }
   // Always answering: a shell cell may open Policy (a built page), and the shipped UI never asks for /drafts/(repos|policy|intake).
-  const areas = makeAreas(opts.areas ?? "default");
+  const areas = makeAreas();
 
   const viewedMarks = new Set<string>();
-  const lib = opts.ngLibrary ? libraryState(opts.ngLibrary) : null;
+  const lib = opts.ngLibrary ? libraryState() : null;
   // ux2-W8: review threads per item, seeded for a needs-gate item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
@@ -332,13 +307,11 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const { action, ids = [], reason } = req.postDataJSON() ?? {};
       if (action === "cancel" && !String(reason ?? "").trim()) return json(route, { detail: "reason: cancel needs a non-blank reason" }, 422);
       const known = [...S.ngBoard, ...S.ngArchived, ...S.items, ...S.archived];
-      const fail = new Set((opts.bulkFail ?? []).map((bead) => known.find((i) => i.bead_id === bead)?.id));
       return json(route, { results: (ids as string[]).map((id) => {
         const i = known.find((x) => x.id === id);
         const status = i?.status ?? "active";
         const ended = status === "completed" || status === "abandoned";
-        const error = fail.has(id) ? `work item is paused, not running`
-          : action === "pause" && !["active", "waiting"].includes(status) ? `work item is ${status}, not running`
+        const error = action === "pause" && !["active", "waiting"].includes(status) ? `work item is ${status}, not running`
           : action === "cancel" && ended ? `work item is ${status}; its chain does not run again`
           : action === "archive" && !ended ? "only a completed or abandoned item can be archived"
           : action === "restore" && !i?.archived_at ? "work item is not archived" : null;
@@ -456,7 +429,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       if (!b) return json(route, { detail: "work item not found" }, 404);
       const cur = b.item.current_node_id ?? null;
       const stored = (): any[] => {
-        if (!itemDrafts.has(m![1])) itemDrafts.set(m![1], opts.itemDraft && opts.itemDraft !== "applied" && opts.itemDraft !== "none" && m![1] === S.ng.running ? clone(ITEM_DRAFT_SEEDS[opts.itemDraft]) : []);
+        if (!itemDrafts.has(m![1])) itemDrafts.set(m![1], opts.itemDraft && opts.itemDraft !== "none" && m![1] === S.ng.running ? clone(ITEM_DRAFT_SEEDS[opts.itemDraft]) : []);
         return itemDrafts.get(m![1])!;
       };
       const answer = (ops: any[]) => {
@@ -649,7 +622,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       if (action === "ops") return json(route, { ...view, ops: (req.postDataJSON()?.ops ?? []).map((o: { op: string }) => ({ op: o.op })) });
       return json(route, view);
     }
-    /* the agent task's choices in the Chains editor (real answers, sweep/draftViews.json) */
+    /* the agent task's choices in the Chains editor (real answers, draftViews.json) */
     if (p === "/harnesses/profiles" && method === "GET") return json(route, DRAFTS.harnesses);
     if (p === "/harnesses/providers") return json(route, DRAFTS.providers);
     if (p === "/drafts") return json(route, [...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
@@ -703,20 +676,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
     ]);
     if (p === "/apply" || p === "/apply/reload") {
-      const port = { id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" };
-      const disk = { id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded" };
-      const bad = { ...disk, problem: "defaults: Input should be a valid dictionary" };
-      const by = { none: [[], []], reload: [[], [disk]], restart: [[port], []], problem: [[], [bad]], unmanaged: [[port], []], both: [[port], [bad]] } as const;
-      const [restart, reload] = restarted ? [[], []] : by[opts.apply ?? "none"];
-      return json(route, { restart, reload, managed: opts.apply !== "unmanaged" });
+      return json(route, { restart: [], reload: [], managed: true });
     }
     if (p === "/apply/restart") { restarted = 1; return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }); }
     if (p === "/update" || p === "/update/check") {
       const at = new Date(Date.now() - 3_600_000).toISOString();
-      const u = opts.update ?? "available";
-      return json(route, u === "unknown"
-        ? { installed: "1.4.0", latest: null, channel: "stable", python: "3.14", behind: null, checked_at: null }
-        : { installed: "1.4.0", latest: u === "current" ? "v1.4.0" : "v1.5.0", channel: "stable", python: "3.14", behind: u === "available", checked_at: at });
+      return json(route, { installed: "1.4.0", latest: "v1.5.0", channel: "stable", python: "3.14", behind: true, checked_at: at });
     }
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
@@ -728,6 +693,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/login") return json(route, { ok: true });
     if (p === "/logout") return route.fulfill({ status: 204 });
 
-    return json(route, { detail: `sweep mock: unhandled ${method} ${p}` }, 404);
+    return json(route, { detail: `mock: unhandled ${method} ${p}` }, 404);
   });
 }

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
-import type { Scenario } from "../fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withStop, withTestResult } from "../fixtures";
+import type { Scenario } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
