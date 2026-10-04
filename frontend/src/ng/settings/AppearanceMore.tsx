@@ -106,9 +106,9 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
               ))}
             </ul>
           </div>
-          <div className="set-diff-preview" data-colours={diff.colours} data-layout={diff.layout} data-wrap={diff.wrap_lines} aria-label="Diff preview" role="img">
+          <div className="set-diff-preview" data-colours={diff.colours} data-layout={diff.layout} data-wrap={diff.wrap_lines} aria-label="Diff preview" role="group">
             <div className="set-diff-head">search/cache.py</div>
-            <div className={unified ? "set-diff-body" : "set-diff-body is-split"}>
+            <div className={unified ? "set-diff-body" : "set-diff-body is-split"} tabIndex={0} role="group" aria-label="Diff preview lines, scrolls sideways">
               <span className="set-drow is-del"><span className="set-mark">-</span><span>{diff.word_highlight ? <>ttl = <mark className="set-word">60</mark></> : "ttl = 60"}</span></span>
               <span className="set-drow is-add"><span className="set-mark">+</span><span>{diff.word_highlight ? <>ttl = <mark className="set-word">300  # seconds, a long comment that wraps or scrolls</mark></> : "ttl = 300  # seconds, a long comment that wraps or scrolls"}</span></span>
             </div>

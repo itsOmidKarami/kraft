@@ -42,6 +42,12 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(tile("Fix loops")).getByText("cycles per verify · 2 hit their cap")).toBeInTheDocument();
   });
 
+  it("makes its scrolling area reachable from the keyboard (R14b-03)", async () => {
+    mount();
+    await screen.findByText("$38.20");
+    expect(screen.getByRole("region", { name: "Analytics figures" })).toHaveAttribute("tabindex", "0");
+  });
+
   it("does not claim a median, a spend delta or a per-day chart (R66)", async () => {
     mount();
     await screen.findByText("$38.20");

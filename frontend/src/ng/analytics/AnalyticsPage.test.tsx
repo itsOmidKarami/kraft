@@ -49,14 +49,16 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByText("1.5 fix cycles per verify · 6 capped · 9 rejected gates")).toBeInTheDocument();
   });
 
-  it("says its scope once, in the header row, with no heading of its own (AN-1)", async () => {
+  it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {
     vi.spyOn(api, "getAnalytics").mockResolvedValue(REPORT);
     const tail = document.createElement("div");
     document.body.append(tail);
     const { container } = render(<HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
     expect(tail).toHaveTextContent("· Last 8 weeks · completed work items");
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    // One heading for a screen reader (R14b-03), which sighted readers do not see twice: the crumb says it.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Analytics");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveClass("an-visually-hidden");
     expect(container).not.toHaveTextContent("Last 8 weeks");
     tail.remove();
   });

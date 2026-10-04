@@ -67,6 +67,14 @@ describe("ng AppearancePage", () => {
     expect(document.querySelector(".tc-crumb")).toHaveTextContent(/^Board › [0-9a-f]{8}…[0-9a-f]{5}$/);
   });
 
+  // R14b-03: the preview's lines scroll sideways, so a keyboard has to be able to reach them.
+  it("lets the keyboard reach the diff preview's scrolling lines", async () => {
+    setup();
+    const lines = await screen.findByRole("group", { name: /^Diff preview lines/ });
+    expect(lines).toHaveAttribute("tabindex", "0");
+    expect(lines).toHaveClass("set-diff-body");
+  });
+
   it("paints a change before the server answers", async () => {
     setup();
     vi.mocked(api.putTheme).mockReturnValueOnce(new Promise(() => {}));

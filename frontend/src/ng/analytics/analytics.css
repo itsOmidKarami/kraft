@@ -1,5 +1,6 @@
 /* Analytics (W16 F). Colours only from W1 tokens; classes are an-*. */
 .an-page { width: 100%; max-width: 680px; box-sizing: border-box; margin: 0 auto; padding: 22px 24px 70px; display: flex; flex-direction: column; gap: 30px; }
+.an-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 .an-scope { font-size: 12px; color: var(--text-muted); }
 .an-error { margin: 0; font-size: 12px; color: var(--bad); }
 .an-empty { margin: 0; padding: 14px 0; font-size: 12px; color: var(--text-muted); }

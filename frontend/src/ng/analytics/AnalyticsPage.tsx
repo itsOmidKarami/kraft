@@ -85,6 +85,8 @@ export function AnalyticsPage() {
 
   return (
     <div className="an-page">
+      {/* The header crumb is not a heading: the page keeps one, unseen, for a screen reader (R14b-03). */}
+      <h1 className="an-visually-hidden">Analytics</h1>
       {filters}
       <HeaderTail><span className="an-scope">· Last 8 weeks · completed work items</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
