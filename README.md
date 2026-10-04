@@ -28,10 +28,10 @@
 | src/kraft/api/deps.py                        |      319 |       21 |     93% |87-88, 215-216, 416, 419-421, 493-494, 532-533, 542-543, 676-677, 712, 715, 718, 741-742 |
 | src/kraft/api/perimeter.py                   |      133 |        2 |     98% |  271, 426 |
 | src/kraft/api/routes/\_\_init\_\_.py         |        0 |        0 |    100% |           |
-| src/kraft/api/routes/admin.py                |       39 |        0 |    100% |           |
+| src/kraft/api/routes/admin.py                |       40 |        0 |    100% |           |
 | src/kraft/api/routes/artifacts.py            |      212 |        8 |     96% |148, 247-254, 402, 437 |
 | src/kraft/api/routes/auth.py                 |       61 |        0 |    100% |           |
-| src/kraft/api/routes/board.py                |      401 |        4 |     99% |168, 655, 751, 754 |
+| src/kraft/api/routes/board.py                |      401 |        4 |     99% |168, 670, 766, 769 |
 | src/kraft/api/routes/check.py                |       20 |        0 |    100% |           |
 | src/kraft/api/routes/drafts.py               |      284 |        9 |     97% |247, 263, 321-322, 328, 344, 361, 400, 507 |
 | src/kraft/api/routes/gates.py                |      136 |        6 |     96% |118, 121, 129, 333, 366-367 |
@@ -174,7 +174,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       82 |        9 |     89% |45, 96, 142-144, 147-151, 159-160 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **30701** | **1450** | **95%** |           |
+| **TOTAL**                                    | **30702** | **1450** | **95%** |           |
 
 
 ## Setup coverage badge
