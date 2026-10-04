@@ -330,7 +330,7 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    or a name of yours, and that its size is the table's.
 
    The `review` steps are the contract suite's range pick
-   (`sweep/contract/review.spec.ts`) pointed at `calc.py`; they have not been
+   (`e2e/contract/review.spec.ts`) pointed at `calc.py`; they have not been
    run against the dev seed, so check the composer header reads "Comment on
    lines −2 to +2" before you save the frame. The committed `review.png` shows
    `calc.py` inline and alone; if your frame lists both files or shows two
