@@ -29,11 +29,11 @@
 | src/kraft/api/perimeter.py                   |      133 |        2 |     98% |  271, 426 |
 | src/kraft/api/routes/\_\_init\_\_.py         |        0 |        0 |    100% |           |
 | src/kraft/api/routes/admin.py                |       39 |        0 |    100% |           |
-| src/kraft/api/routes/artifacts.py            |      197 |        7 |     96% |147, 246-253, 410 |
+| src/kraft/api/routes/artifacts.py            |      212 |        9 |     96% |148, 247-254, 402, 406, 435 |
 | src/kraft/api/routes/auth.py                 |       61 |        0 |    100% |           |
 | src/kraft/api/routes/board.py                |      382 |        4 |     99% |168, 655, 751, 754 |
 | src/kraft/api/routes/check.py                |       20 |        0 |    100% |           |
-| src/kraft/api/routes/drafts.py               |      271 |        9 |     97% |246, 262, 320-321, 327, 343, 360, 399, 464 |
+| src/kraft/api/routes/drafts.py               |      284 |        9 |     97% |247, 263, 321-322, 328, 344, 361, 400, 507 |
 | src/kraft/api/routes/gates.py                |      136 |        6 |     96% |118, 121, 129, 333, 366-367 |
 | src/kraft/api/routes/harnesses.py            |       97 |        1 |     99% |       253 |
 | src/kraft/api/routes/lifecycle.py            |      823 |       43 |     95% |153, 156-157, 162-163, 267, 280, 364-367, 388-389, 410, 496, 569, 695, 811-812, 822, 977-978, 1121, 1130, 1297-1298, 1513, 1518-1519, 1540, 1662, 1692-1693, 1756, 1776-1777, 1822-1823, 1825, 1866, 2002-2003, 2053 |
@@ -174,7 +174,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       63 |        9 |     86% |44, 108, 112-114, 117-121, 129-130 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **30571** | **1460** | **95%** |           |
+| **TOTAL**                                    | **30599** | **1462** | **95%** |           |
 
 
 ## Setup coverage badge
