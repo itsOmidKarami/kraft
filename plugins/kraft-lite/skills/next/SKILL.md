@@ -1,6 +1,6 @@
 ---
 name: next
-description: "Runs the next node of a Kraft Lite chain from its recorded state and reports what the finished run cost. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
+description: "Runs the next node of a Kraft Lite chain from its recorded state and reports the finished run's time and attempts per node. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
 ---
 
 # Running the next node

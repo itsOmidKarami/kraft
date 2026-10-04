@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Writes the implementation plan for a work item from its human-approved spec, as small independently reviewable tasks. Kraft runs it at the plan_author task, after the spec gate and before implementation. Use when a chain needs that plan written or revised."
+description: "Writes the implementation plan for a work item from its human-approved spec, as small independently reviewable tasks. Kraft runs it as the library's plan_author task, after the spec gate and before implementation. Use when a chain needs that plan written or revised."
 ---
 
 # Writing a plan, headless

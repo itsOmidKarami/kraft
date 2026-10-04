@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "Writes the design spec for one work item from its brief, headless, for a human to approve or reject. Kraft runs it at the spec_author task, before the plan is written; use when a work item's brief needs a design before planning."
+description: "Writes the design spec for one work item from its brief, headless, for a human to approve or reject. Kraft runs it as the library's spec_author task, before the plan is written; use when a work item's brief needs a design before planning."
 ---
 
 # Writing a spec, headless

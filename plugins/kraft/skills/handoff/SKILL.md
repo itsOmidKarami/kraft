@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: "Files work with Kraft as a paused work item, with any agreed spec and plan attached. Use when work settled in this session should be handed to Kraft instead of done here, or the task is too big for this session. Connecting a new repo belongs to kraft:onboard, the inline-or-Kraft decision to kraft:prepare."
+description: "Files work with Kraft as a paused work item, with any agreed spec and plan attached. Use when work settled in this session should be handed to Kraft instead of done here, or the task is too big for this session. It connects a repo Kraft has not seen; verifying that repo's test and setup commands belongs to kraft:onboard, the inline-or-Kraft decision to kraft:prepare."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -14,9 +14,10 @@ Kraft runs semi-autonomous work items as chains, with human gates. Hand work off
 rather than doing it inline when it is large enough to want that structure.
 
 1. `ensure_repo()` - connects the current repo if Kraft has not seen it.
-   Idempotent, so call it every time rather than checking first. For a repo
-   that is new to Kraft, `kraft:onboard` covers confirming the test and setup
-   commands it proposes.
+   Idempotent, so call it every time rather than checking first. If it newly
+   connected the repo, say so and run `kraft:onboard` before the item is
+   started: the test and setup commands it proposed are saved unconfirmed, and
+   an item run against wrong ones stops.
 2. `create_work_item(title, description=...)` - files the work. The title is a
    label; the description is the brief, and it is what the spec node writes its
    design from. Put the intent in the description rather than packing it into

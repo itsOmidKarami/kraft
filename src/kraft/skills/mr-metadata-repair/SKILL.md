@@ -1,6 +1,6 @@
 ---
 name: mr-metadata-repair
-description: "Repairs a merge request's metadata, such as a missing or wrong label, so its checks can pass. Kraft runs it as the on_failure repair of the merge request's CI wait, when the failed job's trace names a label."
+description: "Repairs a merge request's metadata, such as a missing or wrong label, so its checks can pass. Kraft runs it as the on_failure repair of the merge request's CI wait, on every failure; it acts only when the failed job's trace names a label."
 ---
 
 # Repairing a merge request's metadata

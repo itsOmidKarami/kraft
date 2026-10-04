@@ -1,6 +1,6 @@
 ---
 name: chain-review
-description: "Decides whether the nodes after the revision gate still fit the approved spec and plan, and writes a chain_revision change set: skip a node, add a library node, override effort or caps, or change nothing. Kraft runs it in the revise_chain task, right after the spec and plan are approved."
+description: "Decides whether the nodes after the revision gate still fit the approved spec and plan, and writes a chain_revision change set: skip a node, add a library node, override effort or caps, or change nothing. Kraft runs it as the library's revise_chain task, right after the spec and plan are approved."
 ---
 
 # Chain Review

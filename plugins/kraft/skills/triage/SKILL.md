@@ -56,6 +56,8 @@ steer did not reach the cause: report it rather than retrying again.
 `skip_work_item` (CLI `kraft item skip`) advances past a node without running it.
 That is the person's decision every time: offer it, do not take it.
 
+Report what you found even when you do not retry.
+
 ## If you are a Kraft worker session
 
 You cannot act on the item that is running you. Report the cause and let the

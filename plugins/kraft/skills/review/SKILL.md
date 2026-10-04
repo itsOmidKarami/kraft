@@ -1,6 +1,6 @@
 ---
 name: review
-description: "Reads the spec, plan or diff a Kraft work item's pending gate is about and recommends approving or rejecting it, with reasons, for the person to confirm. Use when an item is waiting at a gate and someone asks for a review or help deciding; kraft:gates owns the approve, reject and thread calls themselves."
+description: "Reads the spec, plan or diff a Kraft work item's pending gate is about and recommends approving or rejecting it, with reasons, for the person to confirm. Use when an item is waiting at a gate and someone asks for a review or help deciding; kraft:gates owns the approve, reject and submit calls themselves."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this

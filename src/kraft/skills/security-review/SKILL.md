@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: "Reviews the diff a work item has produced for authentication, session, token, secret and permission-check defects, and writes severity-ranked findings to the result file. Kraft runs it as an extra review task beside the general code review in a verification node, only when an operator adds it to a chain; use it for a change that touches those areas."
+description: "Reviews the diff a work item has produced for authentication, session, token, secret and permission-check defects, and writes severity-ranked findings to the result file. Kraft runs it as an extra review task beside the general code review in a verification node. No shipped chain runs it: an operator adds it to the library and a chain, for changes that touch those areas."
 ---
 
 # Reviewing this work item's diff for security
@@ -14,9 +14,10 @@ a valid result.
 ## What you are looking at
 
 The diff for this work item is handed to you by path, as a review package. Read
-the code around the change, not just the changed lines. Almost every real
+it first; its context lines already show the changed files. Almost every real
 finding here lives in the interaction between new code and an assumption the old
-code was already making.
+code was already making, so read that code too — callers, neighbours, whatever
+the package does not show.
 
 ## What earns a finding
 

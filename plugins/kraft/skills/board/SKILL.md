@@ -1,6 +1,6 @@
 ---
 name: board
-description: "Reads what Kraft is doing: the board of work items, the state of one item, and a cross-repo search of specs, plans and session summaries. Use when asked what work is running, blocked or waiting on a person, or whether a decision was already made in a spec or plan in another repo. A single item's progress or a watch belongs to kraft:status, and a stopped item to kraft:triage."
+description: "Reads what Kraft is doing across work items: the board, and a cross-repo search of specs, plans and session summaries. Use when asked what work is running, blocked or waiting on a person, or whether a decision was already made in a spec or plan in another repo. One item's progress or a watch belongs to kraft:status, and a stopped item to kraft:triage."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
