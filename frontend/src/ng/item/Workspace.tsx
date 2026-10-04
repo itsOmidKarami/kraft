@@ -18,7 +18,7 @@ import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
 import { DocViewer, docBy } from "./DocViewer";
 import { gateView, reviewerSel } from "./gateView";
-import { nodeGraph } from "./nodeGraph";
+import { nodeGraph, roundShown } from "./nodeGraph";
 import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
@@ -77,6 +77,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     useBudgetEditor.setState({ id: null, at: 0 });
     setEditBudget(true);
   }, [asked]);
+  // The fix-loop round the canvas shows: one picked in this node view (undefined: the newest). Leaving the node drops it.
+  const [picked, setPicked] = useState<{ node: string; round: number } | null>(null);
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Every second while an agent or a check runs, so "running 12s" counts; every
@@ -131,6 +133,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   useEffect(() => {
     if (lastNode.current === place.node) return;
     lastNode.current = place.node;
+    setPicked(null);
     const f = requestAnimationFrame(() => areaRef.current?.querySelector<HTMLElement>('[role="group"] [tabindex="0"]')?.focus());
     return () => cancelAnimationFrame(f);
   }, [place.node]);
@@ -150,8 +153,10 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   // Focus does, so the canvas shows where it sits and not only the pane.
   const pick = (to: Sel) => dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   const tab = place.tab ?? "";
+  const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
+  const round = viewing ? roundShown(item, viewing, picked?.node === viewing.id ? picked.round : undefined) : undefined;
   const pane = paneContent({
-    item, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
+    item, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round,
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
@@ -160,8 +165,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     canEdit: draft?.editable,
     applied,
   });
-  const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
-  const plain = viewing && nodeGraph(item, viewing, now);
+  const plain = viewing && nodeGraph(item, viewing, now, events, picked?.node === viewing.id ? picked.round : undefined);
   const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
@@ -181,6 +185,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             steps={inside.steps}
             side={inside.side}
             loop={inside.loop}
+            rounds={inside.rounds}
+            onRound={(r) => setPicked(r && viewing ? { node: viewing.id, round: r } : null)}
             onFailure={inside.onFailure}
             reserve={reserve}
             selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { curve, G, loopArc, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { curve, G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 
 const step = (id: string, n: number): NodeStep => ({ id, tasks: Array.from({ length: n }, (_, i) => ({ id: `${id}${i}` })) });
 
@@ -64,5 +64,29 @@ describe("node layout", () => {
     const labelY = lay.TY + 0.75 * (lay.loopY - lay.TY) + 14;
     expect(loopArc(lay, "fix").label!.y).toBe(labelY);
     expect(lay.H).toBe(labelY + 16);
+  });
+  it("makes an arc that carries tasks deeper by the prototype's 78px of control depth, with its label on the line", () => {
+    const bare = nodeLayout([step("a", 1)], { loop: true }), full = nodeLayout([step("a", 1)], { loop: true, loopTasks: true });
+    // NodeGraph.dc.html: the world grows 92 instead of 34 and the controls sit at H − 30 + 40, not + 20.
+    expect(full.loopY).toBe(bare.loopY + 78);
+    expect(full.loopY).toBe(bare.H - 34 + 102);
+    // The curve's lowest point is 0.75 of the way down its controls (+2.4px from its ends being 9 and 10 below the axis).
+    expect(loopArc(full, "fix").label!.y).toBeCloseTo(full.TY + 0.75 * (full.loopY - full.TY) + 2.375, 5);
+    expect(full.H).toBeGreaterThan(loopArc(full, "fix").label!.y + 22 + 40);
+  });
+  it("seats the repair left of centre and the judge right of it, ±110px or a quarter of the arc's width, on the curve", () => {
+    const wide = nodeLayout([step("a", 1), step("b", 1), step("c", 1)], { loop: true, loopTasks: true });
+    const mid = (wide.endX + 23) / 2;
+    const [repair, judge] = loopSlots(wide, 1, true);
+    expect([repair.x, judge.x]).toEqual([mid - 110, mid + 110]);
+    // Both are on the cubic, below the axis, and no lower than its lowest point.
+    expect(repair.y).toBeGreaterThan(wide.TY + 60);
+    expect(repair.y).toBeLessThanOrEqual(loopArc(wide, "x").label!.y + 1e-6);
+    expect(Math.abs(repair.y - judge.y)).toBeLessThan(1);
+    const narrow = nodeLayout([step("a", 1)], { loop: true, loopTasks: true });
+    const [nr, nj] = loopSlots(narrow, 1, true);
+    expect(nj.x - nr.x).toBe((narrow.endX - 23) / 2);
+    // A repair alone sits left of centre too, where the prototype puts the first of its tasks.
+    expect(loopSlots(narrow, 1, false)[0].x).toBe((narrow.endX + 23) / 2 - (narrow.endX - 23) / 4);
   });
 });

@@ -19,6 +19,15 @@ describe("item URL", () => {
     });
   });
 
+  it("reads and writes a fix loop's tasks, the task `<step>.<task>` in a loop of steps, only on a node that has a loop", () => {
+    const looped: ChainNode[] = [{ ...nodes[1], fix_loop: "verification.fix_loop" }];
+    expect(readPlace("verification", q("sel=verification.fix_loop.judge"), looped).sel).toEqual({ kind: "task", node: "verification", step: "fix_loop", task: "judge" });
+    const deep = readPlace("verification", q("sel=verification.fix_loop.repair.fix"), looped);
+    expect(deep.sel).toEqual({ kind: "task", node: "verification", step: "fix_loop", task: "repair.fix" });
+    expect(placeUrl("w1", deep)).toBe("/work-items/w1/nodes/verification?sel=verification.fix_loop.repair.fix");
+    expect(readPlace("verification", q("sel=verification.fix_loop.judge"), nodes).sel).toEqual({ kind: "node", node: "verification" });
+  });
+
   it("reads and writes the document open over the page, so a shared link lands on it", () => {
     expect(readPlace(undefined, q("doc=d1"), nodes).doc).toBe("d1");
     expect(readPlace(undefined, q(""), nodes).doc).toBeUndefined();

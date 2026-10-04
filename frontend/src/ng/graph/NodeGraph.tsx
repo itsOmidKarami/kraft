@@ -1,6 +1,8 @@
 import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
 import { NodeGlyph } from "./NodeGlyph";
-import { G, loopArc, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { RoundPicker } from "./RoundPicker";
+import type { Rounds } from "../item/nodeGraph";
 import { accessibleName, breakable, type GraphItem } from "./types";
 import { useCamera } from "./useCamera";
 import { useRoving } from "./useRoving";
@@ -8,7 +10,7 @@ import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
 import { tip } from "../ui/Tooltip";
 
-/** A step, or a task in it. The escalation task's step is `escalation`. */
+/** A step, or a task in it. The escalation task's step is `escalation`, a fix loop's repair and judge `fix_loop`. */
 export type NodeSel = { step: string; task?: string };
 
 type Props = {
@@ -18,7 +20,10 @@ type Props = {
   selected?: NodeSel;
   /** The escalation task, on a dashed branch off the end. */
   side?: GraphItem;
-  loop?: { tone?: "idle" | "active" | "red"; label?: string };
+  loop?: { tone?: "idle" | "active" | "red"; label?: string; /** The repair tasks, then the judge, drawn on the arc. */ tasks?: GraphItem[] };
+  /** The fix-loop rounds, with the one the canvas shows; picking one (undefined: the newest) is `onRound`. */
+  rounds?: Rounds;
+  onRound?: (round: number | undefined) => void;
   /** The node's own on_failure, as one footer line. */
   onFailure?: string;
   /** A "+" seam after the last step. */
@@ -43,8 +48,9 @@ const parse = (key: string): NodeSel => {
 };
 
 /** A node's inside: steps in order, parallel tasks as rows (NodeGraph.dc.html). */
-export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
-  const lay = useMemo(() => nodeLayout(steps, { side: !!side, loop: !!loop, footer: !!onFailure }), [steps, side, loop, onFailure]);
+export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
+  const loopTasks = loop?.tasks ?? [];
+  const lay = useMemo(() => nodeLayout(steps, { side: !!side, loop: !!loop, loopTasks: loopTasks.length > 0, footer: !!onFailure }), [steps, side, loop, loopTasks.length, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
   const camera = useCamera({ canvas: "node", world: lay, opening: "fit", reserve });
   const selKey = selected && (selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step));
@@ -52,8 +58,18 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
   const roving = useRoving(selKey, firstStep && (firstStep.tasks[0] ? taskKey(firstStep.id, firstStep.tasks[0].id) : labelKey(firstStep.id)));
 
   // ←/→ to the neighbouring step at the same row (clamped), ↑/↓ within a step, ↑ from the top task to the step's label.
+  const loopKeys = loopTasks.map((t) => taskKey("fix_loop", t.id));
   const move = (key: string, dir: string): string | undefined => {
     const { step, task } = parse(key);
+    // The loop's tasks sit on the arc, left to right: ←/→ between them, ↑ back to the last step.
+    if (step === "fix_loop") {
+      const j = loopKeys.indexOf(key);
+      if (dir === "ArrowLeft") return loopKeys[Math.max(0, j - 1)];
+      if (dir === "ArrowRight") return loopKeys[Math.min(loopKeys.length - 1, j + 1)];
+      const end = steps.at(-1);
+      if (dir === "ArrowUp" && end) return end.tasks.length ? taskKey(end.id, end.tasks.at(-1)!.id) : labelKey(end.id);
+      return;
+    }
     const k = steps.findIndex((s) => s.id === step);
     if (k < 0) return;
     const i = task ? steps[k].tasks.findIndex((t) => t.id === task) : -1;
@@ -66,7 +82,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
     if (dir === "ArrowRight") return at(k + 1, i);
     if (dir === "ArrowLeft") return at(k - 1, i);
     if (dir === "ArrowUp") return at(k, i - 1);
-    if (dir === "ArrowDown") return at(k, i + 1);
+    if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && loopKeys.length ? loopKeys[0] : at(k, i + 1);
   };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); onEscape?.(); return; }
@@ -80,6 +96,8 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
   };
   const { cam } = camera;
   const loopShape = loop && loopArc(lay, loop.label);
+  const judged = loopTasks.length > 0 && loopTasks.at(-1)!.id === "judge";
+  const slots = loopSlots(lay, loopTasks.length - (judged ? 1 : 0), judged);
   const sb = side && sideBranch(lay);
   const isSel = (s: NodeSel) => selected?.step === s.step && selected?.task === s.task;
   const last = lay.cols[lay.cols.length - 1];
@@ -95,7 +113,8 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
         ref={roving.ref(key)}
         type="button"
         tabIndex={roving.tabIndex(key)}
-        aria-label={accessibleName(t, kind)}
+        // A fix loop's task is selected as `<step>.<task>` but named by the task.
+        aria-label={accessibleName(s.step === "fix_loop" ? { ...t, id: t.label ?? t.id } : t, kind)}
         aria-pressed={sel}
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${extra}`}
         style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
@@ -164,12 +183,14 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
             st.seamBefore && seam(`sf${st.id}`, k === 0 ? (G.startX + 18 + cx - G.BOX / 2) / 2 : (lay.cols[k - 1].cx + cx) / 2, lay.TY, "Add a step here", (el) => onSeam?.("before", k, el)),
           ];
         })}
+        {loopTasks.map((t, i) => taskButton({ step: "fix_loop", task: t.id }, t, slots[i].x, slots[i].y, `fix-loop ${t.id === "judge" ? "judge" : "repair"} ${t.taskKind ?? "agent"} task`, t.faded ? " is-faded" : ""))}
         {sb && side && taskButton({ step: "escalation", task: side.id }, { ...side, state: side.state ?? "esc" }, sb.x, sb.y, "escalation task", " is-side")}
         {onFailure && <span className="node-footer" style={{ left: G.startX, top: lay.footerY }}>on failure · {onFailure}</span>}
         {seamAfter && seam("after", last ? (last.cx + G.BOX / 2 + lay.endX) / 2 : (G.startX + 18 + lay.endX) / 2, lay.TY, "Add a step here", (el) => onSeam?.("after", steps.length, el))}
       </div>
       <div className="canvas-zoom" style={{ right: reserve + 12 }}>
         <ZoomControls scale={cam.s} mode={camera.mode} onIn={camera.zoomIn} onOut={camera.zoomOut} onReset={camera.reset} onFit={camera.fit} fitLabel="Fit the node" />
+        {rounds && onRound && <RoundPicker rounds={rounds} onPick={onRound} />}
       </div>
     </div>
   );

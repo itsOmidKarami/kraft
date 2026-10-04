@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkerSession } from "../../types";
+import type { KraftEvent } from "../../types";
 import { footerState, nodeGraph } from "./nodeGraph";
-import { detail, FROZEN } from "./testkit";
+import { detail, FROZEN, LOOPED } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const node: ChainNode = {
@@ -20,11 +21,12 @@ describe("nodeGraph", () => {
     ] });
     const g = nodeGraph(item, node, NOW);
     expect(g.steps.map((st) => [st.id, st.tasks.map((t) => [t.id, t.state, t.meta ?? null, t.attempt ?? null])])).toEqual([
-      ["checks", [["lint", "done", "11s", 2], ["typecheck", "todo", null, null]]],
-      ["review", [["code_review", "current", "running · 3m", 2]]],
+      // A fix-loop node names the round, not a run count: no ×N on its tasks.
+      ["checks", [["lint", "done", "11s", null], ["typecheck", "todo", null, null]]],
+      ["review", [["code_review", "current", "running · 3m", null]]],
     ]);
     expect(g.steps[1].tasks[0]).toMatchObject({ running: true, taskKind: "agent" });
-    expect(g.loop).toEqual({ tone: "active", label: "fix loop · round 2" });
+    expect(g.loop).toEqual({ tone: "active", label: "round 2", tasks: [] });
     expect(g.onFailure).toBe("repair_pass");
   });
 
@@ -48,6 +50,86 @@ describe("nodeGraph", () => {
     const g = nodeGraph(detail({ worker_sessions: [s("verification.checks.lint")] }), node, NOW);
     expect(g.loop).toBeUndefined();
     expect(g.side).toBeUndefined();
+  });
+});
+
+const verdict = (cycle: number, v: string) => ({ type: "judge_verdict", payload: { node_id: "verification", cycle, verdict: v } }) as unknown as KraftEvent;
+/** Round 1 failed, the repair ran (310s), round 2 failed, the judge said continue after it, and the second repair runs. */
+const LOOP_RUN = [
+  s("verification.checks.lint", { round: 0, status: "failed" }), s("verification.review.code_review", { round: 0 }),
+  s("verification.fix_loop.main.repair", { round: 1, wall_ms: 310_000, model: "sonnet" }),
+  s("verification.checks.lint", { round: 1, status: "failed" }), s("verification.review.code_review", { round: 1, wall_ms: 90_000 }),
+  s("verification.fix_loop.judge", { round: 1, wall_ms: 31_000, model: "sonnet" }),
+  s("verification.fix_loop.main.repair", { round: 2, status: "running", model: "sonnet", wall_ms: null, attempt: 2 }),
+];
+const looped = (over = {}) => detail({ materialized_chain: LOOPED, worker_sessions: LOOP_RUN, ...over });
+const states = (g: ReturnType<typeof nodeGraph>) => g.steps.flatMap((st) => st.tasks.map((t) => `${t.id}:${t.state}`));
+
+describe("nodeGraph rounds", () => {
+  it("draws the newest round, with the repair that is leading out of it and the judge that came after it", () => {
+    const g = nodeGraph(looped(), node, NOW, [verdict(1, "continue")]);
+    expect(states(g)).toEqual(["lint:failed", "typecheck:todo", "code_review:done"]);
+    expect(g.loop).toMatchObject({ tone: "active", label: "round 2 of 3" });
+    expect(g.loop!.tasks.map((t) => [t.label, t.state, t.meta, t.faded ?? false, t.attempt ?? null])).toEqual([
+      ["repair", "current", "running · 3m", false, null],
+      ["judge", "done", "continue", false, null],
+    ]);
+    expect(g.loop!.tasks.map((t) => t.icon ?? null)).toEqual([null, "scale"]);
+    // Selected as `<step>.<task>` under `fix_loop` (a bare `tasks:` list is the step `main`), drawn as the task.
+    expect(g.loop!.tasks.map((t) => [t.id, t.label])).toEqual([["main.repair", "repair"], ["judge", "judge"]]);
+    expect(g.rounds).toMatchObject({ selected: 2, latest: 2, total: 3 });
+    expect(g.rounds!.rows).toEqual([{ n: 1, tone: "bad", outcome: "sent to the fix loop" }, { n: 2, tone: "warn", outcome: "running" }].map((r) => expect.objectContaining(r)));
+  });
+
+  it("draws an earlier round whole: its tasks, its repair, and a judge that skipped the first one", () => {
+    const g = nodeGraph(looped(), node, NOW, [verdict(1, "continue")], 1);
+    expect(g.steps[0].tasks[0]).toMatchObject({ id: "lint", state: "failed" });
+    expect(g.steps[1].tasks[0]).toMatchObject({ id: "code_review", state: "done", meta: "4m" });
+    expect(g.loop!.label).toBe("round 1 of 3");
+    expect(g.loop!.tasks.map((t) => [t.label, t.state, t.meta, t.faded ?? false])).toEqual([
+      ["repair", "done", "done · 5m", false],
+      ["judge", "todo", "skipped · first repair", true],
+    ]);
+    expect(g.rounds!.selected).toBe(1);
+  });
+
+  it("ignores a pick the item has not reached, and a repair that has not run is 'not yet' or 'last round'", () => {
+    const only1 = looped({ worker_sessions: LOOP_RUN.slice(0, 2) });
+    const g = nodeGraph(only1, node, NOW, [], 3);
+    expect(g.rounds!.selected).toBe(1);
+    expect(g.loop).toBeUndefined();
+    const idle = nodeGraph(looped({ worker_sessions: LOOP_RUN.slice(0, 5) }), node, NOW, []);
+    expect(idle.loop!.tasks.map((t) => [t.label, t.meta])).toEqual([["repair", "not yet"], ["judge", "not yet"]]);
+    const lastRound = nodeGraph(looped({ worker_sessions: [...LOOP_RUN.slice(0, 7), s("verification.checks.lint", { round: 2 })] }), node, NOW, [], 3);
+    expect(lastRound.loop!.tasks[0]).toMatchObject({ label: "repair", meta: "last round" });
+  });
+
+  it("draws a judge that stopped the loop red, and the repair it stopped 'stopped by judge'", () => {
+    const g = nodeGraph(looped({ worker_sessions: LOOP_RUN.slice(0, 6) }), node, NOW, [verdict(1, "stop_needs_human")]);
+    expect(g.loop!.tasks.map((t) => [t.label, t.state, t.meta])).toEqual([["repair", "todo", "stopped by judge"], ["judge", "failed", "stop"]]);
+  });
+
+  it("calls the newest round running while the node is the one the run stands on, and done once it has moved on", () => {
+    const running = nodeGraph(looped(), node, NOW, []);
+    expect(running.rounds!.rows.map((r) => [r.n, r.tone, r.outcome])).toEqual([[1, "bad", "sent to the fix loop"], [2, "warn", "running"]]);
+    const moved = nodeGraph(looped({ current_node_id: "merge_request" }), node, NOW, []);
+    expect(moved.rounds!.rows.map((r) => [r.n, r.tone, r.outcome])).toEqual([[1, "bad", "sent to the fix loop"], [2, "ok", "done"]]);
+    // The arc is amber only while the loop runs on past its first round, and red when it stopped.
+    expect(running.loop!.tone).toBe("active");
+    expect(moved.loop!.tone).toBe("idle");
+  });
+
+  it("draws a loop written as steps with every task of every step, each at its own path", () => {
+    const frozen = JSON.parse(LOOPED);
+    frozen.chain.nodes[2].fix_loop = { max_attempts: 2, steps: [{ id: "repair", tasks: [{ id: "repair", kind: "agent" }] }, { id: "sync", tasks: [{ id: "sync", kind: "builtin" }] }], judge: { id: "judge", kind: "agent" } };
+    const sessions = [...LOOP_RUN.slice(0, 2), s("verification.fix_loop.repair.repair", { round: 1 }), s("verification.fix_loop.sync.sync", { round: 1 }), s("verification.checks.lint", { round: 1 }), s("verification.review.code_review", { round: 1 })];
+    const g = nodeGraph(looped({ materialized_chain: JSON.stringify(frozen), worker_sessions: sessions }), node, NOW, [], 1);
+    expect(g.loop!.tasks.map((t) => [t.id, t.label, t.state])).toEqual([["repair.repair", "repair", "done"], ["sync.sync", "sync", "done"], ["judge", "judge", "todo"]]);
+  });
+
+  it("marks the newest round stopped, in red, when the item stopped on the node", () => {
+    const g = nodeGraph(looped({ worker_sessions: LOOP_RUN.slice(0, 6), display_status: "needs_you", stop: { kind: "stuck", node: "verification", resume_at: null, reason: null } }), node, NOW, []);
+    expect(g.rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "bad", outcome: "stopped · needs you" });
   });
 });
 

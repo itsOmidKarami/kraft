@@ -1,8 +1,8 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
-import { materialized, taskKindAt } from "./chainValues";
+import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
 import { stepsOf, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
@@ -45,28 +45,117 @@ export function sessionLook(s: WorkerSession | undefined, now: number): Pick<Gra
   return { state: "done", meta: s.wall_ms != null ? elapsed(s.wall_ms) : undefined };
 }
 
+/** The step a fix loop's own tasks are selected under: `<node>.fix_loop.<task>`. */
+export const FIX_LOOP = "fix_loop";
+export const JUDGE = "judge";
+
+/** A node's fix-loop rounds, 1-based. A round is one measurement of the node's own steps
+ *  (`WorkerSession.round`, 0-based). `total` is the loop's limit, its attempts plus the first pass,
+ *  when the chain says; the judge's session carries the round it came after, the repair's the
+ *  round it leads into. */
+export function loopRounds(item: ItemDetail, node: ApiNode): { latest: number; total?: number } | undefined {
+  if (!node.fix_loop) return;
+  const own = new Set(stepsOf(node).steps.flatMap((st) => st.tasks));
+  const ran = item.worker_sessions.filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
+  if (!ran.length) return;
+  const m = materialized(item);
+  const max = m ? Number(attemptsAt(m, node.id, item.policy_override)?.value) : NaN;
+  return { latest: Math.max(...ran), total: Number.isFinite(max) ? max + 1 : undefined };
+}
+
+/** The round a node's canvas and pane show: the one picked when it ran, else the newest. */
+export const roundShown = (item: ItemDetail, node: ApiNode, picked?: number): number | undefined => {
+  const r = loopRounds(item, node);
+  return r && (picked && picked <= r.latest ? picked : r.latest);
+};
+
+export const verdictOf = (events: KraftEvent[] | undefined, node: string, cycle: number) =>
+  events?.filter((e) => e.type === "judge_verdict" && e.payload.node_id === node && e.payload.cycle === cycle).at(-1)?.payload.verdict as string | undefined;
+
 /** A node's inside for NodeGraph (Decisions §7): steps in order, a row per
- *  task with its latest attempt's state, the escalation side branch, the
+ *  task with its state in the round shown (a fix-loop node's own round: every
+ *  task, its repair and its judge follow it), the escalation side branch, the
  *  fix-loop arc once a round ran, and the on_failure footer line. */
-export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now()) {
+export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), events?: KraftEvent[], picked?: number) {
   const { steps } = stepsOf(node);
   const frozen = materialized(item);
+  const rounds = loopRounds(item, node);
+  const shown = roundShown(item, node, picked);
   const out: NodeStep[] = steps.map((st) => ({
     id: st.id,
     tasks: st.tasks.map((path): GraphItem => {
       const ss = sessionsOf(item, path);
-      const last = ss.at(-1);
-      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: last?.attempt, ...sessionLook(last, now) };
+      // In a fix-loop node the round says which run this is; a count of runs across rounds would badge every task.
+      const last = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
+      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown ? undefined : last?.attempt, ...sessionLook(last, now) };
     }),
   }));
   const esc = escalationsOf(item, node.id);
   const lastEsc = esc.at(-1);
   const side: GraphItem | undefined = lastEsc && { id: ESCALATION, icon: "siren", ...sessionLook(lastEsc, now), meta: `thread ${lastEsc.thread} · turn ${esc.filter((s) => s.thread === lastEsc.thread).length}` };
-  const rounds = Math.max(0, ...item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)).map((s) => s.round));
   const stopped = item.stop?.node === node.id && (item.stop.kind === "cap" || item.stop.kind === "budget");
-  const loop = node.fix_loop && rounds > 0 ? { tone: stopped ? ("red" as const) : item.current_node_id === node.id ? ("active" as const) : ("idle" as const), label: `fix loop · round ${rounds + 1}` } : undefined;
+  const own = loopPaths(frozen, node.id);
+  const inLoop = item.worker_sessions.some((s) => s.node_id === node.id && s.hook_point.startsWith(`${node.id}.${FIX_LOOP}.`));
+  // The arc is drawn once the loop did something: a second round, or a repair or judge that ran.
+  // Red while the newest round is shown and the loop stopped; amber while it runs on past its first round.
+  const tone = stopped && shown === rounds?.latest ? "red" : rounds && rounds.latest > 1 && item.current_node_id === node.id ? "active" : "idle";
+  const loop = node.fix_loop && rounds && (rounds.latest > 1 || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
   const onFailure = node.on_failure?.length ? node.on_failure.map(taskName).join(", ") : undefined;
-  return { steps: out, side, loop, onFailure };
+  return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
+}
+
+/** Why a round has no repair after it (yet). */
+export const repairIdle = (round: number, total: number | undefined, judgeStopped: boolean | undefined) =>
+  judgeStopped ? "stopped by judge" : round >= (total ?? Infinity) ? "last round" : "not yet";
+
+type Loop = { tone: "idle" | "active" | "red"; label: string; tasks: GraphItem[] };
+
+/** The arc: its label, and the repair and judge for the round shown (the judge last). */
+function loopOf(item: ItemDetail, node: ApiNode, own: ReturnType<typeof loopPaths>, round: number, rounds: { latest: number; total?: number }, tone: Loop["tone"], now: number, events?: KraftEvent[]): Loop {
+  const frozen = materialized(item);
+  const verdict = verdictOf(events, node.id, round - 1);
+  const judgeStop = verdict?.startsWith("stop");
+  const task = (path: string, run: WorkerSession | undefined, idle: string, over: Partial<GraphItem> = {}): GraphItem => ({
+    // Selected as `<step>.<task>` under `fix_loop`, drawn as the task's own name.
+    id: path.split(".").slice(2).join("."),
+    label: taskName(path),
+    taskKind: taskKindAt(frozen, path) ?? (run?.model ? "agent" : undefined),
+    ...(run ? sessionLook(run, now) : { state: "todo" as const, meta: idle, faded: true }),
+    ...over,
+  });
+  // The repair that went between this round and the next, stamped with the next one's index.
+  const repair = own.repair.map((path) => {
+    const run = sessionsOf(item, path).filter((s) => s.round === round).at(-1);
+    const g = task(path, run, repairIdle(round, rounds.total, judgeStop));
+    // The prototype says what became of it: "done · 5m".
+    return run?.status === "done" && g.meta ? { ...g, meta: `done · ${g.meta}` } : g;
+  });
+  const tasks = [...repair];
+  if (own.judge) {
+    const run = sessionsOf(item, own.judge).filter((s) => s.round === round - 1).at(-1);
+    const done = run?.status === "done";
+    // The judge draws as the scales, as the prototype has it; the repair keeps its task kind's.
+    tasks.push(task(own.judge, run, round === 1 ? "skipped · first repair" : "not yet", { icon: "scale", ...(done && verdict ? { meta: judgeStop ? "stop" : verdict.split("_")[0], ...(judgeStop && { state: "failed" as const }) } : {}) }));
+  }
+  return { tone, tasks, label: `round ${round}${rounds.total ? ` of ${rounds.total}` : ""}` };
+}
+
+export type RoundRow = { n: number; tone: "ok" | "warn" | "bad"; outcome: string };
+export type Rounds = { rows: RoundRow[]; selected: number; latest: number; total?: number };
+
+/** One row per round that ran, oldest first: its dot and what became of it. A round the loop moved on from was
+ *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (amber)
+ *  while the node is the one the run stands on, else done (green). */
+function roundList(item: ItemDetail, node: ApiNode, { latest, total }: { latest: number; total?: number }, selected: number): Rounds {
+  const halted = item.stop?.node === node.id;
+  const rows = Array.from({ length: latest }, (_, i): RoundRow => {
+    const n = i + 1;
+    if (n < latest) return { n, tone: "bad", outcome: "sent to the fix loop" };
+    if (halted) return { n, tone: "bad", outcome: "stopped · needs you" };
+    if (item.current_node_id === node.id) return { n, tone: "warn", outcome: "running" };
+    return { n, tone: "ok", outcome: "done" };
+  });
+  return { rows, selected, latest, total };
 }
 
 export type FooterState = "running" | "paused" | "stopped" | null;

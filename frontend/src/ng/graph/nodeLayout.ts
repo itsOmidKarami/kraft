@@ -21,10 +21,26 @@ export function curve(x1: number, y1: number, x2: number, y2: number) {
   return `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
 }
 
+/** What an arc's control depth grows by when it carries tasks, px: the prototype's 92px of world height
+ *  (against 34 for the bare arc) less the 14 its control points already sit under the world's foot. */
+export const LOOP_TASKS_EXTRA = 78;
+/** The arc's lowest point: a cubic with both controls at `y` is at 0.75 of the way down there. */
+const arcLow = (TY: number, y: number) => (6 * y + 2 * TY + 19) / 8;
+
+/** The y of the fix-loop arc under world x: it runs from the end mark (x = `e`) back to the start (x = `x1`),
+ *  a cubic whose controls sit `y` deep, x monotone in t, so bisect. */
+export function arcYAt(TY: number, e: number, x1: number, y: number, px: number) {
+  const x = (t: number) => e * (1 - t) ** 2 * (1 + 2 * t) + x1 * t * t * (3 - 2 * t);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (x(m) > px) lo = m; else hi = m; }
+  const t = (lo + hi) / 2, u = 1 - t;
+  return u ** 3 * (TY + 9) + 3 * u * u * t * y + 3 * u * t * t * y + t ** 3 * (TY + 10);
+}
+
 const rowsOf = (st: NodeStep) => Math.max(1, st.tasks.length);
 
 /** Steps as columns; a step's tasks as rows centred on the axis TY. */
-export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; footer?: boolean } = {}) {
+export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolean; loopTasks?: boolean; footer?: boolean } = {}) {
   const maxRows = Math.max(1, ...steps.map(rowsOf));
   const TY = G.TOP + ((maxRows - 1) / 2) * G.ROW + G.BOX / 2;
   const ys = (n: number) => Array.from({ length: n }, (_, i) => TY + (i - (n - 1) / 2) * G.ROW);
@@ -44,6 +60,14 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
     loopY = Math.max(proto, TY + Math.ceil(1.8 * bottom));
     loopLabelY = TY + 0.75 * (loopY - TY) + 14;
     H = Math.max(proto + 10, loopLabelY + 16);
+    if (o.loopTasks) {
+      // An arc that carries the repair and the judge is deeper; its label sits on the line,
+      // between the two, and the world ends under their boxes and labels.
+      loopY += LOOP_TASKS_EXTRA;
+      const low = arcLow(TY, loopY);
+      loopLabelY = low;
+      H = Math.max(proto + 10, low + G.BOX / 2 + 52);
+    }
   }
   const footerY = H + 4;
   if (o.footer) H += 26;
@@ -95,4 +119,17 @@ export function loopArc(lay: NodeLayout, label?: string) {
     arrow: `M${x1 - 5} ${lay.TY + 17} L${x1} ${lay.TY + 10} L${x1 + 5} ${lay.TY + 17}`,
     label: label ? { x: (e + x1) / 2, y: lay.loopLabelY, text: label } : undefined,
   };
+}
+
+/** Where the fix loop's tasks sit on its arc, left to right, as `loopArc` draws it:
+ *  repair tasks, then the judge, which decides first (the arc runs right to left).
+ *  The pair sits ±110px of centre, or a quarter of the arc's width when that is less. */
+export function loopSlots(lay: NodeLayout, repairs: number, judge: boolean) {
+  const x1 = G.startX + 9, e = lay.endX, mid = (e + x1) / 2;
+  const off = Math.min(110, (e - x1) / 4);
+  const xs = [
+    ...Array.from({ length: repairs }, (_, i) => mid - off - (repairs - 1 - i) * Math.max(2 * off, G.COL + 10)),
+    ...(judge ? [mid + off] : []),
+  ];
+  return xs.map((px) => ({ x: px, y: arcYAt(lay.TY, e, x1, lay.loopY, px) }));
 }

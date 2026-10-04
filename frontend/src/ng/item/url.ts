@@ -1,6 +1,6 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
-import { AUTO_REVIEW, ESCALATION } from "./nodeGraph";
+import { AUTO_REVIEW, ESCALATION, FIX_LOOP } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -29,6 +29,8 @@ export function selPath(sel: Sel): string | null {
 export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
   const [n, step, task, ...rest] = path.split(".");
   const node = nodes.find((x) => x.id === n);
+  // A fix loop's repair and judge: `<node>.fix_loop.<task>`, the task `<step>.<task>` in a loop of steps.
+  if (node?.fix_loop && step === FIX_LOOP && task) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
   if (!node || rest.length) return null;
   if (!step) return { kind: "node", node: n };
   // A gate's reviewer is `<gate>.auto_review`: the chain lists no step there, the frozen chain has its task.

@@ -32,6 +32,12 @@ export const FROZEN = JSON.stringify({
   },
   policy: { cap_defaults: { tasks: { time_cap_minutes: 60 } }, maxima: { nodes: { time_cap_minutes: 30 } } },
 });
+/** `FROZEN` with a repair and a judge in verification's fix loop: three rounds, two attempts and the first pass. */
+export const LOOPED = JSON.stringify((() => {
+  const m = JSON.parse(FROZEN);
+  m.chain.nodes[2].fix_loop = { max_attempts: 2, tasks: [{ id: "repair", kind: "agent" }], judge: { id: "judge", kind: "agent" } };
+  return m;
+})());
 /** An item filed with `FROZEN` and not started. */
 export const fresh = (over: Partial<ItemDetail> = {}) => detail({ current_node_id: null, display_status: "paused", materialized_chain: FROZEN, ...over });
 
