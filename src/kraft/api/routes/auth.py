@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 from dataclasses import asdict
 
@@ -152,4 +153,6 @@ async def health(request: Request):
         # update and the restart that finishes it; the SPA and `admin doctor`
         # both say so.
         "installed": update_mod.installed(),
+        # public: About's footer names the interpreter this server runs on.
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
     }

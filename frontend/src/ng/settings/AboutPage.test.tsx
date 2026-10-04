@@ -163,6 +163,27 @@ describe("ng AboutPage", () => {
     expect(await screen.findByText("pid 41822")).toBeInTheDocument();
   });
 
+  // ST-7
+  it.each([
+    ["off on a loopback bind", false, "127.0.0.1:8765 · sign-in off on localhost"],
+    ["on once Kraft listens on the network", true, "127.0.0.1:8765 · sign-in on"],
+  ])("writes whether sign-in is on beside the address: %s", async (_, auth_required, text) => {
+    vi.spyOn(api, "getAccess").mockResolvedValue({ bind: "127.0.0.1", port: 8765, session_expiry_days: 7, password_set: false, auth_required, allowed_hosts: [] });
+    render(<AboutPage />);
+    const dd = (await screen.findByText("Address")).nextElementSibling as HTMLElement;
+    await waitFor(() => expect(dd).toHaveTextContent(text));
+  });
+
+  it("names the Python in the footer, and leaves it out for a server that does not say", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, python: "3.14" });
+    render(<AboutPage />);
+    expect(await screen.findByText("macOS and Linux · Python 3.14 · Only the latest release gets fixes.")).toBeInTheDocument();
+    document.body.innerHTML = "";
+    vi.spyOn(api, "getHealth").mockResolvedValue(instance);
+    render(<AboutPage />);
+    expect(await screen.findByText("macOS and Linux · Only the latest release gets fixes.")).toBeInTheDocument();
+  });
+
   it("draws the version as a card of its own, the instance as labelled rows and the links as a list", async () => {
     vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 214, last_scan_at: new Date(Date.now() - 120_000).toISOString(), errors: [] } });
     render(<AboutPage />);
