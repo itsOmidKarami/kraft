@@ -16,7 +16,7 @@ supported.
 
 Before 2.0 the directory was `templates/`. The first start of 2.0 renames it;
 `KRAFT_TEMPLATES_DIR` still points at it when `KRAFT_CONFIG_DIR` is unset.
-See [Upgrading from 1.4](/get-started/install#upgrading-from-14).
+See [Upgrading from 1.4](/guides/run/upgrade-kraft#upgrading-from-14).
 
 - `kraft admin doctor` reports anything that does not parse.
 - `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains,
