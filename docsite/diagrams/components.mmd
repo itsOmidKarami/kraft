@@ -9,7 +9,7 @@ flowchart TB
   subgraph daemon["kraft: one FastAPI process"]
     api["HTTP API and WebSocket"]
     exec["Executor"]
-    pollers["Pollers: waits, rate limits,<br/>time caps, triggers,<br/>auto-intake, archive"]
+    pollers["Pollers: waits, rate limits,<br/>time caps, schedules, auto-intake,<br/>delayed escalations, closed MRs,<br/>archive"]
     store[("orchestrator.db<br/>SQLite, one writer")]
     index[("index.db<br/>search")]
     egress["Egress proxy"]
