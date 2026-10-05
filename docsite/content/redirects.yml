@@ -36,3 +36,11 @@
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-kraft#upgrading-from-older-releases
 /get-started/install#a-restart-ends-running-agents: /guides/run/upgrade-kraft#a-restart-ends-running-agents
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
+/concepts/caps-and-budgets#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
+/concepts/caps-and-budgets#the-two-dollar-caps: /guides/day-to-day/raise-a-cap#the-two-dollar-caps
+/concepts/caps-and-budgets#the-per-scope-cap: /guides/day-to-day/raise-a-cap#the-per-scope-cap
+/concepts/caps-and-budgets#the-items-own-dollar-cap: /guides/day-to-day/raise-a-cap#the-items-own-dollar-cap
+/concepts/caps-and-budgets#which-one-the-interface-shows: /guides/day-to-day/raise-a-cap#which-one-the-interface-shows
+/concepts/caps-and-budgets#budget-stops-and-what-the-interface-offers: /guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers
+/concepts/caps-and-budgets#raising-a-budget-from-the-command-line: /guides/day-to-day/raise-a-cap#raising-a-budget-from-the-command-line
+/concepts/caps-and-budgets#harnesses-that-report-no-cost: /reference/harnesses/cost-reporting#harnesses-that-report-no-cost

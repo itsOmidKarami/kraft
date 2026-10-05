@@ -13,6 +13,7 @@ A harness is one agent runtime described as data; this page lists the seven Kraf
 - [Agent profiles](/reference/harnesses/agent-profiles): named model tiers a task selects with `profile:`.
 - [Harness files](/reference/harnesses/harness-files): the YAML file that describes one harness.
 - [Fallback and escalation](/reference/harnesses/fallback-and-escalation): where a launch goes next, and which harness runs an escalation turn.
+- [Cost reporting](/reference/harnesses/cost-reporting): how Kraft estimates the cost of a harness that reports tokens but no dollar figure.
 
 A **harness** is one agent runtime, described as data — a fact about a CLI, not
 code. An `agent` task in [`library.yaml`](/reference/configuration/library-and-chains#libraryyaml-reusable-components)
@@ -51,7 +52,7 @@ Each table lists what the overview row leaves out for that harness.
 | Missing | No `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. |
 | Tool policy | `deny_tools` and `allowed_tools` work through a `PreToolUse` hook passed with `-c` and trusted for that launch only, answered by the [permission gate](/reference/permissions#codex); web search never reaches it. |
 | Read from its log | Tokens, the thread id and a usage-limit stop are read off its `--json` log. |
-| Cost | It reports no cost, and no reset time for a limit, so [the dollar caps estimate it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) on the model Kraft launched it with. |
+| Cost | It reports no cost, and no reset time for a limit, so [the dollar caps estimate it](/reference/harnesses/cost-reporting#harnesses-that-report-no-cost) on the model Kraft launched it with. |
 
 ### Cursor details
 
@@ -62,7 +63,7 @@ Each table lists what the overview row leaves out for that harness.
 | Missing | No out-of-band context channel (context goes in the prompt), and no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. |
 | Tool policy | `deny_tools` and `allowed_tools` work through a `preToolUse` hook Kraft installs in the worktree, answered by the [permission gate](/reference/permissions#cursor). |
 | Read from its log | Tokens and the chat id `resume` takes are read off its `stream-json` log. |
-| Cost | It reports no cost and names its model "Auto", so Kraft [estimates it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) only on a launch model `prices.json` lists. Otherwise the item and daily dollar caps count it as $0 and Kraft warns. |
+| Cost | It reports no cost and names its model "Auto", so Kraft [estimates it](/reference/harnesses/cost-reporting#harnesses-that-report-no-cost) only on a launch model `prices.json` lists. Otherwise the item and daily dollar caps count it as $0 and Kraft warns. |
 | Needs | An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. |
 
 ### OpenCode details
@@ -90,7 +91,7 @@ Each table lists what the overview row leaves out for that harness.
 | Model | Name the base model (`gemini-3.8-flash`) and set `effort`, not a slug with the effort in it (`gemini-3.8-flash-low`), or the session can't be priced. |
 | Missing | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact`: a task with a tool policy is refused. |
 | Read from its log | Tokens, the conversation id `resume` takes and a quota stop are read off its `stream-json` log. |
-| Cost | It reports no cost, so [the dollar caps estimate it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) on the model it was launched with when `prices.json` lists it. |
+| Cost | It reports no cost, so [the dollar caps estimate it](/reference/harnesses/cost-reporting#harnesses-that-report-no-cost) on the model it was launched with when `prices.json` lists it. |
 | Needs | A prior interactive sign-in (`agy` once) on the machine, or a Gemini API key: see [Antigravity credentials](/guides/harnesses/adding-a-harness#antigravity). |
 
 ### Gemini details
@@ -109,7 +110,7 @@ Each table lists what the overview row leaves out for that harness.
 | Missing | Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. |
 | Tool policy | `deny_tools` and `allowed_tools` go into a settings file of the launch's own (`--settings-file`) when the task's policy sets either ([permission gate](/reference/permissions#opencode-and-amp-rules-written-at-launch)). |
 | Read from its log | Tokens and the thread id `resume` takes are read off its `--stream-json` log. |
-| Cost | It reports no cost, so [the dollar caps estimate it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) on the model its log names when `prices.json` lists it. |
+| Cost | It reports no cost, so [the dollar caps estimate it](/reference/harnesses/cost-reporting#harnesses-that-report-no-cost) on the model its log names when `prices.json` lists it. |
 | Launch | Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. |
 
 ## Capabilities, not flags
