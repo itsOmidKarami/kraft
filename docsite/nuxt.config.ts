@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 // GitHub Pages serves this repo at /kraft/, not the domain root -- every
 // Nuxt-generated asset URL (_nuxt/*, _payload.json, the _ipx image proxy)
 // needs that prefix or it 404s and the page loads unstyled.
@@ -9,6 +12,42 @@ const channel = process.env.KRAFT_DOCS_CHANNEL || ''
 // that already ends in /kraft/ doubles the prefix (og:image at /kraft/kraft/).
 const origin = 'https://itsomidkarami.github.io'
 
+// content/redirects.yml: the addresses that moved in this build's content, as
+// site paths without the base. The file documents the format, and
+// dev/check_docs_redirects.py reads it with the same pattern. A release tag's
+// content from before the map existed has no file.
+const redirectsFile = fileURLToPath(new URL('./content/redirects.yml', import.meta.url))
+const redirects = (existsSync(redirectsFile) ? readFileSync(redirectsFile, 'utf8') : '')
+  .split('\n')
+  .flatMap((line) => {
+    const entry = /^(\/[a-z0-9/._#-]*):\s+(\/[a-z0-9/._#-]*)$/.exec(line.trim())
+    return entry ? [[entry[1], entry[2]] as [string, string]] : []
+  })
+const movedPages = redirects.filter(([from]) => !from.includes('#'))
+const movedSections = redirects.filter(([from]) => from.includes('#'))
+const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
+
+// What a moved page's old address serves. Nitro prerenders a redirect rule as
+// a bare meta refresh to the rule's target: no base, the reader's #fragment
+// dropped, and a blank page where refresh is blocked. The script keeps the
+// fragment, or follows a section of the old page that went somewhere else;
+// without JavaScript the meta refresh and the link remain.
+function forwardingPage(from: string, to: string): string {
+  const sections = Object.fromEntries(
+    movedSections
+      .filter(([source]) => source.startsWith(`${from}#`))
+      .map(([source, target]) => [source.slice(from.length), withBase(target)]),
+  )
+  const href = withBase(to)
+  const keepFragment = to.includes('#') ? '' : ' + location.hash'
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Moved</title>
+<link rel="canonical" href="${origin}${href}">
+<script>location.replace(${JSON.stringify(sections)}[location.hash] || ${JSON.stringify(href)}${keepFragment})</script>
+<meta http-equiv="refresh" content="0; url=${href}">
+</head><body><p>This page has moved to <a href="${href}">${href}</a>.</p></body></html>
+`
+}
+
 export default defineNuxtConfig({
   extends: ['docus'],
   css: ['~/assets/css/hero.css'],
@@ -18,6 +57,11 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', type: 'image/svg+xml', href: `${baseURL}icon.svg` }],
     },
   },
+  // A moved page: the server answers its old address with a redirect, which
+  // the prerenderer writes as a file (rewritten in nitro.hooks below), and
+  // Nuxt's own route-rules middleware follows the same rule for a link clicked
+  // inside the site, keeping the #fragment.
+  routeRules: Object.fromEntries(movedPages.map(([from, to]) => [from, { redirect: to }])),
   site: {
     url: origin,
     name: 'Kraft',
@@ -52,6 +96,10 @@ export default defineNuxtConfig({
         stableBase: '/kraft/',
         nextBase: '/kraft/next/',
       },
+      // A moved section, old `/page#anchor` to its new address. A static host
+      // never sees the fragment, so app/plugins/moved-sections.ts forwards it
+      // in the browser, on the page that still exists.
+      movedSections: Object.fromEntries(movedSections),
     },
   },
   // The IPX image proxy double-prefixes app.baseURL for content images
@@ -71,8 +119,16 @@ export default defineNuxtConfig({
     ],
   },
   nitro: {
+    hooks: {
+      'prerender:generate'(route) {
+        const moved = movedPages.find(([from]) => from === route.route)
+        if (moved) route.contents = forwardingPage(...moved)
+      },
+    },
     prerender: {
-      routes: ['/robots.txt'],
+      // No page links to a moved page's old address, so the crawler would
+      // never reach it on its own.
+      routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
       // The version switch links to the other build's root, which the crawler
       // would take for one of this build's own pages and fail as a 404.
       // Exactly that path: a prefix match on /kraft/ would skip every page.
