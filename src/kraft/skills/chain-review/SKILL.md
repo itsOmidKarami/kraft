@@ -79,7 +79,7 @@ the person at the gate can find it.
 | Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
 | A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
 | The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap |
-| The plan is docs-only, with no executable change | Skip a test node that has nothing to run against, never the review |
+| The plan is docs-only, with no executable change | Skip a node that only runs tests, if the tail has one; never a node that holds the review |
 | A risk section names a failure mode the chain never checks, and the library has the check | Add it |
 
 Leave it alone when the chain differs from what you would have picked but

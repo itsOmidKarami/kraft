@@ -43,7 +43,7 @@ is what tells you which question below is yours.
   the finished item and its merge request (`final_review` in the shipped
   chain). Does the finished work match what was approved, and does its size match
   the plan's? This is the one gate whose own document must exist; without it
-  there is nothing to finalize.
+  there is nothing to finalize, so report `undecided` and say it is missing.
 - **A gate with no document at all** — a checkpoint before something
   irreversible starts (opening a merge request, for instance). Read the worktree
   and the diff, and judge whether the work is ready for that step.

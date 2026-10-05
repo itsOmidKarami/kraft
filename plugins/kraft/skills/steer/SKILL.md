@@ -30,7 +30,8 @@ holds the documents, committed on its branch, and steering is the only route.
 
 ## Started: stop, then restart with a steer
 
-Ask the person before pausing: it discards the running attempt.
+Ask the person before pausing, unless pausing is what they asked for: it
+discards the running attempt.
 
 - Running and going wrong: `pause_work_item()`, then `resume_work_item(steer="...")`.
 - Already stopped: `retry_work_item(steer="...")`, see `kraft:triage`.

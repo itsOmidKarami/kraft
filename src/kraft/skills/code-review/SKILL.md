@@ -117,5 +117,7 @@ none.
 
 Set `status` to `"done"` when you completed the review, whatever you found.
 Reserve `"failed"` for being unable to review at all — an unreadable diff, a
-missing package. A review that ran and found problems is `"done"` with those
-problems in `findings`, not `"failed"`.
+missing package — and say which in your session summary: the result file has
+no field for the reason, and a bare `"failed"` tells the person nothing. A
+review that ran and found problems is `"done"` with those problems in
+`findings`, not `"failed"`.

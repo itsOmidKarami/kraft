@@ -37,6 +37,7 @@ paused unless they were created with `--autostart`. If both checks pass, run
 | Install is out of date | `kraft admin update [--restart]` |
 | `mcp server` not `ok` | Install the Kraft plugin, or `kraft admin init` for a terminal-only setup; then doctor again |
 | A repo row not `ok` | Do what its line names (often `kraft repo connect`), then doctor again |
+| A `chain_templates`, `agent: <profile>`, `capabilities` or `setup <repo>` row not `ok` | That is config drift, not server health: hand it to `kraft:check` |
 
 `reload` is safe to run. `restart` and `update` interrupt whatever the server is
 running, so say that and ask first. `update` also replaces the installed
