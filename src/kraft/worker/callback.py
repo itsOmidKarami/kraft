@@ -61,6 +61,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
     for method, path, kind in (
         ("GET", rf"/api/work-items/{_P}", "item"),
         ("GET", rf"/api/work-items/{_P}/threads", "item"),
+        ("GET", rf"/api/work-items/{_P}/events", "item"),
         ("POST", rf"/api/work-items/{_P}/progress", "item"),
         # The escalation self-retry keeps its server-side carve-out.
         ("POST", rf"/api/work-items/{_P}/retry", "item"),
