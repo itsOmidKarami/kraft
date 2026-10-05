@@ -14,9 +14,13 @@ is not in their decision.
 
 Read, in this order:
 
-- The chain's events for this work item: the merge request that was opened, and
-  what the pipeline said about it. If CI was not configured or never ran, the
-  brief says that instead.
+- The chain's events for this work item: `kraft view events` (the worktree you
+  are in names the work item). `mr_opened` records the merge request that was
+  opened; the events after it say what the pipeline said about it. If CI was
+  not configured or never ran, the brief says that instead. If `kraft` refuses
+  the verb or cannot be run (a sandboxed worker with no network cannot reach
+  Kraft at all), work from what your instructions carry and say in the brief
+  which events you could not read.
 - The local review findings, including the ones ruled minor.
 - The diff itself. A brief written from the spec rather than from the diff
   describes the change that was planned, not the one that was made.

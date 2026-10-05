@@ -111,6 +111,7 @@ async def worker_api():
         ),
         ("show", {"id": "w-own"}, ("GET", "/api/work-items/w-own", None)),
         ("threads", {}, ("GET", "/api/work-items/w-own/threads", None)),
+        ("events", {}, ("GET", "/api/work-items/w-own/events", None)),
         (
             "permission-hook",
             {"harness": "cursor", "stdin": '{"tool_name": "Shell"}'},
@@ -121,7 +122,7 @@ async def worker_api():
             ),
         ),
     ],
-    ids=["progress", "retry", "retry-steered", "reply", "show", "threads", "hook"],
+    ids=["progress", "retry", "retry-steered", "reply", "show", "threads", "events", "hook"],
 )
 async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, verb, form, call):
     """The session and the credential are the channel's and the daemon's,
@@ -146,10 +147,18 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
         ("reply", {"thread": "t-other", "body": "x"}, "POST /api/threads/t-other/replies"),
         ("reply", {"thread": "t-gone", "body": "x"}, "POST /api/threads/t-gone/replies"),
         ("show", {"id": "w-other"}, "GET /api/work-items/w-other"),
+        ("events", {"id": "w-other"}, "GET /api/work-items/w-other/events"),
         ("progress", {"task": "1", "id": "w-other"}, "POST /api/work-items/w-other/progress"),
         ("progress", {"task": "1", "id": "w-own/../w-other"}, None),
     ],
-    ids=["another-item-thread", "no-such-thread", "another-item", "another-item-act", "traversal"],
+    ids=[
+        "another-item-thread",
+        "no-such-thread",
+        "another-item",
+        "another-item-events",
+        "another-item-act",
+        "traversal",
+    ],
 )
 async def test_another_item_is_refused_and_recorded(worker_api, verb, form, route):
     api, ask = worker_api
@@ -213,6 +222,40 @@ async def test_threads_open_leaves_out_the_resolved(worker_api):
     api.answers["/api/work-items/w-own/threads"] = (200, threads)
     _, body, _ = await ask("threads", {"open": "1"})
     assert [t["id"] for t in json.loads(body)] == ["a"]
+
+
+@pytest.mark.parametrize(
+    ("form", "seqs"),
+    [
+        ({"after": "1"}, [2, 3]),
+        ({"type": "judge_verdict"}, [1, 3]),
+        ({"after": "1", "type": "judge_verdict"}, [3]),
+    ],
+    ids=["after", "type", "both"],
+)
+async def test_events_after_and_type_leave_out_the_rest(worker_api, form, seqs):
+    """Cut from the answer, not asked of the API: the call carries no query."""
+    api, ask = worker_api
+    rows = [
+        {"seq": 1, "type": "judge_verdict"},
+        {"seq": 2, "type": "mr_opened"},
+        {"seq": 3, "type": "judge_verdict"},
+    ]
+    api.answers["/api/work-items/w-own/events"] = (200, rows)
+    _, body, _ = await ask("events", form)
+    assert [e["seq"] for e in json.loads(body)] == seqs
+    assert [c["query"] for c in api.calls] == [{}]
+
+
+@pytest.mark.parametrize(
+    "after", ["-1", "x", "\u00b2", "9" * 5000], ids=["negative", "word", "non-ascii-digit", "huge"]
+)
+async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api, after):
+    api, ask = worker_api
+    status, body, events = await ask("events", {"after": after})
+    assert status == 400, body
+    assert api.calls == []
+    assert events == []
 
 
 async def test_the_mcp_endpoint_takes_only_its_transport_methods(worker_api):

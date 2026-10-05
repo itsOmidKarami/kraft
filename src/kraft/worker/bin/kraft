@@ -18,7 +18,7 @@ usage() {
 	echo "kraft: $1" >&2
 	echo "in a sandbox kraft has only: item progress K [ID] | item reply THREAD --body B" \
 		"[--claim C] | item retry [ID] [--steer S] | view show|threads [ID]" \
-		"| admin permission-hook HARNESS" >&2
+		"| view events [ID] [--after N] [--type T] | admin permission-hook HARNESS" >&2
 	exit 2
 }
 
@@ -89,16 +89,21 @@ item_retry() {
 	post retry "id=$id" "steer=$steer"
 }
 
-# view show|threads [ID]: the payload as JSON, whatever rendering flag the
-# host CLI would have taken. No diff or compare: Kraft reads no git in a live
-# sandboxed worktree, and the worker has git of its own.
+# view show|threads|events [ID]: the payload as JSON, whatever rendering flag
+# the host CLI would have taken. No diff or compare: Kraft reads no git in a
+# live sandboxed worktree, and the worker has git of its own. No events -f:
+# one request, one answer.
 view() {
 	verb=$1
 	shift
-	open=
+	open= after= etype=
 	while [ $# -gt 0 ]; do
 		case $verb:$1 in
 		threads:--open) open=1 ;;
+		events:--after) [ $# -ge 2 ] || usage "--after needs a value"; after=$2; shift ;;
+		events:--after=*) after=${1#--after=} ;;
+		events:--type) [ $# -ge 2 ] || usage "--type needs a value"; etype=$2; shift ;;
+		events:--type=*) etype=${1#--type=} ;;
 		*:--json) ;;
 		*:-*) usage "unknown option: $1" ;;
 		*) positional "$1" ;;
@@ -107,6 +112,7 @@ view() {
 	done
 	case $verb in
 	threads) post threads "id=$id" "open=$open" ;;
+	events) post events "id=$id" "after=$after" "type=$etype" ;;
 	*) post "$verb" "id=$id" ;;
 	esac
 }
@@ -152,7 +158,7 @@ case "$group $verb" in
 "item progress") item_progress "$@" ;;
 "item reply") item_reply "$@" ;;
 "item retry") item_retry "$@" ;;
-"view show" | "view threads") view "$verb" "$@" ;;
+"view show" | "view threads" | "view events") view "$verb" "$@" ;;
 "admin permission-hook") permission_hook "$@" ;;
 *) usage "not available in a sandbox: kraft $group $verb" ;;
 esac

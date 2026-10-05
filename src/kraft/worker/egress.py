@@ -534,6 +534,13 @@ class EgressProxy:
             text, kind = answer["body"].encode(), "application/json"
         elif verb is _threads and status == 200 and form.get("open"):
             text = json.dumps([t for t in reply.json() if t["state"] != "resolved"]).encode()
+        elif verb is _events and status == 200 and (form.get("after") or form.get("type")):
+            # ponytail: the item's whole history is read and cut here, as the
+            # host CLI cuts --type, so the call carries no query at all. Pass
+            # after_seq through if an item's events ever get too many for that.
+            after, only = int(form.get("after") or 0), form.get("type")
+            rows = [e for e in reply.json() if e["seq"] > after and only in (None, "", e["type"])]
+            text = json.dumps(rows).encode()
         await _respond(writer, status, reply.reason_phrase, kind, text)
 
     async def _mcp_call(self, reader, writer, session: EgressSession, method, headers, rest):
@@ -691,6 +698,14 @@ def _threads(form, scope) -> _Call:
     return "GET", f"{_item(form, scope)}/threads", None
 
 
+def _events(form, scope) -> _Call | str:
+    after = form.get("after", "")
+    # 18 digits: any seq there is, and well inside what int() will parse.
+    if after and not (after.isascii() and after.isdigit() and len(after) <= 18):
+        return "events needs --after as a whole number, 0 or more"
+    return "GET", f"{_item(form, scope)}/events", None
+
+
 def _permission_hook(form, scope) -> _Call | str:
     if not form.get("harness") or "stdin" not in form:
         return "permission-hook needs a harness and its stdin"
@@ -704,6 +719,7 @@ _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
     "reply": _reply,
     "show": _show,
     "threads": _threads,
+    "events": _events,
     "permission-hook": _permission_hook,
 }
 

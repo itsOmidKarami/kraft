@@ -18,6 +18,7 @@ def _allowed(method, path):
 _OWN_ITEM = [
     ("GET", "/api/work-items/{}"),
     ("GET", "/api/work-items/{}/threads"),
+    ("GET", "/api/work-items/{}/events"),
     ("POST", "/api/work-items/{}/progress"),
     ("POST", "/api/work-items/{}/retry"),
 ]
@@ -59,6 +60,7 @@ def test_the_mcp_endpoint_is_the_channel_session_own(method):
         # The right path, the wrong method: a write where only a read is listed.
         ("POST", "/api/work-items/w-own"),
         ("DELETE", "/api/work-items/w-own/threads"),
+        ("POST", "/api/work-items/w-own/events"),
         # Routes not on the list at all, even for the session's own item.
         ("POST", "/api/work-items/w-own/skip"),
         # Design §6 rule 2: never a person's decision on its own item, nor
