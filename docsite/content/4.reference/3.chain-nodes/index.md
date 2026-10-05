@@ -48,7 +48,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `on_failure` | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
 | `fix_loop` | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes, up to `max_attempts` and the wall clock that `policy.yaml` gives the loop (`<node>.fix_loop`). See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a person is asked. |
-| `on_base_changed` | What to re-run when a rebase moves the base. `restart_from` names this node or an earlier exec node, never a gate. `on_conflict` names the task or steps that resolve a conflicting rebase. A retry or resume that starts at such a node leaves the rebase to it when the node has an `mr_rebase` task of its own, so a move still restarts the span. |
+| `on_base_changed` | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
 | `read_only` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
 | `icon` | The [icon](#icons) the board draws for the node. |
 
@@ -56,6 +56,15 @@ A recovery that concludes no repair can help reports `failed` with a
 `suggested_action` (`skip`, `retry` or `abandon`, with a reason) in its
 [result file](/reference/chain-nodes/result-file). `kraft view show` prints the one command that takes it. An infra stop
 suggests `retry`.
+
+#### on_base_changed
+
+| Key | Meaning |
+|---|---|
+| `restart_from` | Names this node or an earlier exec node, never a gate. |
+| `on_conflict` | Names the task or steps that resolve a conflicting rebase. |
+
+A retry or resume that starts at such a node leaves the rebase to it when the node has an `mr_rebase` task of its own, so a move still restarts the span.
 
 ### Step keys
 
@@ -129,10 +138,13 @@ A task takes no `read_only`. Set it on the step or node instead.
 | `forge` | `target` | A merge-request action on GitHub or GitLab, resolved from the `forge` in the repo's `repos.yaml` entry: `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
 | `forge` | `wait` | For a wait, `{polling: {initial_interval: 30s, max_interval: 5m}}`. Set the timeout with the task's `policy: {total_time_cap_minutes: 90}`. |
 
+### Editing keys in the interface
+
 In Templates › Chains and Library, `ref`, `target` and `inputs` list the
 values above as you type, each with a line on what it does. So do `steering`,
 and a policy's `grants` and `allowed_harnesses`. A value that is not on the
 list is marked where you typed it and is not saved.
+
 An agent task's `fallback` is edited there as its list of entries, a harness
 and a profile picked for each; an entry's `model` and `effort` are set in YAML.
 
