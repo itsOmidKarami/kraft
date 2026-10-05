@@ -20,3 +20,9 @@ flowchart TD
   fix -- "cap reached, or the judge stops" --> esc
   esc -- "retry" --> main
   esc -- "cannot help" --> stop
+
+  class chain,exec core
+  class gate,stop hero
+  class main,task worker
+  class session,next store
+  class recovery,fix,esc client

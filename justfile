@@ -380,11 +380,13 @@ ci-test:
     uv run pytest -m "not e2e" -n auto
     uv run python -m kraft.intent
 
-# Render docsite/diagrams/*.mmd to the SVGs the pages show. Docus does not
+# Render docsite/diagrams/*.mmd to the SVGs the pages show, a light and a dark
+# one each, in the site's palette (docsite/diagrams/render.mjs). Docus does not
 # render Mermaid, so the SVGs are committed; run this after editing a diagram.
-[doc("Render the Mermaid diagrams to the committed SVGs")]
-docs-diagrams:
-    cd docsite/diagrams && for f in *.mmd; do npx -y @mermaid-js/mermaid-cli@11 -c mermaid.json -b white -i "$f" -o "../public/diagrams/${f%.mmd}.svg"; done
+# Name diagrams to render only those: `just docs-diagrams components`.
+[doc("Render the Mermaid diagrams to the committed SVGs, light and dark")]
+docs-diagrams *names:
+    cd docsite && node diagrams/render.mjs {{names}}
 
 # Preview the docs site with live reload at http://localhost:3000/kraft/
 docs:

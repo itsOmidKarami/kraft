@@ -1,27 +1,30 @@
 flowchart TB
   subgraph clients["Clients"]
     direction LR
-    browser["Browser<br/>React SPA"]
-    cli["kraft CLI"]
-    mcpc["Coding agent<br/>kraft admin mcp"]
+    browser("Browser<br/>React SPA")
+    cli("kraft CLI")
+    mcpc("Coding agent<br/>kraft admin mcp")
   end
 
-  subgraph daemon["kraft: one FastAPI process"]
-    api["HTTP API and WebSocket"]
-    exec["Executor"]
-    pollers["Pollers: waits, rate limits,<br/>time caps, schedules, auto-intake,<br/>delayed escalations, closed MRs,<br/>archive"]
+  subgraph daemon["kraft · one FastAPI process"]
+    api("HTTP API and WebSocket")
+    pollers("Pollers<br/>waits · rate limits · time caps<br/>schedules · auto-intake<br/>delayed escalations · closed MRs<br/>archive")
+    exec("Executor")
     store[("orchestrator.db<br/>SQLite, one writer")]
     index[("index.db<br/>search")]
-    egress["Egress proxy"]
+    egress("Egress proxy")
   end
 
   subgraph item["One per running task"]
-    agent["Worker session<br/>an agent CLI or a subprocess"]
-    wt["git worktree<br/>one per work item"]
+    agent("Worker session<br/>an agent CLI or a subprocess")
+    wt("git worktree<br/>one per work item")
   end
 
-  forge["gh or glab"]
-  bd["bd, optional"]
+  subgraph tools["Tools it runs"]
+    direction TB
+    forge("gh or glab")
+    bd("bd, optional")
+  end
 
   browser --> api
   cli --> api
@@ -31,9 +34,18 @@ flowchart TB
   api --> exec
   pollers --> exec
   exec --> store
-  exec -- "spawns" --> agent
+  exec e1@-- "spawns" --> agent
   exec -- "forge tasks" --> forge
   exec --> bd
   agent -- "edits and commits" --> wt
-  agent -- "permission hook,<br/>progress, replies" --> api
+  agent e2@-- "permission hook,<br/>progress, replies" --> api
   agent -. "network, when sandboxed" .-> egress
+  e1@{ animate: true }
+  e2@{ animate: true }
+
+  class browser,cli,mcpc client
+  class api,exec,pollers core
+  class store,index store
+  class agent hero
+  class wt worker
+  class forge,bd,egress ext

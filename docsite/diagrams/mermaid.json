@@ -1,6 +1,0 @@
-{
-  "theme": "neutral",
-  "htmlLabels": false,
-  "flowchart": { "htmlLabels": false, "curve": "basis" },
-  "themeVariables": { "fontFamily": "ui-sans-serif, system-ui, sans-serif", "fontSize": "15px" }
-}

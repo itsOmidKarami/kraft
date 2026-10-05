@@ -19,5 +19,6 @@ For how one work item moves from filing to merge, and its seven statuses, see
 For the vocabulary, see
 [Concepts](https://itsomidkarami.github.io/kraft/concepts/vocabulary).
 
-The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to SVG with
-`just docs-diagrams`.
+The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to a light
+and a dark SVG each with `just docs-diagrams`. A source names each box's role
+(`class api core`); `docsite/diagrams/render.mjs` holds the colours.
