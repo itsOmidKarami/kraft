@@ -48,7 +48,7 @@ repos:
 | `env` | `{}` | Literal environment variables every worker for this repo gets. See [`env`](#env). |
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the worker allowlist under `env` doesn't cover. A sandbox gets each by name, so its value never appears on the `docker` command line. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. See [`local_files`](#local_files). |
-| `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (see the `policy` row): frozen into each work item when it is filed, and a later addition still applies to running items. |
+| `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (see [`policy`](#policy)): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Names of `library.yaml` steering profiles given to every agent launch on this repo, before the task's own steering. Frozen into each work item when it is filed. |
 | `sandbox` | `null` | `{kind: docker, image: ..., resources: {...}, network: {...}}` — run this repo's task processes in that container, within the optional [resource limits](#resource-limits) and [network policy](#network-policy). See [`sandbox`](#sandbox). |
 | `policy` | `null` | The repository policy layer, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. See [`policy`](#policy). |
@@ -68,7 +68,7 @@ No key on an entry passes silently. A key within two edits of a field above (`au
 
 ### `default_chain`
 
-An item gets it however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake.
+An item that names no chain gets it however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake.
 
 `default_chain_template` before 2.0: still read, and saved under the new name.
 
@@ -133,7 +133,7 @@ It binds every work item filed in this repo, whatever its chain; a value `policy
 
 ### `ci_checks`
 
-The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once. It does not touch `mr.automated_review` or `mr.external_approval`.
+The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It does not touch `mr.automated_review` or `mr.external_approval`.
 
 ## Sandboxed workers
 
@@ -147,7 +147,7 @@ A sandboxed task runs `docker run --init` (or `podman run`) with every capabilit
 | Workspace members | Each member's own repository, the same way as the root's: a private copy of its refs, from which Kraft moves the item's branch in that repository, and its objects. See [Workspace members](#workspace-members). |
 | `HOME` | `$KRAFT_HOME/run/sandbox-home/<work item>`, read-write and kept across sessions, so an agent CLI keeps its state and can resume a paused session. A CLI config directory Kraft owns (Cursor's) lives there too, one per item. |
 | Credentials | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, and every name in `env_passthrough` and `env`, forwarded by name, so their values never appear on the `docker` command line or in `ps`. See [Forwarded credentials](#forwarded-credentials). |
-| Proxy and CA | The daemon's `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (any case), forwarded by name. See [Proxy and CA](#proxy-and-ca). |
+| Proxy and CA | The daemon's `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (any case), forwarded by name, except a proxy on the daemon's loopback and under a network policy. See [Proxy and CA](#proxy-and-ca). |
 | Git identity | `GIT_AUTHOR_*` and `GIT_COMMITTER_*` from the daemon's environment, else your `user.name` and `user.email` for the repository. Repository hooks never run in the container, as they never run on a worker's commits outside one. |
 | Tool policy | Enforced inside the container or refused. See [Tool policy](#tool-policy). |
 
@@ -155,7 +155,7 @@ Abandoning or archiving an item removes its ref store and sandbox home.
 
 ### Repository refs
 
-The worker sees every branch and tag as of its session's start, and may create, move or delete refs, but only there.
+The worker sees every branch and tag as of its session's start, and may create, move or delete refs, but only in that copy.
 
 When a session ends, Kraft moves the item's branch in your repository to where the worker left it, and only if nothing else moved it since; any other ref the worker changed is dropped. What Kraft relies on to decide that lives outside the copy, where the worker cannot write.
 
@@ -406,13 +406,13 @@ This holds for every sandboxed launch of the item: agent sessions, subprocess ta
 
 - `env: NAME` alone takes the rest from the harness file of the session's CLI:
   - Claude declares `ANTHROPIC_API_KEY` (`x-api-key`) and `CLAUDE_CODE_OAUTH_TOKEN` (`Authorization: Bearer`) on `api.anthropic.com`.
-  - Codex declares `CODEX_API_KEY` (`Authorization: Bearer`) on `api.openai.com`. Its name is `CODEX_API_KEY` because `codex exec` does not send an `OPENAI_API_KEY`.
+  - Codex declares `CODEX_API_KEY` (`Authorization: Bearer`) on `api.openai.com`. Its variable is `CODEX_API_KEY` because `codex exec` does not send an `OPENAI_API_KEY`.
   - Gemini declares `GEMINI_API_KEY` (`x-goog-api-key`) on `generativelanguage.googleapis.com`.
   - Verified against the real CLI, in a Docker and a Podman sandbox, by `e2e(<cli>)` in `tests/worker/test_credentials_docker.py` (run with `KRAFT_E2E=1`):
     - `ANTHROPIC_API_KEY` with Claude Code 2.1.284.
     - `CODEX_API_KEY` with codex-cli 0.158.0 (which opens a WebSocket to the host first; against the test's fake host it fell back to HTTPS, and whether it does when the real host's `101` ends the connection is untested).
     - `GEMINI_API_KEY` with Gemini CLI 0.61.0.
-    - `CLAUDE_CODE_OAUTH_TOKEN` is unverified.
+  - `CLAUDE_CODE_OAUTH_TOKEN` is unverified.
   - A CLI that pins its host's certificate, or needs HTTP/2, cannot be managed this way, and its variable should stay unlisted.
   - A CLI whose harness does not declare the name gets the sentinel and nothing injected.
 - A repository's own credential gives `service`, and `inject`: a list of an exact `domain`, a `header`, and optionally a `format` holding `%s` where the value goes. `sentinel` sets what the container sees, `kraft-proxy-managed` unless the harness says otherwise.
@@ -577,11 +577,10 @@ own, and the root scope, running that command, covers it.
 ### When connect finds no command
 
 Connect says when it found no command. With no `test_command` it saves the
-repo disabled. To get it going:
+repo disabled. Either:
 
 - Set `setup_command` yourself, or `""` (the **No setup needed**
-  checkbox in Settings › Repos) if the repo needs no preparation.
-- Set `test_command`, then `enabled: true`.
+  checkbox in Settings › Repos) if the repo needs no preparation, and set `test_command`, then `enabled: true`.
 - Or fix the cause, such as committing the missing lockfile, and run
   `kraft repo connect` again: on a connected repo it fills in only what the entry
   left undecided, and enables a repo that was disabled for want of a test command.
