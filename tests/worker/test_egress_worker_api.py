@@ -247,7 +247,9 @@ async def test_events_after_and_type_leave_out_the_rest(worker_api, form, seqs):
     assert [c["query"] for c in api.calls] == [{}]
 
 
-@pytest.mark.parametrize("after", ["-1", "x", "9" * 5000], ids=["negative", "word", "huge"])
+@pytest.mark.parametrize(
+    "after", ["-1", "x", "\u00b2", "9" * 5000], ids=["negative", "word", "non-ascii-digit", "huge"]
+)
 async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api, after):
     api, ask = worker_api
     status, body, events = await ask("events", {"after": after})
