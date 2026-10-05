@@ -8,11 +8,11 @@ This checks, against `docsite/content/` as it is in this checkout:
 
 - every map entry: its target is a real page (and heading), its source is not
   (or the entry would never be reached), and it does not lead to another entry;
-- every docs address Kraft links to (the CLI, the web UI, the VS Code
-  extension, the plugins, the README, install.sh): it is a real page and
-  heading, or the map forwards it to one. A copy of Kraft already installed
-  keeps opening those addresses, so moving a section without an entry fails
-  here.
+- every docs address the repository links to outside the docs themselves
+  (the CLI, the web UI, the VS Code extension, the plugins, the READMEs,
+  install.sh, package metadata): it is a real page and heading, or the map
+  forwards it to one. A copy of Kraft already installed keeps opening those
+  addresses, so moving a section without an entry fails here.
 
 A `/kraft/next/...` link and a `/kraft/...` one are both read against this
 checkout's pages: they are what the next release publishes at `/kraft/`.
@@ -32,14 +32,19 @@ ROOT = Path(__file__).parent.parent
 CONTENT = ROOT / "docsite" / "content"
 MAP_NAME = "redirects.yml"
 
-# Where Kraft's own links to the docs live, and what one looks like.
-LINK_SOURCES = ["src", "frontend/src", "plugins", "vscode", "install.sh", "README.md"]
+# Where Kraft's links to the docs live, and what one looks like: every tracked
+# file but the docs' own pages (lychee checks those on the built site) and the
+# tests, whose URLs are fixtures. A list of folders missed three files that
+# link to the docs; a new one is picked up here without an edit.
+LINK_SOURCES = [".", ":!docsite", ":!tests"]
 LINK = r"itsomidkarami\.github\.io/kraft/[a-zA-Z0-9/#._-]*"
 
 # A site path with an optional anchor. Narrower than the pattern in
 # docsite/nuxt.config.ts on purpose: every line this accepts, the site reads,
 # and a line the site would read differently or skip is reported here.
-_ADDRESS = r"/[a-z0-9/._-]*[a-z0-9](?:#[a-z0-9._-]+)?"
+# No file extension on the last segment: `/robots.txt` or `/guides/x.md` is a
+# file, not a page's address.
+_ADDRESS = r"/(?:[a-z0-9/._-]*/)?[a-z0-9_-]*[a-z0-9](?:#[a-z0-9._-]+)?"
 ENTRY = re.compile(rf"^({_ADDRESS}):\s+({_ADDRESS})$")
 
 # Addresses Kraft links to that resolve to nothing today. Each one is a dead
@@ -47,8 +52,8 @@ ENTRY = re.compile(rf"^({_ADDRESS}):\s+({_ADDRESS})$")
 # check fails on an entry here that resolves, so this list can only shrink.
 KNOWN_BROKEN: dict[str, str] = {}
 
-_FENCE = re.compile(r"^\s*(```|~~~)")
-_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
+_FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 
 
 def route(relative: Path) -> str:
@@ -67,29 +72,43 @@ def anchors(markdown: str) -> set[str]:
     letters, digits, spaces, hyphens and underscores (so a code span loses its
     backticks), turn spaces into hyphens, and number a repeat
     (`-1`, `-2`). Nuxt MDC then squeezes a run of hyphens into one ("Without
-    `--json`" is `without-json`), trims them from the ends, and puts `_` before
-    an id that starts with a digit ("2. Connect a repo" is `_2-connect-a-repo`).
-    Checked against every heading id of a built site when this was written.
+    `--json`" is `without-json`), trims them from the ends ("`--yes`" is
+    `yes`), and puts `_` before an id that starts with a digit ("2. Connect a
+    repo" is `_2-connect-a-repo`): @nuxtjs/mdc's parser/compiler.js. Checked
+    against every heading id of a built site when this was written.
 
-    ponytail: reads the Markdown source, not rendered text, so a heading with
-    a link in it (`## See [x](/y)`) would get the URL in its anchor. No page
-    has one; strip the link syntax here when one does.
+    Front matter and fenced code are skipped: a `# comment` there is no heading.
+
+    ponytail: reads the Markdown source, not the rendered text. Known gaps,
+    none of which a page has today: a heading with a link in it
+    (`## See [x](/y)` gets the URL in its anchor), a Setext heading
+    (underlined with `===` or `---`), an indented or closed (`## x ##`) one,
+    a heading written as inline HTML, and non-ASCII text that slugger treats
+    differently from a Python word character. Parse with a Markdown library when one
+    of them appears.
     """
     found: set[str] = set()
     seen: dict[str, int] = {}
-    fenced = False
-    for line in markdown.splitlines():
-        if _FENCE.match(line):
-            fenced = not fenced
-        heading = None if fenced else _HEADING.match(line)
+    lines = markdown.splitlines()
+    if lines[:1] == ["---"]:
+        lines = lines[lines.index("---", 1) + 1 :] if "---" in lines[1:] else []
+    fence = ""  # the marker that opened the code block we are in
+    for line in lines:
+        marker = _FENCE.match(line)
+        if marker and not fence:
+            fence = marker.group(1)
+        elif marker and marker.group(1).startswith(fence):
+            # Closed by the same character, at least as many: ```` holds ```.
+            fence = ""
+        heading = None if fence or marker else _HEADING.match(line)
         if not heading:
             continue
         slug = re.sub(r"[^\w\- ]", "", heading.group(1).lower()).replace(" ", "-")
-        slug = re.sub(r"-+", "-", slug).strip("-")
         count = seen.get(slug, 0)
         seen[slug] = count + 1
         if count:
             slug = f"{slug}-{count}"
+        slug = re.sub(r"-+", "-", slug).strip("-")
         found.add(f"_{slug}" if slug[:1].isdigit() else slug)
     return found
 
@@ -118,7 +137,7 @@ def read_map(path: Path) -> tuple[dict[str, str], list[str]]:
         if not entry:
             problems.append(
                 f"{path.name}:{number}: not an entry (`/old/page: /new/page`, "
-                f"lower-case paths, no trailing slash): {line.strip()}"
+                f"lower-case paths, no trailing slash or file extension): {line.strip()}"
             )
         elif entry.group(1) in entries:
             problems.append(f"{path.name}:{number}: {entry.group(1)} has two entries")
@@ -135,7 +154,7 @@ def exists(address: str, site: dict[str, set[str]]) -> bool:
 
 def forward(address: str, entries: dict[str, str]) -> str:
     """Where the site sends a reader who opens `address`: the same one hop the
-    forwarding page and app/plugins/moved-sections.ts make."""
+    forwarding page (docsite/nuxt.config.ts) and app/plugins/moved.ts make."""
     path, _, anchor = address.partition("#")
     if address in entries:
         return entries[address]
@@ -196,7 +215,7 @@ def check_links(
 def site_path(url: str) -> str:
     """A docs URL as a site path: no base, no `/next`, no trailing slash."""
     # A URL that ends a sentence takes the full stop with it.
-    address = url.partition("/kraft")[2].rstrip(".")
+    address = re.split("/kraft", url, maxsplit=1, flags=re.IGNORECASE)[1].rstrip(".")
     address = re.sub(r"^/next(?=/|#|$)", "", address)
     path, hash_, anchor = address.partition("#")
     return (path.rstrip("/") or "/") + hash_ + anchor
@@ -205,7 +224,7 @@ def site_path(url: str) -> str:
 def kraft_links(root: Path) -> list[str]:
     """Every docs address Kraft links to, as a site path without the base."""
     found = subprocess.run(
-        ["git", "grep", "-h", "-o", "-E", LINK, "--", *LINK_SOURCES],
+        ["git", "grep", "-h", "-o", "-i", "-E", LINK, "--", *LINK_SOURCES],
         cwd=root,
         capture_output=True,
         text=True,
@@ -221,7 +240,7 @@ def check(root: Path) -> list[str]:
     links = kraft_links(root)
     if not links:
         # Zero is the grep failing, not Kraft having no docs links.
-        problems.append(f"found no docs links under {', '.join(LINK_SOURCES)}")
+        problems.append("found no docs links anywhere in the repository")
     return problems + check_map(entries, site) + check_links(links, entries, site, KNOWN_BROKEN)
 
 

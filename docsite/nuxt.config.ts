@@ -27,9 +27,10 @@ const movedPages = redirects.filter(([from]) => !from.includes('#'))
 const movedSections = redirects.filter(([from]) => from.includes('#'))
 const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
 
-// What a moved page's old address serves. Nitro prerenders a redirect rule as
-// a bare meta refresh to the rule's target: no base, the reader's #fragment
-// dropped, and a blank page where refresh is blocked. The script keeps the
+// What a moved page's old address serves. The prerenderer writes a redirect
+// (app/plugins/moved.ts answers the old address with one) as a bare meta
+// refresh: the reader's #fragment dropped, and a blank page where refresh is
+// blocked. The script keeps the
 // fragment, or follows a section of the old page that went somewhere else;
 // without JavaScript the meta refresh and the link remain.
 function forwardingPage(from: string, to: string): string {
@@ -57,11 +58,6 @@ export default defineNuxtConfig({
       link: [{ rel: 'icon', type: 'image/svg+xml', href: `${baseURL}icon.svg` }],
     },
   },
-  // A moved page: the server answers its old address with a redirect, which
-  // the prerenderer writes as a file (rewritten in nitro.hooks below), and
-  // Nuxt's own route-rules middleware follows the same rule for a link clicked
-  // inside the site, keeping the #fragment.
-  routeRules: Object.fromEntries(movedPages.map(([from, to]) => [from, { redirect: to }])),
   site: {
     url: origin,
     name: 'Kraft',
@@ -96,10 +92,11 @@ export default defineNuxtConfig({
         stableBase: '/kraft/',
         nextBase: '/kraft/next/',
       },
-      // A moved section, old `/page#anchor` to its new address. A static host
-      // never sees the fragment, so app/plugins/moved-sections.ts forwards it
-      // in the browser, on the page that still exists.
-      movedSections: Object.fromEntries(movedSections),
+      // Every moved address, old to new. app/plugins/moved.ts forwards them:
+      // not a `routeRules` redirect, which Nuxt follows in the browser before
+      // any middleware of ours and without looking at the fragment, so a
+      // moved section of a moved page went to the page's new address.
+      moved: Object.fromEntries(redirects),
     },
   },
   // The IPX image proxy double-prefixes app.baseURL for content images

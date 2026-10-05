@@ -66,7 +66,12 @@ jobs:
       # the map comes back as a page, listed in the sitemap and llms.txt.
       - name: the map of moved addresses is not a page
         run: |
-          ! ls "$RUNNER_TEMP/site/redirects.html" "$RUNNER_TEMP/site/next/redirects.html" 2>/dev/null
+          for page in "$RUNNER_TEMP/site/redirects.html" "$RUNNER_TEMP/site/next/redirects.html"; do
+            if [ -e "$page" ]; then
+              echo "::error::$page exists: the map of moved addresses was built as a page"
+              exit 1
+            fi
+          done
 
       # Every link on main's pages (/kraft/next/), internal and external,
       # anchors included. PRs only: a link that rots between PRs must not
