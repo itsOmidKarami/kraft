@@ -281,7 +281,7 @@ The `mcp server` row is also only a warning when no chain launches an unsandboxe
 
 #### The agent row and the service PATH
 
-Doctor does not read the server's `PATH`: under a service, the unit's `PATH` is the one that counts when an item runs, so compare it with your shell's, and if they differ run `kraft admin uninstall-service`, then `kraft admin install-service` from a shell where the CLI works. See [Run Kraft as a service](/guides/run/operations#run-kraft-as-a-service).
+Doctor does not read the server's `PATH`: under a service, the unit's `PATH` is the one that counts when an item runs, so compare it with your shell's, and if they differ run `kraft admin uninstall-service`, then `kraft admin install-service` from a shell where the CLI works. See [Run Kraft as a service](/guides/run/run-as-a-service#run-kraft-as-a-service).
 
 #### Kraft not on PATH under a service
 

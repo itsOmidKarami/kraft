@@ -36,4 +36,7 @@ Each guide walks through one job from start to finish.
 ## Run the server
 
 - [Remote access](/guides/run/remote-access): approve or reject a gate from a phone, over a tunnel.
-- [Operate a Kraft server](/guides/run/operations): back up the database, find logs, reclaim disk space, run two instances, and run Kraft as a service.
+- [Operate a Kraft server](/guides/run/operations): what to know before you back up the database, read logs or run Kraft as a service.
+- [Back up and restore the database](/guides/run/back-up-and-restore): copy the database while the server runs, restore it, and use the copy Kraft makes before an upgrade.
+- [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
+- [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
