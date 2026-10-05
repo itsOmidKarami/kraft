@@ -30,13 +30,14 @@ reasoning; it is not evidence about whether the code moved.
   is the same story by a different route.
 - **Severity of what is actually still open**, not what has already been
   fixed. A loop that cleared every `critical` finding and has one
-  `important` naming nit left recurring is a different call than one still
-  chasing a `critical` security hole.
-- **Cost already spent vs cap remaining.** A loop three cycles in with
-  two attempts remaining that is still finding new things each round
-  is close to where the cap would stop it anyway -- `stop_needs_human` there
-  costs nothing the cap would not have cost a cycle later, and saves the
-  wasted cycle.
+  `important` finding about a stale comment left recurring is a different call
+  than one still chasing a `critical` security hole.
+- **Cost already spent vs cap remaining**, in attempts and in wall-clock: your
+  task instruction gives both. A loop three cycles in with two attempts
+  remaining, or most of its wall-clock gone, that is still finding new things
+  each round is close to where the cap would stop it anyway --
+  `stop_needs_human` there costs nothing the cap would not have cost a cycle
+  later, and saves the wasted cycle.
 
 ## Reporting your decision
 
