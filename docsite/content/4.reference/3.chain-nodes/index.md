@@ -121,8 +121,8 @@ A task takes no `read_only`. Set it on the step or node instead.
 |---|---|---|
 | `harness` | string | The [harness profile](/reference/harnesses) to run on, an ID from `harnesses.yaml`. A missing or disabled profile stops the task for a human unless the task declares `fallback`. |
 | `prompt` | string | What the task is asked to do. Required. Kraft's output contract comes before the skill and steering. |
-| `skill` | string | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). `spec_author` and `plan_author` default to `kraft:spec` and `kraft:plan`. A skill that cannot load stops the task for a human. |
-| `produces` | string | The document kind the task writes (`spec`, `plan`, `work_brief`, `review_brief`). |
+| `skill` | string | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). With none set, the launch has none (the shipped `spec_author` and `plan_author` set `kraft:spec` and `kraft:plan`). A skill that cannot load stops the task for a human. |
+| `produces` | string | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`). |
 | `profile` | string | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
 | `model`, `effort` | string | This task's runtime options, checked against what the profile's provider accepts. Not allowed with `profile`. |
 | `fallback` | list | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |

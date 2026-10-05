@@ -19,7 +19,10 @@ Before 2.0 the directory was `templates/`. The first start of 2.0 renames it;
 See [Upgrading from 1.4](/get-started/install#upgrading-from-14).
 
 - `kraft admin doctor` reports anything that does not parse.
-- `kraft admin reload` picks up an on-disk edit without a restart.
+- `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains,
+  and `intake.yaml` without a restart. A change to `access.yaml`'s `bind` or
+  `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the
+  next save in Settings or a restart.
 - `kraft admin templates lint` checks the whole library and every chain at
   once, and writes nothing.
 
@@ -54,7 +57,9 @@ template format. Kraft refuses a home that still holds them until you run
 ## Settings-only files
 
 `notify.yaml` and `theme.yaml` are written by the Settings screens (Notifications and Appearance), and Kraft rereads `notify.yaml` after each save. You can edit
-them by hand, but nothing else in this section depends on them.
+them by hand, but a hand edit of `notify.yaml` takes effect only at the next
+save in Settings or the next restart; nothing else in this section depends on
+these files.
 
 | File | Fields |
 |---|---|
@@ -63,10 +68,12 @@ them by hand, but nothing else in this section depends on them.
 
 ### notify.yaml
 
-- `enabled`.
-- `url`, the webhook Kraft posts to, which is a secret and is never shown back.
-- `base_url`, the address links in a notification use.
-- `events`, the event types that send one.
+- `enabled`, off by default.
+- `url`, the webhook Kraft posts to, unset by default, which is a secret and is
+  never shown back.
+- `base_url`, the address links in a notification use, unset by default.
+- `events`, the event types that send one; `gate_requested` and
+  `work_item_needs_human` by default.
 
 See [Notifications](/reference/events#notifications) for the payload and every event type.
 

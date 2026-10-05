@@ -32,7 +32,7 @@ Kraft ships seven harnesses:
 
 | id | Binary | Notable gaps |
 |---|---|---|
-| `claude` | `claude` | Full capability set. |
+| `claude` | `claude` | Every capability but `writable_dirs`, which only Codex declares. |
 | `codex` | `codex exec` | No `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. See [Codex details](#codex-details). |
 | `cursor` | `agent -p --trust` | Cursor's agent CLI. Runs in `--auto-review` (Cursor's classifier); `permission_mode: force` overrides it. See [Cursor details](#cursor-details). |
 | `opencode` | `opencode run` | Needs OpenCode 2.0.0 or newer (not npm's 1.x `opencode-ai`); an older one is refused at launch. See [OpenCode details](#opencode-details). |
@@ -124,7 +124,7 @@ acceptEdits|auto|...` for Claude, `-c sandbox_mode=read-only|workspace-write|...
 for Codex, `--approval-mode default|yolo|...` for Gemini, `--auto-review|--force`
 for Cursor — one Kraft-side name, four different flags.
 
-Codex's options are all `-c` config keys.
+Codex's context, effort, permission mode and writable-roots options are `-c` config keys.
 
 - Codex runs in its "approve for me" mode by default, Claude's `auto` counterpart: the
   sandbox is `workspace-write`, and a sandbox escalation the model asks for goes
