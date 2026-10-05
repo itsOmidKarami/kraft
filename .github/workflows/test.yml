@@ -78,6 +78,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run python dev/check_docs_coverage.py
+      # Here, not in docs.yml: this job has no `if:`, so it runs on a
+      # docs-only pull request, which is where a wall of text arrives.
+      - run: uv run python dev/check_docs_walls.py
       - run: uv run python dev/check_tests.py
 
   test:

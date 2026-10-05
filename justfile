@@ -376,6 +376,7 @@ ci-test:
     uv run ruff check .
     uv run ruff format --check .
     uv run python dev/check_docs_coverage.py
+    uv run python dev/check_docs_walls.py
     uv run python dev/check_tests.py
     uv run pytest -m "not e2e" -n auto
     uv run python -m kraft.intent
