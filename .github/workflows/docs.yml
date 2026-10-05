@@ -60,6 +60,19 @@ jobs:
       - name: check the LLM copies of the docs
         run: python3 dev/check_llm_docs.py "$RUNNER_TEMP/site"
 
+      # docsite/content/redirects.yml is the map of moved addresses, which
+      # docsite/content.config.ts keeps out of Docus's page collections by
+      # reaching into a source's file list. If a Docus upgrade breaks that,
+      # the map comes back as a page, listed in the sitemap and llms.txt.
+      - name: the map of moved addresses is not a page
+        run: |
+          for page in "$RUNNER_TEMP/site/redirects.html" "$RUNNER_TEMP/site/next/redirects.html"; do
+            if [ -e "$page" ]; then
+              echo "::error::$page exists: the map of moved addresses was built as a page"
+              exit 1
+            fi
+          done
+
       # Every link on main's pages (/kraft/next/), internal and external,
       # anchors included. PRs only: a link that rots between PRs must not
       # block the Pages deploy on push; the next docs PR catches it instead.

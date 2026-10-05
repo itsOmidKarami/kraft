@@ -1,0 +1,17 @@
+# Forwarding addresses for pages and sections that have moved, one per line:
+#
+#   /old/page: /new/page                     a page that moved or was renamed
+#   /page#old-heading: /other-page#heading   a section that moved to another page
+#
+# An address is a site path as the browser shows it, without /kraft or
+# /kraft/next: no number prefixes, no .md, no trailing slash. Paths and anchors
+# hold only lower-case letters, digits and / . _ -
+#
+# A page entry may point at a section (/old/page: /new/page#section), and a
+# section entry's page may itself be a moved page with an entry of its own.
+# One hop only: a target is a real page (and heading), never another entry.
+#
+# nuxt.config.ts reads this file line by line, not as YAML: no quotes, no
+# nesting, no comment after an entry. dev/check_docs_redirects.py checks every
+# entry, and every docs address Kraft itself links to. See CONTRIBUTING.md,
+# "User-facing docs".
