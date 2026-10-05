@@ -230,7 +230,7 @@ pin the same thing in both.
 Seven images are shown, in four places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
 `analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
-board tour (`docsite/content/3.guides/00.the-board.md`) `board`, `item`,
+board tour (`docsite/content/3.guides/1.day-to-day/1.the-board.md`) `board`, `item`,
 `review` and `mobile` (`docsite/public/assets` is a link to this folder).
 Retake the ones whose screen changed, and all of them when a release is cut:
 

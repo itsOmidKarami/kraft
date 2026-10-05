@@ -780,7 +780,7 @@ def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
         Path(__file__).resolve().parents[1]
         / "docsite"
         / "content"
-        / "4.reference"
+        / "5.reference"
         / "2.configuration"
         / "3.policy.md"
     ).read_text()
