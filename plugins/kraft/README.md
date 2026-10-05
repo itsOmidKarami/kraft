@@ -89,7 +89,7 @@ without the slash (`kraft:board`).
 | `/kraft:check` | Report where a repo's Kraft config has drifted from this version. |
 | `/kraft:doctor` | Diagnose and fix an unhealthy Kraft server. |
 
-An agent files work paused: a person starts it from the board. Details, the MCP
+What an agent files through the MCP tools lands paused: a person starts it from the board. Details, the MCP
 tools behind each skill, and the by-hand install are in the
 [agent integration guide](https://itsomidkarami.github.io/kraft/guides/agent-integration).
 

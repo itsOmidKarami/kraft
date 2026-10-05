@@ -179,7 +179,7 @@ The container's own environment still holds the values, so `docker inspect` show
 
 ### Proxy and CA
 
-A proxy on the daemon's loopback (`127.0.0.0/8`, `localhost`, `::1`) is left out, since the container's loopback is its own and nothing listens there; `kraft admin doctor` warns about it. Under a [network policy](#network-policy) none of these is forwarded: the container's proxy is Kraft's own.
+A proxy on the daemon's loopback (`127.0.0.0/8`, `::1`, `localhost` or any `*.localhost` name, or the unspecified address `0.0.0.0` or `::`) is left out, since the container's loopback is its own and nothing listens there; `kraft admin doctor` warns about it. Under a [network policy](#network-policy) none of these is forwarded: the container's proxy is Kraft's own.
 
 When there is an extra CA, [sandbox.yaml](/reference/configuration/sandbox#ca-certificates)'s `ca_bundle` or else a usable `SSL_CERT_FILE` of the daemon's, Kraft combines it with the image's own roots into one bundle, mounted read-only at `/etc/kraft/ca-bundle.pem`, and points `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, `PIP_CERT` and `npm_config_cafile` at it. No host path is forwarded. With no extra CA, nothing is mounted or set.
 
@@ -352,6 +352,7 @@ Whatever the lists say, these are denied:
 
 - loopback;
 - link-local (`169.254.0.0/16`, `fe80::/10`);
+- the unspecified (`0.0.0.0`, `::`) and multicast addresses;
 - cloud metadata names and addresses;
 - the host's own addresses, which are what its hostname resolves to.
 
@@ -527,8 +528,8 @@ Kraft reads only the first page of 100 of each list it asks for: the pull reques
 `kraft repo connect` proposes a `setup_command`, a `test_command` and, for a
 repo with more than one project in it, `test_scopes`. It reads them from the
 repo's own task runner (a justfile, Makefile, Taskfile or mise task,
-`script/test`), from its CI, and from its toolchain's lockfile, in that order.
-It prints each command with the file it came from and lists what else it found.
+`script/test`), then from its toolchain's lockfile, then from its CI (for the
+test command). It prints each command with the file it came from and lists what else it found.
 See [Detectors](/reference/configuration/repos/detectors) for the ranking, and
 for how `detectors.yaml` teaches Kraft your own conventions.
 
