@@ -86,7 +86,7 @@ Each table lists what the overview row leaves out for that harness.
 |---|---|
 | Launch | Google's Antigravity CLI, for an individual Google account: Gemini CLI stopped serving those on 2026-06-18, so `gemini` is for API-key and Code Assist users. |
 | Permissions | Every launch passes `--dangerously-skip-permissions`, since headless `agy` otherwise denies every file write and shell command and still exits 0. |
-| Control | Because every launch passes that flag, Kraft has no per-action control over an `agy` worker: the worktree is the boundary, and a [sandbox](/reference/configuration/repos#sandboxed-workers) is the way to bound what it can reach. |
+| Control | Because every launch passes that flag, Kraft has no per-action control over an `agy` worker: the worktree is the boundary, and a [sandbox](/reference/configuration/sandbox) is the way to bound what it can reach. |
 | Effort | `effort` is `--effort low\|medium\|high\|max`, checked by `agy` against the model. |
 | Model | Name the base model (`gemini-3.8-flash`) and set `effort`, not a slug with the effort in it (`gemini-3.8-flash-low`), or the session can't be priced. |
 | Missing | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact`: a task with a tool policy is refused. |
@@ -135,7 +135,7 @@ Codex's context, effort, permission mode and writable-roots options are `-c` con
   `read-only` or `danger-full-access` (a harness profile's `defaults:` or a task)
   changes the sandbox. The reviewer stays on in every mode.
 - Under Kraft's
-  [docker sandbox](/reference/configuration/repos#sandboxed-workers) the default
+  [docker sandbox](/reference/configuration/sandbox) the default
   becomes `danger-full-access` (`container_permission_mode`): Codex's own
   sandbox cannot start inside a container, and the container is the boundary.
 
@@ -168,7 +168,7 @@ either one.
 A harness
 that doesn't declare `writable_dirs` gets nothing extra.
 
-Another is filled by Kraft only for a [sandboxed](/reference/configuration/repos#sandboxed-workers)
+Another is filled by Kraft only for a [sandboxed](/reference/configuration/sandbox)
 launch with `network:`: `mcp_config`, the CLI's MCP servers as one JSON object,
 `{"mcpServers": {"kraft": {"type": "http", "url": "http://kraft/mcp"}}}`: Kraft's
 own server for that session, reached through the sandbox's route out, since the
@@ -214,7 +214,7 @@ Amp needs credentials a headless process can use. See [Set up harness credential
 - **Tool policy.** `deny_tools` and `allowed_tools` go through a `preToolUse` hook. See [Cursor](/reference/permissions#cursor).
 - **Login.** The login lives in the OS keychain, not the config dir. With an
   API key instead, name `CURSOR_API_KEY` in the repo's `env_passthrough`: the
-  only way a [sandboxed](/reference/configuration/repos#sandboxed-workers)
+  only way a [sandboxed](/reference/configuration/sandbox)
   worker, which has no keychain, logs in.
 - **Usage.** Tokens come off the log's closing `result` line, one per run:
   uncached input, output, and cache reads and writes. Cursor reports no cost,
