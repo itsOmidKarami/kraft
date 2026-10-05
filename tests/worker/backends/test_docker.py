@@ -283,7 +283,8 @@ def test_docker_argv_mounts_only_this_session_s_result_file_read_write():
         ["claude"],
         "/work/item-1",
         {"kind": "docker", "image": "x"},
-        [earlier, package, mine],
+        # Named twice: docker refuses the same mount target a second time.
+        [earlier, package, mine, earlier],
         result_path=mine,
     )
     assert [v for v in _volumes(argv) if v.startswith("/run/results")] == [

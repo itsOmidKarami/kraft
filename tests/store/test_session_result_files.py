@@ -29,6 +29,9 @@ async def test_result_files_are_the_items_own_and_only_those_that_exist(database
     await session("s1")
     await session("s2")  # never wrote its result file
     await session("s3", result=results / "escalation-w1-1.json")
+    # A turn whose archive failed still names its thread's file: listed once,
+    # since docker refuses the same mount target twice.
+    await session("s5", result=results / "escalation-w1-1.json")
     await session("s4", result=results.parent / "elsewhere.json")
     await session("other", "w2")
     for name in ("s1.json", "s1.review.md", "s1.instruction.md", "escalation-w1-1.json"):
