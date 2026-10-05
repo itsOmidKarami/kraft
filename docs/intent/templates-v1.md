@@ -1196,6 +1196,17 @@ apart from the task's own on each runtime.
 enforced-by: tests/worker/backends/test_docker.py::test_every_runtime_leaves_what_the_worker_writes_the_operators[rootless-docker], tests/worker/backends/test_docker.py::test_every_runtime_leaves_what_the_worker_writes_the_operators[rootless-podman], tests/worker/backends/test_docker.py::test_every_runtime_leaves_what_the_worker_writes_the_operators[podman-docker-shim], tests/worker/backends/test_docker.py::test_the_runtime_says_what_it_is[podman-docker-shim], tests/worker/backends/test_docker.py::test_selinux_relabel_shares_every_mount_and_never_privatises_one, tests/worker/backends/test_docker.py::test_an_enforcing_host_nobody_configured_refuses_the_launch, tests/worker/backends/test_docker.py::test_the_refusal_stops_a_session_before_it_starts, tests/worker/backends/test_docker.py::test_sandbox_yaml_decides_selinux_only_where_it_enforces[enforcing-auto], tests/worker/backends/test_docker.py::test_podman_launch_failures_are_told_apart_by_exit_code[task], tests/worker/test_refstore_docker.py::test_a_sandboxed_worker_moves_only_its_own_branch[podman]
 origin: src/kraft/worker/backends/docker.py §Runtime -- sandbox Part 2, P1: rootless podman could not write a worktree without keep-id, and podman deletes a `--rm` container's cidfile, which read every failed task as a launch failure.
 
+## REQ sandbox-sees-only-its-own-items-results
+
+A sandboxed launch SHALL mount, of the results folder, only files that belong
+to its own work item: the result file, review package and cut instruction of
+that item's sessions, taken from its session rows. It SHALL NOT mount the
+folder itself, nor any file of another work item, nor a path that is not an
+existing plain file. Every such file SHALL be read-only except the launching
+session's own result file. A launch that is no session SHALL mount none.
+enforced-by: tests/worker/backends/test_docker.py::test_docker_argv_mounts_only_this_session_s_result_file_read_write, tests/worker/backends/test_docker.py::test_docker_argv_refuses_the_results_folder_itself, tests/worker/backends/test_docker.py::test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir, tests/store/test_session_result_files.py::test_result_files_are_the_items_own_and_only_those_that_exist, tests/adapters/test_subprocess_sandbox_results.py::test_a_sandboxed_launch_mounts_only_its_own_items_results, tests/worker/backends/test_docker_results_e2e.py::test_a_sandboxed_session_sees_only_its_own_items_results[docker]
+origin: src/kraft/store/sessions.py §result_files -- Kraft-dni4n: the whole folder was mounted read-only, so a sandboxed worker on one repository could read the diffs and findings of every other work item.
+
 ## REQ sandbox-egress-is-deny-by-default-when-declared
 
 With a sandbox `network` policy set, a sandboxed launch's only route out SHALL

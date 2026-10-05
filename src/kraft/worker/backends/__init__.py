@@ -61,8 +61,10 @@ class SandboxBackend(Protocol):
         `members=` is each workspace member's trusted `(common gitdir, admin
         dir)` by mount path (`sandbox.Checkout`), code the session sees too."""
 
-    def wrap(self, cmd: list[str], cwd, sandbox: dict, results_dir, env=None, **kw) -> list[str]:
-        """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
+    def wrap(self, cmd: list[str], cwd, sandbox: dict, results, env=None, **kw) -> list[str]:
+        """The argv that runs `cmd` inside the sandbox; `results` is the files of
+        the results folder it may read (`store.result_files`), None for none;
+        `ca_bundle=` is
         what `prepare` returned, `sentinels=` each proxy-managed
         credential's variable and what it holds in the value's place,
         `workdir=` where under `cwd` the command runs when not at its top."""

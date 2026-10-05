@@ -851,6 +851,37 @@ def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
     ]
 
 
+def result_files(conn: sqlite3.Connection, results: Path, work_item_id: str) -> list[Path]:
+    """The files in `results` that belong to this work item and exist: each of
+    its sessions' result file, review package and cut instruction. What a
+    sandboxed session of the item may read (`docker_argv`, Kraft-dni4n).
+
+    From the item's session rows, never a name pattern: the folder is one
+    directory for every work item. A row's `result_path` is taken as recorded,
+    since an escalation turn's is its thread's; anything outside `results`,
+    missing, or not a plain file is left out, because docker makes a root-owned
+    directory of a mount source that is not there."""
+    rows = conn.execute(
+        "SELECT id, result_path FROM worker_sessions WHERE work_item_id = ? "
+        "ORDER BY created_at, id",
+        (work_item_id,),
+    ).fetchall()
+    named = (
+        p
+        for r in rows
+        for p in (
+            Path(r["result_path"]),
+            results / f"{r['id']}.review.md",
+            results / f"{r['id']}.instruction.md",
+        )
+    )
+    return [
+        p
+        for p in dict.fromkeys(named)
+        if p.parent == results and p.is_file() and not p.is_symlink()
+    ]
+
+
 def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: str) -> list:
     """The running (or just-started) sessions of the task at `path`, or of
     every task under a step path -- what a skip of that scope stops, and

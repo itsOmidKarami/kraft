@@ -799,11 +799,16 @@ async def run_task(
             # still outrank it.
             repo_env = repo_entry.env if repo_entry is not None else {}
             identity = await _item_identity(db, work_item_id)
+            # Only this item's: the folder holds every item's diffs and
+            # findings. `db.write` so this session's own row is seen.
+            results = await db.write(
+                lambda c: store.result_files(c, run_dirs.results, work_item_id)
+            )
             cmd = backend.wrap(
                 cmd,
                 root,
                 sandbox,
-                run_dirs.results,
+                results,
                 env={
                     **{k: v for k, v in identity.items() if k not in repo_env},
                     **(env or {}),

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 from support.harness import entry_of, git
-from support.sandbox_image import build_git_image
 from support.workspace import nested_repositories, repositories, workspace_item
 
 from kraft import builtins
@@ -23,16 +22,6 @@ from kraft.worker.backends import docker
 from .test_host_git_trust import PROGRAM_KEYS
 
 BRANCH = "kraft/item-1"
-
-
-@pytest.fixture(
-    params=[
-        pytest.param("docker", marks=pytest.mark.e2e("docker")),
-        pytest.param("podman", marks=pytest.mark.e2e("podman")),
-    ]
-)
-def git_image(request, tmp_path, monkeypatch):
-    return build_git_image(request.param, tmp_path, monkeypatch)
 
 
 def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image):
