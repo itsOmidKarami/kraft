@@ -52,7 +52,7 @@ orientation: horizontal
 reverse: true
 links:
   - label: The review page
-    to: /guides/day-to-day/the-board#the-review-page
+    to: /reference/web-ui/review-page
     color: neutral
     variant: outline
 ---
@@ -85,7 +85,7 @@ description: The same board at the same address, laid out for a phone. Approve o
 orientation: horizontal
 links:
   - label: The phone layout
-    to: /guides/day-to-day/the-board#on-a-phone
+    to: /guides/day-to-day/kraft-on-a-phone
     color: neutral
     variant: outline
   - label: Reach it from your phone

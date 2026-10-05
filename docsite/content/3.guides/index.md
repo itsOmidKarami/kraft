@@ -11,11 +11,14 @@ Each guide walks through one job from start to finish.
 
 ## Day to day
 
-- [The board and the web UI](/guides/day-to-day/the-board): a tour of every screen, from the board and an item's page to review, Templates, Settings and the phone.
+- [The board and the web UI](/guides/day-to-day/the-board): where each screen of the web UI is described, from the board and an item's page to review, Templates, Settings and the phone.
+- [The first run](/guides/day-to-day/first-run): the setup steps the board shows when no repo is connected.
+- [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
 - [Reviewing a change](/guides/day-to-day/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
-- [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
 - [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap): raise the cap that stopped a work item from the interface or the command line, and retry it.
+- [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
+- [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone): the phone layout, its bottom bar, the board's cards and the buttons on a stopped item.
 
 ## Customize the chain
 

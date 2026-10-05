@@ -2,11 +2,12 @@
 title: Reference
 navigation:
   title: Overview
-description: Look-up pages for the CLI, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
+description: Look-up pages for the web UI, the CLI, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
 ---
 
 Reference pages describe Kraft's surface; they do not walk you through tasks.
 
+- [Web UI](/reference/web-ui): the board, an item's page, the review page, Templates and Settings, screen by screen.
 - [CLI](/reference/cli): every `kraft` verb, grouped by what it does.
 - [Configuration](/reference/configuration): every field in Kraft's YAML files.
 - [Chain nodes](/reference/chain-nodes): the node kinds a chain is built from, the subprocess task and fix loop contracts, and the result file.

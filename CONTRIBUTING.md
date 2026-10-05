@@ -341,12 +341,12 @@ Page rules:
 | The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/5.reference/4.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/5.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/8.mcp-tools.md` |
-| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/2.agent-integration.md` |
+| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/4.agent-integration.md` |
 | A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/2.configuration/9.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/9.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/4.troubleshooting/index.md` |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/1.remote-access.md`, and `SECURITY.md` if it's security-relevant |
-| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/3.guides/1.day-to-day/3.review-a-change.md` (the review page), `docsite/content/3.guides/4.run/1.remote-access.md` (Access and the phone), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
+| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/5.reference/0.web-ui/` (each screen: the board, an item's page, the review page, Templates and Settings), `docsite/content/3.guides/1.day-to-day/2.first-run.md` (the setup wizard), `docsite/content/3.guides/1.day-to-day/3.file-a-work-item.md` (the composer), `docsite/content/3.guides/1.day-to-day/5.review-a-change.md` (the review page), `docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md` (the phone), `docsite/content/3.guides/4.run/1.remote-access.md` (Access), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer
