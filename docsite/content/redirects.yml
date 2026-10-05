@@ -15,3 +15,18 @@
 # nesting, no comment after an entry. dev/check_docs_redirects.py checks every
 # entry, and every docs address Kraft itself links to. See CONTRIBUTING.md,
 # "User-facing docs".
+
+/get-started/troubleshooting: /troubleshooting
+/guides/the-board: /guides/day-to-day/the-board
+/guides/agent-integration: /guides/day-to-day/agent-integration
+/guides/review-a-change: /guides/day-to-day/review-a-change
+/guides/vscode: /guides/day-to-day/vscode
+/guides/write-your-own-chain: /guides/customize/write-your-own-chain
+/guides/add-review-agents: /guides/customize/add-review-agents
+/guides/schedule-and-webhook-work: /guides/customize/schedule-and-webhook-work
+/guides/upgrading-templates: /guides/customize/upgrading-templates
+/guides/switch-harness: /guides/harnesses/switch-harness
+/guides/adding-a-harness: /guides/harnesses/adding-a-harness
+/guides/worker-kit: /guides/harnesses/worker-kit
+/guides/remote-access: /guides/run/remote-access
+/guides/operations: /guides/run/operations

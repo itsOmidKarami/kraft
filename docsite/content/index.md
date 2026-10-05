@@ -37,7 +37,7 @@ description: Work items grouped by what needs you, what is running, and what is 
 orientation: horizontal
 links:
   - label: Tour the web UI
-    to: /guides/the-board
+    to: /guides/day-to-day/the-board
     color: neutral
     variant: outline
 ---
@@ -52,7 +52,7 @@ orientation: horizontal
 reverse: true
 links:
   - label: The review page
-    to: /guides/the-board#the-review-page
+    to: /guides/day-to-day/the-board#the-review-page
     color: neutral
     variant: outline
 ---
@@ -85,11 +85,11 @@ description: The same board at the same address, laid out for a phone. Approve o
 orientation: horizontal
 links:
   - label: The phone layout
-    to: /guides/the-board#on-a-phone
+    to: /guides/day-to-day/the-board#on-a-phone
     color: neutral
     variant: outline
   - label: Reach it from your phone
-    to: /guides/remote-access
+    to: /guides/run/remote-access
     color: neutral
     variant: outline
 ---
@@ -151,6 +151,15 @@ title: Reference
 description: The CLI, every configuration file, chain nodes, permissions, harnesses, and triggers.
 variant: ghost
 ---
+::::
+
+::::u-page-card
+---
+title: Security and privacy
+variant: ghost
+---
+#description
+[Security](/project/security): the threat model. [Data and privacy](/project/data-and-privacy): what leaves your machine.
 ::::
 :::
 ::

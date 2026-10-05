@@ -12,7 +12,7 @@ The full page, with the request flow, trust boundaries, a map of every module
 in `src/kraft/` and a "where to change things" table, lives on the docs site:
 [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 Its source is
-[`docsite/content/5.project/1.architecture.md`](docsite/content/5.project/1.architecture.md).
+[`docsite/content/6.project/1.architecture.md`](docsite/content/6.project/1.architecture.md).
 
 For how one work item moves from filing to merge, and its seven statuses, see
 [How a work item runs](https://itsomidkarami.github.io/kraft/concepts/how-a-work-item-runs).
