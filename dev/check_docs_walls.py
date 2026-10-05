@@ -37,7 +37,7 @@ ALLOWED: list[tuple[str, str]] = [
     # one first-column cell so a reader who searches for any of them lands on
     # the row that answers it.
     (
-        "4.troubleshooting/index.md",
+        "4.troubleshooting/1.why-did-my-item-stop.md",
         "`workspace member <path> of <worktree> has no checkout Kraft made",
     ),
 ]
