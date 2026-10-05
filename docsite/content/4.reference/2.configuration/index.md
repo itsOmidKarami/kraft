@@ -58,8 +58,17 @@ them by hand, but nothing else in this section depends on them.
 
 | File | Fields |
 |---|---|
-| `notify.yaml` | `enabled`; `url`, the webhook Kraft posts to, which is a secret and is never shown back; `base_url`, the address links in a notification use; and `events`, the event types that send one. See [Notifications](/reference/events#notifications) for the payload and every event type. |
+| `notify.yaml` | `enabled`, `url`, `base_url` and `events`. See [notify.yaml](#notifyyaml). |
 | `theme.yaml` | The look: `surface`, `accent` and `colour_amount`; `mode` and `density`; `code_scheme`, `diff` and `board`; and the default `editor`. See [theme.yaml](#themeyaml). |
+
+### notify.yaml
+
+- `enabled`.
+- `url`, the webhook Kraft posts to, which is a secret and is never shown back.
+- `base_url`, the address links in a notification use.
+- `events`, the event types that send one.
+
+See [Notifications](/reference/events#notifications) for the payload and every event type.
 
 ## theme.yaml
 
