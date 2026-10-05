@@ -62,7 +62,7 @@ Each table lists what the overview row leaves out for that harness.
 | Missing | No out-of-band context channel (context goes in the prompt), and no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. |
 | Tool policy | `deny_tools` and `allowed_tools` work through a `preToolUse` hook Kraft installs in the worktree, answered by the [permission gate](/reference/permissions#cursor). |
 | Read from its log | Tokens and the chat id `resume` takes are read off its `stream-json` log. |
-| Cost | It reports no cost and names its model "Auto", so [the dollar caps estimate it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) only on a launch model `prices.json` lists, and otherwise count it as $0 and warn. |
+| Cost | It reports no cost and names its model "Auto", so Kraft [estimates it](/concepts/caps-and-budgets#harnesses-that-report-no-cost) only on a launch model `prices.json` lists. Otherwise the item and daily dollar caps count it as $0 and Kraft warns. |
 | Needs | An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. |
 
 ### OpenCode details
