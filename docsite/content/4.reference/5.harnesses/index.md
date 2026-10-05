@@ -42,7 +42,7 @@ Kraft ships seven harnesses:
 
 ## The harnesses in detail
 
-Each harness has a table of the same rows where they apply: what its launch does, the model and effort it takes, what it lacks, how tool policy reaches it, what Kraft reads from its log, how its cost is counted, and what it needs.
+Each table lists what the overview row leaves out for that harness.
 
 ### Codex details
 
@@ -85,7 +85,7 @@ Each harness has a table of the same rows where they apply: what its launch does
 |---|---|
 | Launch | Google's Antigravity CLI, for an individual Google account: Gemini CLI stopped serving those on 2026-06-18, so `gemini` is for API-key and Code Assist users. |
 | Permissions | Every launch passes `--dangerously-skip-permissions`, since headless `agy` otherwise denies every file write and shell command and still exits 0. |
-| Control | Kraft has no per-action control over an `agy` worker: the worktree is the boundary, and a [sandbox](/reference/configuration/repos#sandboxed-workers) is the way to bound what it can reach. |
+| Control | Because every launch passes that flag, Kraft has no per-action control over an `agy` worker: the worktree is the boundary, and a [sandbox](/reference/configuration/repos#sandboxed-workers) is the way to bound what it can reach. |
 | Effort | `effort` is `--effort low\|medium\|high\|max`, checked by `agy` against the model. |
 | Model | Name the base model (`gemini-3.8-flash`) and set `effort`, not a slug with the effort in it (`gemini-3.8-flash-low`), or the session can't be priced. |
 | Missing | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact`: a task with a tool policy is refused. |
