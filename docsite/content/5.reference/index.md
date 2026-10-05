@@ -16,4 +16,5 @@ Reference pages describe Kraft's surface; they do not walk you through tasks.
 - [HTTP API](/reference/http-api): the stable routes, the OpenAPI schema, and who may call.
 - [MCP tools](/reference/mcp-tools): every tool `kraft admin mcp` serves, and its `kraft` command.
 - [Environment variables](/reference/configuration/environment-variables): every variable Kraft reads, sets or passes to workers.
+- [Work item statuses](/reference/statuses): the seven statuses, what moves an item between them, and the status the board shows.
 - [Events](/reference/events): every event type on a work item's timeline, and the notification webhook.
