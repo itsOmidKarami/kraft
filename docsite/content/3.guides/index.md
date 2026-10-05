@@ -15,6 +15,7 @@ Each guide walks through one job from start to finish.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
 - [Reviewing a change](/guides/day-to-day/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
 - [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
+- [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap): raise the cap that stopped a work item from the interface or the command line, and retry it.
 
 ## Customize the chain
 
