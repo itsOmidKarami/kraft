@@ -155,11 +155,20 @@ variant: ghost
 
 ::::u-page-card
 ---
-title: Security and privacy
+to: /project/security
+title: Security
+description: The threat model, and what a fresh install does before you change a setting.
 variant: ghost
 ---
-#description
-[Security](/project/security): the threat model. [Data and privacy](/project/data-and-privacy): what leaves your machine.
+::::
+
+::::u-page-card
+---
+to: /project/data-and-privacy
+title: Data and privacy
+description: What leaves your machine, and where Kraft keeps secrets and state.
+variant: ghost
+---
 ::::
 :::
 ::
