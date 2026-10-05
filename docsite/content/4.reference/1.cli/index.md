@@ -11,8 +11,9 @@ manages repositories and their worktrees, and `admin` runs this machine's
 server. Typing an old flat verb (`kraft list`) prints where it moved.
 
 `kraft <group> <verb> --help` prints every flag for one verb. Each group page
-below describes its verbs and the flags that change what they do. Wherever a command takes a work item ID, you can omit it
-when you run the command from inside that item's worktree.
+below describes its verbs and the flags that change what they do. Wherever a
+command takes a work item ID, you can omit it when you run the command from
+inside that item's worktree.
 
 ## In this section
 
