@@ -17,7 +17,7 @@ from kraft.worker.refstore import RefStore
 def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
     cmd = ["pytest", "-q"]
     argv = docker.docker_argv(
-        cmd, "/work/item-1", {"kind": "docker", "image": "kraft-worker:py"}, "/run/results"
+        cmd, "/work/item-1", {"kind": "docker", "image": "kraft-worker:py"}, None
     )
     assert argv[:3] == ["docker", "run", "--rm"]
     assert argv[argv.index("-u") + 1] == f"{os.getuid()}:{os.getgid()}"
@@ -31,7 +31,6 @@ def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
     # What `sweep_orphans` finds this Kraft's containers by.
     assert argv[argv.index("--label") + 1] == docker.home_label()
     assert "/work/item-1:/work/item-1" in argv
-    assert "/run/results:/run/results:ro" in argv
     w_i = argv.index("-w")
     assert argv[w_i + 1] == "/work/item-1"
     for name in sandbox.FORWARDED_ENV:
@@ -60,9 +59,7 @@ def test_docker_argv_mounts_the_repo_gitdir_read_only_without_a_ref_store(tmp_pa
     """Without a ref store the worker gets no writable ref anywhere in the
     operator's repository: a commit fails rather than move a shared ref."""
     repo, worktree, gitdir = _worktree(tmp_path)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     git = repo / ".git"
     assert f"{git}:{git}:ro" in argv
     for name in ("objects", "refs", "logs"):
@@ -82,7 +79,7 @@ def test_docker_argv_mounts_the_ref_store_over_the_repo_gitdir(tmp_path):
         ["git", "status"],
         worktree,
         {"kind": "docker", "image": "x"},
-        "/run/results",
+        None,
         refstores=(store,),
     )
     assert f"{store.shadow}:{git}" in argv
@@ -212,7 +209,7 @@ def test_docker_argv_mounts_every_alternate_object_dir_read_only(tmp_path):
         ["git", "log"],
         worktree,
         {"kind": "docker", "image": "x"},
-        "/run/results",
+        None,
         refstores=(store,),
     )
     assert f"{borrowed}:{borrowed}:ro" in argv
@@ -226,9 +223,7 @@ def test_docker_argv_leaves_every_host_code_execution_path_read_only(tmp_path):
     not `modules/`, where a submodule's own gitdir (and its own `hooks/`)
     lives one directory over."""
     repo, worktree, _ = _worktree(tmp_path)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     git = repo / ".git"
     rw_mounts = [
         argv[i + 1] for i, a in enumerate(argv) if a == "-v" and not argv[i + 1].endswith(":ro")
@@ -246,9 +241,7 @@ def test_docker_argv_mounts_the_worktree_git_file_read_only(tmp_path):
     left writable, a worker repoints it at a gitdir of its own making, hooks
     and all, and the next host-side git command in the worktree runs it."""
     _, worktree, _ = _worktree(tmp_path)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     git_file = worktree / ".git"
     assert f"{git_file}:{git_file}:ro" in argv
 
@@ -259,9 +252,7 @@ def test_docker_argv_shadows_commondir_read_only(tmp_path):
     directory gets its own hooks run as the host user next time git runs
     here."""
     _, worktree, gitdir = _worktree(tmp_path)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     commondir = gitdir / "commondir"
     # Created, not guarded with exists(), for the same reason `modules` is.
     assert commondir.is_file()
@@ -275,38 +266,46 @@ def test_docker_argv_shadows_config_worktree_read_only(tmp_path):
     enables) -- a worker that plants `core.hooksPath` there gets it run as
     the host user next time git runs here, same as through `commondir`."""
     _, worktree, gitdir = _worktree(tmp_path)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     worktree_config = gitdir / "config.worktree"
     assert worktree_config.is_file()
     assert f"{worktree_config}:{worktree_config}:ro" in argv
 
 
-def test_docker_argv_mounts_only_this_session_s_result_file_read_write(tmp_path):
-    """The results dir is one directory for every work item: a worker that
-    could write it could forge another session's status and findings. It
-    still has to *read* it (its own review package, the previous fix
-    session's result file), so it is mounted read-only with just this
-    session's own result file carved back out."""
+def test_docker_argv_mounts_only_this_session_s_result_file_read_write():
+    """The results folder is one directory for every work item, so it is never
+    mounted itself (Kraft-dni4n): only the files the caller lists, which are
+    this item's. Each is read-only, since a worker that could write one could
+    forge another session's status and findings, and this session's own result
+    file is the one carved back out read-write, once."""
+    mine, earlier, package = (f"/run/results/{n}" for n in ("s1.json", "s0.json", "s1.review.md"))
     argv = docker.docker_argv(
         ["claude"],
         "/work/item-1",
         {"kind": "docker", "image": "x"},
-        "/run/results",
-        result_path="/run/results/s1.json",
+        [earlier, package, mine],
+        result_path=mine,
     )
-    assert "/run/results:/run/results:ro" in argv
-    assert "/run/results/s1.json:/run/results/s1.json" in argv
+    assert [v for v in _volumes(argv) if v.startswith("/run/results")] == [
+        f"{earlier}:{earlier}:ro",
+        f"{package}:{package}:ro",
+        f"{mine}:{mine}",
+    ]
+
+
+def test_docker_argv_refuses_the_results_folder_itself():
+    """A path where the list belongs would be iterated as its characters, and
+    `/` mounted."""
+    with pytest.raises(TypeError, match="never the results folder"):
+        docker.docker_argv(["true"], "/w", {"kind": "docker", "image": "x"}, "/run/results")
 
 
 def test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir(tmp_path):
     worktree = tmp_path / "repo"
     (worktree / ".git").mkdir(parents=True)
-    before = docker.docker_argv(
-        ["true"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
-    assert before.count("-v") == 2  # cwd and results_dir only
+    # No session, no results: a setup command's launch.
+    before = docker.docker_argv(["true"], worktree, {"kind": "docker", "image": "x"}, None)
+    assert _volumes(before) == [f"{worktree}:{worktree}"]
 
 
 def test_docker_argv_forwards_env_as_literal_values():
@@ -314,7 +313,7 @@ def test_docker_argv_forwards_env_as_literal_values():
         ["pytest"],
         "/work/item-1",
         {"kind": "docker", "image": "x"},
-        "/run/results",
+        None,
         env={"PYTHONDONTWRITEBYTECODE": "1"},
     )
     i = argv.index("PYTHONDONTWRITEBYTECODE=1")
@@ -326,7 +325,7 @@ def test_docker_argv_names_the_container_when_asked():
         ["pytest"],
         "/work/item-1",
         {"kind": "docker", "image": "x"},
-        "/run/results",
+        None,
         name="kraft-s1",
     )
     n_i = argv.index("--name")
@@ -348,9 +347,7 @@ def test_docker_argv_leaves_a_submodule_gitdir_writable(tmp_path):
     _, worktree, gitdir = _worktree(tmp_path)
     sm_gitdir = gitdir / "modules" / "libs" / "sm"
     sm_gitdir.mkdir(parents=True)
-    argv = docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    argv = docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     assert f"{gitdir}:{gitdir}" in argv
     assert not [a for a in argv if a.startswith(f"{gitdir / 'modules'}") and a.endswith(":ro")]
 
@@ -364,9 +361,7 @@ def test_docker_argv_writes_nothing_into_a_submodule_gitdir(tmp_path):
     sm_gitdir = gitdir / "modules" / "sm"
     (sm_gitdir / "refs" / "remotes" / "origin").mkdir(parents=True)
     (sm_gitdir / "refs" / "remotes" / "origin" / "HEAD").write_text("ref: refs/heads/main\n")
-    docker.docker_argv(
-        ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
-    )
+    docker.docker_argv(["git", "status"], worktree, {"kind": "docker", "image": "x"}, None)
     assert sorted(p.name for p in (sm_gitdir / "refs" / "remotes" / "origin").iterdir()) == ["HEAD"]
 
 

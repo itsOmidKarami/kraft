@@ -852,7 +852,7 @@ def docker_argv(
     cmd: list[str],
     cwd: str | Path,
     sandbox: dict,
-    results_dir: str | Path | None,
+    results: Iterable[str | Path] | None,
     env: dict | None = None,
     name: str | None = None,
     result_path: str | Path | None = None,
@@ -887,12 +887,17 @@ def docker_argv(
     then `.git/modules/<sub>/hooks`, then `.git/worktrees/<id>/modules/...`),
     and the container only has to find the one nobody listed.
 
-    `results_dir`: read-only, because a hook legitimately *reads* its
-    neighbours there (its own `<session>.review.md`, the previous fix
-    session's result file), but a session writing another session's
-    `<other>.json` would forge that session's status and findings. Only this
-    session's own `result_path` is mounted back read-write. `None` for a
-    launch that is no session and has no results to read (a repository's
+    `results`: the files of the results folder this session may read, each
+    mounted read-only at its own path (`store.result_files`): its work item's
+    result files, review packages and cut instructions, and nothing of another
+    item's. That folder is one directory for every work item of every
+    repository, so it is never mounted itself (Kraft-dni4n): a worker would
+    read every other item's diff and findings there. Read-only, because a
+    session writing another session's `<other>.json` would forge its status
+    and findings. Only this session's own `result_path` is mounted back
+    read-write. Docker makes a directory, as root, of a source that does not
+    exist, so the caller lists only files it has seen. `None` for a launch
+    that is no session and has no results to read (a repository's
     `setup_command`, `builtins.run_setup_command`): nothing is mounted.
 
     `<repo>/.git`, for every repository of the checkout -- the worktree's own
@@ -1009,8 +1014,13 @@ def docker_argv(
         "-w",
         str(Path(cwd) / rel),
     ]
-    if results_dir is not None:
-        argv += ["-v", f"{results_dir}:{results_dir}:ro"]
+    if isinstance(results, str | Path):
+        # Iterated, a path is its characters, and the first is `/`.
+        raise TypeError("`results` is the files to mount, never the results folder itself")
+    for path in dict.fromkeys(str(p) for p in results or ()):
+        # Its own is mounted read-write below; docker refuses a target twice.
+        if result_path is None or path != str(result_path):
+            argv += ["-v", f"{path}:{path}:ro"]
     if result_path is not None:
         argv += ["-v", f"{result_path}:{result_path}"]
     argv += _gitdir_mounts(Path(cwd), refstores)
@@ -1682,7 +1692,7 @@ class DockerBackend:
         cmd: list[str],
         cwd: str | Path,
         sandbox: dict,
-        results_dir: str | Path | None,
+        results: Iterable[str | Path] | None,
         env: dict | None = None,
         *,
         session_id: str | None = None,
@@ -1701,7 +1711,7 @@ class DockerBackend:
             cmd,
             cwd,
             sandbox,
-            results_dir,
+            results,
             env=env,
             name=container_name(session_id) if session_id is not None else None,
             result_path=result_path,
