@@ -1,152 +1,223 @@
 ---
-title: Chain nodes
+title: Chain file keys
 navigation:
-  title: Overview
-description: Node keys, task kinds, read_only, extends, and canonical paths in chain files.
+  title: Chain file keys
+description: Every key a chain file accepts, from the chain down to each kind of task, plus read_only, extends, icons and canonical paths.
 ---
 
-The keys a chain file under `config/chains/` accepts, and the keys of every
-task kind. For what a chain, node, task, and gate are, see
-[Concepts](/concepts/vocabulary). For the reusable components a chain extends,
+The keys a chain file under `config/chains/` accepts: the chain's own, then each
+kind of node, step and task. For what a chain, node, task and gate are, see
+[Vocabulary](/concepts/vocabulary). For the reusable components a chain extends,
 see [Library and chains](/reference/configuration/library-and-chains).
 
-## In this section
+## Example
 
-- [Subprocess tasks](/reference/chain-nodes/subprocess-tasks): what Kraft passes a command, and how its exit code becomes a status.
-- [Fix loop and judge](/reference/chain-nodes/fix-loop): when a fix loop opens, what each cycle does, and what the judge's verdicts mean.
-- [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
+A chain of three nodes: an agent implements, a command runs under a fix loop
+with a judge, and a gate waits for approval. `implementation` and `strict_judge`
+are components of the shipped library, which `extends` pulls in.
+
+```yaml [config/chains/example.yaml]
+id: example
+description: Implement, check with a fix loop, then ask for approval.
+nodes:
+  - id: implementation
+    extends: implementation          # a library node, tasks and all
+
+  - id: checks
+    kind: exec
+    skippable: false
+    policy:
+      time_cap_minutes: 30
+    steps:
+      - id: lint
+        tasks:
+          - id: lint
+            kind: subprocess
+            command: sh -c 'npm run lint && npx tsc --noEmit'
+    fix_loop:
+      tasks:
+        - id: repair
+          kind: agent
+          harness: claude
+          profile: strong
+          prompt: Fix what the checks reported.
+      judge:
+        id: judge
+        extends: strict_judge
+      max_attempts: 3
+
+  - id: review
+    kind: gate
+    message: Review the change.
+    reject_to: implementation
+```
+
+Kraft refuses a key that these tables do not list when it loads the chain, and
+`kraft admin templates lint` reports it. A default of `required` means the key
+has no default: the chain must set it, itself or through `extends`.
 
 ## Chain keys
 
-| Key | Meaning |
-|---|---|
-| `id` | The chain's name. Defaults to the file name. |
-| `description` | One line saying what the chain is for, shown in the chain list. Listed even for a chain that does not resolve. |
-| `nodes` | The ordered list of nodes. At least one. |
-| `policy` | The chain's layer of the [policy](/reference/configuration/policy). |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | The file name | The chain's name. |
+| `description` | string | none | One line saying what the chain is for, shown in the chain list. Listed even for a chain that does not resolve. |
+| `nodes` | list | required | The ordered list of nodes. At least one. |
+| `policy` | mapping | none | The chain's layer of the [policy](/reference/configuration/policy). |
 
 ## Node keys
 
 Every node takes these keys, then the keys of its kind.
 
-| Key | Meaning |
-|---|---|
-| `id` | The node's name (`[a-z][a-z0-9_-]*`), unique in the chain. |
-| `kind` | `exec` runs work: one or more steps, each a group of tasks. `gate` waits for a person. |
-| `extends` | The [library](#the-library-and-extends) node this one builds on. |
-| `policy` | This node's layer of the [policy](/reference/configuration/policy). Safety settings only tighten. Operational values stay within the administrator's maxima. |
-| `skippable` | `false` refuses `kraft item skip`, a chain revision's skip, and `kraft item create --skip-nodes` naming the node. Default `true`. |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | required | The node's name (`[a-z][a-z0-9_-]*`), unique in the chain. |
+| `kind` | string | required, unless `extends` supplies it | `exec` runs work: one or more steps, each a group of tasks. `gate` waits for you. |
+| `extends` | string | none | The [library](#the-library-and-extends) node this one builds on. |
+| `policy` | mapping | none | This node's layer of the [policy](/reference/configuration/policy). Safety settings only tighten. Operational values stay within the `maxima` in `policy.yaml`. |
+| `skippable` | boolean | `true` | `false` refuses `kraft item skip`, a chain revision's skip, and `kraft item create --skip-nodes` naming the node. |
 
 ### Exec node keys
 
 An exec node declares `tasks` or `steps`, never both.
 
-| Key | Meaning |
-|---|---|
-| `tasks` | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
-| `steps` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
-| `on_failure` | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
-| `fix_loop` | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes, up to `max_attempts` and the wall clock that `policy.yaml` gives the loop (`<node>.fix_loop`). See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
-| `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a person is asked. |
-| `on_base_changed` | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
-| `read_only` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
-| `icon` | The [icon](#icons) the board draws for the node. |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `tasks` | list | one of `tasks` and `steps` is required, unless `extends` supplies it | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
+| `steps` | list | see `tasks` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
+| `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
+| `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
+| `escalation` | mapping | none | An agent task dispatched when the node is stuck after recovery and the fix loop, before you are asked. |
+| `on_base_changed` | mapping | none | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
+| `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
+| `icon` | string | none | The [icon](#icons) the board draws for the node. |
 
 A recovery that concludes no repair can help reports `failed` with a
-`suggested_action` (`skip`, `retry` or `abandon`, with a reason) in its
-[result file](/reference/chain-nodes/result-file). `kraft view show` prints the one command that takes it. An infra stop
-suggests `retry`.
-
-#### on_base_changed
-
-| Key | Meaning |
-|---|---|
-| `restart_from` | Names this node or an earlier exec node, never a gate. |
-| `on_conflict` | Names the task or steps that resolve a conflicting rebase. |
-
-A retry or resume that starts at such a node leaves the rebase to it when the node has an `mr_rebase` task of its own, so a move still restarts the span.
-
-### Step keys
-
-| Key | Meaning |
-|---|---|
-| `id` | The step's name, unique in the node. |
-| `tasks` | The step's tasks, dispatched together. At least one. |
-| `on_failure` | A recovery pass for this step alone. |
-| `policy` | This step's policy layer. |
-| `skippable` | `false` refuses an operator's skip. |
-| `read_only` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](#read_only). |
-| `icon` | The [icon](#icons) the board draws for the step. |
+`suggested_action`. See [suggested_action](/reference/chain-nodes/result-file#suggested_action).
 
 ### Gate node keys
 
-| Key | Meaning |
-|---|---|
-| `message` | The text shown to the reviewer. |
-| `artifact` | The document the reviewer decides on: a kind an earlier node `produces`. |
-| `artifact_required` | `true` refuses approval while the `artifact` document is missing, with a `422` that says to retry the node that owes it. Needs an `artifact`. Default `false`. |
-| `reject_to` | The node a rejection re-enters, with the reviewer's note. It must be an exec node before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
-| `timeout` | How long the gate waits for a decision. It may not exceed the `total_time_cap_minutes` around it. |
-| `auto_review` | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. |
-| `chain_finalized` | `true` marks the final review. |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `message` | string | none | The text shown to the person who decides the gate. |
+| `artifact` | string | none | The document the gate is decided on: a kind an earlier node `produces`. |
+| `artifact_required` | boolean | `false` | `true` refuses approval while the `artifact` document is missing, with a `422` that says to retry the node that owes it. Needs an `artifact`. |
+| `reject_to` | string | see Meaning | The exec node a rejection re-enters, with the reviewer's note. It must be before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
+| `timeout` | duration | none | How long the gate waits for a decision, such as `90m`. It may not exceed the `total_time_cap_minutes` around it. |
+| `auto_review` | mapping | none | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. See [Add a security review or a gate reviewer](/guides/customize/add-review-agents). |
+| `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. |
 
-A `chain_finalized` gate cannot be approved without its document either,
-whether or not it sets `artifact_required`. Dropping that rule would make every
-existing final gate, the shipped `default` chain's included, approvable with
-nothing to read. A gate takes no `icon`.
+A gate takes no `icon`.
+
+## on_base_changed
+
+`on_base_changed` goes on an exec node whose work can move the worktree's base
+branch. The shipped `default` chain sets it on `merge_request_feedback`:
+
+```yaml [config/chains/default.yaml]
+- id: merge_request_feedback
+  extends: post_draft_feedback
+  on_base_changed:
+    restart_from: verification
+```
+
+When a rebase moves the base, Kraft re-runs the exec nodes from `restart_from`
+through this node: the [span](/concepts/vocabulary#span). A gate in that range
+keeps its approval after a clean rebase. It reopens, and needs approving again,
+after a rebase that needed a conflict resolved.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `restart_from` | string | required | Names this node or an earlier exec node, never a gate. |
+| `on_conflict` | mapping | none | Names the task or steps that resolve a conflicting rebase. |
+
+If a retry or resume starts at a node that has its own `mr_rebase` task and an
+`on_base_changed`, that task does the rebase, and a changed base still re-runs
+the span.
+
+## Step keys
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | required | The step's name, unique in the node. |
+| `extends` | string | none | The library step this one builds on. Its tasks come from the library step unless this step sets `tasks`, which replace them. |
+| `tasks` | list | required, unless `extends` supplies it | The step's tasks, dispatched together. At least one. |
+| `on_failure` | mapping | none | A recovery pass for this step alone. |
+| `policy` | mapping | none | This step's policy layer. |
+| `skippable` | boolean | `true` | `false` refuses a skip of this step. |
+| `read_only` | boolean | `false` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](#read_only). |
+| `icon` | string | none | The [icon](#icons) the board draws for the step. |
 
 ## Task keys
 
-Every task takes these keys, then the keys of its kind.
+Every task takes these keys, then the keys of its kind. A task takes no
+`read_only`: set it on the step or node instead.
 
-| Key | Type | Meaning |
-|---|---|---|
-| `id` | string | The task's name (`[a-z][a-z0-9_-]*`), unique in the step. A library entry is named by its key instead. |
-| `kind` | string | `agent`, `subprocess`, `builtin` or `forge`. |
-| `extends` | string | The library task this one builds on. |
-| `scope` | string | `each_repository` runs the task once per selected repository of a workspace item. `once` (default) runs it once. |
-| `steering` | list | Names from the library's `steering` section. Only an agent task reads it. |
-| `on_failure` | mapping | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
-| `policy` | mapping | This task's own policy layer. A subprocess, builtin or forge task reads only `time_cap_minutes`, `total_time_cap_minutes` and `sandbox` itself. Its harness, budget, tool and grant caps bound the agent of its `on_failure` recovery, which runs under this layer. |
-| `skippable` | boolean | `false` refuses an operator's skip. Default `true`. |
-| `icon` | string | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | required | The task's name (`[a-z][a-z0-9_-]*`), unique in the step. A library entry is named by its key instead. |
+| `kind` | string | required, unless `extends` supplies it | `agent`, `subprocess`, `builtin` or `forge`. |
+| `extends` | string | none | The library task this one builds on. |
+| `scope` | string | `once` | `each_repository` runs the task once per selected repository of a workspace item. `once` runs it once. |
+| `steering` | list | `[]` | Names from the library's `steering` section. Only an agent task reads it. |
+| `on_failure` | mapping | none | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
+| `policy` | mapping | none | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
+| `skippable` | boolean | `true` | `false` refuses a skip of this task. |
+| `icon` | string | none | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
 
-A task takes no `read_only`. Set it on the step or node instead.
+### What a task's policy does
+
+- On a subprocess, builtin or forge task, the layer's own effect is
+  `time_cap_minutes`, `total_time_cap_minutes` and `sandbox`.
+- Its other caps (harness, budget, tools and grants) apply to the agent that runs
+  this task's `on_failure` recovery.
 
 ### Agent task keys
 
 `kind: agent` runs a headless coding agent in the item's worktree.
 
-| Key | Type | Meaning |
-|---|---|---|
-| `harness` | string | The [harness profile](/reference/harnesses) to run on, an ID from `harnesses.yaml`. A missing or disabled profile stops the task for a human unless the task declares `fallback`. |
-| `prompt` | string | What the task is asked to do. Required. Kraft's output contract comes before the skill and steering. |
-| `skill` | string | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). With none set, the launch has none (the shipped `spec_author` sets `kraft:spec`, for example). A skill that cannot load stops the task for a human. |
-| `produces` | string | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`). |
-| `profile` | string | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
-| `model`, `effort` | string | This task's runtime options, checked against what the profile's provider accepts. Not allowed with `profile`. |
-| `fallback` | list | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |
-| `inputs` | list | What Kraft hands the task: `review_package`, `carried_findings` or `previous_review`. |
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `harness` | string | required | The [harness profile](/reference/harnesses) to run on, an ID from `harnesses.yaml`. A missing or disabled profile stops the task and waits for you unless the task declares `fallback`. |
+| `prompt` | string | required | What the task is asked to do. Kraft's output contract comes before the skill and steering. |
+| `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that cannot load stops the task and waits for you. |
+| `produces` | string | none | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`). |
+| `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
+| `model`, `effort` | string | none | This task's runtime options, checked against what the profile's provider accepts. Not allowed with `profile`. |
+| `fallback` | list | unset | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |
+| `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings` or `previous_review`. |
 
-### Other task kinds
+### Subprocess task keys
 
-| Kind | Key | Meaning |
-|---|---|---|
-| `subprocess` | `command` | The command to run in the worktree. It is split into arguments like a shell would, but runs with no shell, so `&&` and pipes need `sh -c '...'`. Exit 0 is `done`. See [Subprocess tasks](/reference/chain-nodes/subprocess-tasks). |
-| `builtin` | `ref` | The work Kraft does itself: `kraft.verify_changed_test_scopes` (the repo's own test scopes) or `kraft.mr_rebase` (rebase the worktree onto the item's base branch). |
-| `builtin` | `execution` | `sequential` (default) or `parallel`. |
-| `forge` | `target` | A merge-request action on GitHub or GitLab, resolved from the `forge` in the repo's `repos.yaml` entry: `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
-| `forge` | `wait` | For a wait, `{polling: {initial_interval: 30s, max_interval: 5m}}`. Set the timeout with the task's `policy: {total_time_cap_minutes: 90}`. |
+`kind: subprocess` runs one command in the item's worktree.
 
-### Editing keys in the interface
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `command` | string | required | The command to run in the worktree. It is split into arguments like a shell would, but runs with no shell, so `&&` and pipes need `sh -c '...'`. Exit 0 is `done`. See [Subprocess tasks](/reference/chain-nodes/subprocess-tasks). |
 
-In Templates › Chains and Library, `ref`, `target` and `inputs` list the
-values above as you type, each with a line on what it does. So do `steering`,
-and a policy's `grants` and `allowed_harnesses`. A value that is not on the
-list is marked where you typed it and is not saved.
+### Builtin task keys
 
-An agent task's `fallback` is edited there as its list of entries, a harness
-and a profile picked for each; an entry's `model` and `effort` are set in YAML.
+`kind: builtin` is work Kraft does itself.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `ref` | string | required | `kraft.verify_changed_test_scopes` runs the repo's own test scopes. `kraft.mr_rebase` rebases the worktree onto the item's base branch. |
+| `execution` | string | `sequential` | `sequential` or `parallel`. |
+
+### Forge task keys
+
+`kind: forge` is a merge-request action on GitHub or GitLab, resolved from the
+`forge` in the repo's `repos.yaml` entry.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
+| `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
+
+```yaml
+wait: {polling: {initial_interval: 30s, max_interval: 5m}}
+policy: {total_time_cap_minutes: 90}
+```
 
 ## read_only
 
@@ -160,14 +231,15 @@ is refused at load.
   node does the same around all of its steps.
 - **What counts as a change.** Any difference, including an untracked file or a
   commit.
-- **What happens.** The item stops for a person with a `read_only_violated`
+- **What happens.** The item stops and waits for you, with a `read_only_violated`
   event and a stop reason naming the changed files. It is not a task failure, so
   no recovery, fix loop, or attempt is spent on it.
-- **Exclusions.** Recovery and fix loops run outside the check. A recovery's
-  retry of the step's tasks is checked again. A step inside an `on_failure` or a
-  `fix_loop` refuses `read_only`.
-- **Sandboxed items.** Kraft runs no host git in a worktree that gained a
-  repository it did not create. That repository is the reported change.
+- **Exclusions.** The check does not run during a recovery or a fix loop. It runs
+  again when a recovery retries the step's tasks. A step inside an `on_failure` or
+  a `fix_loop` refuses `read_only`.
+- **Sandboxed items.** In a sandboxed item, if the worktree gains a repository
+  Kraft did not create, Kraft runs no host git there and reports that repository
+  as the change.
 - **Default.** Off. No shipped chain sets it. Setting it on both a node and its
   steps is allowed and redundant.
 
@@ -197,17 +269,8 @@ icon in its place.
 - `kraft admin templates show ID --resolved` prints a chain with every library
   component expanded.
 
-```yaml
-# chains/quick-task-with-review.yaml
-id: quick-task-with-review
-nodes:
-  - id: implementation
-    kind: exec
-    tasks:
-      - { id: implement, extends: implementer }
-  - id: verification
-    extends: verification        # the library node, fix loop and all
-```
+[Library and chains](/reference/configuration/library-and-chains) lists the
+library's sections and has examples of each.
 
 ## Canonical paths
 
@@ -215,3 +278,19 @@ Every task, step, and node has a canonical path, for example
 `spec.main.author`, `verification.review.code_review`, or
 `merge_request_feedback.fix_loop.judge`. Events, sessions,
 `kraft item retry --path`, and `kraft item skip --path` address work by it.
+
+## Editing keys in the interface
+
+In Templates › Chains and Library, `ref`, `target` and `inputs` list the
+values above as you type, each with a line on what it does. So do `steering`,
+and a policy's `grants` and `allowed_harnesses`. A value that is not on the
+list is marked where you typed it and is not saved.
+
+An agent task's `fallback` is edited there as its list of entries, a harness
+and a profile picked for each; an entry's `model` and `effort` are set in YAML.
+
+## In this section
+
+- [Subprocess tasks](/reference/chain-nodes/subprocess-tasks): what Kraft passes a command, and how its exit code becomes a status.
+- [Fix loop and judge](/reference/chain-nodes/fix-loop): when a fix loop opens, what each cycle does, and what the judge's verdicts mean.
+- [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
