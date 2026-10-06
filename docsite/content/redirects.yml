@@ -179,7 +179,8 @@
 /reference/configuration/repos#repository-refs: /reference/configuration/sandbox#repository-refs
 /reference/configuration/repos#workspace-members: /reference/configuration/sandbox#workspace-members
 /reference/configuration/repos#forwarded-credentials: /reference/configuration/sandbox#forwarded-credentials
-/reference/configuration/repos#proxy-and-ca: /reference/configuration/sandbox#proxy-and-ca
+/reference/configuration/repos#proxy-and-ca: /reference/configuration/sandbox/sandbox-yaml#proxy
+/reference/configuration/sandbox#proxy-and-ca: /reference/configuration/sandbox/sandbox-yaml#proxy
 /reference/configuration/repos#tool-policy: /reference/configuration/sandbox#tool-policy
 /reference/configuration/repos#the-image: /reference/configuration/sandbox#the-image
 /reference/configuration/repos#not-yet-covered: /reference/configuration/sandbox#not-yet-covered
@@ -211,9 +212,11 @@
 /reference/configuration/repos#what-a-launch-runs: /reference/configuration/sandbox/kits#what-a-launch-runs
 /reference/configuration/repos#when-it-is-read: /reference/configuration/sandbox/kits#when-it-is-read
 /reference/configuration/repos#doctor: /reference/configuration/sandbox/kits#doctor
-/reference/configuration/repos#connecting-a-repo: /reference/configuration/repos/detectors#connecting-a-repo
-/reference/configuration/repos#repos-that-get-no-proposal: /reference/configuration/repos/detectors#repos-that-get-no-proposal
+/reference/configuration/repos#connecting-a-repo: /reference/configuration/repos/detectors#choosing-something-else
+/reference/configuration/repos#repos-that-get-no-proposal: /reference/configuration/repos/detectors#a-python-project-with-no-lockfile
 /reference/configuration/repos#when-connect-finds-no-command: /reference/configuration/repos/detectors#when-connect-finds-no-command
+/reference/configuration/repos/detectors#connecting-a-repo: /reference/configuration/repos/detectors#choosing-something-else
+/reference/configuration/repos/detectors#repos-that-get-no-proposal: /reference/configuration/repos/detectors#a-python-project-with-no-lockfile
 /reference/configuration/sandbox#field-details: /reference/configuration/sandbox/sandbox-yaml#field-details
 /reference/configuration/sandbox#selinux: /reference/configuration/sandbox/sandbox-yaml#selinux
 /reference/configuration/sandbox#ca_bundle: /reference/configuration/sandbox/sandbox-yaml#ca_bundle
