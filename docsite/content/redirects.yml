@@ -241,7 +241,7 @@
 /troubleshooting#git-would-not-start-the-rebase: /troubleshooting/why-did-my-item-stop#git-would-not-start-the-rebase
 /troubleshooting#invalid-intakeyaml: /troubleshooting/doctor-failures#invalid-intakeyaml
 /troubleshooting#kraft-command-not-found: /troubleshooting/starting-and-reaching-kraft#kraft-command-not-found
-/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service
+/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /troubleshooting#kraft-wont-start-port-already-in-use: /troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use
 /troubleshooting#moved-keys: /troubleshooting/doctor-failures#moved-keys
 /troubleshooting#older-entries-and-the-tests-row: /troubleshooting/doctor-failures#older-entries-and-the-tests-row
@@ -266,7 +266,7 @@
 /get-started/troubleshooting#git-would-not-start-the-rebase: /troubleshooting/why-did-my-item-stop#git-would-not-start-the-rebase
 /get-started/troubleshooting#invalid-intakeyaml: /troubleshooting/doctor-failures#invalid-intakeyaml
 /get-started/troubleshooting#kraft-command-not-found: /troubleshooting/starting-and-reaching-kraft#kraft-command-not-found
-/get-started/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service
+/get-started/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /get-started/troubleshooting#kraft-wont-start-port-already-in-use: /troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use
 /get-started/troubleshooting#moved-keys: /troubleshooting/doctor-failures#moved-keys
 /get-started/troubleshooting#older-entries-and-the-tests-row: /troubleshooting/doctor-failures#older-entries-and-the-tests-row
@@ -274,6 +274,7 @@
 /get-started/troubleshooting#stop-reasons-in-detail: /troubleshooting/why-did-my-item-stop#stop-reasons-in-detail
 /get-started/troubleshooting#the-agent-row-and-the-service-path: /troubleshooting/doctor-failures#the-agent-row-and-the-service-path
 /get-started/troubleshooting#the-mcp-server-warning: /troubleshooting/doctor-failures#the-mcp-server-warning
+/troubleshooting/doctor-failures#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /get-started/troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
 /get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different
 /get-started/troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
