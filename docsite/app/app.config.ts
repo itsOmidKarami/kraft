@@ -27,7 +27,19 @@ export default defineAppConfig({
         linkTitle: 'whitespace-normal!',
       },
     },
+    // Nuxt UI cuts a long "On this page" entry short too, and three entries
+    // that differ only after the cut read the same. Wrap it.
+    contentToc: {
+      slots: {
+        linkText: 'whitespace-normal!',
+      },
+    },
     prose: {
+      // Inline code is an inline-block, so one long path or flag is wider
+      // than a phone and the whole page scrolls sideways. Let it break.
+      code: {
+        base: 'max-w-full wrap-break-word',
+      },
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.
       pre: {
