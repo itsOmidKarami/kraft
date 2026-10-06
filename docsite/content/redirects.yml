@@ -270,3 +270,10 @@
 /get-started/troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
 /get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different
 /get-started/troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
+/concepts/vocabulary#cap-and-wait: /concepts/vocabulary#cap
+/concepts/vocabulary#the-library-and-reuse: /concepts/vocabulary#library
+/concepts/caps-and-budgets#raising-a-cap-on-a-stuck-item: /guides/day-to-day/raise-a-cap
+/concepts/caps-and-budgets#background-jobs: /concepts/caps-and-budgets#the-shipped-implementer-cap
+/concepts/how-a-work-item-runs#where-to-go-next: /concepts/how-a-work-item-runs#related
+/concepts/vocabulary#where-to-go-next: /concepts/vocabulary#related
+/concepts/permission-gate#why-an-escalation-gets-git-grants-by-default: /concepts/permission-gate#why-grants-are-names-not-command-patterns
