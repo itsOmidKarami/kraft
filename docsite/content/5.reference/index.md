@@ -5,17 +5,27 @@ navigation:
 description: Look-up pages for the web UI, the CLI, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
 ---
 
-Reference pages describe Kraft's surface; they do not walk you through tasks.
+Look up a command, field, endpoint, tool, status or event.
 
-- [Web UI](/reference/web-ui): the board, an item's page, the review page, Templates and Settings, screen by screen.
-- [CLI](/reference/cli): every `kraft` verb, grouped by what it does.
-- [Configuration](/reference/configuration): every field in Kraft's YAML files.
-- [Chain nodes](/reference/chain-nodes): the node kinds a chain is built from, the subprocess task and fix loop contracts, and the result file.
-- [Permissions](/reference/permissions): how the permission gate answers a worker's asks, and grants.
-- [Agent harnesses](/reference/harnesses): the agent CLIs Kraft runs and what each supports.
-- [Inbound triggers](/reference/triggers): start a chain from a cron schedule or an HTTP call.
-- [HTTP API](/reference/http-api): the stable routes, the OpenAPI schema, and who may call.
-- [MCP tools](/reference/mcp-tools): every tool `kraft admin mcp` serves, and its `kraft` command.
-- [Environment variables](/reference/configuration/environment-variables): every variable Kraft reads, sets or passes to workers.
-- [Work item statuses](/reference/statuses): the seven statuses, what moves an item between them, and the status the board shows.
-- [Events](/reference/events): every event type on a work item's timeline, and the notification webhook.
+## In this section
+
+**Use Kraft**
+
+- [Web UI](/reference/web-ui): when you want a screen explained: the board, an item's page, the review page, Templates and Settings.
+- [CLI](/reference/cli): when you want the verb for a task, or a verb's flags and output.
+- [Work item statuses](/reference/statuses): when you want to know what a status means and what moves an item to the next.
+
+**Configure Kraft**
+
+- [Configuration](/reference/configuration): when you edit a YAML file and want its fields, defaults and limits.
+- [Environment variables](/reference/configuration/environment-variables): when you want a `KRAFT_*` variable, or a variable Kraft passes to workers.
+- [Chain nodes](/reference/chain-nodes): when you write a chain and want the node kinds, the subprocess task and fix loop contracts, and the result file.
+- [Agent harnesses](/reference/harnesses): when you want the agent CLIs Kraft runs and what each supports.
+- [Permission gate](/reference/permissions): when you want to know how Kraft answers a worker's asks, and the grants.
+
+**Drive Kraft from a program**
+
+- [Inbound triggers](/reference/triggers): when you start a chain from a cron schedule or an HTTP call.
+- [HTTP API](/reference/http-api): when you call Kraft over HTTP and want the stable routes, the schema, and who may call.
+- [MCP tools](/reference/mcp-tools): when you wire an agent to Kraft and want every tool and its `kraft` command.
+- [Events](/reference/events): when you read a work item's timeline, or send events to a webhook.

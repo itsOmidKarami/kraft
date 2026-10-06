@@ -12,6 +12,7 @@ clients of that API.
 Only two routes are meant for other programs, and only these keep their shape
 between minor releases. See
 [Versioning and stability](/project/status-and-support#versioning-and-stability).
+Who may call them is under [Who may call](#who-may-call).
 
 | Route | Use |
 |---|---|
@@ -20,16 +21,52 @@ between minor releases. See
 
 ### `GET /api/health`
 
+```bash
+curl -s http://127.0.0.1:8765/api/health | jq .status
+```
+
 The answer carries:
 
 | Field | Meaning |
 |---|---|
 | `status` | `ok` or `degraded`. |
 | `invalid_templates`, `invalid_policy`, `invalid_intake` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`. |
-| `intake_off` | Whether auto-intake and `intake.yaml`'s schedules are off for it: `true` when the server started on that file, though a trigger left in `policy.yaml` still fires; `false` when a reload refused it and the running ones are kept. |
+| `intake_off` | Whether auto-intake and `intake.yaml`'s schedules are off for it. |
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
+| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. |
+| `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
+| `session_expiry_days` | How long a login lasts, which the login screen shows. |
+
+`intake_off` is `true` when the server started on an `intake.yaml` that does not load. A trigger left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
+
+## Who may call
+
+| Caller | What it needs |
+|---|---|
+| A process on the same machine, while Kraft is bound to loopback | Nothing, as long as it addresses the server as `127.0.0.1`, `localhost` or `[::1]`. |
+| Anyone, once Kraft is bound off loopback | A browser session from the login page, or the MCP bearer token in `$KRAFT_HOME/run/mcp-token`, sent as `Authorization: Bearer <token>`. |
+| A trigger sender, once Kraft is bound off loopback | For `POST /api/triggers` only, the trigger token in `$KRAFT_HOME/run/trigger-token`, sent the same way. |
+| A remote caller while no password is set | Nothing works. Kraft answers `403`. |
+
+The MCP bearer token is a full-access credential. See [Security](/project/security) for the whole model, and [Remote access](/guides/run/remote-access) to set a password.
+
+### Refusals
+
+| Status | When |
+|---|---|
+| `401` | The request has no valid credentials. |
+| `403` | A remote caller, while no password is set. |
+| `403` | The `Host` is not an allowed name: `unexpected Host for a server bound to …`. See the rules below. |
+| `403` | A cross-site write. The `/api/ws/events` WebSocket refuses the handshake the same way when its `Origin` is another site's. |
+
+A `Host` is not allowed when:
+
+- Kraft is bound to loopback and the request is not addressed to `127.0.0.1`, `localhost` or `[::1]`.
+- Kraft is bound off loopback and the request comes from a browser (it sends `Sec-Fetch-Site`, `Origin`, `Referer` or an HTML `Accept`) whose `Host` is neither a loopback name nor in `allowed_hosts`. The CLI, MCP and `curl` need no entry there.
+
+A browser opening a page (a `GET` outside `/api` with an HTML `Accept`) gets the `403` as a short HTML page instead. The page names the `Host` it sent and how to allow it. The WebSocket applies the same `Host` rules.
 
 ## The schema
 
@@ -57,41 +94,7 @@ ReDoc's "Redocly" logo is not fetched.
 On a machine without internet access,
 load `/openapi.json` into your own OpenAPI viewer.
 
-## Who may call
-
-| Caller | What it needs |
-|---|---|
-| A process on the same machine, while Kraft is bound to loopback | Nothing, as long as it addresses the server as `127.0.0.1`, `localhost` or `[::1]`. |
-| Anyone, once Kraft is bound off loopback | A browser session from the login page, or the MCP bearer token in `$KRAFT_HOME/run/mcp-token`, sent as `Authorization: Bearer <token>`. |
-| A trigger sender, once Kraft is bound off loopback | For `POST /api/triggers` only, the trigger token in `$KRAFT_HOME/run/trigger-token`, sent the same way. |
-| A remote caller while no password is set | Nothing works. Kraft answers `403`. |
-
-A request without valid credentials gets `401`.
-
-A request whose `Host` is not
-an allowed name gets `403` ("unexpected Host for a server bound to …"):
-
-- On a
-  loopback bind that is any request not addressed to `127.0.0.1`, `localhost` or
-`[::1]`.
-- Off loopback it is a browser request (one that sends `Sec-Fetch-Site`,
-`Origin`, `Referer` or an HTML `Accept`) whose `Host` is neither a loopback
-name nor in `allowed_hosts`; the CLI, MCP and `curl` need no entry there.
-
-A
-browser opening a page (a `GET` outside `/api` with an HTML `Accept`) gets the
-`403` as a short HTML page instead, naming the `Host` it sent and how to allow
-it.
-
-A cross-site
-write also gets `403`. The `/api/ws/events` WebSocket applies the same `Host`
-rules, and refuses the handshake (`403`) when its `Origin` is another site's.
-
-The MCP bearer token is
-a full-access credential. See [Security](/project/security) for the whole
-model, and [Remote access](/guides/run/remote-access) to set a password.
-
-## Other routes
+## In this section
 
 Routes written on the pages below without the `/api`
 prefix are relative to it, except the three paths under

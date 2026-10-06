@@ -284,3 +284,6 @@
 /concepts/how-a-work-item-runs#where-to-go-next: /concepts/how-a-work-item-runs#related
 /concepts/vocabulary#where-to-go-next: /concepts/vocabulary#related
 /concepts/permission-gate#why-an-escalation-gets-git-grants-by-default: /concepts/permission-gate#why-grants-are-names-not-command-patterns
+/reference/http-api#other-routes: /reference/http-api#in-this-section
+/reference/cli/item#less-common-item-verbs: /reference/cli/item#skip-escalate-end-or-drop-an-item
+/reference/cli/admin#verb-details: /reference/cli/admin#run-the-server
