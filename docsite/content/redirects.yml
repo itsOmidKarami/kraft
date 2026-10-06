@@ -38,7 +38,7 @@
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
 /get-started/install#requirements: /get-started/install#before-you-start
 /get-started/install#verify: /get-started/install#check-it-worked
-/get-started/install#licences: /project/status-and-support#licences
+/get-started/install#licences: /project/status-and-support#licenses
 /get-started/first-work-item#next-run-it-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
 /get-started/why-kraft#why-the-name: /get-started/why-kraft
 /concepts/caps-and-budgets#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
@@ -121,6 +121,8 @@
 /project/architecture#forge-and-trackers: /project/source-map#forge-and-trackers
 /project/architecture#state-and-configuration: /project/source-map#state-and-configuration
 /project/architecture#where-to-change-things: /project/source-map#where-to-change-things
+/project/status-and-support#licences: /project/status-and-support#licenses
+/project/status-and-support#maturity: /project/status-and-support
 /guides/day-to-day/the-board#the-first-run: /guides/day-to-day/first-run
 /guides/day-to-day/the-board#the-board: /reference/web-ui/board
 /guides/day-to-day/the-board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
