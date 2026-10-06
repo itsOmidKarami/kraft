@@ -227,11 +227,13 @@ pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Seven images are shown, in four places: the root README uses `board`, `gate`,
+Seven images are shown, in five places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
 `analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
-board tour (`docsite/content/3.guides/1.day-to-day/1.the-board.md`) `board`, `item`,
-`review` and `mobile` (`docsite/public/assets` is a link to this folder).
+web UI reference (`docsite/content/5.reference/0.web-ui/`) `board`, `item` and
+`review`; and the phone guide
+(`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`
+(`docsite/public/assets` is a link to this folder).
 Retake the ones whose screen changed, and all of them when a release is cut:
 
 | File | Size | Shows |
