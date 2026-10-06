@@ -27,7 +27,7 @@ In the Resume and Rate-limit fallback columns, a tick means the harness declares
 | `codex` | `codex exec` | both | Gate | Tokens | System prompt | ✓ | ✓ | `CODEX_API_KEY` |
 | `cursor` | `agent -p --trust` | model | Gate | Tokens | Prompt | ✓ | – | `CURSOR_API_KEY` |
 | `opencode` | `opencode run` | model | Rules | Yes | Prompt | ✓ | ✓ | the provider's own key |
-| `antigravity` | `agy -p` | both | Refused | Tokens | Prompt | ✓ | ✓ | none: sign-in (`agy`), or `GEMINI_API_KEY` |
+| `antigravity` | `agy -p` | both | Refused | Tokens | Prompt | ✓ | ✓ | none: sign-in (`agy`) |
 | `gemini` | `gemini` | model | Refused | Agent-written | Prompt | – | – | `GEMINI_API_KEY` |
 | `amp` | `amp -x` | effort | Rules | Tokens | Prompt | ✓ | – | `AMP_API_KEY` |
 
@@ -83,7 +83,7 @@ Each table lists what the comparison leaves out for that harness.
 
 | Topic | What to know |
 |---|---|
-| Accounts | Google's Antigravity CLI, for an individual Google account. `gemini` no longer serves those: see [Gemini details](#gemini-details). |
+| Accounts | Google's Antigravity CLI, for an individual Google account. `gemini` serves a Gemini API key or Gemini Code Assist: see [Gemini details](#gemini-details). |
 | Control | Kraft has no per-action control over an `agy` worker. See [Unattended runs](/reference/harnesses/unattended-runs#notes-by-harness). |
 | Effort | `effort` is `--effort low\|medium\|high\|max`, checked by `agy` against the model. |
 | Model | Name the base model (`gemini-3.8-flash`) and set `effort`, not a slug with the effort in it (`gemini-3.8-flash-low`), or Kraft cannot price the session. |
