@@ -316,3 +316,17 @@
 /guides/day-to-day/vscode#version-compatibility: /guides/day-to-day/vscode#if-the-extension-is-read-only
 /guides/kraft-lite#behavior: /guides/kraft-lite#how-lite-works
 /guides/kraft-lite#more-detail: /guides/kraft-lite#next-steps
+/reference/triggers#the-cron-field: /reference/triggers#cron-syntax
+/reference/triggers#when-a-403-is-returned: /reference/http-api#who-may-call
+/reference/triggers#pre-20-triggers-with-a-bad-cron: /reference/triggers#when-a-schedule-fires
+/reference/triggers#an-intakeyaml-with-a-cron-kraft-cant-run: /reference/triggers#a-cron-kraft-cannot-run
+/reference/chain-nodes#other-task-kinds: /reference/chain-nodes#subprocess-task-keys
+/reference/chain-nodes/result-file#example: /reference/chain-nodes/result-file#examples
+/guides/customize/write-your-own-chain#verify: /guides/customize/write-your-own-chain#check-it-worked
+/guides/customize/write-your-own-chain#how-the-lint-node-runs: /guides/customize/write-your-own-chain#_1-add-the-tasks-to-the-library
+/guides/customize/write-your-own-chain#or-use-a-test-scope-instead: /guides/customize/write-your-own-chain
+/guides/customize/add-review-agents#check-it-and-use-it: /guides/customize/add-review-agents#check-it-worked
+/guides/customize/schedule-and-webhook-work#verify: /guides/customize/schedule-and-webhook-work#check-it-worked
+/guides/customize/upgrading-templates#keep-your-templates-in-git: /guides/customize/upgrading-templates#keep-your-config-in-git
+/guides/customize/upgrading-templates#diff-against-the-packaged-defaults: /guides/customize/upgrading-templates#diff-against-the-shipped-defaults
+/guides/customize/upgrading-templates#verify: /guides/customize/upgrading-templates#check-it-worked
