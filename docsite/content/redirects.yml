@@ -89,3 +89,15 @@
 /reference/http-api#saved-but-not-applied: /reference/http-api/repos-chains-harnesses-and-server#saved-but-not-applied
 /reference/http-api#update-check: /reference/http-api/repos-chains-harnesses-and-server#update-check
 /reference/http-api#editors: /reference/http-api/repos-chains-harnesses-and-server#editors
+/concepts/how-a-work-item-runs#statuses: /reference/statuses#statuses
+/concepts/how-a-work-item-runs#displayed-status: /reference/statuses#displayed-status
+/concepts/how-a-work-item-runs#mr-closed-externally: /reference/statuses#mr-closed-externally
+/project/architecture#module-map: /project/source-map#module-map
+/project/architecture#serving: /project/source-map#serving
+/project/architecture#route-modules: /project/source-map#route-modules
+/project/architecture#running-a-chain: /project/source-map#running-a-chain
+/project/architecture#templates: /project/source-map#templates
+/project/architecture#agents-and-workers: /project/source-map#agents-and-workers
+/project/architecture#forge-and-trackers: /project/source-map#forge-and-trackers
+/project/architecture#state-and-configuration: /project/source-map#state-and-configuration
+/project/architecture#where-to-change-things: /project/source-map#where-to-change-things
