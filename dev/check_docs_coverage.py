@@ -151,8 +151,12 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("environment variables", env_vars, "5.reference/2.configuration/9.environment-variables.md"),
     ("policy.yaml fields", policy_fields, "5.reference/2.configuration/3.policy.md"),
     ("access.yaml fields", access_fields, "5.reference/2.configuration/6.access.md"),
-    ("sandbox.yaml fields", sandbox_fields, "5.reference/2.configuration/8.sandbox.md"),
-    ("sandbox policy fields", sandbox_policy_fields, "5.reference/2.configuration/2.repos"),
+    (
+        "sandbox.yaml fields",
+        sandbox_fields,
+        "5.reference/2.configuration/8.sandbox/6.sandbox-yaml.md",
+    ),
+    ("sandbox policy fields", sandbox_policy_fields, "5.reference/2.configuration/8.sandbox"),
     (
         "library.yaml agent task keys",
         agent_task_keys,

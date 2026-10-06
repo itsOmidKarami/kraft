@@ -45,12 +45,12 @@ template format. Kraft refuses a home that still holds them until you run
 | File | What it configures | Page |
 |---|---|---|
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each work item at intake. | [Library and chains](/reference/configuration/library-and-chains) |
-| `repos.yaml` | Connected repos: setup command, env, steering, workspaces. | [Repos](/reference/configuration/repos) |
+| `repos.yaml` | Connected repos: setup command, env, steering, workspaces. | [Repos](/reference/configuration/repos); its `sandbox` field: [Sandboxed workers](/reference/configuration/sandbox), [Callbacks and resource limits](/reference/configuration/sandbox/callbacks-and-limits), [Network policy](/reference/configuration/sandbox/network-policy), [Credentials](/reference/configuration/sandbox/credentials), [Kits](/reference/configuration/sandbox/kits) |
 | `harnesses.yaml` | Harness profiles and agent profiles. | [Harnesses file](/reference/configuration/harnesses-file) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | [Policy](/reference/configuration/policy) |
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | [Intake](/reference/configuration/intake) |
 | `access.yaml` | Bind address, password, remote access. | [Access](/reference/configuration/access) |
-| `sandbox.yaml` | Which container CLI runs sandboxed tasks, SELinux, and an extra CA. | [Sandbox host](/reference/configuration/sandbox) |
+| `sandbox.yaml` | Which container CLI runs sandboxed tasks, SELinux, and an extra CA. | [Sandbox host](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Optional: your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the packaged table. Not seeded. | [Detectors](/reference/configuration/repos/detectors) |
 | `notify.yaml`, `theme.yaml` | Notification webhook and UI appearance. | [Settings-only files](#settings-only-files) |
 

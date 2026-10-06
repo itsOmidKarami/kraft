@@ -65,8 +65,8 @@ forge problem, a budget or time cap, a wait that ran out) come to you at once.
 | `budget_usd reached ...`, `token budget reached ...` | A policy `budget_usd` or `token_budget` refused the next launch. The message names the scope: `the work item`, or a node, step or task path in backticks. | The fix depends on the scope the message names. See [A policy budget or token cap refused the launch](#a-policy-budget-or-token-cap-refused-the-launch). |
 | `budget cap reached: ... today, across every work item` | The daily cap refused the next launch. Nothing on the item raises it: `raise-budget` is refused, and the item's page offers **Retry** with no raise. | Raise `budget.daily_usd` in `policy.yaml`, or wait for local midnight, then retry. |
 | `budget_usd cannot be checked: N launch(es) in ... reported no cost, and unknown spend is never counted as free ...` | A launch in that scope ran on a harness that reports tokens but no cost, on a model `prices.json` cannot price, so Kraft cannot show the scope is under its `budget_usd` and will not count the launch as free. | Clear the item-wide cap with `kraft item set-policy ID --policy budget_usd=none` (add `--policy token_budget=N` to keep a bound), then retry. See [A budget cap cannot be checked](#a-budget-cap-cannot-be-checked). |
-| `kraft: a process in the sandbox was killed by its memory limit (<size>)`, or `... under its <size> memory limit (the runtime did not confirm it was the limit)` | The sandbox's memory limit killed the task. In the second form Docker never confirmed it, but the container exited 137 under the limit and Kraft did not stop it. | Raise `resources.memory` in the sandbox policy, or make the task need less, then retry. See [sandboxed workers](/reference/configuration/repos#sandboxed-workers). |
-| `the Kit <ref> cannot be used: ...`, or `the Kit <ref> has not been fetched here yet ...` | The item's sandbox is a [Kit](/reference/configuration/repos#kits) Kraft could not fetch, or will not run. | See [A Kit is refused](#a-kit-is-refused). |
+| `kraft: a process in the sandbox was killed by its memory limit (<size>)`, or `... under its <size> memory limit (the runtime did not confirm it was the limit)` | The sandbox's memory limit killed the task. In the second form Docker never confirmed it, but the container exited 137 under the limit and Kraft did not stop it. | Raise `resources.memory` in the sandbox policy, or make the task need less, then retry. See [sandboxed workers](/reference/configuration/sandbox/callbacks-and-limits#out-of-memory). |
+| `the Kit <ref> cannot be used: ...`, or `the Kit <ref> has not been fetched here yet ...` | The item's sandbox is a [Kit](/reference/configuration/sandbox/kits) Kraft could not fetch, or will not run. | See [A Kit is refused](#a-kit-is-refused). |
 | `<scope> hit its time cap of N minutes` | A time cap ran out. | Raise it for this item, then retry: `kraft item set-policy ID --policy time_cap_minutes=240`. See [Raising a cap](/guides/day-to-day/raise-a-cap). |
 | `<scope> hit its total time cap of N minutes` | A scope's wall-clock cap ran out. Waits and gates count toward it. | Raise it for this item, then retry: `kraft item set-policy ID --policy total_time_cap_minutes=N`. A node or task needs its path in the key, such as `merge_request_feedback.ci.await_ci.total_time_cap_minutes=N`. |
 | `gate <gate> waited past its timeout of N minutes` | Nobody decided a gate in time. | Retry to reopen the gate, then decide it. |
@@ -133,7 +133,7 @@ The `budget_usd=none` fix clears a cap from the chain's own `policy:`, `repos.ya
 
 ### A Kit is refused
 
-An item whose sandbox is a [Kit](/reference/configuration/repos#kits) reads
+An item whose sandbox is a [Kit](/reference/configuration/sandbox/kits) reads
 the Kit before its worktree is made. If that fails, the item stops needing
 you, and the reason names the Kit and why. The same check runs again before
 each task; there a failure ends that task's launch as a configuration error,
@@ -144,7 +144,7 @@ and nothing runs outside the sandbox. The rest of the reason says which:
 | `` `manifest inspect <ref>` failed: ... ``, or under Podman `` `pull -q <ref>` failed: ... `` or `` `image inspect <ref>` failed: ... `` | The CLI could not read the Kit: a wrong reference, a missing registry login, or a registry it does not trust. Check it with `docker manifest inspect <ref>` as the user Kraft runs as. |
 | `<ref> is not a Kit: no vnd.docker.sandbox.kit.descriptor annotation` | The image was not built with the Kit frontend (`# syntax=docker/sandbox-kit:3`). |
 | `requires <type>; Kraft does not enforce it`, `is a kind: mixin ...`, `has a capability group ...` | The Kit needs something Kraft does not run. Mark the capability `optional: true`, or remove it, and rebuild. Docker's published Kits are refused this way: [build one for Kraft](/guides/harnesses/worker-kit). |
-| `credential service '<service>' has no binding ...` | Add `<service>: <DAEMON_ENV_NAME>` under `credentials` in [sandbox.yaml](/reference/configuration/sandbox), and set that variable in the daemon's environment. |
+| `credential service '<service>' has no binding ...` | Add `<service>: <DAEMON_ENV_NAME>` under `credentials` in [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml), and set that variable in the daemon's environment. |
 | A dotted path and a message, such as `capabilities.1.config.apiKey: ...` | The descriptor does not decode: fix the Kit at that path. |
 | `has not been fetched here yet` | A review, gate review, escalation turn, or a read through the artifacts or diff API ran before any task fetched the Kit. Retry the item. |
 
@@ -240,9 +240,9 @@ health` checks only the server.
 | `cost: <harness>` (a warning) | That harness reports no cost, and the chains launch it on a model `prices.json` cannot price, or on no model (the CLI's default). `budget.work_item_usd`, `budget.daily_usd` and `--budget` count its spend as $0; a `budget_usd` stops on it. | Give its tasks or profile a priced model, or bound them with `token_budget`. See [Harnesses that report no cost](/reference/harnesses/cost-reporting#harnesses-that-report-no-cost). |
 | `kraft on PATH`: `not on PATH` | The `kraft` command is not on `PATH`, usually right after a uv install. The plugin, every MCP registration and the hooks run it by name, so they start nothing. | Run `uv tool update-shell` (or add the directory `kraft` is in to `PATH`), then start `kraft` again from a new terminal. Under a service, see [Kraft not on PATH under a service](#kraft-not-on-path-under-a-service). |
 | `kraft on PATH`: `another install` | An older `kraft` comes first on `PATH`. The MCP server and hooks run it. | Uninstall the other one, or reorder `PATH`. |
-| `sandbox <repo>`: `the Kit <ref> is refused: ...` | The repository's [Kit](/reference/configuration/repos#kits) cannot be fetched or will not run, so each item there stops. | See [A Kit is refused](#a-kit-is-refused). |
+| `sandbox <repo>`: `the Kit <ref> is refused: ...` | The repository's [Kit](/reference/configuration/sandbox/kits) cannot be fetched or will not run, so each item there stops. | See [A Kit is refused](#a-kit-is-refused). |
 | `kit hosts <repo>` (a warning) | The Kit does not allow a host a harness requires, so that harness's sessions under it are refused the host. | Add the host to the Kit's `runtime` allow list and rebuild it, or run that harness elsewhere. |
-| `kit credentials <repo>` (a warning) | An optional Kit credential has no binding in `sandbox.yaml`, so it is skipped. | Add `<service>: <DAEMON_ENV_NAME>` under `credentials` in [sandbox.yaml](/reference/configuration/sandbox). |
+| `kit credentials <repo>` (a warning) | An optional Kit credential has no binding in `sandbox.yaml`, so it is skipped. | Add `<service>: <DAEMON_ENV_NAME>` under `credentials` in [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml). |
 | `forge <repo>` | `gh` or `glab` is missing, or the repo has no forge recorded. | Install the forge CLI and log in, or set `forge:` on the repo. |
 | `repo <repo>` | A connected repo's path is gone or is not a git repo. | Reconnect it, or `kraft repo disconnect PATH`. |
 | `setup <repo>` | The repo has no `setup_command` in `repos.yaml`, so its next work item will stop. The row reads `no setup_command in repos.yaml — suggest: ...` and names a command when it found one. | Run `kraft repo connect <path>` again to save the suggested command. Or set it in Settings › Repos (or `repos.yaml`), or tick **No setup needed** there (`""` in `repos.yaml`) for a repo that needs no preparation, then **Review & publish**. |
@@ -403,5 +403,5 @@ one agent session, with no server to run.
 Kraft's [permission gate](/reference/permissions) answers each tool call from
 the task's policy, never by asking a person. To control what a worker may do,
 set `allowed_tools`, `deny_tools` and `grants`, run it in a
-[sandbox](/reference/configuration/repos#sandboxed-workers), and review its
+[sandbox](/reference/configuration/sandbox), and review its
 work at the gates between nodes.
