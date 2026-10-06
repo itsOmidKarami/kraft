@@ -93,7 +93,7 @@ A worker can use the CLI's own stored login instead where it has one; [Run worke
 | Topic | What to know |
 |---|---|
 | Command | `agy`. The prompt follows `-p`. |
-| API key | None: sign-in with `agy`. |
+| API key | None: sign-in with `agy`. A `GEMINI_API_KEY` route exists and is untested: see [Run workers on your agent](/guides/day-to-day/agent-integration#run-workers-on-your-agent). |
 | Accounts | Google's Antigravity CLI, for an individual Google account. `gemini` serves a Gemini API key or Gemini Code Assist: see [Gemini details](#gemini-details). |
 | Control | Kraft has no per-action control over an `agy` worker. See [Unattended runs](/reference/harnesses/unattended-runs#notes-by-harness). |
 | Effort | `effort` is `--effort low\|medium\|high\|max`, checked by `agy` against the model. |
