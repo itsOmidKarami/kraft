@@ -241,7 +241,7 @@
 /troubleshooting#git-would-not-start-the-rebase: /troubleshooting/why-did-my-item-stop#git-would-not-start-the-rebase
 /troubleshooting#invalid-intakeyaml: /troubleshooting/doctor-failures#invalid-intakeyaml
 /troubleshooting#kraft-command-not-found: /troubleshooting/starting-and-reaching-kraft#kraft-command-not-found
-/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service
+/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /troubleshooting#kraft-wont-start-port-already-in-use: /troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use
 /troubleshooting#moved-keys: /troubleshooting/doctor-failures#moved-keys
 /troubleshooting#older-entries-and-the-tests-row: /troubleshooting/doctor-failures#older-entries-and-the-tests-row
@@ -266,7 +266,7 @@
 /get-started/troubleshooting#git-would-not-start-the-rebase: /troubleshooting/why-did-my-item-stop#git-would-not-start-the-rebase
 /get-started/troubleshooting#invalid-intakeyaml: /troubleshooting/doctor-failures#invalid-intakeyaml
 /get-started/troubleshooting#kraft-command-not-found: /troubleshooting/starting-and-reaching-kraft#kraft-command-not-found
-/get-started/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service
+/get-started/troubleshooting#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /get-started/troubleshooting#kraft-wont-start-port-already-in-use: /troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use
 /get-started/troubleshooting#moved-keys: /troubleshooting/doctor-failures#moved-keys
 /get-started/troubleshooting#older-entries-and-the-tests-row: /troubleshooting/doctor-failures#older-entries-and-the-tests-row
@@ -287,3 +287,4 @@
 /reference/http-api#other-routes: /reference/http-api#in-this-section
 /reference/cli/item#less-common-item-verbs: /reference/cli/item#skip-escalate-end-or-drop-an-item
 /reference/cli/admin#verb-details: /reference/cli/admin#run-the-server
+/troubleshooting/doctor-failures#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service

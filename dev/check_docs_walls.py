@@ -32,15 +32,7 @@ LIMITS = {"paragraph": 80, "list item": 80, "table cell": 40}
 #: text), each with its reason. The fragment, not a line number: a line moves
 #: with every edit above it. An entry that matches no wall fails the check, so
 #: fixing the page means deleting its entry here.
-ALLOWED: list[tuple[str, str]] = [
-    # Five quoted error strings that share one cause and one fix. They stay in
-    # one first-column cell so a reader who searches for any of them lands on
-    # the row that answers it.
-    (
-        "4.troubleshooting/1.why-did-my-item-stop.md",
-        "`workspace member <path> of <worktree> has no checkout Kraft made",
-    ),
-]
+ALLOWED: list[tuple[str, str]] = []
 
 _LIST_ITEM = re.compile(r"(?:[-*]|\d+\.)\s+(.*)")
 _COMPONENT = re.compile(r":{2,}[\w-]")
