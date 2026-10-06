@@ -54,7 +54,7 @@ nodes:
 
 Kraft refuses a key that these tables do not list when it loads the chain, and
 `kraft admin templates lint` reports it. A default of `required` means the key
-has no default and a chain without it does not load.
+has no default: the chain must set it, itself or through `extends`.
 
 ## Chain keys
 
@@ -83,7 +83,7 @@ An exec node declares `tasks` or `steps`, never both.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `tasks` | list | one of `tasks` and `steps` is required | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
+| `tasks` | list | one of `tasks` and `steps` is required, unless `extends` supplies it | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
 | `steps` | list | see `tasks` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
 | `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
@@ -121,8 +121,10 @@ branch. The shipped `default` chain sets it on `merge_request_feedback`:
     restart_from: verification
 ```
 
-When a rebase moves the base, Kraft re-runs the nodes from `restart_from` through
-this node. Those nodes are the **span**.
+When a rebase moves the base, Kraft re-runs the exec nodes from `restart_from`
+through this node: the [span](/concepts/vocabulary#span). A gate in that range
+keeps its approval after a clean rebase. It reopens, and needs approving again,
+after a rebase that needed a conflict resolved.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -138,7 +140,8 @@ the span.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | required | The step's name, unique in the node. |
-| `tasks` | list | required | The step's tasks, dispatched together. At least one. |
+| `extends` | string | none | The library step this one builds on. Its tasks come from the library step unless this step sets `tasks`, which replace them. |
+| `tasks` | list | required, unless `extends` supplies it | The step's tasks, dispatched together. At least one. |
 | `on_failure` | mapping | none | A recovery pass for this step alone. |
 | `policy` | mapping | none | This step's policy layer. |
 | `skippable` | boolean | `true` | `false` refuses a skip of this step. |
