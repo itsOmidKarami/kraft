@@ -19,4 +19,4 @@ merge-ready diff. Still deciding whether Kraft is for you? Read
 ## Elsewhere in the docs
 
 - [Troubleshooting](/troubleshooting): when an item stops, a command fails, or a doctor row is red.
-- [What's new in 2.0](/guides/run/whats-new): what changed, and what to check before you upgrade from 1.4.
+- [What's new in 2.0](/project/whats-new): what changed, and what to check before you upgrade from 1.4.

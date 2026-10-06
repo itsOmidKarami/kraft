@@ -781,7 +781,7 @@ def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
         / "docsite"
         / "content"
         / "5.reference"
-        / "2.configuration"
+        / "03.configuration"
         / "3.policy.md"
     ).read_text()
     block = re.search(r"```yaml[^\n]*\n(.*?)```", page, re.DOTALL).group(1)

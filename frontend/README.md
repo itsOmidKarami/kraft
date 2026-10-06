@@ -230,7 +230,7 @@ pin the same thing in both.
 Seven images are shown, in five places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
 `analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
-web UI reference (`docsite/content/5.reference/0.web-ui/`) `board`, `item` and
+web UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item` and
 `review`; and the phone guide
 (`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`
 (`docsite/public/assets` is a link to this folder).
