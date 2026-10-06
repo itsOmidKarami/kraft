@@ -110,7 +110,7 @@ Pull it before filing work, or the first launch pulls it inside the task's time 
 
 - Without a [network policy](/reference/configuration/sandbox/network-policy), the container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable.
 - A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch.
-- Without a network policy a worker cannot reach Kraft at all: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks-and-limits#callbacks-from-a-sandbox).
+- Without a network policy a worker has no channel to Kraft, and its network is not restricted: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks-and-limits#callbacks-from-a-sandbox).
 - Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
 
 ## In this section
