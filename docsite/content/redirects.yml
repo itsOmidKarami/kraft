@@ -217,6 +217,8 @@
 /reference/configuration/repos#when-connect-finds-no-command: /reference/configuration/repos/detectors#when-connect-finds-no-command
 /reference/configuration/repos/detectors#connecting-a-repo: /reference/configuration/repos/detectors#choosing-something-else
 /reference/configuration/repos/detectors#repos-that-get-no-proposal: /reference/configuration/repos/detectors#a-python-project-with-no-lockfile
+/reference/configuration/repos/detectors#the-packaged-table: /reference/configuration/repos/detectors#detectorsyaml
+/reference/configuration/repos#sandboxed-workers: /reference/configuration/sandbox
 /reference/configuration/sandbox#field-details: /reference/configuration/sandbox/sandbox-yaml#field-details
 /reference/configuration/sandbox#selinux: /reference/configuration/sandbox/sandbox-yaml#selinux
 /reference/configuration/sandbox#ca_bundle: /reference/configuration/sandbox/sandbox-yaml#ca_bundle
