@@ -220,6 +220,8 @@
 /reference/configuration/sandbox#when-the-file-is-read: /reference/configuration/sandbox/sandbox-yaml#when-the-file-is-read
 /reference/configuration/sandbox#ca-certificates: /reference/configuration/sandbox/sandbox-yaml#ca-certificates
 /reference/configuration/sandbox#proxy: /reference/configuration/sandbox/sandbox-yaml#proxy
+/reference/configuration#settings-only-files: /reference/configuration#files
+/reference/configuration/environment-variables#set-by-an-operator: /reference/configuration/environment-variables#variables-you-set
 /troubleshooting#a-budget-cap-cannot-be-checked: /troubleshooting/why-did-my-item-stop#a-budget-cap-cannot-be-checked
 /troubleshooting#a-git-operation-is-in-progress: /troubleshooting/why-did-my-item-stop#a-git-operation-is-in-progress
 /troubleshooting#a-kit-is-refused: /troubleshooting/why-did-my-item-stop#a-kit-is-refused
