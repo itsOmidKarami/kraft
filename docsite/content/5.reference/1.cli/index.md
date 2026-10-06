@@ -30,7 +30,7 @@ Each command links to its entry.
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
 | Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
 | Switch the chain of an item that has not started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
-| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#pause-and-resume) |
 
 ### Watching
 
@@ -88,7 +88,7 @@ Each command links to its entry.
 | Reread the templates and policy after editing them | [`kraft admin reload`](/reference/cli/admin#reload-the-configuration) |
 | Check my chains | [`kraft admin templates lint`](/reference/cli/admin#lint-the-templates) |
 | Register Kraft with an agent | [`kraft admin init`](/reference/cli/admin) |
-| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#verbs-a-worker-calls) |
+| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
 | Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#disconnect-a-repo) |
 
 `kraft item progress` and `kraft item reply` are [called by a worker](/reference/cli/item#verbs-a-worker-calls), not by you.
