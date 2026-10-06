@@ -34,7 +34,7 @@
 /get-started/install#upgrading-from-14: /guides/run/upgrade-kraft#upgrading-from-14
 /get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-kraft#upgrading-from-a-150-release-candidate
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-kraft#upgrading-from-older-releases
-/get-started/install#a-restart-ends-running-agents: /guides/run/upgrade-kraft#a-restart-ends-running-agents
+/get-started/install#a-restart-ends-running-agents: /guides/run/operations#a-restart-ends-running-agents
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
 /get-started/install#requirements: /get-started/install#before-you-start
 /get-started/install#verify: /get-started/install#check-it-worked
@@ -179,7 +179,7 @@
 /guides/run/operations#the-copy-kraft-makes-before-an-upgrade: /guides/run/back-up-and-restore#the-copy-kraft-makes-before-an-upgrade
 /guides/run/operations#verify-the-backup: /guides/run/back-up-and-restore#verify-the-backup
 /guides/run/operations#find-the-logs: /guides/run/logs-and-disk-space#find-the-logs
-/guides/run/operations#line-times-in-a-session-log: /guides/run/logs-and-disk-space#line-times-in-a-session-log
+/guides/run/operations#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/operations#reclaim-disk-space: /guides/run/logs-and-disk-space#reclaim-disk-space
 /guides/run/operations#run-kraft-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
 /guides/run/operations#verify-the-service: /guides/run/run-as-a-service#verify-the-service
@@ -188,7 +188,7 @@
 /guides/operations#the-copy-kraft-makes-before-an-upgrade: /guides/run/back-up-and-restore#the-copy-kraft-makes-before-an-upgrade
 /guides/operations#verify-the-backup: /guides/run/back-up-and-restore#verify-the-backup
 /guides/operations#find-the-logs: /guides/run/logs-and-disk-space#find-the-logs
-/guides/operations#line-times-in-a-session-log: /guides/run/logs-and-disk-space#line-times-in-a-session-log
+/guides/operations#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/operations#reclaim-disk-space: /guides/run/logs-and-disk-space#reclaim-disk-space
 /guides/operations#run-kraft-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
 /guides/operations#verify-the-service: /guides/run/run-as-a-service#verify-the-service
@@ -272,7 +272,7 @@
 /troubleshooting#the-agent-row-and-the-service-path: /troubleshooting/doctor-failures#the-agent-row-and-the-service-path
 /troubleshooting#the-mcp-server-warning: /troubleshooting/doctor-failures#the-mcp-server-warning
 /troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
-/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different
+/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
 /troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
 /get-started/troubleshooting#a-budget-cap-cannot-be-checked: /troubleshooting/why-did-my-item-stop#a-budget-cap-cannot-be-checked
 /get-started/troubleshooting#a-git-operation-is-in-progress: /troubleshooting/why-did-my-item-stop#a-git-operation-is-in-progress
@@ -298,7 +298,7 @@
 /get-started/troubleshooting#the-mcp-server-warning: /troubleshooting/doctor-failures#the-mcp-server-warning
 /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /get-started/troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
-/get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different
+/get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
 /get-started/troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
 /concepts/vocabulary#cap-and-wait: /concepts/vocabulary#cap
 /concepts/vocabulary#the-library-and-reuse: /concepts/vocabulary#library
@@ -332,3 +332,7 @@
 /guides/customize/upgrading-templates#keep-your-templates-in-git: /guides/customize/upgrading-templates#keep-your-config-in-git
 /guides/customize/upgrading-templates#diff-against-the-packaged-defaults: /guides/customize/upgrading-templates#diff-against-the-shipped-defaults
 /guides/customize/upgrading-templates#verify: /guides/customize/upgrading-templates#check-it-worked
+/guides/run/upgrade-kraft#a-restart-ends-running-agents: /guides/run/operations#a-restart-ends-running-agents
+/guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
+/guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
+/guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked

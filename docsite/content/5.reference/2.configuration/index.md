@@ -83,7 +83,7 @@ A `palette` key in an old file (`nocturne`, `rose`, `forest`, `amber` or `slate`
 | `amber` | `sand` | `amber` |
 | `slate` | `slate` | `blue` |
 
-A file that already sets its own `surface` only loses the `palette`. A file that does not parse or holds a value Kraft does not know is left alone. The backup names and how to restore one are in [Upgrading from 1.4](/guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different).
+A file that already sets its own `surface` only loses the `palette`. A file that does not parse or holds a value Kraft does not know is left alone. The backup names and how to restore one are in [Upgrading from 1.4](/guides/run/upgrade-kraft#where-the-pages-moved).
 
 ## Related
 
