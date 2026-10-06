@@ -6,11 +6,11 @@ description: 'A local orchestrator that takes your coding agent from spec to pul
 ::u-page-hero
 ---
 headline: '$ uv tool install kraft-sdlc && kraft'
-title: 'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours.'
-description: "Kraft isn't another coding agent. It runs the one you already use, and adds what a single session can't: a process the agent can't skip, checks it doesn't grade itself on, and a person at the decisions that matter. Hand it a spec and walk away; retries and spend are capped."
+title: 'A local orchestrator that takes your coding agent from spec to pull request.'
+description: "It stops only when a decision is yours. Kraft isn't another coding agent. It runs the one you already use, and adds what a single session can't: a process the agent can't skip, checks it doesn't grade itself on, and a person at the decisions that matter. Hand it a spec and walk away; retries and spend are capped."
 links:
-  - label: Get started
-    to: /get-started
+  - label: Install Kraft
+    to: /get-started/install
     color: primary
   - label: View on GitHub
     to: https://github.com/itsOmidKarami/kraft
@@ -33,7 +33,7 @@ ui:
 ::u-page-section
 ---
 title: The board
-description: Work items grouped by what needs you, what is running, and what is done — redrawn live as agents work.
+description: Work items grouped by what needs you, what is running, and what is done, redrawn live as agents work.
 orientation: horizontal
 links:
   - label: Tour the web UI
@@ -71,7 +71,7 @@ orientation: horizontal
 ::u-page-section
 ---
 title: Analytics
-description: Lead time, cost, and where both go — by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days). Built from the same events the board renders live, not a separate pipeline.
+description: See where lead time and cost go, by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days).
 orientation: horizontal
 reverse: true
 ---
@@ -103,6 +103,8 @@ ui:
   wrapper: text-left items-start
   title: text-left
 ---
+Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` chain also needs a GitHub or GitLab remote. [Install](/get-started/install) lists the rest.
+
 :::u-page-list
 ---
 divide: true
@@ -110,18 +112,27 @@ class: max-w-2xl
 ---
 ::::u-page-card
 ---
-to: /get-started/why-kraft
-title: Why Kraft
-description: What it does that a session, a loop or a skill does not, and when not to use it.
+to: /get-started/install
+title: Install
+description: Install Kraft, start the server, and register it with Claude Code.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /get-started
-title: Get started
-description: Install Kraft and run your first work item.
+to: /get-started/first-work-item
+title: Your first work item
+description: Connect a repo, run a work item end to end, and approve its gates.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
+to: /get-started/why-kraft
+title: Why Kraft
+description: What it does that a session, a loop or a skill does not, and when not to use it.
 variant: ghost
 ---
 ::::

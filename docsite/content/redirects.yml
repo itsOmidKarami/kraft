@@ -36,6 +36,11 @@
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-kraft#upgrading-from-older-releases
 /get-started/install#a-restart-ends-running-agents: /guides/run/upgrade-kraft#a-restart-ends-running-agents
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
+/get-started/install#requirements: /get-started/install#before-you-start
+/get-started/install#verify: /get-started/install#check-it-worked
+/get-started/install#licences: /project/status-and-support#licences
+/get-started/first-work-item#next-run-it-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
+/get-started/why-kraft#why-the-name: /get-started/why-kraft
 /concepts/caps-and-budgets#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
 /concepts/caps-and-budgets#the-two-dollar-caps: /guides/day-to-day/raise-a-cap#the-two-dollar-caps
 /concepts/caps-and-budgets#the-per-scope-cap: /guides/day-to-day/raise-a-cap#the-per-scope-cap
