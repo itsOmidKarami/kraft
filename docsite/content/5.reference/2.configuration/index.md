@@ -62,12 +62,12 @@ Settings › Appearance writes this file. A save changes only the keys it sends,
 | `code_scheme.light` | `auto`, `none` or `solarized-light` | `auto` | The syntax colors in review diffs in light mode. |
 | `code_scheme.dark` | `auto`, `none`, `solarized-dark`, `monokai` or `dracula` | `auto` | The syntax colors in review diffs in dark mode. |
 | `diff.layout` | `unified` or `split` | `unified` | The layout of the review page's diff. |
-| `diff.colours` | `theme`, `safe` or `plain` | `theme` | The colors of the review page's diff. |
-| `diff.show_whitespace` | boolean | `true` | A switch on the review page's diff. |
-| `diff.word_highlight` | boolean | `true` | A switch on the review page's diff. |
-| `diff.wrap_lines` | boolean | `false` | A switch on the review page's diff. |
-| `diff.one_file_at_a_time` | boolean | `true` | A switch on the review page's diff. |
-| `board.group_by` | `status`, `repo` or `chain` | `status` | What the board groups items by. |
+| `diff.colours` | `theme`, `safe` or `plain` | `theme` | The colors of the review page's diff: status colors (`theme`), colorblind-safe blue and orange (`safe`), or marks only (`plain`). |
+| `diff.show_whitespace` | boolean | `true` | Show whitespace changes. `false` hides lines that differ only in whitespace. |
+| `diff.word_highlight` | boolean | `true` | Highlight changed words: a stronger tint on the words that changed inside a line. |
+| `diff.wrap_lines` | boolean | `false` | Wrap long lines. `false` scrolls sideways. |
+| `diff.one_file_at_a_time` | boolean | `true` | Show one file at a time, with the file tree beside it. |
+| `board.group_by` | `status`, `repo` or `chain` | `status` | What the board groups items by. Before 2.0, `template` meant `chain`. It is still read as `chain`. |
 | `board.show_done` | integer, at least `1` | `5` | The size of the Done group. |
 | `board.open_in` | `peek` or `full` | `peek` | Whether opening an item shows the side panel (`peek`) or the item page (`full`). |
 | `editor` | `code`, `cursor`, `zed` or `obsidian` | unset | The editor a document's **Open in editor** uses. Left out, it is `KRAFT_EDITOR`, else the system's default app. |
