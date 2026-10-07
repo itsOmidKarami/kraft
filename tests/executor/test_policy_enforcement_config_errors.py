@@ -185,3 +185,31 @@ async def test_an_escalation_whose_steering_cannot_be_resolved_stops_as_its_own_
 
     assert launched == []
     _config_error_session(it, "escalation", expect="boom")
+
+
+async def test_a_gate_review_in_a_sandbox_without_network_stops_as_its_own_session(
+    item_on, monkeypatch, fake_agent
+):
+    """The adapter's refusal of a sandbox with no `network:` reaches the gate
+    as the reviewer's own config-error session, not a crash in the gate loop."""
+    from executor.test_policy_enforcement import NO_SETUP, _requested, _reviewed_gate
+
+    bare = {"kind": "docker", "image": "x"}
+    it = await item_on(_reviewed_gate({"sandbox": bare}), auto_gate=True)
+    launched = []
+    monkeypatch.setattr(dispatch._subprocess, "run_task", lambda *_a, **kw: launched.append(kw))
+    await _requested(it)
+    gate = it.chain.chain.nodes[1]
+
+    verdict, note = await gate_review.review(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate="spec_approval",
+        node=gate,
+        launch=NO_SETUP,
+    )
+
+    assert (verdict, launched) == ("undecided", [])
+    assert "unrestricted_network" in note
+    _config_error_session(it, gate.auto_review.path, expect="unrestricted_network")
