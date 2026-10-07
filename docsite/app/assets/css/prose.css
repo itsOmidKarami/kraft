@@ -76,7 +76,7 @@
   }
 }
 
-/* On a phone, a table of three or more columns is a list of blocks, and so is
+/* On a phone, a table of three to five columns is a list of blocks, and so is
    a two-column table whose first column holds a long name (a code span of more
    than 14 characters: ProseCode.vue adds code-long). Squeezed into 343px the
    first column was about 40px wide and the name a reader looks up
@@ -85,7 +85,11 @@
    far from its symptom. Each row is now one block: the first cell is its
    heading, whole, and every other cell is a line that starts with its
    column's header (data-label, written when the page is rendered:
-   ProseTd.vue). A two-column table with short names stays a table.
+   ProseTd.vue). A two-column table with short names stays a table, and so
+   does a matrix of six or more columns (the seven-column harness table): it
+   is read down a column ("which harness resumes?"), as seven blocks the
+   comparison is gone, so it keeps scrolling in its own box with the edge
+   shadow (.scroll-hint).
    From 640px up nothing here applies.
    Table semantics survive the display change in two ways: the header row is
    only moved out of sight (not display: none), and the label is generated
@@ -93,7 +97,7 @@
    column header once and not the label as well. */
 @media (max-width: 639px) {
   main table:is(
-      :has(th:nth-child(3)),
+      :has(th:nth-child(3)):not(:has(th:nth-child(6))),
       :not(:has(th:nth-child(3))):has(td:first-child code.code-long)
     ) {
     display: block;
@@ -152,5 +156,11 @@
     &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
       content: none;
     }
+  }
+
+  /* A matrix keeps its first column whole: it is the row's name, and the
+     other columns give way to the scroll. */
+  main table:has(th:nth-child(6)) :is(th, td):first-child {
+    white-space: nowrap;
   }
 }
