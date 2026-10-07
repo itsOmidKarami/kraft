@@ -114,7 +114,7 @@
 | src/kraft/intent.py                          |      198 |        9 |     95% |91-92, 186, 203, 264-265, 321-322, 339 |
 | src/kraft/logs.py                            |      177 |       12 |     93% |61-62, 103, 108, 125, 135, 152, 168-169, 177-178, 278 |
 | src/kraft/mcp.py                             |      128 |        2 |     98% |   526-527 |
-| src/kraft/mr\_poller.py                      |       66 |        9 |     86% |70-71, 83-84, 90, 125-128 |
+| src/kraft/mr\_poller.py                      |       66 |       11 |     83% |70-71, 83-84, 90, 123-128 |
 | src/kraft/node\_runs.py                      |       64 |        1 |     98% |        55 |
 | src/kraft/notify.py                          |      152 |       10 |     93% |183-184, 268-275, 288-291, 317 |
 | src/kraft/overrides.py                       |       98 |        3 |     97% |116, 189-190 |
@@ -174,7 +174,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       82 |        9 |     89% |45, 96, 142-144, 147-151, 159-160 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **30886** | **1443** | **95%** |           |
+| **TOTAL**                                    | **30886** | **1445** | **95%** |           |
 
 
 ## Setup coverage badge
