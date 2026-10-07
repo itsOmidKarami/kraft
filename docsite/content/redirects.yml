@@ -33,8 +33,8 @@
 /get-started/whats-new: /project/whats-new
 /guides/run/whats-new: /project/whats-new
 /get-started/install#upgrading-from-14: /guides/run/upgrade-kraft#upgrading-from-14
-/get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-kraft#upgrading-from-a-150-release-candidate
-/get-started/install#upgrading-from-older-releases: /guides/run/upgrade-kraft#upgrading-from-older-releases
+/get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-from-1-4#upgrading-from-a-150-release-candidate
+/get-started/install#upgrading-from-older-releases: /guides/run/upgrade-from-1-4#upgrading-from-older-releases
 /get-started/install#a-restart-ends-running-agents: /guides/run/operations#a-restart-ends-running-agents
 /get-started/install#pin-or-roll-back-a-version: /guides/run/upgrade-kraft#pin-or-roll-back-a-version
 /get-started/install#requirements: /get-started/install#before-you-start
@@ -273,7 +273,7 @@
 /troubleshooting#the-agent-row-and-the-service-path: /troubleshooting/doctor-failures#the-agent-row-and-the-service-path
 /troubleshooting#the-mcp-server-warning: /troubleshooting/doctor-failures#the-mcp-server-warning
 /troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
-/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
+/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-from-1-4#where-the-pages-moved
 /troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
 /get-started/troubleshooting#a-budget-cap-cannot-be-checked: /troubleshooting/why-did-my-item-stop#a-budget-cap-cannot-be-checked
 /get-started/troubleshooting#a-git-operation-is-in-progress: /troubleshooting/why-did-my-item-stop#a-git-operation-is-in-progress
@@ -299,7 +299,7 @@
 /get-started/troubleshooting#the-mcp-server-warning: /troubleshooting/doctor-failures#the-mcp-server-warning
 /troubleshooting/doctor-failures#kraft-not-on-path-under-a-service: /troubleshooting/starting-and-reaching-kraft#kraft-not-on-path-under-a-service
 /get-started/troubleshooting#waiting-on-ci-or-a-review: /troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review
-/get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
+/get-started/troubleshooting#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-from-1-4#where-the-pages-moved
 /get-started/troubleshooting#why-did-my-item-stop: /troubleshooting/why-did-my-item-stop#why-did-my-item-stop
 /concepts/vocabulary#cap-and-wait: /concepts/vocabulary#cap
 /concepts/vocabulary#the-library-and-reuse: /concepts/vocabulary#library
@@ -334,7 +334,7 @@
 /guides/customize/upgrading-templates#diff-against-the-packaged-defaults: /guides/customize/upgrading-templates#diff-against-the-shipped-defaults
 /guides/customize/upgrading-templates#verify: /guides/customize/upgrading-templates#check-it-worked
 /guides/run/upgrade-kraft#a-restart-ends-running-agents: /guides/run/operations#a-restart-ends-running-agents
-/guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
+/guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-from-1-4#where-the-pages-moved
 /guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked
 /reference/cli/admin#the-sandbox-row: /troubleshooting/doctor-failures#the-sandbox-row
@@ -347,3 +347,19 @@
 /guides/harnesses/adding-a-harness#antigravity: /guides/day-to-day/agent-integration#run-workers-on-your-agent
 /guides/harnesses/adding-a-harness#check-that-a-worker-can-log-in: /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in
 /guides/harnesses/adding-a-harness#set-up-harness-credentials: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/run/upgrade-kraft#update-from-14: /guides/run/upgrade-from-1-4#update-from-14
+/guides/run/upgrade-kraft#if-you-used-14s-update-anyway: /guides/run/upgrade-from-1-4#if-you-used-14s-update-anyway
+/guides/run/upgrade-kraft#what-changed: /guides/run/upgrade-from-1-4#what-changed
+/guides/run/upgrade-kraft#where-the-pages-moved: /guides/run/upgrade-from-1-4#where-the-pages-moved
+/guides/run/upgrade-kraft#your-theme: /guides/run/upgrade-from-1-4#your-theme
+/guides/run/upgrade-kraft#upgrading-from-a-150-release-candidate: /guides/run/upgrade-from-1-4#upgrading-from-a-150-release-candidate
+/guides/run/upgrade-kraft#upgrading-from-older-releases: /guides/run/upgrade-from-1-4#upgrading-from-older-releases
+/guides/run/upgrade-kraft#network-access: /guides/run/upgrade-from-1-4#network-access
+/guides/run/upgrade-kraft#items-and-repos: /guides/run/upgrade-from-1-4#items-and-repos
+/guides/run/upgrade-kraft#scripts-json-output-and-the-api: /guides/run/upgrade-from-1-4#scripts-json-output-and-the-api
+/guides/run/upgrade-kraft#config-directory-and-files: /guides/run/upgrade-from-1-4#config-directory-and-files
+/guides/run/upgrade-kraft#permission-hooks: /guides/run/upgrade-from-1-4#permission-hooks
+/guides/run/upgrade-kraft#the-interface: /guides/run/upgrade-from-1-4#the-interface
+/guides/run/upgrade-kraft#what-a-rollback-does-to-kraft_home: /guides/run/roll-back#what-a-rollback-does-to-kraft_home
+/guides/run/upgrade-kraft#roll-back-from-20-to-14: /guides/run/roll-back#roll-back-from-20-to-14
+/guides/run/upgrade-kraft#what-the-restore-leaves-behind: /guides/run/roll-back#what-the-restore-leaves-behind
