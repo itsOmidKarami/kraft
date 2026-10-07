@@ -11,7 +11,7 @@ Find the message you are looking at in the first column, then follow its link.
 
 | What you see | Go to |
 |---|---|
-| A [work item](/concepts/vocabulary#work-item) under **Needs you**, with a reason such as `task failed in node ...`, `could not start ...`, `budget cap reached` or `stuck: ...` | [Why did my item stop?](/troubleshooting/why-did-my-item-stop#find-your-reason) |
+| A [work item](/concepts/vocabulary#work-item) under **Needs you**, with a reason such as `task failed in node ...`, `could not start ...`, `budget cap reached`, `stuck: ...`, or a sandbox or Kit reason | [Why did my item stop?](/troubleshooting/why-did-my-item-stop#find-your-reason) |
 | A work item that waits on CI or a review and nothing moves | [Waiting on CI or a review](/troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review) |
 | `kraft: command not found` | [`kraft`: command not found](/troubleshooting/starting-and-reaching-kraft#kraft-command-not-found) |
 | `kraft: refusing to start`, or a port that is already in use | [Kraft won't start: port already in use](/troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use) |
