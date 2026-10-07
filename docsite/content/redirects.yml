@@ -32,7 +32,7 @@
 /guides/operations: /guides/run/restart-kraft
 /get-started/whats-new: /project/whats-new
 /guides/run/whats-new: /project/whats-new
-/get-started/install#upgrading-from-14: /guides/run/upgrade-kraft#upgrading-from-14
+/get-started/install#upgrading-from-14: /guides/run/upgrade-from-1-4#update-from-14
 /get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-from-1-4#upgrading-from-a-150-release-candidate
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-from-1-4#upgrading-from-older-releases
 /get-started/install#a-restart-ends-running-agents: /guides/run/restart-kraft#a-restart-ends-running-agents
@@ -440,3 +440,4 @@
 /reference/harnesses/agent-profiles#select-a-profile-in-a-task: /reference/harnesses/agent-profiles#select-an-agent-profile-in-a-task
 /reference/harnesses/agent-profiles#precedence-and-when-a-profile-is-read: /reference/harnesses/agent-profiles#precedence-and-when-an-agent-profile-is-read
 /reference/harnesses/agent-profiles#shipped-profiles: /reference/harnesses/agent-profiles#shipped-agent-profiles
+/guides/run/upgrade-kraft#upgrading-from-14: /guides/run/upgrade-from-1-4#update-from-14
