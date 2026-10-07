@@ -7,11 +7,15 @@ the group, in the sidebar's order. A link to a page of another section goes
 under a different heading.
 
 A sub-group with no landing page of its own has nowhere to be linked, so its
-pages are listed in its place (the Guides index lists every guide).
+pages are listed in its place (the Guides index lists every guide). A page
+deeper in one of the group's own sub-folders may be listed too.
 
 The sidebar sorts by file name, so `10.x` sorts before `2.y`. Number prefixes
 in one folder must all have the same number of digits, or the numeric order
-this check reads is not the order the reader sees.
+is not the order the reader sees.
+
+It reads file names, not front matter: a page hidden from the sidebar with
+`navigation: false` would still have to be listed. No page is.
 
     uv run python dev/check_docs_landings.py
 
@@ -47,7 +51,8 @@ def children(folder: Path) -> list[Path]:
         for p in folder.iterdir()
         if not p.name.startswith(".") and p.name != "index.md" and (p.is_dir() or p.suffix == ".md")
     ]
-    return sorted(found, key=lambda p: p.name)
+    # By stem, as the sidebar does: `1.a.md` comes before `1.a-b.md`.
+    return sorted(found, key=lambda p: p.stem if p.is_file() else p.name)
 
 
 def expected(content: Path, folder: Path) -> list[str]:
@@ -68,20 +73,22 @@ def listed(text: str) -> list[str] | None:
     section = _SECTION.search(text)
     if section is None:
         return None
-    return list(dict.fromkeys(_LINK.findall(section.group(1))))
+    links = (link.rstrip("/") or "/" for link in _LINK.findall(section.group(1)))
+    return list(dict.fromkeys(links))
 
 
 def check(content: Path = DOCSITE) -> list[str]:
     problems: list[str] = []
-    for folder in sorted(p for p in content.rglob("*") if p.is_dir()):
+    for folder in [content, *sorted(p for p in content.rglob("*") if p.is_dir())]:
         widths = {len(m.group(1)) for p in children(folder) if (m := _PREFIX.match(p.name))}
         if len(widths) > 1:
             problems.append(
-                f"{folder.relative_to(content)}/: number prefixes differ in length, "
-                "so the sidebar does not sort them in numeric order"
+                f"{folder.relative_to(content)}/: number prefixes differ in length, so the "
+                "sidebar does not sort them in numeric order: pad the shorter ones (`01.`)"
             )
         index = folder / "index.md"
-        if not index.exists():
+        # The content root's index.md is the home page, not a section landing.
+        if folder == content or not index.exists():
             continue
         where = index.relative_to(content)
         want, got = expected(content, folder), listed(index.read_text())

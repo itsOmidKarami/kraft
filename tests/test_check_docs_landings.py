@@ -56,6 +56,18 @@ _BOTH = "- [Install](/start/install): a\n- [First](/start/first): b\n"
         ),
         (f"## In this section\n\n{_BOTH}", ("3.run/1.ops.md",), "/start/run/ops is in this"),
         (
+            f"## In this section\n\n{_BOTH}- [Run](/start/run/): c, see [Ops](/start/run/ops)\n",
+            ("3.run/index.md", "3.run/1.ops.md"),
+            # The outer list passes; the inner landing page, written bare here, is the one finding.
+            '3.run/index.md: no "## In this section" list',
+        ),
+        (
+            "## In this section\n\n- [Install](/start/install): a, [again](/start/install#x)\n"
+            "- [First](/start/first): b, after [Install](/start/install)\n",
+            (),
+            None,
+        ),
+        (
             # `10.` sorts before `2.` by name, so this list is in the sidebar's order.
             "## In this section\n\n- [Install](/start/install): a\n- [Ops](/start/ops): c\n"
             "- [First](/start/first): b\n",
@@ -72,6 +84,8 @@ _BOTH = "- [Install](/start/install): a\n- [First](/start/first): b\n"
         "out-of-order",
         "group-without-a-landing-lists-its-pages",
         "group-without-a-landing-left-out",
+        "group-with-a-landing-and-a-page-inside-it",
+        "a-page-linked-twice",
         "prefixes-of-two-widths",
     ],
 )

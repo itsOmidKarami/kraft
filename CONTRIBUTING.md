@@ -329,11 +329,13 @@ Page rules:
   `dev/check_docs_redirects.py` (the `lint` job) fails on a bad entry, and on
   any docs address that Kraft itself links to and that no longer resolves.
 - When you add, move or remove a page, update its folder's `index.md`: the
-  list under `## In this section` names the pages of that folder, in file
-  name order, and nothing else. Link a page of another section under
-  another heading. `dev/check_docs_landings.py` (the `lint` job) fails when
-  the list and the folder disagree. Number prefixes in one folder all have
-  the same number of digits, because the sidebar sorts by name.
+  list under `## In this section` names the pages and sub-folders of that
+  folder, in file name order. A sub-folder with no `index.md` of its own is
+  listed as its pages, and a page deeper inside a sub-folder may be listed
+  too. Link a page of another section under another heading.
+  `dev/check_docs_landings.py` (the `lint` job) fails when the list and the
+  folder disagree. Number prefixes in one folder all have the same number of
+  digits (`01.` to `10.`), because the sidebar sorts by name.
 
 | Source | Docs page |
 |---|---|
