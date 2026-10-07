@@ -344,6 +344,7 @@
 /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-from-1-4#where-the-pages-moved
 /guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked
+/guides/run/remote-access#choose-a-bind: /guides/run/remote-access#choose-a-way
 /reference/cli/admin#the-sandbox-row: /troubleshooting/doctor-failures#the-sandbox-row
 /reference/cli/admin#a-repository-whose-sandbox-is-a-kit: /troubleshooting/doctor-failures#the-sandbox-row
 /reference/triggers#a-cron-kraft-cannot-run: /reference/configuration/intake#when-the-file-does-not-load
