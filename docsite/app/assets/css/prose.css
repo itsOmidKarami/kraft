@@ -1,0 +1,46 @@
+/* A table or tab strip that scrolls sideways gave no sign there was more to
+   the right, only a scroll bar a phone does not draw. These are the "scroll
+   shadow" gradients: a shadow pinned to each edge that shows only while
+   there is content past that edge, and a cover scrolling with the content
+   that hides it again at the end. The covers match the page background. */
+.scroll-hint {
+  background:
+    linear-gradient(to right, var(--ui-bg) 30%, transparent) left / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--ui-bg) 30%, transparent) right / 2rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent) left / 0.75rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent) right / 0.75rem 100% no-repeat scroll;
+}
+
+/* The code theme's comment colour was 2.5:1 on the code block in light mode
+   and 3.0:1 in dark, under WCAG AA's 4.5:1. Nuxt Content turns each theme
+   colour into a class and puts the colour in --shiki-* variables on it; this
+   is the class of the theme's comments (the italic ones), so it moves if the
+   theme does. Light is the theme's own darker comment colour (5.2:1 on the
+   block), dark is the same blue-grey lightened (5.4:1). */
+:root pre.shiki code .sHwdD,
+:root code.shiki .sHwdD {
+  --shiki-light: #546e7a;
+  --shiki-dark: #959cc0;
+}
+
+/* The landscape diagrams (public/diagrams/*.svg, 1100 to 1650px wide) shrank
+   to 343px on a phone, 4 to 5px text. Under 640px they keep a width where
+   the text can be read and scroll sideways inside their own paragraph. The
+   SVGs state no pixel width, so the overlay cannot show them larger than the
+   screen; the tap is switched off, as the diagram is already readable here.
+   structure.svg is portrait and fits as it was. */
+@media (max-width: 639px) {
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"])) {
+    overflow-x: auto;
+  }
+  main img[src*="/diagrams/"]:not([src$="/structure.svg"]) {
+    width: 1100px;
+    max-width: none;
+    pointer-events: none;
+  }
+  /* The tap overlay (a fixed layer; app.config.ts, prose.img) opens a phone
+     screenshot at 1440px wide. mobile.png is 390px: let it fit the screen. */
+  .fixed img[src$="/mobile.png"] {
+    width: 95vw;
+  }
+}

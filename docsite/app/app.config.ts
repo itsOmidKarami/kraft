@@ -28,10 +28,13 @@ export default defineAppConfig({
       },
     },
     // Nuxt UI cuts a long "On this page" entry short too, and three entries
-    // that differ only after the cut read the same. Wrap it.
+    // that differ only after the cut read the same. Wrap it. whitespace-normal
+    // only breaks at spaces, so one long identifier
+    // (work_item_changed_test_selection) was still cut at the box's edge;
+    // wrap-anywhere lets it break there too.
     contentToc: {
       slots: {
-        linkText: 'whitespace-normal!',
+        linkText: 'whitespace-normal! wrap-anywhere',
       },
     },
     prose: {
@@ -40,6 +43,40 @@ export default defineAppConfig({
       code: {
         base: 'max-w-full wrap-break-word',
       },
+      // A table column is never narrower than its longest word, and
+      // wrap-break-word (above) does not count a break point inside a word
+      // when it works that out, so one long code span in a cell kept the
+      // column wide and 126 of 252 tables scrolled sideways at 390px.
+      // wrap-anywhere does count it, so the column can shrink to fit. Under
+      // 640px only: wider, it let a column shrink below its own identifier
+      // (work_item_ / id) to make room for its neighbour's prose.
+      // Where a table still does not fit it scrolls inside its own box;
+      // scroll-hint (assets/css/prose.css) shows there is more to the right.
+      table: {
+        slots: {
+          root: 'scroll-hint',
+          base: 'max-sm:[&_code]:wrap-anywhere',
+        },
+      },
+      // A 1440px screenshot is 343px wide on a phone, and tapping it opened
+      // the same 343px image in an overlay. On a phone the overlay now shows
+      // it at the screenshots' own 1440px and scrolls both ways (the width is
+      // stated: @nuxt/image's 1x/2x srcset makes a browser count the file as
+      // 720px, so "natural size" was half; prose.css keeps mobile.png, which
+      // is phone-sized already, fitting the screen). The "safe" centering keeps the left edge
+      // reachable when the image is wider than the screen; an unsafe one
+      // clipped it.
+      img: {
+        slots: {
+          content: 'overflow-auto justify-center-safe! items-center-safe!',
+          zoomedImage: 'max-sm:w-[1440px] max-sm:shrink-0 max-sm:max-w-none max-sm:max-h-none',
+        },
+      },
+      // Nuxt UI pads every cell 16px a side, which is 128px of a 343px phone
+      // table spent on four columns of padding. 8px on a phone, 16px from
+      // 640px up.
+      th: { base: 'px-2 sm:px-4' },
+      td: { base: 'px-2 sm:px-4' },
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.
       pre: {
