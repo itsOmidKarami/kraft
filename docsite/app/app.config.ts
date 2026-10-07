@@ -49,18 +49,24 @@ export default defineAppConfig({
       // column wide and 126 of 252 tables scrolled sideways at 390px.
       // wrap-anywhere does count it, so the column can shrink to fit. Under
       // 640px only: wider, it let a column shrink below its own identifier
-      // (work_item_ / id) to make room for its neighbour's prose. Not in a
-      // table of five or more columns either: those scroll on a phone
-      // anyway (breaking code there bought no fit and cut claud / e in half;
-      // no table of five or more fitted only because of it), while 4-column
-      // tables still need it (without it 44 of the 49 tables with four or
-      // more columns scroll, against 4 with it).
+      // (work_item_ / id) to make room for its neighbour's prose. And not
+      // everywhere under 640px, by columns:
+      //  - Five or more: those scroll on a phone anyway, so breaking code
+      //    there bought no fit and cut claud / e in half. None fits only
+      //    because of it.
+      //  - Three or four: any code span may break. The reference tables of
+      //    four columns fit only if their short identifiers give way (they
+      //    scroll if only a long one may: 22 tables, against 4 now).
+      //  - Two: a span of up to 14 characters stays whole (ProseCode adds
+      //    code-long above that; work_item_id was cut to work / _ite / m_id on
+      //    Events, with room to spare) and only a long one may break. All 131
+      //    two-column tables still fit.
       // Where a table still does not fit it scrolls inside its own box;
       // scroll-hint (assets/css/prose.css) shows there is more to the right.
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-sm:[&:not(:has(th:nth-child(5)))_code]:wrap-anywhere',
+          base: 'max-sm:[&:has(th:nth-child(3)):not(:has(th:nth-child(5)))_code]:wrap-anywhere max-sm:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened
