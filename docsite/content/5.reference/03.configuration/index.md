@@ -2,7 +2,7 @@
 title: Configuration
 navigation:
   title: Overview
-description: Which file in Kraft's config directory controls what, what the directory holds, and the two files only Settings writes.
+description: Which file in Kraft's config directory controls what, and how Kraft creates, edits, validates and rereads the directory.
 ---
 
 Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (default `~/.kraft/config/`). This page maps each file to its reference page and says how the directory is created and edited.
@@ -14,13 +14,13 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `repos.yaml` | Connected repos: setup command, env, steering, workspaces, and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [policy.yaml](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
-| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [`harnesses.yaml`](/reference/configuration/harnesses-file) |
+| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [harnesses.yaml](/reference/configuration/harnesses-file) |
 | `access.yaml` | Bind address, password, remote access. | The first save in Settings | [access.yaml](/reference/configuration/access) |
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [intake.yaml](/reference/configuration/intake) |
-| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [`sandbox.yaml`](/reference/configuration/sandbox/sandbox-yaml) |
+| `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](/reference/configuration/notify) |
+| `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
+| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
-| `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](#notifyyaml) |
-| `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](#themeyaml) |
 | `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
 
 ## How Kraft treats the directory
@@ -37,61 +37,15 @@ Three commands check and reload the files:
 - `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, and `intake.yaml` without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
 - `kraft admin templates lint` checks the whole library and every chain at once, and writes nothing.
 
-## notify.yaml
-
-Settings › Notifications writes this file, and Kraft rereads it after each save. See [Notifications](/reference/events#notifications) for the payload and every event type, and [Get notified when an item needs you](/guides/day-to-day/notifications) to set it up.
-
-| Field | Type | Default | Meaning |
-|---|---|---|---|
-| `enabled` | boolean | `false` | Whether Kraft posts notifications. Nothing is sent while it is `false`, or while `url` is empty. |
-| `url` | string | unset | The webhook Kraft posts to. It is a secret and is never shown back. |
-| `base_url` | string | the address the server listens on | The start of the link in each notification. |
-| `events` | list | `[gate_requested, work_item_needs_human]` | The event types that send a notification. Any event type in [Events](/reference/events) works, but not the Live messages (`intake_checked`, `apply_changed`), which are not events. Kraft does not check the names, so a typo sends nothing. |
-
-## theme.yaml
-
-Settings › Appearance writes this file. A save changes only the keys it sends, and a key the file leaves out takes its default. When a file sets `surface`, a missing `accent` is `none` and a missing `colour_amount` is `subtle`. A file that sets `colour_amount: mono` must leave `accent` out or set it to `none`; Kraft refuses a file that pairs `mono` with another accent.
-
-| Field | Type | Default | Meaning |
-|---|---|---|---|
-| `surface` | `graphite`, `slate`, `ink`, `sand` or `moss` | `ink` | The base colors of the page. |
-| `accent` | `none`, `blue`, `violet`, `green`, `amber` or `rose` | `violet` | The accent color. |
-| `colour_amount` | `mono`, `subtle` or `full` | `full` | How much color the surfaces, the accent and the status colors carry. `mono` leaves only gray. |
-| `mode` | `light`, `dark` or `system` | `dark` | The color mode. |
-| `density` | `compact` or `comfortable` | `compact` | How tightly rows and text are spaced. |
-| `code_scheme.light` | `auto`, `none` or `solarized-light` | `auto` | The syntax colors in review diffs in light mode. |
-| `code_scheme.dark` | `auto`, `none`, `solarized-dark`, `monokai` or `dracula` | `auto` | The syntax colors in review diffs in dark mode. |
-| `diff.layout` | `unified` or `split` | `unified` | The layout of the review page's diff. |
-| `diff.colours` | `theme`, `safe` or `plain` | `theme` | The colors of the review page's diff: status colors (`theme`), colorblind-safe blue and orange (`safe`), or marks only (`plain`). |
-| `diff.show_whitespace` | boolean | `true` | Show whitespace changes. `false` hides lines that differ only in whitespace. |
-| `diff.word_highlight` | boolean | `true` | Highlight changed words: a stronger tint on the words that changed inside a line. |
-| `diff.wrap_lines` | boolean | `false` | Wrap long lines. `false` scrolls sideways. |
-| `diff.one_file_at_a_time` | boolean | `true` | Show one file at a time, with the file tree beside it. |
-| `board.group_by` | `status`, `repo` or `chain` | `status` | What the board groups items by. Before 2.0, `template` meant `chain`. It is still read as `chain`. |
-| `board.show_done` | integer, at least `1` | `5` | The size of the Done group. |
-| `board.open_in` | `peek` or `full` | `peek` | Whether opening an item shows the side panel (`peek`) or the item page (`full`). |
-| `editor` | `code`, `cursor`, `zed` or `obsidian` | unset | The editor a document's **Open in editor** uses. Left out, it is `KRAFT_EDITOR`, else the system's default app. |
-
-### `palette` is legacy
-
-A `palette` key in an old file (`nocturne`, `rose`, `forest`, `amber` or `slate`) is converted once at startup into the three keys that draw the same look, and Kraft saves the original as `theme.yaml.pre-2.0`. A `palette` that reappears, from an old browser tab's save or a hand edit, is read as it was and converted the same way at the next start. The conversion, with `colour_amount` set to the file's own value, else `full`:
-
-| `palette` | `surface` | `accent` |
-|---|---|---|
-| `nocturne`, `rose` | `ink` | `violet` |
-| `forest` | `moss` | `green` |
-| `amber` | `sand` | `amber` |
-| `slate` | `slate` | `blue` |
-
-A file that already sets its own `surface` only loses the `palette`. A file that does not parse or holds a value Kraft does not know is left alone. The backup names and how to restore one are in [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4#your-theme).
-
 ## In this section
 
 - [repos.yaml](/reference/configuration/repos): every field in `repos.yaml`, and the pages for how connect proposes commands, `detectors.yaml` and workspaces.
 - [policy.yaml](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
 - [Library and chains](/reference/configuration/library-and-chains): the sections of `library.yaml`, and how `chains/*.yaml` files compose them into chains.
-- [`harnesses.yaml`](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
+- [harnesses.yaml](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
 - [access.yaml](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
 - [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
+- [notify.yaml](/reference/configuration/notify): every field in `notify.yaml`: the notification webhook and the events that post to it.
+- [theme.yaml](/reference/configuration/theme): every field in `theme.yaml`: colors, density, the diff and the board.
 - [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's network, credentials, Kits and `sandbox.yaml`.
 - [Environment variables](/reference/configuration/environment-variables): the variables that move this directory, every other variable Kraft reads, and the variables a worker gets.
