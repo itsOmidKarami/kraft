@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shlex
 from collections.abc import Mapping, Sequence
@@ -31,6 +32,12 @@ from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+
+logger = logging.getLogger(__name__)
+
+_NETWORK_DOCS = (
+    "https://itsomidkarami.github.io/kraft/reference/configuration/sandbox/network-policy"
+)
 
 _CTX = (
     "You are working on a Kraft work item.\n"
@@ -870,6 +877,22 @@ async def run_agent_task(
             f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
         )
     channel = bool(sandbox and sandbox.get("network"))
+    if sandbox and not channel:
+        if not sandbox.get("unrestricted_network"):
+            # Kraft sets up no channel and does not restrict this container's
+            # network, so nothing keeps the worker from dialing Kraft's API
+            # (Kraft-1q6d7), whatever its harness.
+            raise LaunchRefused(
+                f"this launch is sandboxed in {repo_path} with no `network:` policy, which "
+                f"leaves the worker's network unrestricted and gates not enforced; add a "
+                f"`network:` policy to the sandbox ({_NETWORK_DOCS}), or, if you accept "
+                f"that, set `unrestricted_network: true` on it"
+            )
+        logger.warning(
+            "%s: sandboxed with `unrestricted_network: true`: the worker's network is not "
+            "restricted and gates are not enforced",
+            repo_path,
+        )
     asks = h.capabilities.get("approval_channel")
     if sandbox and not channel and asks is not None and asks.always:
         # Every launch names Kraft's MCP permission tool, and only a channel

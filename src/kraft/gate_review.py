@@ -304,35 +304,53 @@ async def review(
             f"{auto_review.path}: {exc}\n",
         )
         return "undecided", str(exc)
-    status = await _agent.run_agent_task(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=node.id,
-        hook_point=auto_review.path,
-        command=inv.command,
-        harness=inv.harness,
-        model=inv.model,
-        effort=inv.effort,
-        deny_tools=inv.deny_tools,
-        allowed_tools=inv.allowed_tools,
-        grants=inv.grants,
-        permission_mode=inv.permission_mode,
-        method_text=inv.method_text,
-        steering_texts=inv.steering_texts,
-        sandbox=sandbox,
-        checkout=executor.sandbox_checkout(row, launch, run_dirs.worktrees / work_item_id)
-        if sandbox
-        else None,
-        task_instruction=task_instruction,
-        title=row["title"],
-        repo_path=row["repo"],
-        cwd=run_dirs.worktrees / work_item_id,
-        repo_entry=launch.repo_entry,
-        time_cap=time_cap,
-        harness_id=auto_review.task.harness,
-    )
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=node.id,
+            hook_point=auto_review.path,
+            command=inv.command,
+            harness=inv.harness,
+            model=inv.model,
+            effort=inv.effort,
+            deny_tools=inv.deny_tools,
+            allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
+            permission_mode=inv.permission_mode,
+            method_text=inv.method_text,
+            steering_texts=inv.steering_texts,
+            sandbox=sandbox,
+            checkout=executor.sandbox_checkout(row, launch, run_dirs.worktrees / work_item_id)
+            if sandbox
+            else None,
+            task_instruction=task_instruction,
+            title=row["title"],
+            repo_path=row["repo"],
+            cwd=run_dirs.worktrees / work_item_id,
+            repo_entry=launch.repo_entry,
+            time_cap=time_cap,
+            harness_id=auto_review.task.harness,
+        )
+    except _agent.LaunchRefused as exc:
+        # Refused before anything started: recorded as the reviewer's own
+        # session, so the pending gate names why no review ran.
+        await executor.config_error_session(
+            db,
+            run_dirs,
+            dict(
+                session_id=session_id,
+                work_item_id=work_item_id,
+                node_id=node.id,
+                hook_point=auto_review.path,
+                round=0,
+                head_sha=None,
+            ),
+            f"{auto_review.path}: {exc}\n",
+        )
+        return "undecided", str(exc)
 
     result_path = run_dirs.results / f"{session_id}.json"
     note = _subprocess.read_concerns(result_path) or ""
