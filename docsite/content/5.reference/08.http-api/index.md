@@ -7,7 +7,7 @@ description: Which of Kraft's HTTP routes are stable, which the pages here docum
 
 The Kraft server serves its board, and the JSON API behind it, on one port
 (`127.0.0.1:8765` by default). The `kraft` command and the MCP server are
-clients of that API.
+clients of that API. The pages in this section document part of it: see [Routes the pages document](#routes-the-pages-document). [`/openapi.json`](#the-schema) lists every HTTP route.
 
 ## Stable routes
 
@@ -72,7 +72,7 @@ A browser opening a page (a `GET` outside `/api` with an HTML `Accept`) gets the
 
 ## The schema
 
-FastAPI generates a schema of every route:
+FastAPI generates a schema of every HTTP route:
 
 | Path | What it serves |
 |---|---|
@@ -98,14 +98,14 @@ load `/openapi.json` into your own OpenAPI viewer.
 
 ## Routes the pages document
 
-The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They do not document every route. [`/openapi.json`](#the-schema) lists all of them. The pages leave out these groups, which the board uses and a script rarely needs:
+The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They do not document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
 
 - review threads and their comments;
 - login and logout, and the browser sessions;
 - search, the index rescan, and reading one indexed document;
 - worker session logs and permission asks;
 - analytics;
-- reading and saving the theme, access, notify and intake settings, the library and a chain's file, and the checks that run on them;
+- reading and saving the theme, access, notify and intake settings, saving the library, reading and saving a chain's file, and the checks that run on them;
 - the Settings views of one harness profile or provider.
 
 A route listed here is written in full: its method and its path with the `/api` prefix, as in `POST /api/work-items`. That is how the route appears in `/openapi.json` and in a request. A route that is not in the table has no entry.
