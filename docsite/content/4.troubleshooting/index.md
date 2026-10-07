@@ -13,10 +13,10 @@ Find the message you are looking at in the first column, then follow its link.
 |---|---|
 | A [work item](/concepts/vocabulary#work-item) under **Needs you**, with a reason such as `task failed in node ...`, `could not start ...`, `budget cap reached` or `stuck: ...` | [Why did my item stop?](/troubleshooting/why-did-my-item-stop#find-your-reason) |
 | A sandbox, Kit, workspace-member or nested-repository reason, such as `a process in the sandbox was killed by its memory limit` or `the Kit ... cannot be used` | [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops#find-your-reason) |
-| `no setup_command declared for ...` on a first work item | [`no setup_command declared`](/troubleshooting/why-did-my-item-stop#no-setup_command-declared) |
-| `no user.name configured in ...` | [`no user.name configured`](/troubleshooting/why-did-my-item-stop#no-username-configured) |
-| `... nothing registers it for Claude Code: ...` | [`nothing registers it for Claude Code`](/troubleshooting/why-did-my-item-stop#nothing-registers-it-for-claude-code) |
-| `could not start ...` with `declares neither test_scopes nor test_command in repos.yaml` | [`declares neither test_scopes nor test_command`](/troubleshooting/why-did-my-item-stop#declares-neither-test_scopes-nor-test_command) |
+| `no setup_command declared for ...` on a first work item | [`no setup_command declared`](/troubleshooting/stop-reasons-in-detail#no-setup_command-declared) |
+| `no user.name configured in ...` | [`no user.name configured`](/troubleshooting/stop-reasons-in-detail#no-username-configured) |
+| `... nothing registers it for Claude Code: ...` | [`nothing registers it for Claude Code`](/troubleshooting/stop-reasons-in-detail#nothing-registers-it-for-claude-code) |
+| `could not start ...` with `declares neither test_scopes nor test_command in repos.yaml` | [`declares neither test_scopes nor test_command`](/troubleshooting/stop-reasons-in-detail#declares-neither-test_scopes-nor-test_command) |
 | `task failed in node ...`, and the log shows an authentication or login error | [Questions, failed tasks and logins](/troubleshooting/why-did-my-item-stop#questions-failed-tasks-and-logins) |
 | A work item that waits on CI or a review and nothing moves | [Waiting on CI or a review](/troubleshooting/why-did-my-item-stop#waiting-on-ci-or-a-review) |
 | `kraft: command not found` | [`kraft`: command not found](/troubleshooting/starting-and-reaching-kraft#kraft-command-not-found) |
@@ -30,6 +30,7 @@ Find the message you are looking at in the first column, then follow its link.
 ## In this section
 
 - [Why did my item stop?](/troubleshooting/why-did-my-item-stop): every other stop reason Kraft shows, with its fix, and the two waits that need no stop.
+- [Stop reasons in detail](/troubleshooting/stop-reasons-in-detail): the stop reasons that need more than one row, each with its numbered fix.
 - [Starting and reaching Kraft](/troubleshooting/starting-and-reaching-kraft): a missing `kraft` command, a taken port, and a rejected `Host`.
 - [Doctor failures](/troubleshooting/doctor-failures): every row `kraft admin doctor` can print, and how to clear it.
 - [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit, workspace-member and nested-repository stops of a sandboxed item.
