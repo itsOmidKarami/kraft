@@ -227,12 +227,14 @@ pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Seven images are shown, in five places: the root README uses `board`, `gate`,
+Ten images are shown, in eight places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
-`analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
-web UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item` and
-`review`; and the phone guide
-(`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`
+`analytics` and `mobile`; the first-work-item page `board` and `gate`; the web
+UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item`,
+`review`, `analytics`, `chains` and `policy`; the phone guide
+(`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`; and
+the setup wizard guide (`docsite/content/3.guides/1.day-to-day/2.first-run.md`)
+`setup`
 (`docsite/public/assets` is a link to this folder).
 Retake the ones whose screen changed, and all of them when a release is cut:
 
@@ -244,11 +246,14 @@ Retake the ones whose screen changed, and all of them when a release is cut:
 | `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: the chain as a graph, and the inspector with the gate's files, open thread and Approve and Reject… |
 | `review.png` | 1440×700 | the review page of that item on `calc.py`, with a comment being written on lines −2 to +2 (the removed line and its replacement), Must fix selected |
 | `analytics.png` | 1440×660 | the Analytics page |
+| `chains.png` | 1440×700 | Templates › Chains on the `default` chain, with the `spec_approval` gate selected and its settings in the inspector |
+| `policy.png` | 1440×700 | Settings › Policy on its Limits section |
+| `setup.png` | 1440×700 | the setup wizard's first step, on a home with no repo connected |
 | `mobile.png` | 390×844 | the board in the phone layout |
 
 All are the default look (graphite, dark, no accent), of a repo named `repo`
-and the items `just dev-seed` files (the committed ones have a dozen or so;
-file more through the composer). `item` and `review` are of the same item as
+and the items `just dev-seed` files, plus more filed in step 3. `setup` is the
+exception: it is of a second, empty home. `item` and `review` are of the same item as
 `gate`, the one at `spec_approval`; its worktree's `calc.py` is `a - b` changed
 to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
 
@@ -259,6 +264,11 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    just dev-reset && just api       # in one terminal: backend on :8766, serving frontend/dist
    just dev-seed                    # in another: four items, one at a gate
    ```
+
+   The seed's two failing and slow items carry `KRAFT_FAIL` and `KRAFT_SLOW`
+   in their titles, which a screenshot should not show. Abandon them
+   (`kraft item abandon ID --yes`) and file the same work as clean titles with
+   the marker in the description, which the fake agent reads too (below).
 
 2. Give search something to find. It indexes only what git tracks under
    `.engineering/`, and the folder names the kind shown beside a hit
@@ -281,20 +291,41 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    open thread, add one with `kraft item comment <id> --body "why is this here?"`
    (a comment on no file is a thread on the whole change), against the same dev
    home: `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment ...`.
+   The comment is a draft until a review is sent, which is how `item` and
+   `review` show it ("1 open thread", "pending").
+
+   File a few more, each as `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft
+   item create "title" --repo .dev/repo ...`: two with `--chain quick-task` and
+   no `--autostart` (Not started), one more with `--autostart` on the default
+   chain (a second gate), and a few with `--chain quick-task --autostart` that
+   finish (Done). For Running, file two with `--chain quick-task --autostart
+   --description KRAFT_SLOW`, which run for 15 seconds, and take `board` and
+   `mobile` in that window (`ONLY=board,mobile`, below). `Rewrite the parser`
+   with `--description KRAFT_FAIL` is the failed one; `Investigate the flaky
+   import test` with `KRAFT_SLOW`, then `kraft item pause ID` while it runs, is
+   the paused one. The Done group sorts the newest first, and the frame cuts
+   it after one row: finish a clean item last, so an abandoned one is not the
+   row that shows.
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
-   as `GATED_ID=<id> node e2e-shots/shot.mjs`:
+   as `GATED_ID=<id> node e2e-shots/shot.mjs`. `ONLY=board,mobile` takes just
+   those; `setup` is taken on its own (`ONLY=setup`), against a second home
+   with no repo, started from a folder that is not a checkout (the wizard
+   offers the checkout it was started in as a path) and with its own copy of
+   `config/`, as `just api` makes for `.dev`:
 
    ```js
    import { chromium } from "@playwright/test";
 
    const base = "http://127.0.0.1:8766";
    const out = process.env.OUT ?? "../.github/assets";
+   const only = process.env.ONLY?.split(",");
    const browser = await chromium.launch();
    const desktop = { colorScheme: "dark", viewport: { width: 1440, height: 700 } };
    const phone = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 
    async function shoot(name, context, go) {
+     if (only && !only.includes(name)) return;
      const page = await (await browser.newContext(context)).newPage();
      await page.goto(base + "/");
      await go(page);
@@ -321,9 +352,15 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
      await pick("new", 2).click({ modifiers: ["Shift"] }); // ... to the line that replaced it
      await pick("new", 2).hover();
      await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Comment on lines -2 to +2"
-     await p.getByRole("button", { name: "Must fix", exact: true }).click();
+     await p.getByRole("radio", { name: "Must fix", exact: true }).click();
      await p.getByRole("textbox", { name: "Comment" }).fill("Good catch. Add a test that pins it: add(2, 3) == 5.");
    });
+   await shoot("chains", desktop, async (p) => {
+     await p.goto(`${base}/templates/chains/default`);
+     await p.getByText("spec_approval", { exact: true }).first().click(); // the gate's own settings in the inspector
+   });
+   await shoot("policy", desktop, (p) => p.goto(`${base}/settings/policy/limits`));
+   await shoot("setup", desktop, (p) => p.getByText("Nothing on the board yet").waitFor()); // a home with no repo: ONLY=setup
    await shoot("mobile", phone, () => {});
    await browser.close();
    ```
@@ -332,12 +369,10 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    or a name of yours, and that its size is the table's.
 
    The `review` steps are the contract suite's range pick
-   (`e2e/contract/review.spec.ts`) pointed at `calc.py`; they have not been
-   run against the dev seed, so check the composer header reads "Comment on
-   lines −2 to +2" before you save the frame. The committed `review.png` shows
-   `calc.py` inline and alone; if your frame lists both files or shows two
-   columns, change the diff settings (Inline, one file at a time) before the
-   shot.
+   (`e2e/contract/review.spec.ts`) pointed at `calc.py`; check the composer
+   header reads "Lines −2 to +2" before you save the frame. `?file=calc.py`
+   shows that file alone; if your frame shows two columns, change the diff
+   settings (Inline) before the shot.
 
 The footer under the sidebar prints the instance's version. A checkout prints a
 dev version (`2.0.0rc9.dev1+g…` on a tagged clone, `0.1.devN` in one without

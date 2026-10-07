@@ -386,9 +386,12 @@ ci-test:
 
 # Render docsite/diagrams/*.mmd to the SVGs the pages show. Docus does not
 # render Mermaid, so the SVGs are committed; run this after editing a diagram.
+# The portrait/ ones have no background of their own, so they read on the dark
+# theme too.
 [doc("Render the Mermaid diagrams to the committed SVGs")]
 docs-diagrams:
     cd docsite/diagrams && for f in *.mmd; do npx -y @mermaid-js/mermaid-cli@11 -c mermaid.json -b white -i "$f" -o "../public/diagrams/${f%.mmd}.svg"; done
+    cd docsite/diagrams && for f in portrait/*.mmd; do npx -y @mermaid-js/mermaid-cli@11 -c mermaid-portrait.json -b transparent -i "$f" -o "../public/diagrams/${f%.mmd}.svg"; done
 
 # Preview the docs site with live reload at http://localhost:3000/kraft/
 docs:
