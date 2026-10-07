@@ -90,7 +90,7 @@ Each command links to its entry.
 | Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/admin#reload-the-configuration) |
 | Check my chains | [`kraft admin templates lint`](/reference/cli/admin#lint-the-templates) |
 | Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`, `templates library`](/reference/cli/admin#show-a-chain) |
-| See the [harness](/concepts/vocabulary#harness) profiles and what selects each | [`kraft admin harnesses`](/reference/cli/admin) |
+| See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/admin) |
 | Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/admin) |
 | Register Kraft with an agent | [`kraft admin init`](/reference/cli/admin) |
 | Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
