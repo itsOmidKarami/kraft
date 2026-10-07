@@ -12,7 +12,7 @@ const REPORT: Analytics = {
   totals: { work_items: 42, work_items_run: 39, by_status: {}, mrs_merged: 27, wall_ms: 3e8, human_wait_ms: 8e7, tokens_in: 3.9e7, tokens_out: 4.2e6, cost_usd: 212.4, cost_complete: true, rounds: 140, capped_out: 6, completed: 30, completed_prev: 22, median_lead_ms: 5.6e6, human_wait_pct: 25, fix_cycles: 1.5, fix_cycles_capped: 6, rejected_gates: 9, unplanned_touches_per_item: 1.25, open_mr_to_green_ci_ms: 1.2e6 },
   weekly_merged: [],
   by_node: [{ node: "implementation", runs: 30, wall_ms: 4e7, avg_ms: 1.2e6, tokens: 4e6, cost_usd: 21.5, cost_complete: true, rounds: 12, capped_out: 0 }],
-  by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 30 }],
+  by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 2.5 }],
   rejected_gates_by_gate: [],
   stop_reasons: [{ label: "agent needs context", n: 2 }],
 };
@@ -31,8 +31,7 @@ const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "analytic
 const SECTIONS = ["Overview", "Throughput by week", "By node", "By repo", "Why items stopped for a person"];
 const FOOTNOTES = [
   /Minutes are the mean wall time of one worker session, over every item in range/,
-  /Tokens are what the sessions recorded\. Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "\+" marks a sum that is missing a session/,
-  /Kraft's own estimate from its price table for a session whose agent reported none; a session it cannot price puts a "\+" on the sum/,
+  /Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/,
   /bars count merges, not completions/,
   /unplanned touches per item · open MR → checks done/,
   /current week is partial/,
@@ -45,9 +44,11 @@ describe("ng AnalyticsPage", () => {
     for (const name of SECTIONS) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     for (const label of TILES) expect(screen.getByText(label, { selector: ".an-kpi-label" })).toBeInTheDocument();
     for (const note of FOOTNOTES) expect(screen.getByText(note)).toBeVisible();
-    expect(screen.getByText("+8 vs previous · $7.08 cost ÷ completed")).toBeInTheDocument();
+    expect(screen.getByText("Where the time and the money went.")).toBeInTheDocument();
+    expect(screen.getByText("+8 vs previous · $7.08 spend per completed item, all spend counted")).toBeInTheDocument();
     expect(screen.getByText("median create → completion · 25% waiting on you")).toBeInTheDocument();
-    expect(screen.getByText("1.5 rounds per item that ran a fix-loop node · 6 capped · 9 rejected gates")).toBeInTheDocument();
+    expect(screen.getByText("1.5 repairs per item that needed one · 6 capped · 9 rejected gates")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "avg repairs" })).toBeInTheDocument();
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {

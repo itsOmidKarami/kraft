@@ -93,15 +93,15 @@ export function AnalyticsPage() {
       {!report && !error && <p className="an-empty">Loading…</p>}
       {report && t && (
         <>
-          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history. Dollars are what agents reported, plus Kraft's own estimate from its price table for a session whose agent reported none; a session it cannot price puts a &quot;+&quot; on the sum.">
+          <Section id="an-overview" bare title="Overview" note="Where the time and the money went.">
             <div className="an-kpis">
               <Kpi
                 label="Completed"
                 value={String(t.completed)}
-                sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} cost ÷ completed` : null].filter(Boolean).join(" · ")}
+                sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} spend per completed item, all spend counted` : null].filter(Boolean).join(" · ")}
               />
               <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median create → completion · ${t.human_wait_pct}% waiting on you`} />
-              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} rounds per item that ran a fix-loop node · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
+              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} repairs per item that needed one · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
             </div>
           </Section>
 
@@ -149,7 +149,7 @@ export function AnalyticsPage() {
                 </tbody>
               </table>
             )}
-            <p className="an-note">Minutes are the mean wall time of one worker session, over every item in range. Tokens are what the sessions recorded. Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "+" marks a sum that is missing a session.</p>
+            <p className="an-note">Minutes are the mean wall time of one worker session, over every item in range. Tokens are as recorded, never estimated. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "+" on the sum.</p>
           </Section>
 
           <div className="an-pair">
@@ -158,7 +158,7 @@ export function AnalyticsPage() {
                 <p className="an-empty">Nothing here yet.</p>
               ) : (
                 <table className="an-table an-repos">
-                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num" title="Average, over the repo's items that ran a worker session, of the deepest round any node reached; the first pass is round 0">avg deepest fix round</th></tr></thead>
+                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num" title="Average, over the repo's items that needed at least one repair, of the fix-loop repair rounds (round 1 and up) each ran">avg repairs</th></tr></thead>
                   <tbody>
                     {report.by_repo.map((r) => (
                       <tr key={r.repo} data-repo={r.repo}>

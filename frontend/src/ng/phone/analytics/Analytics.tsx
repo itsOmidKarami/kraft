@@ -40,10 +40,10 @@ export function Analytics() {
         {report && t && (
           <>
             <div className="ph-tiles">
-              <Tile label="Spent" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} spent ÷ completed` : "nothing completed yet"} />
+              <Tile label="Spent" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} spend per completed item, all spend counted` : "nothing completed yet"} />
               <Tile label="Items done" value={String(t.completed)} sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, `${running} running now`].join(" · ")} />
               <Tile label="Time at gates" value={elapsed(t.human_wait_ms)} sub={`completed items waited ${t.human_wait_pct}% of their lead time`} />
-              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`rounds per item that ran a fix-loop node · ${t.fix_cycles_capped} hit their cap`} />
+              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`repairs per item that needed one · ${t.fix_cycles_capped} hit their cap`} />
             </div>
             {empty ? (
               <p className="ph-empty">Nothing has completed in this range yet.</p>
@@ -61,7 +61,7 @@ export function Analytics() {
                       ))}
                     </div>
                   )}
-                  <p className="ph-note">Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "+" marks a sum that is missing a session.</p>
+                  <p className="ph-note">Tokens are as recorded, never estimated. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "+" on the sum.</p>
                 </Block>
                 <Block title="By repo">
                   {report.by_repo.length === 0 ? <p className="ph-note">Nothing here yet.</p> : (
@@ -69,7 +69,7 @@ export function Analytics() {
                       {report.by_repo.map((r) => (
                         <div key={r.repo} className="ph-stat-row">
                           <span className="ph-stat-name">{repoName(r.repo)}</span>
-                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg deepest fix round {r.cycles}</span>
+                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg repairs {r.cycles}</span>
                           <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}</span>
                         </div>
                       ))}

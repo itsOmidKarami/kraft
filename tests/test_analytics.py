@@ -691,7 +691,7 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
         conn.close()
 
     assert t["mrs_merged"] == 2
-    assert t["fix_cycles"] == pytest.approx(2.0)  # 2 repairs (one per loop node) / 1 item that needed one
+    assert t["fix_cycles"] == pytest.approx(2.0)  # 2 repairs, 1 item that needed one
     assert t["fix_cycles_capped"] == 1
 
 
