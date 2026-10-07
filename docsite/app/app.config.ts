@@ -40,32 +40,37 @@ export default defineAppConfig({
         linkText: 'whitespace-normal! break-words',
       },
     },
+    // A search result is one line, cut with an ellipsis: on a 390px phone
+    // "Events > Chain and nodes ...ished.node_id node_skipped" ended before
+    // the word that was searched for. Two lines.
+    commandPalette: {
+      slots: {
+        itemLabel: 'line-clamp-2 whitespace-normal! break-words',
+      },
+    },
+    // The page body is a size container, so a table can ask how wide the text
+    // column is (prose.css) instead of how wide the window is: the sidebar and
+    // the contents column take 400px of a 1024px window.
+    pageBody: {
+      base: '@container/prose',
+    },
     prose: {
       // Inline code is an inline-block, so one long path or flag is wider
       // than a phone and the whole page scrolls sideways. Let it break.
       code: {
         base: 'max-w-full wrap-break-word',
       },
-      // A table column is never narrower than its longest word, and
-      // wrap-break-word (above) does not count a break point inside a word
-      // when it works that out, so one long code span in a cell kept the
-      // column wide and 126 of 252 tables scrolled sideways at 390px.
-      // wrap-anywhere does count it, so the column can shrink to fit. Under
-      // 768px, and only in a table of two columns: a span of up to 14
-      // characters stays whole (ProseCode adds code-long above that;
-      // work_item_id was cut to work / _ite / m_id on Events, with room to
-      // spare) and only a long one may break. "Whole" needs nowrap: the
-      // span's max-w-full lets its column shrink below it, and a name with a
-      // hyphen (--description) then broke at the hyphen. A table of three or more
-      // columns, or of two with a long name in its first column, is a list of
-      // blocks on a phone instead (assets/css/prose.css), each block as wide
-      // as the screen, so a name is cut only if it is longer than that.
-      // Where a table still does not fit it scrolls inside its own box;
-      // scroll-hint (assets/css/prose.css) shows there is more to the right.
+      // Where a table does not fit its text column it scrolls inside its own
+      // box, and scroll-hint (assets/css/prose.css) shows there is more to the
+      // right. A table column is never narrower than its longest word, and
+      // wrap-break-word (the code rule above) does not count a break point
+      // inside a word when it works that out, so one long code span in a cell
+      // kept the column wide and 126 of 252 tables scrolled sideways at 390px.
+      // prose.css makes a long span wrap-anywhere, which does count it, in a
+      // narrow table.
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-md:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-md:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened
@@ -73,9 +78,10 @@ export default defineAppConfig({
       // it at the screenshots' own 1440px and scrolls both ways (the width is
       // stated: @nuxt/image's 1x/2x srcset makes a browser count the file as
       // 720px, so "natural size" was half; prose.css keeps mobile.png, which
-      // is phone-sized already, fitting the screen). The "safe" centering keeps the left edge
-      // reachable when the image is wider than the screen; an unsafe one
-      // clipped it.
+      // is phone-sized already, fitting the screen). The "safe" centering
+      // keeps the left edge reachable when the image is wider than the
+      // screen; an unsafe one clipped it. The overlay's dialog role, close
+      // button and focus are in ProseImg.vue, a copy of Nuxt UI's component.
       img: {
         slots: {
           content: 'overflow-auto justify-center-safe! items-center-safe!',
@@ -97,9 +103,11 @@ export default defineAppConfig({
       // whole and let the strip scroll sideways instead. A scrolling list
       // clips its own border, and the selected tab's underline sat on it, so
       // the rule is an inset shadow and the underline sits just inside it.
+      // scroll-hint (assets/css/prose.css) shows there is more past the edge,
+      // as it does on a table.
       tabs: {
         slots: {
-          list: 'overflow-x-auto overflow-y-hidden border-b-0 pb-[calc(var(--spacing)+1px)] shadow-[inset_0_-1px_0_var(--ui-border)]',
+          list: 'scroll-hint overflow-x-auto overflow-y-hidden border-b-0 pb-[calc(var(--spacing)+1px)] shadow-[inset_0_-1px_0_var(--ui-border)]',
           indicator: 'bottom-0',
           trigger: 'shrink-0',
         },

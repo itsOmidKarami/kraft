@@ -2,5 +2,11 @@
   "theme": "neutral",
   "htmlLabels": false,
   "flowchart": { "htmlLabels": false, "curve": "basis" },
-  "themeVariables": { "fontFamily": "ui-sans-serif, system-ui, sans-serif", "fontSize": "15px" }
+  "themeVariables": {
+    "fontFamily": "ui-sans-serif, system-ui, sans-serif",
+    "fontSize": "15px",
+    "lineColor": "#7b8494",
+    "edgeLabelBackground": "#eef0f3"
+  },
+  "themeCSS": ".edgeLabel rect, .edgeLabel .label rect { opacity: 1; fill: #eef0f3; } .transition, .messageLine0, .messageLine1, .actor-line { stroke: #7b8494; } [id$=\"-arrowhead\"] path { fill: #7b8494; stroke: #7b8494; } .node circle.state-start { fill: #7b8494; stroke: #7b8494; } .cluster rect { fill: transparent; stroke: #7b8494; } .cluster-label text, .cluster-label tspan, .messageText, .messageText > tspan, .actor-man text > tspan { stroke: #eef0f3; stroke-width: 4px; stroke-linejoin: round; paint-order: stroke fill; }"
 }

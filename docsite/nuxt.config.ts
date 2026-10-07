@@ -49,8 +49,30 @@ function forwardingPage(from: string, to: string): string {
 `
 }
 
+// A browser breaks a line after a space or a hyphen and after nothing else in
+// `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
+// (and the phone contents bar's) was cut inside a word ("approv" / "e": 267
+// cuts at 1024px and 71 at 1280px, most on the six HTTP route pages). A
+// zero-width space after a `/`, `_`, `-`, `.`, `?`, `=` or `&` that stands
+// between two other characters (not between two of them: `--start-side` has
+// no break after its first hyphen) is a place to break; the entry still breaks
+// inside a segment only when the segment is longer than the column
+// (break-words, app.config.ts, contentToc). Only the toc's `text` changes: the
+// ids, the headings, the search sections and the page title are not touched.
+const breakable = (text: string) => text.replace(/(?<=[^/_.\-?=&\s][/_.\-?=&])(?=[^/_.\-?=&\s])/g, '​')
+type TocLink = { text: string, children?: TocLink[] }
+const breakableLinks = (links: TocLink[] = []) => links.forEach((link) => {
+  link.text = breakable(link.text)
+  breakableLinks(link.children)
+})
+
 export default defineNuxtConfig({
   extends: ['docus'],
+  hooks: {
+    'content:file:afterParse'({ content }) {
+      breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
+    },
+  },
   css: ['~/assets/css/hero.css', '~/assets/css/prose.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
@@ -63,6 +85,11 @@ export default defineNuxtConfig({
   content: {
     build: {
       markdown: {
+        // `text` blocks get .line spans like the rest (rehype-text-lines.mjs).
+        // Content imports a plugin by its key, so the key is the file's path.
+        rehypePlugins: {
+          [fileURLToPath(new URL('./rehype-text-lines.mjs', import.meta.url))]: {},
+        },
         highlight: {
           theme: {
             light: 'github-light-high-contrast',
