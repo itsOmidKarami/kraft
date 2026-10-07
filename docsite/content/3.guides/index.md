@@ -46,6 +46,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 ### Run the server
 
 - [Remote access](/guides/run/remote-access): reach the board from a phone or another machine, over Tailscale, your local network or a tunnel, with a password.
+- [Put a proxy in front of Kraft](/guides/run/put-a-proxy-in-front-of-kraft): let a tunnel or reverse proxy on this machine pass webhooks and scripts to a loopback-bound Kraft.
 - [Restart Kraft without ending running agents](/guides/run/restart-kraft): pause the items that have an agent running, restart the server, and resume them.
 - [Back up and restore the database](/guides/run/back-up-and-restore): copy the database while the server runs, restore it, and use the copy Kraft makes before an upgrade.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
