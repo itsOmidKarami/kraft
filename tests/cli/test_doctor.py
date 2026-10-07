@@ -755,19 +755,36 @@ def test_doctor_warns_that_an_unusable_ssl_cert_file_is_ignored_by_sandboxes(
     assert usable or ("holds no PEM certificate" in rows[0]["detail"])
 
 
-@pytest.mark.parametrize("network", [None, {"runtime": {"allow": ["a.io"]}}], ids=["open", "set"])
-def test_doctor_warns_about_open_egress_on_a_sandboxed_repo(app, tmp_path, monkeypatch, network):
-    """Spec §1: open stays the default, and doctor says so. Under `network:`
-    Kraft's own proxy reaches a loopback one, so that warning goes too, and
-    the TLS listener is checked: down here, between lifespans."""
+@pytest.mark.parametrize(
+    ("fields", "rows", "phrase"),
+    [
+        ({}, [("egress", False, False), ("proxy", True, True)], "every launch into it is refused"),
+        (
+            {"unrestricted_network": True},
+            [("egress", True, True), ("proxy", True, True)],
+            "gates are not enforced",
+        ),
+        (
+            {"network": {"runtime": {"allow": ["a.io"]}}},
+            [("egress", False, False)],
+            "did not answer",
+        ),
+    ],
+    ids=["refused", "unrestricted", "set"],
+)
+def test_doctor_reports_a_sandboxed_repo_with_no_network_policy(
+    app, tmp_path, monkeypatch, fields, rows, phrase
+):
+    """Without `network:` every launch is refused, so the row fails; the
+    opt-out turns it into a warning. Under `network:` Kraft's own proxy
+    reaches a loopback one, so that warning goes too, and the TLS listener is
+    checked: down here, between lifespans."""
     ready = AsyncMock(return_value=(True, "ready"))
     monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", ready)
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
-    rows = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), network=network)
-    warned = [(r["name"].split()[0], r["ok"], r["warn"]) for r in rows]
-    listener, opened = [("egress", False, False)], [("egress", True, True), ("proxy", True, True)]
-    assert warned == (listener if network else opened)
-    assert ("did not answer" if network else "open egress") in rows[0]["detail"]
+    got = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), **fields)
+    assert [(r["name"].split()[0], r["ok"], r["warn"]) for r in got] == rows
+    assert phrase in got[0]["detail"]
 
 
 def _sandboxed_doctor_rows(app, tmp_path, prefix, **sandbox) -> list[dict]:

@@ -49,7 +49,9 @@ def test_a_sandbox_without_network_is_refused_unless_unrestricted(run, tmp_path,
     unless the repo says it accepts that. (claude is refused on its own
     account, below.)"""
     args = dict(harness=provider, command=provider, run_dirs=RunDirs(base=tmp_path))
-    with pytest.raises(LaunchRefused, match=r"/repo.*add a `network:` policy.*unrestricted_network"):
+    with pytest.raises(
+        LaunchRefused, match=r"/repo.*add a `network:` policy.*unrestricted_network"
+    ):
         run(**args, sandbox=BARE)
     if provider != "claude":
         assert run(**args, sandbox=DOCKER)["sandbox"] == DOCKER
