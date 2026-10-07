@@ -262,12 +262,19 @@ command without `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766` in front acts on your own
 Kraft, in `~/.kraft`: run these from the repository root, and type the two
 variables on each one.**
 
-1. Start a clean, seeded instance:
+1. Start a clean, seeded instance. No comment sits in these blocks: an
+   interactive zsh does not read `#` as one. In one terminal, the backend on
+   :8766, serving `frontend/dist`:
 
    ```bash
    (cd frontend && npm run build)
-   just dev-reset && just api       # in one terminal: backend on :8766, serving frontend/dist
-   just dev-seed                    # in another: four items, one at a gate
+   just dev-reset && just api
+   ```
+
+   In another, the seed: four items, one at a gate:
+
+   ```bash
+   just dev-seed
    ```
 
    The seed's two failing and slow items carry `KRAFT_FAIL` and `KRAFT_SLOW`
@@ -312,10 +319,13 @@ variables on each one.**
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Trim the startup log" --repo .dev/repo --chain quick-task --autostart
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Rewrite the parser" --repo .dev/repo --chain quick-task --autostart --description KRAFT_FAIL
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Investigate the flaky import test" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
-   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item pause ID   # the id `item create` printed, while it still runs
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item pause ID
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Retry flaky uploads in the sync worker" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Migrate the board filters to URL params" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
    ```
+
+   `ID` in the `item pause` line is the id the `item create` before it printed;
+   run the pause while that item still runs.
 
    The Done group sorts the newest first, and the frame cuts it after one row:
    finish a clean item last, so an abandoned one is not the row that shows.
@@ -412,9 +422,12 @@ variables on each one.**
    ```bash
    W=$PWD
    [ -d config ] && mkdir .dev-wizard && cp -R config .dev-wizard/config && rm -f .dev-wizard/config/access.yaml
-   cd "$(mktemp -d)"   # not a checkout: the wizard offers the one it starts in as a path
+   cd "$(mktemp -d)"
    KRAFT_HOME="${W:?set W to the repository root first}/.dev-wizard" KRAFT_PORT=8766 KRAFT_FRONTEND_DIST="$W/frontend/dist" PATH="$W/fixtures/bin:$PATH" "$W/.venv/bin/python" -m kraft
    ```
+
+   The `cd` is to a folder that is not a checkout: the wizard offers the folder
+   it starts in as the repo's path.
 
    With it running, from `frontend/` in another terminal:
    `ONLY=setup node e2e-shots/shot.mjs`. Stop it with Ctrl-C, go back to the
