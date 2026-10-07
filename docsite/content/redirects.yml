@@ -448,6 +448,16 @@
 /guides/harnesses/worker-kit#_5-check-it: /guides/harnesses/worker-kit#check-it-worked
 /guides/day-to-day/review-a-change#gates-dont-ask-twice: /guides/day-to-day/review-a-change#a-gate-with-a-must-fix-does-not-open
 /guides/day-to-day: /guides#day-to-day
-/guides/customize: /guides#customize-the-chain
+/guides/customize: /guides#customize-and-automate
 /guides/harnesses: /guides#agents-and-harnesses
 /guides/run: /guides#run-the-server
+/guides#customize-the-chain: /guides#customize-and-automate
+/guides#without-a-server: /guides/kraft-lite
+/guides/day-to-day/review-a-change#in-the-web-ui: /guides/day-to-day/review-a-change#comment-and-finish-a-review-in-the-web-ui
+/guides/day-to-day/review-a-change#drafts-and-sending: /guides/day-to-day/review-a-change#comment-and-send-a-review-from-the-cli
+/guides/day-to-day/review-a-change#must-fix: /guides/day-to-day/review-a-change#block-approval-with-a-must-fix
+/guides/day-to-day/review-a-change#commenting-while-it-runs: /guides/day-to-day/review-a-change#comment-while-it-runs
+/guides/day-to-day/review-a-change#comparing-attempts: /guides/day-to-day/review-a-change#compare-attempts
+/guides/day-to-day/first-run#step-1-connect-a-repo: /guides/day-to-day/first-run#_1-connect-a-repo
+/guides/day-to-day/first-run#step-2-chain-and-policy: /guides/day-to-day/first-run#_2-chain-and-policy
+/guides/day-to-day/first-run#step-3-first-work-item: /guides/day-to-day/first-run#_3-first-work-item
