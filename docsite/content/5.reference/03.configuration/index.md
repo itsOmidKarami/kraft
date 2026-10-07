@@ -47,5 +47,5 @@ Three commands check and reload the files:
 - [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [notify.yaml](/reference/configuration/notify): every field in `notify.yaml`: the notification webhook and the events that post to it.
 - [theme.yaml](/reference/configuration/theme): every field in `theme.yaml`: colors, density, the diff and the board.
-- [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's network, credentials, Kits and `sandbox.yaml`.
+- [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's resource limits, callbacks, network, credentials, Kits, `sandbox.yaml` and git.
 - [Environment variables](/reference/configuration/environment-variables): the variables that move this directory, every other variable Kraft reads, and the variables a worker gets.
