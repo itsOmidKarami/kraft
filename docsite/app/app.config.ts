@@ -70,9 +70,10 @@ export default defineAppConfig({
       // it at the screenshots' own 1440px and scrolls both ways (the width is
       // stated: @nuxt/image's 1x/2x srcset makes a browser count the file as
       // 720px, so "natural size" was half; prose.css keeps mobile.png, which
-      // is phone-sized already, fitting the screen). The "safe" centering keeps the left edge
-      // reachable when the image is wider than the screen; an unsafe one
-      // clipped it.
+      // is phone-sized already, fitting the screen). The "safe" centering
+      // keeps the left edge reachable when the image is wider than the
+      // screen; an unsafe one clipped it. The overlay's dialog role, close
+      // button and focus are in ProseImg.vue, a copy of Nuxt UI's component.
       img: {
         slots: {
           content: 'overflow-auto justify-center-safe! items-center-safe!',
