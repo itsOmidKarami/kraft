@@ -395,3 +395,4 @@
 /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in: /guides/harnesses/give-a-worker-its-login#check-it-worked
 /guides/day-to-day/agent-integration#what-an-agent-cannot-do: /guides/day-to-day/agent-integration#what-an-agent-is-refused
 /guides/day-to-day/agent-integration#mcp-tools: /reference/mcp-tools
+/guides/run/upgrade-from-1-4#upgrading-from-14: /guides/run/upgrade-from-1-4#what-changed
