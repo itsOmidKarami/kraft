@@ -40,32 +40,29 @@ export default defineAppConfig({
         linkText: 'whitespace-normal! break-words',
       },
     },
+    // The page body is a size container, so a table can ask how wide the text
+    // column is (prose.css) instead of how wide the window is: the sidebar and
+    // the contents column take 400px of a 1024px window.
+    pageBody: {
+      base: '@container/prose',
+    },
     prose: {
       // Inline code is an inline-block, so one long path or flag is wider
       // than a phone and the whole page scrolls sideways. Let it break.
       code: {
         base: 'max-w-full wrap-break-word',
       },
-      // A table column is never narrower than its longest word, and
-      // wrap-break-word (above) does not count a break point inside a word
-      // when it works that out, so one long code span in a cell kept the
-      // column wide and 126 of 252 tables scrolled sideways at 390px.
-      // wrap-anywhere does count it, so the column can shrink to fit. Under
-      // 768px, and only in a table of two columns: a span of up to 14
-      // characters stays whole (ProseCode adds code-long above that;
-      // work_item_id was cut to work / _ite / m_id on Events, with room to
-      // spare) and only a long one may break. "Whole" needs nowrap: the
-      // span's max-w-full lets its column shrink below it, and a name with a
-      // hyphen (--description) then broke at the hyphen. A table of three or more
-      // columns, or of two with a long name in its first column, is a list of
-      // blocks on a phone instead (assets/css/prose.css), each block as wide
-      // as the screen, so a name is cut only if it is longer than that.
-      // Where a table still does not fit it scrolls inside its own box;
-      // scroll-hint (assets/css/prose.css) shows there is more to the right.
+      // Where a table does not fit its text column it scrolls inside its own
+      // box, and scroll-hint (assets/css/prose.css) shows there is more to the
+      // right. A table column is never narrower than its longest word, and
+      // wrap-break-word (the code rule above) does not count a break point
+      // inside a word when it works that out, so one long code span in a cell
+      // kept the column wide and 126 of 252 tables scrolled sideways at 390px.
+      // prose.css makes a long span wrap-anywhere, which does count it, in a
+      // narrow table.
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-md:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-md:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened
