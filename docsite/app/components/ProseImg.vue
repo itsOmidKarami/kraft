@@ -1,7 +1,14 @@
 <script>
-// Nuxt UI's own prose image, copied (as ProseTable.vue copies the table: what
-// it does is in its template and a few lines of setup, and its slots cannot
-// take a different structure) for two changes.
+// Nuxt UI's own prose image, copied from @nuxt/ui 4.11.2
+// (dist/runtime/components/prose/Img.vue) as ProseTable.vue copies the table:
+// what it does is in its template and a few lines of setup, and its slots
+// cannot take a different structure. On a Nuxt UI bump, diff this file against
+// that one and re-copy it, then reapply the two changes below. What differs
+// from the original, besides the imports (`@nuxt/ui/...` for its relative
+// ones): the <DefineViewTemplate> wrapper around the DialogRoot, the dialog
+// markup and close button, the `open` watcher, `landscapeDiagram`, the
+// tabindex/role/keydown on the picture, and the wrapper and caption at the end
+// of the template. The changes:
 //
 // 1. A tapped screenshot opened enlarged with nothing to close it but another
 //    tap, no dialog role and no name. The layer is now role="dialog", named by
