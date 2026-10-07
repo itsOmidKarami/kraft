@@ -379,6 +379,8 @@
 /guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked
 /guides/run/remote-access#choose-a-bind: /guides/run/remote-access#choose-a-way
+/guides/run/remote-access#a-proxy-in-front-of-a-loopback-bind: /guides/run/put-a-proxy-in-front-of-kraft
+/guides/run/remote-access#send-host-localhost-from-the-proxy: /guides/run/put-a-proxy-in-front-of-kraft#send-host-localhost-from-the-proxy
 /reference/cli/admin#the-sandbox-row: /troubleshooting/doctor-failures#the-sandbox-row
 /reference/cli/admin#a-repository-whose-sandbox-is-a-kit: /troubleshooting/doctor-failures#the-sandbox-row
 /reference/triggers#a-cron-kraft-cannot-run: /reference/configuration/intake#when-the-file-does-not-load
@@ -430,7 +432,7 @@
 /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in: /guides/harnesses/give-a-worker-its-login#check-it-worked
 /guides/day-to-day/agent-integration#what-an-agent-cannot-do: /guides/day-to-day/agent-integration#what-an-agent-is-refused
 /guides/day-to-day/agent-integration#mcp-tools: /reference/mcp-tools
-/guides/run/upgrade-from-1-4#upgrading-from-14: /guides/run/upgrade-from-1-4#what-changed
+/guides/run/upgrade-from-1-4#upgrading-from-14: /guides/run/upgrade-from-1-4#update-from-14
 /troubleshooting/why-did-my-item-stop#git-identity-and-worktree-setup: /troubleshooting/why-did-my-item-stop#setting-up-the-worktree
 /troubleshooting/why-did-my-item-stop#git-and-the-worktree: /troubleshooting/why-did-my-item-stop#git-state-of-the-worktree
 /project/contributing#cut-a-release-maintainers: /project/contributing#contribute-a-change
