@@ -100,8 +100,8 @@ load `/openapi.json` into your own OpenAPI viewer.
 
 The pages below describe the board's routes. They can change in any release, so a script that must keep working calls the [stable routes](#stable-routes), or the `kraft` command with `--json`. Each route is written in full, with its `/api` prefix.
 
-- [Work items](/reference/http-api/work-items): creating a work item, its status and `stop` fields, overrides, cancelling, retrying, duplicating, acting in bulk, and a merge request closed on the forge.
-- [Budget, dry run and events](/reference/http-api/budget-and-events): the daily total, the dry run of a create, events paging, the run summary, and the other fields of a work item's detail.
-- [Repos, chains, harnesses and the server](/reference/http-api/repos-chains-harnesses-and-server): connecting a repo, chain templates, harnesses, changes saved but not applied, the update check and editors.
-- [Drafts](/reference/http-api/drafts): the routes behind the Templates and Settings editors' drafts, and the `result` they answer.
-- [Ops for each draft area](/reference/http-api/draft-ops): the ops a draft takes in each area, and a work item's own draft.
+- [Work items](/reference/http-api/work-items): filing, reading, changing, ending and retrying a work item, and the work item object those routes return.
+- [Budget, dry run and events](/reference/http-api/budget-and-events): the daily spend total and raising a budget, the dry run of a create, events paging, the diff and review routes, and a work item's documents.
+- [Repos, chains, harnesses and the server](/reference/http-api/repos-chains-harnesses-and-server): connecting a repo and the proposal it answers, chain templates and library components, harnesses, changes saved but not applied, the update check, and opening an editor.
+- [Drafts](/reference/http-api/drafts): the routes the Templates and Settings editors use to keep, change, publish and discard a draft, and the `result` each answers.
+- [Ops for each draft area](/reference/http-api/draft-ops): every op a draft takes, by area, and a work item's own draft.
