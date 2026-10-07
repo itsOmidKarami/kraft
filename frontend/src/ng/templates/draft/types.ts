@@ -1,4 +1,4 @@
-/** W9's config-draft answers, field for field (docsite 5.reference/08.http-api/5.drafts.md). */
+/** W9's config-draft answers, field for field (docs: /reference/http-api/drafts). */
 
 import type { Choice } from "../../ui/Combobox";
 
