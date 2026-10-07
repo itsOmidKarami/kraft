@@ -18,7 +18,6 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 
 ### Day to day
 
-- [The board and the web UI](/guides/day-to-day/the-board): the sidebar, search and shortcuts every screen shares, and where each screen is described.
 - [The first run](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
 - [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
@@ -33,7 +32,6 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Write your own chain](/guides/customize/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
 - [Add a security review or a gate reviewer](/guides/customize/add-review-agents): put the shipped `security-review` and `gate-review` skills into a chain of your own.
 - [Schedule or webhook work](/guides/customize/schedule-and-webhook-work): file paused work items from a cron schedule or an HTTP call.
-- [Upgrade your configuration](/guides/customize/upgrading-templates): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
 
 ### Agents and harnesses
 
@@ -44,11 +42,12 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 ### Run the server
 
 - [Remote access](/guides/run/remote-access): approve or reject a gate from a phone, over a tunnel.
-- [Operate a Kraft server](/guides/run/operations): what to know before you back up the database, read logs or run Kraft as a service.
+- [Restart Kraft without ending running agents](/guides/run/restart-kraft): pause the items that have an agent running, restart the server, and resume them.
 - [Back up and restore the database](/guides/run/back-up-and-restore): copy the database while the server runs, restore it, and use the copy Kraft makes before an upgrade.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
 - [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
 - [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, and pin a version.
+- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
 - [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, the steps to update from it, and how to upgrade from a release candidate or an older release.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
 

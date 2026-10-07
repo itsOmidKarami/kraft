@@ -15,6 +15,7 @@ merge-ready diff. Still deciding whether Kraft is for you? Read
 - [Why Kraft](/get-started/why-kraft): what it does that a session, a loop or a skill does not, and when not to use it.
 - [Install](/get-started/install): install Kraft with uv, Homebrew, the install script, or from source, start the server, and register it with Claude Code.
 - [Your first work item](/get-started/first-work-item): connect a repo, run a work item end to end, and approve its gates.
+- [FAQ](/get-started/faq): short answers on what Kraft works with, what it costs, and how to write a spec.
 
 ## Elsewhere in the docs
 

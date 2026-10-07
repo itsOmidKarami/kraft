@@ -51,7 +51,7 @@ What the columns mean:
 - **Context**: how Kraft passes its context to the agent. **System prompt** is out of band. **Prompt** is in band, folded into the task's prompt.
 - **Fallback**: a rate limit on this harness can trigger a switch to the next entry of a [`fallback:` list](/reference/harnesses/fallback-and-escalation).
 
-Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `mcp_config`, and only `codex` declares `writable_dirs`. A task or profile that sets an option whose capability its harness lacks is rejected at load. [Harness files](/reference/harnesses/harness-files#capabilities) lists every capability.
+Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `mcp_config`, and only `codex` declares `writable_dirs`. A task or profile that sets an option whose capability its harness lacks is rejected at load. [Harness definition files](/reference/harnesses/harness-files#capabilities) lists every capability.
 
 ## The harnesses in detail
 
@@ -139,6 +139,6 @@ A worker can use the CLI's own stored login instead where it has one; [Run worke
 
 - [Unattended runs](/reference/harnesses/unattended-runs): the mode each CLI runs in when nobody can answer a prompt.
 - [Agent profiles](/reference/harnesses/agent-profiles): named model tiers a task selects with `profile:`.
-- [Harness files](/reference/harnesses/harness-files): the YAML file that describes one harness, and every capability it can declare.
+- [Harness definition files](/reference/harnesses/harness-files): the YAML file that describes one harness, and every capability it can declare.
 - [Fallback and escalation](/reference/harnesses/fallback-and-escalation): where a launch goes next, and which harness runs an escalation turn.
 - [Cost reporting](/reference/harnesses/cost-reporting): how Kraft estimates the cost of a harness that reports tokens but no dollar figure.

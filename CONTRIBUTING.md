@@ -344,7 +344,7 @@ Page rules:
 | A chain template's node fields | `docsite/content/5.reference/04.chain-nodes/index.md` |
 | How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/5.reference/04.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
 | The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/5.reference/04.chain-nodes/3.fix-loop.md` |
-| A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
+| A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/4.vocabulary.md` |
 | Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/5.reference/07.triggers.md` |
 | The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/5.reference/06.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/05.harnesses/` |

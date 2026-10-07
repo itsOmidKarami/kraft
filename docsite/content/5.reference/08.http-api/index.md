@@ -1,5 +1,7 @@
 ---
 title: HTTP API
+navigation:
+  title: Overview
 description: Which of Kraft's HTTP routes are stable, where the full schema is, and who may call them.
 ---
 

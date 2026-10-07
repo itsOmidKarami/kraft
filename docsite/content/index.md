@@ -37,7 +37,7 @@ description: Work items grouped by what needs you, what is running, and what is 
 orientation: horizontal
 links:
   - label: Tour the web UI
-    to: /guides/day-to-day/the-board
+    to: /reference/web-ui/board
     color: neutral
     variant: outline
 ---
