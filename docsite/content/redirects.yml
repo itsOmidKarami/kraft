@@ -423,3 +423,8 @@
 /guides/day-to-day/agent-integration#what-an-agent-cannot-do: /guides/day-to-day/agent-integration#what-an-agent-is-refused
 /guides/day-to-day/agent-integration#mcp-tools: /reference/mcp-tools
 /guides/run/upgrade-from-1-4#upgrading-from-14: /guides/run/upgrade-from-1-4#what-changed
+/troubleshooting/why-did-my-item-stop#git-identity-and-worktree-setup: /troubleshooting/why-did-my-item-stop#setting-up-the-worktree
+/troubleshooting/why-did-my-item-stop#git-and-the-worktree: /troubleshooting/why-did-my-item-stop#git-state-of-the-worktree
+/project/contributing#cut-a-release-maintainers: /project/contributing#contribute-a-change
+/project/contributing#related: /project/contributing#next-steps
+/project/whats-new#looking-ahead: /project/whats-new
