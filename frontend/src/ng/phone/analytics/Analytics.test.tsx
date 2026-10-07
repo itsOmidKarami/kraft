@@ -33,13 +33,13 @@ describe("Analytics (J): each tile reads one field", () => {
     useStore.setState({ workItems: { a: { id: "a", display_status: "running" }, b: { id: "b", display_status: "done" } } } as never);
     mount();
     await screen.findByText("$38.20");
-    expect(within(tile("Spent")).getByText("$3.18 per completed item")).toBeInTheDocument();
+    expect(within(tile("Spent")).getByText("$3.18 spent ÷ completed")).toBeInTheDocument();
     expect(within(tile("Items done")).getByText("12")).toBeInTheDocument();
     expect(within(tile("Items done")).getByText("+3 vs previous · 1 running now")).toBeInTheDocument();
     expect(within(tile("Time at gates")).getByText("14m")).toBeInTheDocument();
-    expect(within(tile("Time at gates")).getByText("8% of the time waiting on you")).toBeInTheDocument();
+    expect(within(tile("Time at gates")).getByText("completed items waited 8% of their lead time")).toBeInTheDocument();
     expect(within(tile("Fix loops")).getByText("1.5")).toBeInTheDocument();
-    expect(within(tile("Fix loops")).getByText("cycles per verify · 2 hit their cap")).toBeInTheDocument();
+    expect(within(tile("Fix loops")).getByText("rounds per item that ran a fix-loop node · 2 hit their cap")).toBeInTheDocument();
   });
 
   it("makes its scrolling area reachable from the keyboard (R14b-03)", async () => {
@@ -69,8 +69,8 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByText("kraft-plugins")).toBeInTheDocument();
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
-    expect(screen.getByText(/a trailing "\+" marks a sum that is missing a session/)).toBeInTheDocument();
-    expect(screen.getByText("0.25 unplanned touches per item · open MR → green CI 10m median")).toBeInTheDocument();
+    expect(screen.getByText(/Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "\+" marks a sum that is missing a session/)).toBeInTheDocument();
+    expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();
   });
 
   it("asks for the range the person picks, 7 days first", async () => {

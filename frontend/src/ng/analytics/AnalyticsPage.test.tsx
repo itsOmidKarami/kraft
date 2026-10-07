@@ -30,10 +30,11 @@ const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "analytic
 // What the shipped views/Analytics.tsx shows that this page must too (GAP §2 #39).
 const SECTIONS = ["Overview", "Throughput by week", "By node", "By repo", "Why items stopped for a person"];
 const FOOTNOTES = [
-  /Minutes are the median per completed item/,
-  /a trailing "\+" marks a sum that is missing a session/,
+  /Minutes are the mean wall time of one worker session, over every item in range/,
+  /Tokens are what the sessions recorded\. Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "\+" marks a sum that is missing a session/,
+  /Kraft's own estimate from its price table for a session whose agent reported none; a session it cannot price puts a "\+" on the sum/,
   /bars count merges, not completions/,
-  /unplanned touches per item · open MR → green CI/,
+  /unplanned touches per item · open MR → checks done/,
   /current week is partial/,
 ];
 const TILES = ["Completed", "Lead time", "Cost"];
@@ -44,9 +45,9 @@ describe("ng AnalyticsPage", () => {
     for (const name of SECTIONS) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     for (const label of TILES) expect(screen.getByText(label, { selector: ".an-kpi-label" })).toBeInTheDocument();
     for (const note of FOOTNOTES) expect(screen.getByText(note)).toBeVisible();
-    expect(screen.getByText("+8 vs previous · $7.08 each")).toBeInTheDocument();
-    expect(screen.getByText("median create → merge · 25% waiting on you")).toBeInTheDocument();
-    expect(screen.getByText("1.5 fix cycles per verify · 6 capped · 9 rejected gates")).toBeInTheDocument();
+    expect(screen.getByText("+8 vs previous · $7.08 cost ÷ completed")).toBeInTheDocument();
+    expect(screen.getByText("median create → completion · 25% waiting on you")).toBeInTheDocument();
+    expect(screen.getByText("1.5 rounds per item that ran a fix-loop node · 6 capped · 9 rejected gates")).toBeInTheDocument();
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {
@@ -55,11 +56,11 @@ describe("ng AnalyticsPage", () => {
     document.body.append(tail);
     const { container } = render(<HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
-    expect(tail).toHaveTextContent("· Last 8 weeks · completed work items");
+    expect(tail).toHaveTextContent("· Items created in the last 8 weeks");
     // One heading for a screen reader (R14b-03), which sighted readers do not see twice: the crumb says it.
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Analytics");
     expect(screen.getByRole("heading", { level: 1 })).toHaveClass("an-visually-hidden");
-    expect(container).not.toHaveTextContent("Last 8 weeks");
+    expect(container).not.toHaveTextContent("8 weeks");
     tail.remove();
   });
 

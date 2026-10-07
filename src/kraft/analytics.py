@@ -53,34 +53,43 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
-def _node_roles(row) -> tuple[set[str], set[str]]:
-    """This item's (merge nodes, fix-loop nodes), by what each node does and
-    never by its name (Kraft-hicln): a V1 row's `chain_definition` is `"{}"`
+def _node_roles(row) -> tuple[set[str], set[str], set[str], set[str]]:
+    """This item's (merge, fix-loop, open-MR, CI) nodes, by what each node does
+    and never by its name (Kraft-hicln): a V1 row's `chain_definition` is `"{}"`
     and no seeded V1 node is called `verify`.
 
     V1 reads the materialized chain: a merge node runs a forge task targeting
-    `mr.merge`, a fix-loop node declares a `fix_loop`. A legacy row, filed
-    before V1 and still in the database, keeps the legacy reading of the same
-    two facts: an `on.merge` task, a `fix_loop` key.
+    `mr.merge`, an open-MR node one targeting `mr.open_draft`, a CI node one
+    targeting `mr.ci`, and a fix-loop node declares a `fix_loop`. A legacy row,
+    filed before V1 and still in the database, keeps the legacy reading of the
+    first two facts (an `on.merge` task, a `fix_loop` key); it has no open-MR or
+    CI node to name.
     """
     from kraft.store.chain import materialized_chain_of
     from kraft.templates.models import ForgeAction, ForgeTask
 
     chain = materialized_chain_of(row)
     if chain is not None:
-        merge = {
-            n.id
-            for n in chain.chain.nodes
-            if any(
-                isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_MERGE
-                for t in n.tasks()
-            )
-        }
-        return merge, {n.id for n in chain.chain.nodes if n.fix_loop}
+
+        def running(target):
+            return {
+                n.id
+                for n in chain.chain.nodes
+                if any(isinstance(t.task, ForgeTask) and t.task.target is target for t in n.tasks())
+            }
+
+        return (
+            running(ForgeAction.MR_MERGE),
+            {n.id for n in chain.chain.nodes if n.fix_loop},
+            running(ForgeAction.MR_OPEN_DRAFT),
+            running(ForgeAction.MR_CI),
+        )
     nodes = json.loads(row["chain_definition"] or "{}").get("nodes", [])
     return (
         {n["id"] for n in nodes if "on.merge" in (n.get("tasks") or [])},
         {n["id"] for n in nodes if n.get("fix_loop")},
+        set(),
+        set(),
     )
 
 
@@ -464,7 +473,8 @@ def compute(
         (wid, node_id, rnd)
         for node_id, seen in node_rounds.items()
         for wid, rnd in seen
-        if node_id in roles[wid][1]
+        # The repair pass (`_REPAIR_ROUND`, below 0) is no round of its own.
+        if node_id in roles[wid][1] and rnd >= 0
     }
     if loop_rounds:
         loop_items = {wid for wid, _, _ in loop_rounds}
@@ -493,7 +503,7 @@ def compute(
         rr["cycles"] = round(sum(rl) / len(rl), 1) if rl else 0.0
 
     # ── events: merges and human wait ────────────────────────────────────────
-    merge_nodes = {wid: merge for wid, (merge, _) in roles.items()}
+    merge_nodes = {wid: r[0] for wid, r in roles.items()}
     events = conn.execute(
         f"SELECT work_item_id, type, payload, created_at FROM events "
         f"WHERE work_item_id IN ({holes}) ORDER BY seq",
@@ -547,12 +557,13 @@ def compute(
     open_to_green_ms: list[int] = []
     for r in completed_items:
         evts = per_item.get(r["id"], [])
+        _, _, open_nodes, ci_nodes = roles[r["id"]]
         start = next(
             (
                 _parse(e["created_at"])
                 for e in evts
                 if e["type"] == "node_started"
-                and json.loads(e["payload"]).get("node_id") == "open_mr"
+                and json.loads(e["payload"]).get("node_id") in open_nodes
             ),
             None,
         )
@@ -561,7 +572,7 @@ def compute(
                 _parse(e["created_at"])
                 for e in evts
                 if e["type"] == "node_completed"
-                and json.loads(e["payload"]).get("node_id") == "mr_checks"
+                and json.loads(e["payload"]).get("node_id") in ci_nodes
             ),
             None,
         )
