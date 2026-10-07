@@ -1,0 +1,10 @@
+flowchart LR
+  p1["Over Tailscale:<br/>phone"] --> m1["Tailnet:<br/>Tailscale<br/>encrypts"] --> k1["Kraft on the<br/>Tailscale address<br/>password, name in<br/>allowed_hosts"]
+  p2["On your local<br/>network: phone"] --> m2["Your LAN:<br/>plain http, the<br/>network can<br/>read it"] --> k2["Kraft on 0.0.0.0<br/>password, name in<br/>allowed_hosts"]
+  p3["Over a Quick<br/>Tunnel: phone"] --> m3["cloudflared:<br/>public internet,<br/>the https URL"] --> k3["Kraft on 0.0.0.0<br/>password, name in<br/>allowed_hosts"]
+  p4["Behind a reverse<br/>proxy you run:<br/>phone"] --> m4["Your proxy: https<br/>to the phone,<br/>plain http on"] --> k4["Kraft on 0.0.0.0<br/>password, name in<br/>allowed_hosts,<br/>port firewalled<br/>by you"]
+  p5["Webhook proxy:<br/>the sender"] --> m5["Your proxy on this<br/>machine: Host<br/>localhost,<br/>X-Forwarded-For"] --> k5["Kraft on 127.0.0.1<br/>every call needs a<br/>session or a token"]
+
+  classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
+  class p1,m1,k1,p2,m2,k2,p3,m3,k3,p4,m4,k4,p5,m5,k5 box
+  linkStyle default stroke:#7b8494
