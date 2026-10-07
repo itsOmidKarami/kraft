@@ -2,10 +2,10 @@
 title: Repos
 navigation:
   title: Overview
-description: Every field in repos.yaml, where a repo's value comes from, and the pages for detectors, workspaces and sandboxes.
+description: Every field in repos.yaml, where a repo's value comes from, and the pages for how connect proposes commands, detectors, workspaces and sandboxes.
 ---
 
-`repos.yaml` lists the repositories you connected and how Kraft works in each. Three groups of pages go deeper: [Detectors](/reference/configuration/repos/detectors) for how `kraft repo connect` fills the entry in, [Workspaces](/reference/configuration/repos/workspaces) for a root repository with members, and [Sandboxed workers](/reference/configuration/sandbox) for the `sandbox` field.
+`repos.yaml` lists the repositories you connected and how Kraft works in each. Four groups of pages go deeper: [How connect proposes commands](/reference/configuration/repos/connect-proposals) for how `kraft repo connect` fills the entry in, [Detectors](/reference/configuration/repos/detectors) for teaching it your own conventions, [Workspaces](/reference/configuration/repos/workspaces) for a root repository with members, and [Sandboxed workers](/reference/configuration/sandbox) for the `sandbox` field.
 
 ```yaml [config/repos.yaml]
 repos:
@@ -117,7 +117,7 @@ It applies above the profile's own `defaults:`, below a task's `model:` or agent
 - A repo with neither this nor `test_scopes` stops that verification for you rather than inventing a command.
 - Verification ignores it while `test_scopes` is set: the scopes are what runs. For a repo with more than one project, connect saves the first scope's command here, beside the scopes, so it does not cover every path.
 
-[Detectors](/reference/configuration/repos/detectors) says how connect proposes it.
+[How connect proposes commands](/reference/configuration/repos/connect-proposals) says how connect proposes it.
 
 ### `areas`
 
@@ -135,7 +135,7 @@ Kraft does not synthesize `test_scopes` from `test_command`: the two stay indepe
 - An absent value stops the repo's next work item rather than guessing.
 - On a [sandboxed](/concepts/vocabulary#sandbox) item it runs as `sh -c` inside the sandbox, never on the host. Without docker the item stops.
 
-[Detectors](/reference/configuration/repos/detectors) says how connect proposes it.
+[How connect proposes commands](/reference/configuration/repos/connect-proposals) says how connect proposes it.
 
 ### `env`
 
@@ -198,7 +198,8 @@ This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENT
 
 ## In this section
 
-- [Detectors](/reference/configuration/repos/detectors): how `kraft repo connect` proposes setup and test commands, what to do when it finds none, and `detectors.yaml`.
+- [How connect proposes commands](/reference/configuration/repos/connect-proposals): how `kraft repo connect` proposes setup and test commands, and what to do when it finds none.
+- [Detectors](/reference/configuration/repos/detectors): `detectors.yaml`, where you teach connect your own conventions, and the toolchains Kraft ships.
 - [Workspaces](/reference/configuration/repos/workspaces): a root repository with other repositories mounted as submodules.
 
 ## Related
