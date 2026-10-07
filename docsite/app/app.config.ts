@@ -51,20 +51,21 @@ export default defineAppConfig({
       // when it works that out, so one long code span in a cell kept the
       // column wide and 126 of 252 tables scrolled sideways at 390px.
       // wrap-anywhere does count it, so the column can shrink to fit. Under
-      // 640px, and only in a table of two columns: a span of up to 14
+      // 768px, and only in a table of two columns: a span of up to 14
       // characters stays whole (ProseCode adds code-long above that;
       // work_item_id was cut to work / _ite / m_id on Events, with room to
       // spare) and only a long one may break. "Whole" needs nowrap: the
       // span's max-w-full lets its column shrink below it, and a name with a
       // hyphen (--description) then broke at the hyphen. A table of three or more
-      // columns is a list of blocks on a phone instead (assets/css/prose.css),
-      // each block as wide as the screen, so no code breaks there at all.
+      // columns, or of two with a long name in its first column, is a list of
+      // blocks on a phone instead (assets/css/prose.css), each block as wide
+      // as the screen, so a name is cut only if it is longer than that.
       // Where a table still does not fit it scrolls inside its own box;
       // scroll-hint (assets/css/prose.css) shows there is more to the right.
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-sm:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-sm:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
+          base: 'max-md:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-md:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened
@@ -83,6 +84,9 @@ export default defineAppConfig({
       },
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.
+      // (The copy button covering the end of a long first line is handled in
+      // assets/css/prose.css, on the first line only: padding on the whole
+      // block made 5 to 8 blocks that fit scroll sideways for 30px of nothing.)
       pre: {
         slots: {
           base: 'whitespace-pre wrap-normal',

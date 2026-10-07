@@ -76,67 +76,123 @@
   }
 }
 
-/* A table of three or more columns, on a phone, is a list of blocks. Squeezed
-   into 343px the first column was about 40px wide and the name a reader looks
-   up (`max_concurrent`) was cut into pieces of two to four letters, and the
-   tables that did fit ran two or three screens of narrow cells with a fix far
-   from its symptom. Each row is now one block: the first cell is its heading,
-   whole, and every other cell is a line that starts with its column's header
-   (data-label, written when the page is rendered: ProseTd.vue). Two-column
-   tables stay tables, and from 640px up nothing here applies.
+/* On a phone, a table of three to five columns is a list of blocks, and so is
+   a two-column table whose first column holds a long name (a code span of more
+   than 14 characters: ProseCode.vue adds code-long). Squeezed into 343px the
+   first column was about 40px wide and the name a reader looks up
+   (`max_concurrent`, `item escalate --message TEXT`) was cut into pieces, and
+   the tables that did fit ran two or three screens of narrow cells with a fix
+   far from its symptom. Each row is now one block: the first cell is its
+   heading, whole, and every other cell is a line that starts with its
+   column's header (data-label, written when the page is rendered:
+   ProseTd.vue). A two-column table with short names stays a table, and so
+   does a matrix of six or more columns (the seven-column harness table): it
+   is read down a column ("which harness resumes?"), as seven blocks the
+   comparison is gone, so it keeps scrolling in its own box with the edge
+   shadow (.scroll-hint).
+   From 768px up nothing here applies. The line was 640px, but the content
+   column at 700px (a phone on its side) is 637px wide and nine
+   three- and four-column tables were wider than that and scrolled.
    Table semantics survive the display change in two ways: the header row is
    only moved out of sight (not display: none), and the label is generated
    content with an empty alternative text, so a screen reader hears the real
    column header once and not the label as well. */
-@media (max-width: 639px) {
-  main table:has(th:nth-child(3)) {
+@media (max-width: 767px) {
+  main table:is(
+      :has(th:nth-child(3)):not(:has(th:nth-child(6))),
+      :not(:has(th:nth-child(3))):has(td:first-child code.code-long)
+    ) {
     display: block;
     border-radius: 0;
+
+    & :is(tbody, tr) {
+      display: block;
+    }
+    & thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    & tr {
+      margin-bottom: 0.5rem;
+      padding: 0.375rem 0.25rem;
+      border: 1px solid var(--ui-border-muted);
+      border-radius: var(--ui-radius);
+    }
+    & td {
+      display: block;
+      padding: 0.125rem 0.5rem;
+      border: 0;
+      border-radius: 0;
+    }
+    /* The heading: the first cell, whole, with no label. */
+    & td:first-child {
+      padding-bottom: 0.25rem;
+      font-weight: 600;
+    }
+    /* A cell with nothing in it would only be a bare label. */
+    & td:empty {
+      display: none;
+    }
+    /* Two declarations: a browser that does not parse the alt-text form
+       (`/ ""`) drops the second one whole, and without the first a phone would
+       show stacked cells with no labels at all. Where the second is read, the
+       label has an empty alternative text. */
+    & td[data-label]:not(:first-child)::before {
+      content: attr(data-label) ": ";
+      content: attr(data-label) ": " / "";
+      color: var(--ui-text-muted);
+      font-weight: 500;
+    }
+    /* Beside a paragraph or a list the label would be a stray word at the end
+       of the line before: put it on its own line. */
+    & td:has(> :is(p, ul, ol, pre, div))::before {
+      display: block;
+    }
+    /* In a block of two cells the second one's label is the same word on every
+       block ("Effect:", "What it does:") and the block already reads as a name
+       and what it means, so it has none. The screen reader still gets the
+       header from the table. */
+    &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
+      content: none;
+    }
   }
-  main table:has(th:nth-child(3)) :is(tbody, tr) {
-    display: block;
+
+  /* A matrix keeps its first column whole: it is the row's name, and the
+     other columns give way to the scroll. */
+  main table:has(th:nth-child(6)) :is(th, td):first-child {
+    white-space: nowrap;
   }
-  main table:has(th:nth-child(3)) thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  main table:has(th:nth-child(3)) tr {
-    margin-bottom: 0.5rem;
-    padding: 0.375rem 0.25rem;
-    border: 1px solid var(--ui-border-muted);
-    border-radius: var(--ui-radius);
-  }
-  main table:has(th:nth-child(3)) td {
-    display: block;
-    padding: 0.125rem 0.5rem;
-    border: 0;
-    border-radius: 0;
-  }
-  /* The heading: the first cell, whole, with no label. */
-  main table:has(th:nth-child(3)) td:first-child {
-    padding-bottom: 0.25rem;
-    font-weight: 600;
-  }
-  /* A cell with nothing in it would only be a bare label. */
-  main table:has(th:nth-child(3)) td:empty {
-    display: none;
-  }
-  /* Two declarations: a browser that does not parse the alt-text form
-     (`/ ""`) drops the second one whole, and without the first a phone would
-     show stacked cells with no labels at all. Where the second is read, the
-     label has an empty alternative text. */
-  main table:has(th:nth-child(3)) td[data-label]:not(:first-child)::before {
-    content: attr(data-label) ": ";
-    content: attr(data-label) ": " / "";
-    color: var(--ui-text-muted);
-    font-weight: 500;
-  }
-  /* Beside a paragraph or a list the label would be a stray word at the end
-     of the line before: put it on its own line. */
-  main table:has(th:nth-child(3)) td:has(> :is(p, ul, ol, pre, div))::before {
-    display: block;
-  }
+}
+
+/* The copy button sits over the top right corner of a code block, and the end
+   of a long first line was under it even scrolled as far as it goes (the
+   backup file name on Roll back). The first line of the block gets 3rem of
+   padding at its end, and so it ends clear of the button (28px, 11px from the
+   edge). Only the first
+   line: the same padding on the whole block made the blocks that fit scroll
+   sideways for 30px of nothing, and would have stopped a highlighted line
+   short of the edge. And only a block without a title: with one the button is
+   in the title bar, not over the code.
+   Padding on a line does nothing by itself: a long line is text overflowing
+   its box, and a scroll box counts the padding only of a box that overflows.
+   So the code element is made as wide as its longest line (and at least as
+   wide as the block), and a line is as wide as it, padding included. The
+   block's own end padding (1rem) is taken back with a negative margin: left
+   in, a line that ended within 1rem of the edge, which had been shown whole,
+   would scroll for the padding. A block whose first line is the longest, or
+   long enough to reach the button, scrolls the extra, as it must.
+   A block of plain text (no .line spans, a bare string in the code element)
+   has no first line to pad: ::first-line takes no padding. It keeps what it
+   had. */
+main pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  margin-inline-end: -1rem;
+}
+main div:not(:has(> div)) > pre code .line:first-child {
+  padding-inline-end: 3rem;
 }
