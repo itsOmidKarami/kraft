@@ -312,7 +312,7 @@ Page rules:
 - Pages live under `docsite/content/`, one Markdown file per page, with MDC
   syntax for the odd embedded component.
 - A page's route follows its folder, minus the number prefixes:
-  `content/5.reference/03.configuration/3.policy.md` is served at
+  `content/5.reference/03.configuration/03.policy.md` is served at
   `/reference/configuration/policy`. A folder's `index.md` is its landing
   page, and its `.navigation.yml` sets its sidebar title.
 - A nested MDC component block needs one more `:` per level of nesting
@@ -350,7 +350,7 @@ Page rules:
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/05.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/09.mcp-tools.md` |
 | A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/4.agent-integration.md` |
-| A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/9.environment-variables.md` |
+| A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/11.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/4.troubleshooting/1.why-did-my-item-stop.md` (a stop reason; a sandbox, Kit or workspace-member one goes on `docsite/content/4.troubleshooting/5.sandbox-and-kit-stops.md`, with a row in the first page's table), `docsite/content/4.troubleshooting/3.doctor-failures.md` (a doctor check) |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/1.remote-access.md`, and `SECURITY.md` if it's security-relevant |

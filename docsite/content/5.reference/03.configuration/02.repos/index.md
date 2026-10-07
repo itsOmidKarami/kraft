@@ -35,9 +35,9 @@ repos:
 
 A repo that sets no `steering:` gets the [steering profiles](/concepts/vocabulary#steering-profile) its default chain's tasks select, from the library. A repo that sets none of `deny_tools`, `models` or a `policy:` key gets the instance's. `deny_tools` and `policy:` come from `policy.yaml`, and a repo's own list only adds to it.
 
-A repo's `policy:` may tighten the instance's safety layer but not relax it. A draft of `repos.yaml` shows a relaxing value as a problem naming the repo and the field before it is published, the same refusal a run gives.
+A repo's `policy:` may tighten the instance's safety layer but not relax it. A draft of `repos.yaml`, the Settings edit buffer, shows a relaxing value as a problem naming the repo and the field before it is published, the same refusal a run gives.
 
-Each field's source (`repo`, `library` or `default`) comes with the value in the `repos` draft's `resolved` view; see the [HTTP API reference](/reference/http-api).
+Each field's source (`repo`, `library` or `default`) comes with the value in the `resolved` view of the `repos` draft; see [The `resolved` answer for repos](/reference/http-api/draft-ops#the-resolved-answer-for-repos).
 
 ## Fields
 
@@ -66,7 +66,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 | `test_scopes` | list of `{paths, command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. See [`test_scopes`](#test_scopes). |
 | `areas` | mapping of id to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
 | `intent_dir` | string, a relative path | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Kraft does not run the tree's check: add it to the repo's `test_scopes` yourself. |
-| `local_files` | list of strings | `[]` | Relative file paths (no globs, no directories) to copy into every new worktree, for files `git worktree add` cannot carry. See [`local_files`](#local_files). |
+| `local_files` | list of strings | `[]` | Files to copy into every new worktree, for ones `git worktree add` cannot carry: relative paths, no globs or directories, covered by the worktree's `.gitignore`. Anything else is refused, and named in the `worktree_prepared` event (`kraft view events`). |
 
 ### Environment
 
@@ -110,6 +110,14 @@ Before 2.0, this key was `default_chain_template`. It is still read, and saved u
 
 It applies above the harness profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. It is keyed by harness profile because one model name means nothing to another provider. The retired `default_model` key is dropped with a warning.
 
+### `setup_command`
+
+- `""` means "deliberately nothing", which is the **No setup needed** checkbox in Settings › Repos.
+- An absent value stops the repo's next work item rather than guessing.
+- On a [sandboxed](/concepts/vocabulary#sandbox) item it runs as `sh -c` inside the sandbox, never on the host. Without docker the item stops.
+
+[How connect proposes commands](/reference/configuration/repos/connect-proposals) says how connect proposes it.
+
 ### `test_command`
 
 - It runs from the worktree root without a shell.
@@ -119,37 +127,21 @@ It applies above the harness profile's own `defaults:`, below a task's `model:` 
 
 [How connect proposes commands](/reference/configuration/repos/connect-proposals) says how connect proposes it.
 
-### `areas`
-
-An area's test scopes join the repo's and are selected by changed paths the same way. Its `setup` runs once before the first of its scopes runs. Areas are never forge targets.
-
 ### `test_scopes`
 
 Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `sh -c 'cd frontend && npm test'` (what connect proposes) or `npm --prefix frontend test`, not `npm test`.
 
 Kraft does not synthesize `test_scopes` from `test_command`: the two stay independently editable.
 
-### `setup_command`
+### `areas`
 
-- `""` means "deliberately nothing", which is the **No setup needed** checkbox in Settings › Repos.
-- An absent value stops the repo's next work item rather than guessing.
-- On a [sandboxed](/concepts/vocabulary#sandbox) item it runs as `sh -c` inside the sandbox, never on the host. Without docker the item stops.
-
-[How connect proposes commands](/reference/configuration/repos/connect-proposals) says how connect proposes it.
+An area's test scopes join the repo's and are selected by changed paths the same way. Its `setup` runs once before the first of its scopes runs. Areas are never forge targets.
 
 ### `env`
 
 `env` sets literal variables every worker for this repo gets, on top of the worker's allowlist. `env_passthrough` names variables the server already has that the allowlist leaves out. Both are layered on the allowlist, which is not the server's whole environment: [Passed to workers](/reference/configuration/environment-variables#passed-to-workers) lists it, and [Added by the repo](/reference/configuration/environment-variables#added-by-the-repo) says what stays behind unless you name it here.
 
 A sandboxed worker gets none of the allowlist, only what [Sandboxed workers](/reference/configuration/sandbox) lists, which covers the server's proxy, an extra CA, and each `env_passthrough` name, forwarded by name so its value never appears on the `docker` command line.
-
-### `local_files`
-
-Only a file the worktree's `.gitignore` covers is copied. An entry that is not covered, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`).
-
-### `sandbox`
-
-`sandbox` is part of the repository policy layer. [Sandboxed workers](/reference/configuration/sandbox#the-sandbox-key) lists its keys, which go with `kind: docker` and which with `kind: kit`, and says why no chain, node or task can change it.
 
 ### `policy`
 
@@ -162,9 +154,20 @@ It takes any of:
 
 It binds every work item filed in this repo, whatever its chain. A value `policy.yaml` refuses makes [intake](/concepts/vocabulary#intake) refuse the item. See [Policy fields](/reference/configuration/policy#policy-fields).
 
-### `ci_checks`
+### Repository steering
 
-The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It does not touch `mr.automated_review` or `mr.external_approval`.
+`steering: [name, ...]` names steering profiles in `library.yaml`, the same ones a task's `steering:` selects (see the [library reference](/reference/configuration/library-and-chains)). There is no other steering store.
+
+- When a work item is filed, Kraft resolves each name to its steering profile's `instructions` and freezes the text into the item. Editing a steering profile reaches items filed afterwards and never one already filed.
+- Every launch gets the repository's steering profiles first, then the task's, in the agent's system prompt under a `## Project standards` heading, 8 KB at most together.
+- A name the library does not define is refused when the repository is saved (Settings › Repos) and when an item is filed. A library save that removes a steering profile a repository still names is refused too.
+- You write steering profiles in Templates › Library, which edits `library.yaml`.
+
+This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on as a source of process context.
+
+### `sandbox`
+
+`sandbox` is part of the repository policy layer. [Sandboxed workers](/reference/configuration/sandbox#the-sandbox-key) lists its keys, which go with `kind: docker` and which with `kind: kit`, and says why no chain, node or task can change it.
 
 ### Automated review
 
@@ -179,16 +182,9 @@ Unset, the repository expects no automated review: the task settles clean at onc
 
 Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet.
 
-### Repository steering
+### `ci_checks`
 
-`steering: [name, ...]` names steering profiles in `library.yaml`, the same ones a task's `steering:` selects (see the [library reference](/reference/configuration/library-and-chains)). There is no other steering store.
-
-- When a work item is filed, Kraft resolves each name to its steering profile's `instructions` and freezes the text into the item. Editing a steering profile reaches items filed afterwards and never one already filed.
-- Every launch gets the repository's steering profiles first, then the task's, in the agent's system prompt under a `## Project standards` heading, 8 KB at most together.
-- A name the library does not define is refused when the repository is saved (Settings › Repos) and when an item is filed. A library save that removes a steering profile a repository still names is refused too.
-- You write steering profiles in Templates › Library, which edits `library.yaml`.
-
-This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on as a source of process context.
+The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It does not touch `mr.automated_review` or `mr.external_approval`.
 
 ## In this section
 
