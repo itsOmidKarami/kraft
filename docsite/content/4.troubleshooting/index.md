@@ -23,7 +23,8 @@ Find the message you are looking at in the first column, then follow its link.
 
 ## In this section
 
-- [Why did my item stop?](/troubleshooting/why-did-my-item-stop): every stop reason Kraft shows, with its fix, and the two waits that need no stop.
+- [Why did my item stop?](/troubleshooting/why-did-my-item-stop): every other stop reason Kraft shows, with its fix, and the two waits that need no stop.
 - [Starting and reaching Kraft](/troubleshooting/starting-and-reaching-kraft): a missing `kraft` command, a taken port, and a rejected `Host`.
 - [Doctor failures](/troubleshooting/doctor-failures): every row `kraft admin doctor` can print, and how to clear it.
 - [FAQ](/troubleshooting/faq): short answers on what Kraft works with, what it costs, and how to write a spec.
+- [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit and workspace-member stops of a sandboxed item.

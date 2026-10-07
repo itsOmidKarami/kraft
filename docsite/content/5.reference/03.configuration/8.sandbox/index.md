@@ -60,7 +60,7 @@ When a session ends, Kraft moves the item's branch in your repository to where t
 
 A branch Kraft could not move is recorded as a `sandbox_branch_not_synced` event, and its commit is kept at `refs/kraft/unsynced/<branch>`. A setup command sees the copy but never moves a branch.
 
-A HEAD the worker points at another branch, or a rebase, merge or other git operation it leaves in progress, is never acted on: Kraft stops the item and waits for you instead (see [Troubleshooting](/troubleshooting/why-did-my-item-stop#why-did-my-item-stop)).
+A HEAD the worker points at another branch, or a rebase, merge or other git operation it leaves in progress, is never acted on: Kraft stops the item and waits for you instead (see [Troubleshooting](/troubleshooting/why-did-my-item-stop#a-git-operation-is-in-progress)).
 
 ## Workspace members
 
