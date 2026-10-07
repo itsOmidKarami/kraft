@@ -1,0 +1,19 @@
+flowchart TD
+  day["A day, since local midnight<br/>every work item together<br/>budget.daily_usd, dollars"]
+  item["A work item<br/>time, total time, tokens,<br/>dollars, and budget.work_item_usd"]
+  node["A node, a gate included<br/>time, total time,<br/>tokens, dollars"]
+  loop["Its fix loop<br/>attempts, wall clock<br/>not a cap"]
+  step["A step<br/>time, total time,<br/>tokens, dollars"]
+  task["A task<br/>time, total time,<br/>tokens, dollars"]
+  stop(["Whichever runs out first<br/>stops the item and waits<br/>for you, naming its scope"])
+
+  day -->|"contains"| item
+  item -->|"contains"| node
+  node -->|"runs"| loop
+  node -->|"contains"| step
+  step -->|"contains"| task
+  task -->|"a cap at any scope,<br/>the day included"| stop
+
+  classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
+  class day,item,node,loop,step,task,stop box
+  linkStyle default stroke:#7b8494
