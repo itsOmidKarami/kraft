@@ -643,6 +643,12 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     _session(conn, "s5", "w2", "verify", round=0, status="capped_out")
     _event(conn, "w2", "node_completed", {"node_id": "verify"}, _at(1))
     _event(conn, "w2", "node_completed", {"node_id": "land"}, _at(1))
+    # w3: a clean pass. `merge_request_feedback`'s wait on CI runs a session at
+    # round 0 but does no work, so only `verification`'s round counts (R19a-01).
+    _v1_item(conn, "w3", seed.resolve_chain("default"), created=_at(2))
+    _session(conn, "s7", "w3", "verification", round=0)
+    _session(conn, "s8", "w3", "merge_request_feedback", round=0)
+    _event(conn, "w3", "external_wait_observed", {"session_id": "s8"}, _at(1))
     conn.commit()
     try:
         t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
@@ -650,7 +656,7 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
         conn.close()
 
     assert t["mrs_merged"] == 2
-    assert t["fix_cycles"] == pytest.approx(3.0)  # 3 loop rounds / 1 item with a loop
+    assert t["fix_cycles"] == pytest.approx(2.0)  # (3 + 1) loop rounds / 2 items with a loop
     assert t["fix_cycles_capped"] == 1
 
 

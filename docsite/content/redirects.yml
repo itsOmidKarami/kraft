@@ -589,3 +589,11 @@
 /troubleshooting/faq#faq: /get-started/faq
 /get-started/first-work-item#where-to-go-from-here: /get-started/first-work-item#next-steps
 /get-started/install#enable-vector-search: /reference/web-ui/sidebar-search-and-keyboard#vector-search
+/guides/operations#related: /guides/run/restart-kraft#next-steps
+/guides/remote-access#related: /guides/run/remote-access#next-steps
+/guides/schedule-and-webhook-work#related: /guides/customize/schedule-and-webhook-work#next-steps
+/guides/upgrading-templates#related: /guides/run/upgrade-your-configuration#next-steps
+/get-started/why-kraft#next-steps: /get-started/why-kraft#related
+/guides/adding-a-harness#set-up-amp-or-cursor-credentials: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
+/reference/cli/admin#migrating-a-pre-v1-template-configuration: /guides/run/upgrade-from-0-x-or-a-release-candidate#migrating-a-home-from-0x
+/reference/triggers#cron-entries: /reference/triggers#cron-syntax

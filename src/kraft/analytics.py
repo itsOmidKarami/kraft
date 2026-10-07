@@ -28,7 +28,7 @@ import statistics
 from datetime import UTC, datetime, timedelta
 
 from kraft import caps as _caps
-from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.store._common import session_wall_ms, wait_sessions, wait_timed_out_sessions
 from kraft.usage import KINDS, spent
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
@@ -402,7 +402,11 @@ def compute(
     timed_out = wait_timed_out_sessions(conn, ids)
     # So is a time cap's stop (Ruling 194).
     time_capped = _caps.time_capped_sessions(conn, ids)
+    # A fix loop's round is one that did work: a forge wait on CI or review runs
+    # a session in its round too, and is no round of its own.
+    waits = wait_sessions(conn, ids)
     node_rounds: dict[str, set[tuple[str, int]]] = {}
+    worked_rounds: dict[str, set[tuple[str, int]]] = {}
     item_node_rounds: dict[str, set[tuple[str, int]]] = {}
     node_capped_items: dict[str, set[str]] = {}
     for s in sessions:
@@ -450,6 +454,8 @@ def compute(
             totals["cost_estimated"] = True
             by_repo[repo_of[s["work_item_id"]]]["cost_estimated"] = True
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
+        if s["id"] not in waits:
+            worked_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 
         for k in KINDS:
@@ -471,7 +477,7 @@ def compute(
     roles = {r["id"]: _node_roles(r) for r in items}
     loop_rounds = {
         (wid, node_id, rnd)
-        for node_id, seen in node_rounds.items()
+        for node_id, seen in worked_rounds.items()
         for wid, rnd in seen
         # The repair pass (`_REPAIR_ROUND`, below 0) is no round of its own.
         if node_id in roles[wid][1] and rnd >= 0

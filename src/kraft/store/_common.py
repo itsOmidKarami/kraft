@@ -67,6 +67,23 @@ def session_wall_ms(row, now: str | None = None) -> int | None:
     return _span_ms(row["started_at"] or row["created_at"], row["exited_at"] or now or _now())
 
 
+def wait_sessions(conn, work_item_ids) -> set[str]:
+    """The sessions among `work_item_ids`' that ran an external wait (a forge
+    task watching CI, a review, a merge): each observation it made names it in
+    an `external_wait_observed` record (`kraft.waits`). Such a session waits;
+    it does no work of its own."""
+    ids = list(work_item_ids)
+    if not ids:
+        return set()
+    rows = conn.execute(
+        "SELECT DISTINCT json_extract(payload, '$.session_id') AS sid FROM events "
+        f"WHERE work_item_id IN ({','.join('?' * len(ids))}) "
+        "AND type = 'external_wait_observed'",
+        ids,
+    ).fetchall()
+    return {r["sid"] for r in rows if r["sid"]}
+
+
 def wait_timed_out_sessions(conn, work_item_ids) -> set[str]:
     """The sessions among `work_item_ids`' that ended because an external
     wait timed out. Such a session exits `capped_out`, the status a fix loop's
