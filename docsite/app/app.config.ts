@@ -51,7 +51,7 @@ export default defineAppConfig({
       // when it works that out, so one long code span in a cell kept the
       // column wide and 126 of 252 tables scrolled sideways at 390px.
       // wrap-anywhere does count it, so the column can shrink to fit. Under
-      // 640px, and only in a table of two columns: a span of up to 14
+      // 768px, and only in a table of two columns: a span of up to 14
       // characters stays whole (ProseCode adds code-long above that;
       // work_item_id was cut to work / _ite / m_id on Events, with room to
       // spare) and only a long one may break. "Whole" needs nowrap: the
@@ -65,7 +65,7 @@ export default defineAppConfig({
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-sm:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-sm:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
+          base: 'max-md:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-md:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened

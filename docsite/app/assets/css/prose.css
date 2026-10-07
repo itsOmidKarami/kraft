@@ -90,12 +90,14 @@
    is read down a column ("which harness resumes?"), as seven blocks the
    comparison is gone, so it keeps scrolling in its own box with the edge
    shadow (.scroll-hint).
-   From 640px up nothing here applies.
+   From 768px up nothing here applies. The line was 640px, but the content
+   column at 700px (a phone on its side) is 637px wide and nine
+   three- and four-column tables were wider than that and scrolled.
    Table semantics survive the display change in two ways: the header row is
    only moved out of sight (not display: none), and the label is generated
    content with an empty alternative text, so a screen reader hears the real
    column header once and not the label as well. */
-@media (max-width: 639px) {
+@media (max-width: 767px) {
   main table:is(
       :has(th:nth-child(3)):not(:has(th:nth-child(6))),
       :not(:has(th:nth-child(3))):has(td:first-child code.code-long)
