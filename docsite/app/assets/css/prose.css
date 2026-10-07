@@ -247,3 +247,21 @@ main div:not(:has(> div)) > pre code .line:first-child {
     white-space: nowrap;
   }
 }
+
+/* The harness matrix (seven columns) scrolls sideways in its box on a phone
+   and at a window width of 1024 to 1056px, and its first column, the name of
+   the row, went out of view with the rest: at Resume or Fallback nothing said
+   which harness the cell belonged to. The first column stays at the left edge.
+   A cell that slides under it must not show through, so each is as opaque as
+   what is behind it (the header row is bg-muted, the body the page: the same
+   tokens, so it follows the colour mode). The cells' own borders move with
+   them, so the edge of the column stays drawn. */
+main table:has(th:nth-child(6)) :is(th, td):first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--ui-bg);
+}
+main table:has(th:nth-child(6)) th:first-child {
+  background: var(--ui-bg-muted);
+}
