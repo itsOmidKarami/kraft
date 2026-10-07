@@ -9,6 +9,8 @@ Checks every line inside a `bash`, `sh`, `shell`, `zsh` or `console` fence of
 docsite/content/: it fails if the line starts with `#` or has a `#` after
 whitespace outside single and double quotes. A `#` inside quotes or in a URL
 fragment (`/page#heading`) passes; a YAML, JSON or other fence is not read.
+A `#` in a heredoc's body is read as a comment too: no docs page has a
+heredoc, and one that needs it belongs in a file block, not a pasted one.
 
 Run directly: `uv run python dev/check_docs_shell.py`. Exits 1 on any finding.
 """
