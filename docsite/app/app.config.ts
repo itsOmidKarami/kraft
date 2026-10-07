@@ -84,9 +84,14 @@ export default defineAppConfig({
       },
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.
+      // The copy button sits over the block's top right corner (28px, 11px
+      // from the edge), and the end of a long first line was under it even
+      // scrolled as far as it goes (the backup file name on Roll back). 48px
+      // of padding at the end of the scroll leaves that line's last character
+      // clear of the button, at every width.
       pre: {
         slots: {
-          base: 'whitespace-pre wrap-normal',
+          base: 'whitespace-pre wrap-normal pe-12',
         },
       },
       // Seven agent tabs don't fit a phone, and each label truncated to a
