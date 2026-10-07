@@ -166,7 +166,7 @@ export function AnalyticsPage() {
                         <td className="an-num">{r.items}</td>
                         <td className="an-num">{r.done}</td>
                         <td className="an-num an-strong">{usd(r.cost_usd, r.cost_complete)}</td>
-                        <td className="an-num">{r.cycles}</td>
+                        <td className="an-num">{r.cycles.toFixed(1)}</td>
                       </tr>
                     ))}
                   </tbody>

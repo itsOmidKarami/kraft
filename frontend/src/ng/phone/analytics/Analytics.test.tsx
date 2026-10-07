@@ -68,7 +68,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByText("18 runs")).toBeInTheDocument();
     expect(screen.getByText("kraft-plugins")).toBeInTheDocument();
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
-    expect(screen.getByText("8 items · 6 done · avg repairs 3")).toBeInTheDocument();
+    expect(screen.getByText("8 items · 6 done · avg repairs 3.0")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
     expect(screen.getByText(/Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/)).toBeInTheDocument();
     expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();

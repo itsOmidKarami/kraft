@@ -69,7 +69,7 @@ export function Analytics() {
                       {report.by_repo.map((r) => (
                         <div key={r.repo} className="ph-stat-row">
                           <span className="ph-stat-name">{repoName(r.repo)}</span>
-                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg repairs {r.cycles}</span>
+                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg repairs {r.cycles.toFixed(1)}</span>
                           <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}</span>
                         </div>
                       ))}

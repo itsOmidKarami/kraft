@@ -12,7 +12,7 @@ const REPORT: Analytics = {
   totals: { work_items: 42, work_items_run: 39, by_status: {}, mrs_merged: 27, wall_ms: 3e8, human_wait_ms: 8e7, tokens_in: 3.9e7, tokens_out: 4.2e6, cost_usd: 212.4, cost_complete: true, rounds: 140, capped_out: 6, completed: 30, completed_prev: 22, median_lead_ms: 5.6e6, human_wait_pct: 25, fix_cycles: 1.5, fix_cycles_capped: 6, rejected_gates: 9, unplanned_touches_per_item: 1.25, open_mr_to_green_ci_ms: 1.2e6 },
   weekly_merged: [],
   by_node: [{ node: "implementation", runs: 30, wall_ms: 4e7, avg_ms: 1.2e6, tokens: 4e6, cost_usd: 21.5, cost_complete: true, rounds: 12, capped_out: 0 }],
-  by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 2.5 }],
+  by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 2 }],
   rejected_gates_by_gate: [],
   stop_reasons: [{ label: "agent needs context", n: 2 }],
 };
@@ -49,6 +49,7 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByText("median create → completion · 25% waiting on you")).toBeInTheDocument();
     expect(screen.getByText("1.5 repairs per item that needed one · 6 capped · 9 rejected gates")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "avg repairs" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "2.0" })).toBeInTheDocument();
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {

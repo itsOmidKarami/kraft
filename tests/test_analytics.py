@@ -676,13 +676,14 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
     # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
     _session(conn, "s5", "w2", "verify", round=0, status="capped_out")
+    _session(conn, "s10", "w2", "verify", round=1)
     _event(conn, "w2", "node_completed", {"node_id": "verify"}, _at(1))
     _event(conn, "w2", "node_completed", {"node_id": "land"}, _at(1))
     # w3: a clean pass. `merge_request_feedback`'s wait on CI runs a session at
-    # round 0 but does no work, so only `verification`'s round counts (R19a-01).
+    # round 1 but does no work, so it is no repair (R19a-01).
     _v1_item(conn, "w3", seed.resolve_chain("default"), created=_at(2))
     _session(conn, "s7", "w3", "verification", round=0)
-    _session(conn, "s8", "w3", "merge_request_feedback", round=0)
+    _session(conn, "s8", "w3", "merge_request_feedback", round=1)
     _event(conn, "w3", "external_wait_observed", {"session_id": "s8"}, _at(1))
     conn.commit()
     try:
