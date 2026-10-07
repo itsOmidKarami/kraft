@@ -231,3 +231,19 @@ main pre code {
 main div:not(:has(> div)) > pre code .line:first-child {
   padding-inline-end: 3rem;
 }
+
+/* Where tables are tables (text column of 738px or more), a name in the first
+   column was cut at a hyphen or a dot in a column of 123 to 173px: `item
+   raise-` / `budget`, `--start-` / `side`, `providers.<id>.` / `model` (42
+   names on 16 pages at 1280px). A name the reader looks up stays whole, up
+   to 26 characters: a third of the narrowest table, 738px. A longer one
+   (ProseCode adds code-wide) wraps as it did, and gives way to the other
+   columns. 36 characters, and a width cap in place of the count, were tried
+   and did not work: the stop reasons table on Why did my item stop has a
+   Fix column that cannot narrow below 473px, and a first column of 28
+   characters held whole made it scroll, 62px over at 1280px. */
+@container prose (width >= 738px) {
+  main td:first-child code:not(.code-wide) {
+    white-space: nowrap;
+  }
+}
