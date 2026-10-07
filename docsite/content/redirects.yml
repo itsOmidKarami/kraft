@@ -428,3 +428,9 @@
 /project/contributing#cut-a-release-maintainers: /project/contributing#contribute-a-change
 /project/contributing#related: /project/contributing#next-steps
 /project/whats-new#looking-ahead: /project/whats-new
+/reference/cli/item#target-a-repo: /reference/cli/item#filing-a-work-item
+/reference/cli/repo#repo-settings: /reference/cli/repo#related
+/reference/web-ui/board#keyboard: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
+/reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
+/reference/events#test_scopes_selected: /reference/events#chain-and-nodes
+/reference/events#notes-on-node_id: /reference/events
