@@ -31,10 +31,13 @@ export default defineAppConfig({
     // that differ only after the cut read the same. Wrap it. whitespace-normal
     // only breaks at spaces, so one long identifier
     // (work_item_changed_test_selection) was still cut at the box's edge;
-    // wrap-anywhere lets it break there too.
+    // break-words lets it break there too. Not wrap-anywhere, which broke
+    // every identifier at the edge of the line it started on (remove_handl /
+    // er) even where it would have fit whole on a line of its own: break-words
+    // moves it to its own line first and breaks only a name longer than that.
     contentToc: {
       slots: {
-        linkText: 'whitespace-normal! wrap-anywhere',
+        linkText: 'whitespace-normal! break-words',
       },
     },
     prose: {

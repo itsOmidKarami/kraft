@@ -16,12 +16,55 @@
    the text can be read and scroll sideways inside their own paragraph. The
    SVGs state no pixel width, so the overlay cannot show them larger than the
    screen; the tap is switched off, as the diagram is already readable here.
-   structure.svg is portrait and fits as it was. */
+   structure.svg is portrait and fits as it was.
+
+   Nothing showed that the diagram goes on to the right. The table's edge
+   shadow (.scroll-hint) is a background of the scrolling box, and the
+   diagram's own white background painted over it. So here the shadows are two
+   strips drawn on top (the paragraph's ::before and ::after, sticky at its
+   left and right edge, so they stay put while the diagram scrolls under them)
+   and a scroll-driven animation shows each only while there is diagram past
+   that edge: the left one fades in over the first 2rem scrolled, the right
+   one fades out over the last 2rem. A browser without scroll-driven
+   animations shows the right one all the time and never the left, which is
+   still true at the start and a harmless hint at the end. The paragraph is a
+   flex box so that the strips take their height from it. */
 @media (max-width: 639px) {
+  @keyframes diagram-edge {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"])) {
+    display: flex;
     overflow-x: auto;
   }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::before,
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::after {
+    content: "";
+    flex: none;
+    position: sticky;
+    z-index: 1;
+    width: 0.75rem;
+    pointer-events: none;
+    animation: diagram-edge linear both;
+    animation-timeline: scroll(nearest inline);
+  }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::before {
+    left: 0;
+    margin-right: -0.75rem;
+    background: radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.3), transparent);
+    opacity: 0;
+    animation-range: 0 2rem;
+  }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::after {
+    right: 0;
+    margin-left: -0.75rem;
+    background: radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.3), transparent);
+    animation-direction: reverse;
+    animation-range: calc(100% - 2rem) 100%;
+  }
   main img[src*="/diagrams/"]:not([src$="/structure.svg"]) {
+    flex: none;
     width: 1100px;
     max-width: none;
     pointer-events: none;
