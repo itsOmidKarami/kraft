@@ -86,8 +86,18 @@ def test_anchors_are_the_ids_the_site_gives_headings(cr, content):
         "/get-started/install#moved: /guides/vscode#_2-connect\n",
         # A section of a page that itself moved.
         "/guides/old: /guides/vscode\n/guides/old#moved: /get-started/install#upgrading\n",
+        # A heading that starts with a digit has the underscore the site gives it.
+        "/guides/vscode#_5-check-it: /guides/vscode#install\n",
     ],
-    ids=["empty", "comment", "page", "page-to-section", "section", "section-of-moved-page"],
+    ids=[
+        "empty",
+        "comment",
+        "page",
+        "page-to-section",
+        "section",
+        "section-of-moved-page",
+        "source-anchor-of-a-digit-heading",
+    ],
 )
 def test_a_sound_map_passes(cr, content, map_text):
     links = ["/guides/vscode#install", "/get-started", "/get-started/install#upgrading"]
@@ -129,6 +139,18 @@ def test_a_missing_map_is_an_empty_one(cr, content):
         ("/guides/old: /guides/vscode  # moved\n", "redirects.yml:1: not an entry"),
         ("/robots.txt: /guides/vscode\n", "redirects.yml:1: not an entry"),
         ("/guides/old: /guides/vscode.md\n", "redirects.yml:1: not an entry"),
+        (
+            "/guides/vscode#5-check-it: /guides/vscode#install\n",
+            "/guides/vscode#5-check-it has an anchor the site never generates",
+        ),
+        (
+            "/guides/vscode#a--b: /guides/vscode#install\n",
+            "/guides/vscode#a--b has an anchor the site never generates",
+        ),
+        (
+            "/guides/vscode#a-: /guides/vscode#install\n",
+            "/guides/vscode#a- has an anchor the site never generates",
+        ),
     ],
     ids=[
         "target-page-missing",
@@ -145,10 +167,64 @@ def test_a_missing_map_is_an_empty_one(cr, content):
         "trailing-comment",
         "source-is-a-file",
         "target-is-a-file",
+        "source-anchor-without-underscore",
+        "source-anchor-double-hyphen",
+        "source-anchor-trailing-hyphen",
     ],
 )
 def test_a_bad_entry_is_reported(cr, content, map_text, expected):
     problems = _problems(cr, content, map_text)
+    assert len(problems) == 1
+    assert expected in problems[0]
+
+
+def _page_problems(cr, content: Path, map_text: str, text: str) -> list[str]:
+    (content / cr.MAP_NAME).write_text(map_text)
+    write(content, "9.links/1.page.md", f"## Here\n\n{text}\n")
+    site = cr.pages(content)
+    return cr.check_page_links(content, cr.read_map(content / cr.MAP_NAME)[0], site)
+
+
+@pytest.mark.parametrize(
+    ("map_text", "text"),
+    [
+        ("", "[a](/guides/vscode#install)"),
+        ("", "[a](/guides/vscode#_2-connect) and [b](/get-started/)"),
+        ("", "[a](#here)"),
+        ("", "![a](/assets/shot.png) and [b](/diagrams/x.svg) and [c](https://x.dev/y#z)"),
+        # The map forwards only an address that is no longer a page.
+        ("/guides/old: /guides/vscode\n", "[a](/guides/vscode#install)"),
+    ],
+    ids=["heading", "digit-heading", "in-page", "not-a-page", "map-leaves-a-live-page"],
+)
+def test_a_link_between_pages_that_lands_passes(cr, content, map_text, text):
+    assert _page_problems(cr, content, map_text, text) == []
+
+
+@pytest.mark.parametrize(
+    ("map_text", "text", "expected"),
+    [
+        ("", "[a](/guides/vscode#nope)", "9.links/1.page.md:3: /guides/vscode#nope is not a page"),
+        ("", "[a](/guides/gone)", "9.links/1.page.md:3: /guides/gone is not a page"),
+        ("", "[a](/guides/vscode#2-connect)", "/guides/vscode#2-connect is not a page"),
+        ("", "[a](#nope)", "#nope is not a page and heading"),
+        (
+            "/guides/old: /guides/vscode\n",
+            "[a](/guides/old#install)",
+            "/guides/old#install is forwarded by redirects.yml: write ](/guides/vscode#install)",
+        ),
+        (
+            "/get-started/install#moved: /guides/vscode#install\n",
+            "[a](/get-started/install#moved)",
+            "write ](/guides/vscode#install)",
+        ),
+    ],
+    ids=["no-heading", "no-page", "digit-without-underscore", "in-page", "forwarded", "section"],
+)
+def test_a_link_between_pages_that_lands_nowhere_or_is_forwarded_is_reported(
+    cr, content, map_text, text, expected
+):
+    problems = _page_problems(cr, content, map_text, text)
     assert len(problems) == 1
     assert expected in problems[0]
 
