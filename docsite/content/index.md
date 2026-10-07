@@ -46,7 +46,7 @@ links:
 
 ::u-page-section
 ---
-title: A gate stops the chain where a human decides
+title: A gate stops the chain where a person decides
 description: Read what the agent wrote, then approve, or reject with a note that re-runs the node that wrote it.
 orientation: horizontal
 reverse: true
@@ -74,6 +74,11 @@ title: Analytics
 description: See where lead time and cost go, by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days).
 orientation: horizontal
 reverse: true
+links:
+  - label: The Analytics screen
+    to: /reference/web-ui/analytics
+    color: neutral
+    variant: outline
 ---
 ![The Analytics view over the last 8 weeks: completed count, median lead time and cost; merged items per week; the top of the cost-by-node table](/assets/analytics.png)
 ::
@@ -103,7 +108,7 @@ ui:
   wrapper: text-left items-start
   title: text-left
 ---
-Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` chain also needs a GitHub or GitLab remote. [Install](/get-started/install) lists the rest.
+Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` chain also needs a GitHub or GitLab remote. [Install](/get-started/install) lists the rest. Before you run it on real code, read [Security](/project/security) and [Data and privacy](/project/data-and-privacy).
 
 :::u-page-list
 ---
@@ -139,6 +144,15 @@ variant: ghost
 
 ::::u-page-card
 ---
+to: /troubleshooting
+title: Troubleshooting
+description: Why an item stopped, and what to do about it.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
 to: /concepts
 title: Concepts
 description: Vocabulary, caps and budgets, and why Kraft has a permission gate.
@@ -160,24 +174,6 @@ variant: ghost
 to: /reference
 title: Reference
 description: The CLI, every configuration file, chain nodes, permissions, harnesses, and triggers.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /project/security
-title: Security
-description: The threat model, and what a fresh install does before you change a setting.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /project/data-and-privacy
-title: Data and privacy
-description: What leaves your machine, and where Kraft keeps secrets and state.
 variant: ghost
 ---
 ::::

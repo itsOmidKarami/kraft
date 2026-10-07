@@ -9,16 +9,19 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 
 ## Where to start
 
-- **You have just installed Kraft and nothing is connected.** Follow [The first run](/guides/day-to-day/first-run), then [File a work item](/guides/day-to-day/file-a-work-item).
+- **You have just installed Kraft and nothing is connected.** Follow [Your first work item](/get-started/first-work-item) from a terminal or your agent, or [The setup wizard on first start](/guides/day-to-day/first-run) in the web UI. Then read [File a work item](/guides/day-to-day/file-a-work-item).
+- **A work item is waiting at a gate, or you want to comment on one.** Read [Reviewing a change](/guides/day-to-day/review-a-change).
 - **You work in a coding agent and want to drive Kraft from it.** Read [Use Kraft from your agent](/guides/day-to-day/agent-integration).
 - **An item stopped on a cap.** Read [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap).
+- **You want the board on your phone.** Read [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone), then [Remote access](/guides/run/remote-access).
+- **You are upgrading Kraft, backing it up, or going back a version.** Read [Upgrade Kraft](/guides/run/upgrade-kraft), [Back up and restore the database](/guides/run/back-up-and-restore) or [Roll back to 1.4](/guides/run/roll-back).
 - **You want to change the chain, a [harness](/concepts/vocabulary#harness) or the server.** Pick from the groups below.
 
 ## In this section
 
 ### Day to day
 
-- [The first run](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
+- [The setup wizard on first start](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
 - [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
 - [Reviewing a change](/guides/day-to-day/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
@@ -42,12 +45,12 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 
 ### Run the server
 
-- [Remote access](/guides/run/remote-access): approve or reject a gate from a phone, over a tunnel.
+- [Remote access](/guides/run/remote-access): reach the board from a phone or another machine, over Tailscale, your local network or a tunnel, with a password.
 - [Restart Kraft without ending running agents](/guides/run/restart-kraft): pause the items that have an agent running, restart the server, and resume them.
 - [Back up and restore the database](/guides/run/back-up-and-restore): copy the database while the server runs, restore it, and use the copy Kraft makes before an upgrade.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
 - [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
-- [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, and pin a version.
+- [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, pin a version, and roll back to an earlier 2.x release.
 - [Upgrade your configuration](/guides/run/upgrade-your-configuration): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
 - [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, the steps to update from it, and how to upgrade from a release candidate or an older release.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.

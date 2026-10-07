@@ -2,6 +2,7 @@
 The conformance set is `tests/fixtures/kit/<SPEC_TAG's milestone>/`."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -277,10 +278,7 @@ def test_the_documented_worker_kit_lowers_as_the_guide_says():
     guide = (
         Path(__file__).parents[2] / "docsite/content/3.guides/3.harnesses/3.worker-kit.md"
     ).read_text()
-    shown = next(
-        block.removeprefix("yaml\n")
-        for block in guide.split("```")
-        if block.startswith("yaml\n# syntax=docker/sandbox-kit:3")
-    )
+    # The fence may carry a file name as its title: ```yaml [name.yaml]
+    shown = re.search(r"```yaml[^\n]*\n(# syntax=docker/sandbox-kit:3.*?)```", guide, re.S).group(1)
     fixture = FIXTURES / "kraft" / "egress-credential-resources.yaml"
     assert kit.decode(shown) == kit.decode(fixture.read_text())
