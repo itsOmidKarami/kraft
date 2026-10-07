@@ -94,107 +94,245 @@
   }
 }
 
-/* When the text is narrow, a table of three to five columns is a list of blocks, and so is
-   a two-column table whose first column holds a long name (a code span of more
-   than 14 characters: ProseCode.vue adds code-long). Squeezed into 343px the
-   first column was about 40px wide and the name a reader looks up
-   (`max_concurrent`, `item escalate --message TEXT`) was cut into pieces, and
-   the tables that did fit ran two or three screens of narrow cells with a fix
-   far from its symptom. Each row is now one block: the first cell is its
-   heading, whole, and every other cell is a line that starts with its
-   column's header (data-label, written when the page is rendered:
-   ProseTd.vue). A two-column table with short names stays a table, and so
+/* A table that does not fit the text is a list of blocks, and so, for the same
+   reason, is a table of two columns whose first column holds a long name (a
+   code span of more than 14 characters: ProseCode.vue adds code-long).
+   Squeezed into 343px the first column was about 40px wide and the name a
+   reader looks up (`max_concurrent`, `item escalate --message TEXT`) was cut
+   into pieces, and the tables that did fit ran two or three screens of narrow
+   cells with a fix far from its symptom. Each row is now one block: the first
+   cell is its heading, whole, and every other cell is a line that starts with
+   its column's header (data-label, written when the page is rendered:
+   ProseTd.vue). A two-column table with short names never stacks, and nor
    does a matrix of six or more columns (the seven-column harness table): it
    is read down a column ("which harness resumes?"), as seven blocks the
    comparison is gone, so it keeps scrolling in its own box with the edge
    shadow (.scroll-hint).
-   "Narrow" is the width of the text column, not of the window (the page body
-   is a size container: app.config.ts, pageBody; and not the table's own box,
-   which a list item makes 30px narrower, so a table that fits at 1280px
-   would stack in a list). The line was the window at 768px, then 640px, and
-   both missed in two places. At 700px (a phone on its side) the text is 652px
-   and nine tables were wider than that. At 1024px the sidebar and the
-   contents column appear and the text drops from 975px to 600px, and 19
-   tables on 13 pages scrolled in their box, up to 138px over, because the
-   window said "desktop". The widest table that can stack needs 738px
-   (sandbox-yaml); the text is 744px at 1248px and 764px at 1280px, so under
-   738px a table stacks and from there up it is a table, at every window
-   width.
+
+   "Does not fit" is measured on the text column, not the window (the page
+   body is a size container: app.config.ts, pageBody; and not the table's own
+   box, which a list item makes 30px narrower), and by the shape of the table,
+   because a table of five columns needs more room than one of three. The
+   narrowest text each table can be a table in (its columns at their narrowest,
+   a name in the first one whole, and a list item's indent) was measured on all
+   389, and each group stacks under what its tables need:
+     two columns, long name   up to 498px     under 500px
+     three columns            up to 696px     see below
+     four columns             up to 738px     see below
+     five columns             up to 697px     under 700px
+   The text is 600px wide in a 1024px window (the sidebar and the contents
+   column take the rest) and 764px at 1280px, 744px at 1248px. A window with a
+   sidebar is a laptop, and there one rule for every table of three or four
+   columns would stack all of them for the sake of a few: 7 of 95 three-column
+   tables need more than 600px (Why did my item stop 7, Events 2 and 13,
+   Environment variables, Caps and budgets, Policy 2, Upgrade from 1.4) and 6
+   of 69 four-column ones (Sandbox YAML, Harness files 4, Data and privacy,
+   Policy 3 and 4, Work items 1). So under 1024px, where the text follows the
+   window and a phone on its side is 652px, a table of three or four columns
+   stacks under 740px and none scrolls; from 1024px up it is a table at any
+   width the sidebar leaves (600px and over), and those few scroll in their
+   box with the edge shadow, as they did before.
    Table semantics survive the display change in two ways: the header row is
    only moved out of sight (not display: none), and the label is generated
    content with an empty alternative text, so a screen reader hears the real
    column header once and not the label as well. */
-@container prose (width < 738px) {
-  main table:is(
-      :has(th:nth-child(3)):not(:has(th:nth-child(6))),
-      :not(:has(th:nth-child(3))):has(td:first-child code.code-long)
-    ) {
-    display: block;
-    border-radius: 0;
-
-    & :is(tbody, tr) {
+@container prose (width < 500px) {
+  main table:is(:not(:has(th:nth-child(3))):has(td:first-child code.code-long)) {
       display: block;
-    }
-    & thead {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-    }
-    & tr {
-      margin-bottom: 0.5rem;
-      padding: 0.375rem 0.25rem;
-      border: 1px solid var(--ui-border-muted);
-      border-radius: var(--ui-radius);
-    }
-    & td {
-      display: block;
-      padding: 0.125rem 0.5rem;
-      border: 0;
       border-radius: 0;
-    }
-    /* The heading: the first cell, whole, with no label. */
-    & td:first-child {
-      padding-bottom: 0.25rem;
-      font-weight: 600;
-    }
-    /* A cell with nothing in it would only be a bare label. */
-    & td:empty {
-      display: none;
-    }
-    /* Two declarations: a browser that does not parse the alt-text form
-       (`/ ""`) drops the second one whole, and without the first a phone would
-       show stacked cells with no labels at all. Where the second is read, the
-       label has an empty alternative text. */
-    & td[data-label]:not(:first-child)::before {
-      content: attr(data-label) ": ";
-      content: attr(data-label) ": " / "";
-      color: var(--ui-text-muted);
-      font-weight: 500;
-    }
-    /* Beside a paragraph or a list the label would be a stray word at the end
-       of the line before: put it on its own line. */
-    & td:has(> :is(p, ul, ol, pre, div))::before {
+
+      & :is(tbody, tr) {
+        display: block;
+      }
+      & thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      & tr {
+        margin-bottom: 0.5rem;
+        padding: 0.375rem 0.25rem;
+        border: 1px solid var(--ui-border-muted);
+        border-radius: var(--ui-radius);
+      }
+      & td {
+        display: block;
+        padding: 0.125rem 0.5rem;
+        border: 0;
+        border-radius: 0;
+      }
+      /* The heading: the first cell, whole, with no label. */
+      & td:first-child {
+        padding-bottom: 0.25rem;
+        font-weight: 600;
+      }
+      /* A cell with nothing in it would only be a bare label. */
+      & td:empty {
+        display: none;
+      }
+      /* Two declarations: a browser that does not parse the alt-text form
+         (`/ ""`) drops the second one whole, and without the first a phone would
+         show stacked cells with no labels at all. Where the second is read, the
+         label has an empty alternative text. */
+      & td[data-label]:not(:first-child)::before {
+        content: attr(data-label) ": ";
+        content: attr(data-label) ": " / "";
+        color: var(--ui-text-muted);
+        font-weight: 500;
+      }
+      /* Beside a paragraph or a list the label would be a stray word at the end
+         of the line before: put it on its own line. */
+      & td:has(> :is(p, ul, ol, pre, div))::before {
+        display: block;
+      }
+      /* In a block of two cells the second one's label is the same word on every
+         block ("Effect:", "What it does:") and the block already reads as a name
+         and what it means, so it has none. The screen reader still gets the
+         header from the table. */
+      &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
+        content: none;
+      }
+  }
+}
+
+@container prose (width < 700px) {
+  main table:is(:has(th:nth-child(5)):not(:has(th:nth-child(6)))) {
       display: block;
-    }
-    /* In a block of two cells the second one's label is the same word on every
-       block ("Effect:", "What it does:") and the block already reads as a name
-       and what it means, so it has none. The screen reader still gets the
-       header from the table. */
-    &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
-      content: none;
+      border-radius: 0;
+
+      & :is(tbody, tr) {
+        display: block;
+      }
+      & thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      & tr {
+        margin-bottom: 0.5rem;
+        padding: 0.375rem 0.25rem;
+        border: 1px solid var(--ui-border-muted);
+        border-radius: var(--ui-radius);
+      }
+      & td {
+        display: block;
+        padding: 0.125rem 0.5rem;
+        border: 0;
+        border-radius: 0;
+      }
+      /* The heading: the first cell, whole, with no label. */
+      & td:first-child {
+        padding-bottom: 0.25rem;
+        font-weight: 600;
+      }
+      /* A cell with nothing in it would only be a bare label. */
+      & td:empty {
+        display: none;
+      }
+      /* Two declarations: a browser that does not parse the alt-text form
+         (`/ ""`) drops the second one whole, and without the first a phone would
+         show stacked cells with no labels at all. Where the second is read, the
+         label has an empty alternative text. */
+      & td[data-label]:not(:first-child)::before {
+        content: attr(data-label) ": ";
+        content: attr(data-label) ": " / "";
+        color: var(--ui-text-muted);
+        font-weight: 500;
+      }
+      /* Beside a paragraph or a list the label would be a stray word at the end
+         of the line before: put it on its own line. */
+      & td:has(> :is(p, ul, ol, pre, div))::before {
+        display: block;
+      }
+      /* In a block of two cells the second one's label is the same word on every
+         block ("Effect:", "What it does:") and the block already reads as a name
+         and what it means, so it has none. The screen reader still gets the
+         header from the table. */
+      &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
+        content: none;
+      }
+  }
+}
+
+@media (max-width: 1023px) {
+  @container prose (width < 740px) {
+    main table:is(:has(th:nth-child(3)):not(:has(th:nth-child(4))),
+          :has(th:nth-child(4)):not(:has(th:nth-child(5))),
+          :has(th:nth-child(5)):not(:has(th:nth-child(6)))) {
+        display: block;
+        border-radius: 0;
+
+        & :is(tbody, tr) {
+          display: block;
+        }
+        & thead {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+        & tr {
+          margin-bottom: 0.5rem;
+          padding: 0.375rem 0.25rem;
+          border: 1px solid var(--ui-border-muted);
+          border-radius: var(--ui-radius);
+        }
+        & td {
+          display: block;
+          padding: 0.125rem 0.5rem;
+          border: 0;
+          border-radius: 0;
+        }
+        /* The heading: the first cell, whole, with no label. */
+        & td:first-child {
+          padding-bottom: 0.25rem;
+          font-weight: 600;
+        }
+        /* A cell with nothing in it would only be a bare label. */
+        & td:empty {
+          display: none;
+        }
+        /* Two declarations: a browser that does not parse the alt-text form
+           (`/ ""`) drops the second one whole, and without the first a phone would
+           show stacked cells with no labels at all. Where the second is read, the
+           label has an empty alternative text. */
+        & td[data-label]:not(:first-child)::before {
+          content: attr(data-label) ": ";
+          content: attr(data-label) ": " / "";
+          color: var(--ui-text-muted);
+          font-weight: 500;
+        }
+        /* Beside a paragraph or a list the label would be a stray word at the end
+           of the line before: put it on its own line. */
+        & td:has(> :is(p, ul, ol, pre, div))::before {
+          display: block;
+        }
+        /* In a block of two cells the second one's label is the same word on every
+           block ("Effect:", "What it does:") and the block already reads as a name
+           and what it means, so it has none. The screen reader still gets the
+           header from the table. */
+        &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
+          content: none;
+        }
     }
   }
+}
 
-  /* In a table of two columns that stays a table, a code span of up to 14
-     characters stays whole (ProseCode adds code-long above that: work_item_id
-     was cut to work / _ite / m_id on Events, with room to spare) and only a
-     long one may break. "Whole" needs nowrap: the span's max-w-full lets its
-     column shrink below it, and a name with a hyphen (--description) then
-     broke at the hyphen. wrap-anywhere is what lets the column of a long span
-     shrink at all (see prose.table in app.config.ts). */
-  main table:not(:has(th:nth-child(3))) code.code-long {
+@container prose (width < 738px) {
+  /* In a table of two columns, a code span of up to 14 characters stays whole
+     (ProseCode adds code-long above that: work_item_id was cut to work / _ite /
+     m_id on Events, with room to spare) and only a long one may break, unless
+     it is the name in the first column, which the rule at the end of this file
+     keeps whole. "Whole" needs nowrap: the span's max-w-full lets its column
+     shrink below it, and a name with a hyphen (--description) then broke at the
+     hyphen. wrap-anywhere is what lets the column of a long span shrink at all
+     (see prose.table in app.config.ts). */
+  main table:not(:has(th:nth-child(3))) td:not(:first-child) code.code-long {
     overflow-wrap: anywhere;
   }
   main table:not(:has(th:nth-child(3))) code:not(.code-long) {
@@ -250,20 +388,18 @@ main div:not(:has(> div)) > pre code .line:first-child {
   padding-inline-end: 3rem;
 }
 
-/* Where tables are tables (text column of 738px or more), a name in the first
+/* In a table that is a table, a name in the first
    column was cut at a hyphen or a dot in a column of 123 to 173px: `item
    raise-` / `budget`, `--start-` / `side`, `providers.<id>.` / `model` (42
    names on 16 pages at 1280px). A name the reader looks up stays whole, up
-   to 26 characters: a third of the narrowest table, 738px. A longer one
+   to 26 characters: a third of a 738px table, less the cell's padding. A longer one
    (ProseCode adds code-wide) wraps as it did, and gives way to the other
    columns. 36 characters, and a width cap in place of the count, were tried
    and did not work: the stop reasons table on Why did my item stop has a
    Fix column that cannot narrow below 473px, and a first column of 28
    characters held whole made it scroll, 62px over at 1280px. */
-@container prose (width >= 738px) {
-  main td:first-child code:not(.code-wide) {
-    white-space: nowrap;
-  }
+main td:first-child code:not(.code-wide) {
+  white-space: nowrap;
 }
 
 /* The harness matrix (seven columns) scrolls sideways in its box on a phone
