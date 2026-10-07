@@ -57,8 +57,9 @@ export default defineAppConfig({
       // spare) and only a long one may break. "Whole" needs nowrap: the
       // span's max-w-full lets its column shrink below it, and a name with a
       // hyphen (--description) then broke at the hyphen. A table of three or more
-      // columns is a list of blocks on a phone instead (assets/css/prose.css),
-      // each block as wide as the screen, so no code breaks there at all.
+      // columns, or of two with a long name in its first column, is a list of
+      // blocks on a phone instead (assets/css/prose.css), each block as wide
+      // as the screen, so a name is cut only if it is longer than that.
       // Where a table still does not fit it scrolls inside its own box;
       // scroll-hint (assets/css/prose.css) shows there is more to the right.
       table: {

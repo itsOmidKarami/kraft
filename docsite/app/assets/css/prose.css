@@ -76,67 +76,81 @@
   }
 }
 
-/* A table of three or more columns, on a phone, is a list of blocks. Squeezed
-   into 343px the first column was about 40px wide and the name a reader looks
-   up (`max_concurrent`) was cut into pieces of two to four letters, and the
-   tables that did fit ran two or three screens of narrow cells with a fix far
-   from its symptom. Each row is now one block: the first cell is its heading,
-   whole, and every other cell is a line that starts with its column's header
-   (data-label, written when the page is rendered: ProseTd.vue). Two-column
-   tables stay tables, and from 640px up nothing here applies.
+/* On a phone, a table of three or more columns is a list of blocks, and so is
+   a two-column table whose first column holds a long name (a code span of more
+   than 14 characters: ProseCode.vue adds code-long). Squeezed into 343px the
+   first column was about 40px wide and the name a reader looks up
+   (`max_concurrent`, `item escalate --message TEXT`) was cut into pieces, and
+   the tables that did fit ran two or three screens of narrow cells with a fix
+   far from its symptom. Each row is now one block: the first cell is its
+   heading, whole, and every other cell is a line that starts with its
+   column's header (data-label, written when the page is rendered:
+   ProseTd.vue). A two-column table with short names stays a table.
+   From 640px up nothing here applies.
    Table semantics survive the display change in two ways: the header row is
    only moved out of sight (not display: none), and the label is generated
    content with an empty alternative text, so a screen reader hears the real
    column header once and not the label as well. */
 @media (max-width: 639px) {
-  main table:has(th:nth-child(3)) {
+  main table:is(
+      :has(th:nth-child(3)),
+      :not(:has(th:nth-child(3))):has(td:first-child code.code-long)
+    ) {
     display: block;
     border-radius: 0;
-  }
-  main table:has(th:nth-child(3)) :is(tbody, tr) {
-    display: block;
-  }
-  main table:has(th:nth-child(3)) thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  main table:has(th:nth-child(3)) tr {
-    margin-bottom: 0.5rem;
-    padding: 0.375rem 0.25rem;
-    border: 1px solid var(--ui-border-muted);
-    border-radius: var(--ui-radius);
-  }
-  main table:has(th:nth-child(3)) td {
-    display: block;
-    padding: 0.125rem 0.5rem;
-    border: 0;
-    border-radius: 0;
-  }
-  /* The heading: the first cell, whole, with no label. */
-  main table:has(th:nth-child(3)) td:first-child {
-    padding-bottom: 0.25rem;
-    font-weight: 600;
-  }
-  /* A cell with nothing in it would only be a bare label. */
-  main table:has(th:nth-child(3)) td:empty {
-    display: none;
-  }
-  /* Two declarations: a browser that does not parse the alt-text form
-     (`/ ""`) drops the second one whole, and without the first a phone would
-     show stacked cells with no labels at all. Where the second is read, the
-     label has an empty alternative text. */
-  main table:has(th:nth-child(3)) td[data-label]:not(:first-child)::before {
-    content: attr(data-label) ": ";
-    content: attr(data-label) ": " / "";
-    color: var(--ui-text-muted);
-    font-weight: 500;
-  }
-  /* Beside a paragraph or a list the label would be a stray word at the end
-     of the line before: put it on its own line. */
-  main table:has(th:nth-child(3)) td:has(> :is(p, ul, ol, pre, div))::before {
-    display: block;
+
+    & :is(tbody, tr) {
+      display: block;
+    }
+    & thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    & tr {
+      margin-bottom: 0.5rem;
+      padding: 0.375rem 0.25rem;
+      border: 1px solid var(--ui-border-muted);
+      border-radius: var(--ui-radius);
+    }
+    & td {
+      display: block;
+      padding: 0.125rem 0.5rem;
+      border: 0;
+      border-radius: 0;
+    }
+    /* The heading: the first cell, whole, with no label. */
+    & td:first-child {
+      padding-bottom: 0.25rem;
+      font-weight: 600;
+    }
+    /* A cell with nothing in it would only be a bare label. */
+    & td:empty {
+      display: none;
+    }
+    /* Two declarations: a browser that does not parse the alt-text form
+       (`/ ""`) drops the second one whole, and without the first a phone would
+       show stacked cells with no labels at all. Where the second is read, the
+       label has an empty alternative text. */
+    & td[data-label]:not(:first-child)::before {
+      content: attr(data-label) ": ";
+      content: attr(data-label) ": " / "";
+      color: var(--ui-text-muted);
+      font-weight: 500;
+    }
+    /* Beside a paragraph or a list the label would be a stray word at the end
+       of the line before: put it on its own line. */
+    & td:has(> :is(p, ul, ol, pre, div))::before {
+      display: block;
+    }
+    /* In a block of two cells the second one's label is the same word on every
+       block ("Effect:", "What it does:") and the block already reads as a name
+       and what it means, so it has none. The screen reader still gets the
+       header from the table. */
+    &:not(:has(th:nth-child(3))) td[data-label]:not(:first-child)::before {
+      content: none;
+    }
   }
 }
