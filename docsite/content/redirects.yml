@@ -141,7 +141,9 @@
 /concepts/how-a-work-item-runs#mr-closed-externally: /reference/statuses#mr-closed-externally
 /project/architecture#module-map: /project/source-map#module-map
 /project/architecture#serving: /project/source-map#serving
-/project/architecture#route-modules: /project/source-map#route-modules
+/project/architecture#route-modules: /project/source-map#serving
+/project/source-map#route-modules: /project/source-map#serving
+/project/architecture#workspace-members: /project/source-map#workspace-members
 /project/architecture#running-a-chain: /project/source-map#running-a-chain
 /project/architecture#templates: /project/source-map#templates
 /project/architecture#agents-and-workers: /project/source-map#agents-and-workers
