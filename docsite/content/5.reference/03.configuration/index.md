@@ -39,7 +39,7 @@ Three commands check and reload the files:
 
 ## notify.yaml
 
-Settings › Notifications writes this file, and Kraft rereads it after each save. See [Notifications](/reference/events#notifications) for the payload and every event type.
+Settings › Notifications writes this file, and Kraft rereads it after each save. See [Notifications](/reference/events#notifications) for the payload and every event type, and [Get notified when an item needs you](/guides/day-to-day/notifications) to set it up.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|

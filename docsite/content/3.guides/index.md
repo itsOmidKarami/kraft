@@ -26,6 +26,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap): raise the cap that stopped a work item from the interface or the command line, and retry it.
 - [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
 - [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone): the phone layout, its bottom bar, the board's cards and the buttons on a stopped item.
+- [Get notified when an item needs you](/guides/day-to-day/notifications): send a webhook or show a browser alert when an item waits at a gate or stops, and test it.
 
 ### Customize the chain
 
