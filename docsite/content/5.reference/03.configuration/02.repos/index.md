@@ -37,7 +37,7 @@ A repo that sets no `steering:` gets the [steering profiles](/concepts/vocabular
 
 A repo's `policy:` may tighten the instance's safety layer but not relax it. A draft of `repos.yaml`, the Settings edit buffer, shows a relaxing value as a problem naming the repo and the field before it is published, the same refusal a run gives.
 
-Each field's source (`repo`, `library` or `default`) comes with the value in the `resolved` view of the `repos` draft; see [Drafts](/reference/http-api/drafts).
+Each field's source (`repo`, `library` or `default`) comes with the value in the `resolved` view of the `repos` draft; see [The `resolved` answer for repos](/reference/http-api/draft-ops#the-resolved-answer-for-repos).
 
 ## Fields
 

@@ -222,8 +222,8 @@
 /guides/operations#run-kraft-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
 /guides/operations#verify-the-service: /guides/run/run-as-a-service#verify-the-service
 /guides/operations#run-two-instances: /guides/run/run-as-a-service#run-two-instances
-/reference/configuration/repos#repository-refs: /reference/configuration/sandbox#repository-refs
-/reference/configuration/repos#workspace-members: /reference/configuration/sandbox#workspace-members
+/reference/configuration/repos#repository-refs: /reference/configuration/sandbox/git-in-a-sandbox#repository-refs
+/reference/configuration/repos#workspace-members: /reference/configuration/sandbox/git-in-a-sandbox#workspace-members
 /reference/configuration/repos#forwarded-credentials: /reference/configuration/sandbox#forwarded-credentials
 /reference/configuration/repos#proxy-and-ca: /reference/configuration/sandbox/sandbox-yaml#proxy
 /reference/configuration/sandbox#proxy-and-ca: /reference/configuration/sandbox/sandbox-yaml#proxy
@@ -477,9 +477,12 @@
 /reference/configuration/sandbox/callbacks-and-limits#how-the-limits-bind: /reference/configuration/sandbox/resource-limits#how-the-limits-bind
 /reference/configuration/sandbox/callbacks-and-limits#when-a-limit-cannot-be-enforced: /reference/configuration/sandbox/resource-limits#when-a-limit-cannot-be-enforced
 /reference/configuration/sandbox/callbacks-and-limits#out-of-memory: /reference/configuration/sandbox/resource-limits#out-of-memory
-/reference/configuration/repos/workspaces#nested-repositories: /reference/configuration/sandbox#nested-repositories
-/reference/configuration/repos/workspaces#when-a-nested-repository-stops-the-item: /reference/configuration/sandbox#when-a-nested-repository-stops-the-item
-/reference/configuration/repos/workspaces#git-while-a-session-runs: /reference/configuration/sandbox#git-while-a-session-runs
-/reference/configuration/repos/workspaces#the-clean-check-under-a-sandbox: /reference/configuration/sandbox#the-clean-check-under-a-sandbox
+/reference/configuration/repos/workspaces#nested-repositories: /reference/configuration/sandbox/git-in-a-sandbox#nested-repositories
+/reference/configuration/repos/workspaces#when-a-nested-repository-stops-the-item: /reference/configuration/sandbox/git-in-a-sandbox#when-a-nested-repository-stops-the-item
+/reference/configuration/repos/workspaces#git-while-a-session-runs: /reference/configuration/sandbox/git-in-a-sandbox#git-while-a-session-runs
+/reference/configuration/repos/workspaces#the-clean-check-under-a-sandbox: /reference/configuration/sandbox/git-in-a-sandbox#the-clean-check-under-a-sandbox
 /reference/configuration/repos/detectors#venv: /reference/configuration/repos/detectors#detector-fields
 /reference/configuration/repos#local_files: /reference/configuration/repos#test-and-setup
+/reference/configuration/sandbox#repository-refs: /reference/configuration/sandbox/git-in-a-sandbox#repository-refs
+/reference/configuration/sandbox#workspace-members: /reference/configuration/sandbox/git-in-a-sandbox#workspace-members
+/reference/configuration/sandbox#git-in-a-sandboxed-worktree: /reference/configuration/sandbox/git-in-a-sandbox#git-in-a-sandboxed-worktree
