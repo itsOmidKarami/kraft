@@ -473,7 +473,8 @@ def compute(
         (wid, node_id, rnd)
         for node_id, seen in node_rounds.items()
         for wid, rnd in seen
-        if node_id in roles[wid][1]
+        # The repair pass (`_REPAIR_ROUND`, below 0) is no round of its own.
+        if node_id in roles[wid][1] and rnd >= 0
     }
     if loop_rounds:
         loop_items = {wid for wid, _, _ in loop_rounds}

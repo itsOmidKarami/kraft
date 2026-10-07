@@ -636,6 +636,8 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     _session(conn, "s2", "w1", "verification", round=0)
     _session(conn, "s3", "w1", "verification", round=1)
     _session(conn, "s4", "w1", "merge_request_feedback", round=0, status="capped_out")
+    # the repair pass is no round: it must not add to the 3
+    _session(conn, "s6", "w1", "verification", round=-1)
     _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
     # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
     _session(conn, "s5", "w2", "verify", round=0, status="capped_out")
@@ -652,19 +654,42 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     assert t["fix_cycles_capped"] == 1
 
 
+_OPEN, _CI = "draft_merge_request", "merge_request_feedback"
+
+
+def _span(started, completed, *, chain="default"):
+    """One completed item: `(chain, [(event type, node, days ago)])`."""
+    return chain, [("node_started", n, d) for n, d in started] + [
+        ("node_completed", n, d) for n, d in completed
+    ]
+
+
 @pytest.mark.parametrize(
-    ("chain", "started", "completed", "expected_days"),
+    ("items", "expected_days"),
     [
-        pytest.param("default", "draft_merge_request", "merge_request_feedback", 0.5, id="default"),
+        pytest.param([_span([(_OPEN, 1.5)], [(_CI, 1.0)])], 0.5, id="default"),
         # The ids this figure once read: no shipped chain has them, and a
         # node's name is not what says it opens a merge request.
-        pytest.param("default", "open_mr", "mr_checks", 0, id="old-ids"),
-        pytest.param("quick-task", "draft_merge_request", "merge_request_feedback", 0, id="no-mr"),
+        pytest.param([_span([("open_mr", 1.5)], [("mr_checks", 1.0)])], 0, id="old-ids"),
+        pytest.param([_span([(_OPEN, 1.5)], [(_CI, 1.0)], chain="quick-task")], 0, id="no-mr"),
+        # A restart (`on_base_changed`) enters the open node and completes the
+        # CI node again: the first of each is the span.
+        pytest.param(
+            [_span([(_OPEN, 1.5), (_OPEN, 1.2)], [(_CI, 1.0), (_CI, 0.95)])], 0.5, id="first-pair"
+        ),
+        # Spans of 0.5, 0.1 and 2 days: the median is 0.5, the mean is not.
+        pytest.param(
+            [
+                _span([(_OPEN, 1.5)], [(_CI, 1.0)]),
+                _span([(_OPEN, 1.5)], [(_CI, 1.4)]),
+                _span([(_OPEN, 3.0)], [(_CI, 1.0)]),
+            ],
+            0.5,
+            id="median",
+        ),
     ],
 )
-def test_open_mr_to_green_ci_reads_what_a_node_does_not_its_id(
-    tmp_path, chain, started, completed, expected_days
-):
+def test_open_mr_to_green_ci_reads_what_a_node_does_not_its_id(tmp_path, items, expected_days):
     """Kraft-05b5i: from the node running `mr.open_draft` starting to the node
     running `mr.ci` completing, read off the materialized chain, so a shipped
     chain does not read 0s. `quick-task` has neither node and adds nothing."""
@@ -675,10 +700,12 @@ def test_open_mr_to_green_ci_reads_what_a_node_does_not_its_id(
     seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "config")
     conn = db._connect(tmp_path / "orchestrator.db")
     db.migrate(conn)
-    _v1_item(conn, "w1", seed.resolve_chain(chain), created=_at(2))
-    _event(conn, "w1", "node_started", {"node_id": started}, _at(1.5))
-    _event(conn, "w1", "node_completed", {"node_id": completed}, _at(1.0))
-    _event(conn, "w1", "work_item_completed", {}, _at(0.9))
+    for n, (chain, events) in enumerate(items):
+        wid = f"w{n}"
+        _v1_item(conn, wid, seed.resolve_chain(chain), created=_at(4))
+        for type_, node, days in events:
+            _event(conn, wid, type_, {"node_id": node}, _at(days))
+        _event(conn, wid, "work_item_completed", {}, _at(0.9))
     conn.commit()
     try:
         t = analytics.compute(conn, range_="7d", now=NOW)["totals"]

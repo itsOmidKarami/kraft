@@ -88,20 +88,20 @@ export function AnalyticsPage() {
       {/* The header crumb is not a heading: the page keeps one, unseen, for a screen reader (R14b-03). */}
       <h1 className="an-visually-hidden">Analytics</h1>
       {filters}
-      <HeaderTail><span className="an-scope">· Last 8 weeks · completed work items</span></HeaderTail>
+      <HeaderTail><span className="an-scope">· Items created in the last 8 weeks</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
       {!report && !error && <p className="an-empty">Loading…</p>}
       {report && t && (
         <>
-          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history. Dollars are what agents reported, plus Kraft's own estimate for a session whose agent reported none.">
+          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history. Dollars are what agents reported, plus Kraft's own estimate from its price table for a session whose agent reported none; a session it cannot price puts a &quot;+&quot; on the sum.">
             <div className="an-kpis">
               <Kpi
                 label="Completed"
                 value={String(t.completed)}
-                sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} each` : null].filter(Boolean).join(" · ")}
+                sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} cost ÷ completed` : null].filter(Boolean).join(" · ")}
               />
               <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median create → completion · ${t.human_wait_pct}% waiting on you`} />
-              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} rounds per fix-loop item · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
+              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} fix-loop rounds per item that ran one · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
             </div>
           </Section>
 
@@ -149,7 +149,7 @@ export function AnalyticsPage() {
                 </tbody>
               </table>
             )}
-            <p className="an-note">Minutes are the mean wall time of one worker session, over every item in range. Tokens and dollars are what the sessions recorded, Kraft's estimates included; a trailing "+" marks a sum that is missing a session.</p>
+            <p className="an-note">Minutes are the mean wall time of one worker session, over every item in range. Tokens are what the sessions recorded. Dollars are what agents reported plus Kraft's own estimate where they reported none; a trailing "+" marks a sum that is missing a session.</p>
           </Section>
 
           <div className="an-pair">
@@ -158,7 +158,7 @@ export function AnalyticsPage() {
                 <p className="an-empty">Nothing here yet.</p>
               ) : (
                 <table className="an-table an-repos">
-                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num">cycles</th></tr></thead>
+                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num" title="Average, over the repo's items that ran, of the deepest round any node reached; the first pass is round 0">avg max round</th></tr></thead>
                   <tbody>
                     {report.by_repo.map((r) => (
                       <tr key={r.repo} data-repo={r.repo}>
