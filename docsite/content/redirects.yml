@@ -141,7 +141,9 @@
 /concepts/how-a-work-item-runs#mr-closed-externally: /reference/statuses#mr-closed-externally
 /project/architecture#module-map: /project/source-map#module-map
 /project/architecture#serving: /project/source-map#serving
-/project/architecture#route-modules: /project/source-map#route-modules
+/project/architecture#route-modules: /project/source-map#serving
+/project/source-map#route-modules: /project/source-map#serving
+/project/architecture#workspace-members: /project/source-map#workspace-members
 /project/architecture#running-a-chain: /project/source-map#running-a-chain
 /project/architecture#templates: /project/source-map#templates
 /project/architecture#agents-and-workers: /project/source-map#agents-and-workers
@@ -340,6 +342,10 @@
 /concepts/caps-and-budgets#background-jobs: /concepts/caps-and-budgets#the-shipped-implementer-cap
 /concepts/how-a-work-item-runs#where-to-go-next: /concepts/how-a-work-item-runs#related
 /concepts/vocabulary#where-to-go-next: /concepts/vocabulary#related
+/project/security#gates: /project/security#agents-and-gates
+/concepts/vocabulary#the-shipped-chains: /concepts/how-a-work-item-runs#the-shipped-chains
+/concepts/vocabulary#the-default-chain: /concepts/how-a-work-item-runs#the-default-chain
+/concepts/vocabulary#the-quick-task-chain: /concepts/how-a-work-item-runs#the-quick-task-chain
 /concepts/vocabulary#run-fork: /reference/cli/item#addressing-work-by-path
 /concepts/vocabulary#classifier-mode: /reference/harnesses/unattended-runs
 /concepts/permission-gate#why-an-escalation-gets-git-grants-by-default: /concepts/permission-gate#why-grants-are-names-not-command-patterns
