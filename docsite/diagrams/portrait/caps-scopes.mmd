@@ -12,7 +12,7 @@ flowchart TD
   node -->|"runs"| loop
   node -->|"contains"| step
   step -->|"contains"| task
-  task --> stop
+  task -->|"a cap at any scope,<br/>the day included"| stop
 
   classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
   class day,item,node,loop,step,task,stop box
