@@ -65,7 +65,7 @@ title: Search, ⌘K
 description: Full-text search, with optional vector search, across work items, pending actions, and linked documents.
 orientation: horizontal
 ---
-![The ⌘K search overlay over the board: a query finds the work item waiting for approval, with tabs for items, documents and beads (issues from the optional bd issue tracker)](/assets/search.png)
+![The ⌘K search overlay over the board: a query finds the work item waiting for approval, with tabs for items, documents and beads issues (from the optional beads tracker, `bd`)](/assets/search.png)
 ::
 
 ::u-page-section
