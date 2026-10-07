@@ -441,6 +441,7 @@
 /reference/cli/item#target-a-repo: /reference/cli/item#filing-a-work-item
 /reference/cli/repo#repo-settings: /reference/cli/repo#related
 /reference/web-ui/board#keyboard: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
+/reference/cli/item#pause-and-resume: /reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget
 /reference/cli/admin#migrating-an-older-template-configuration: /guides/run/upgrade-from-1-4#migrating-a-home-from-0x
 /reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/web-ui/item-page#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop

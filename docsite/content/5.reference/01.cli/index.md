@@ -25,12 +25,13 @@ Each command links to its entry.
 |---|---|
 | Connect a repo to Kraft | [`kraft repo connect`](/reference/cli/repo#connect-a-repo) |
 | Check that a repo's setup and test commands work | [`kraft repo connect --verify`](/reference/cli/repo#verify-a-repos-commands) |
+| Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#disconnect-a-repo) |
 | File a work item | [`kraft item create "title"`](/reference/cli/item#filing-a-work-item) |
 | File it with a spec or plan I wrote | [`kraft item create "title" --spec PATH --plan PATH`](/reference/cli/item#attach-a-spec-or-plan) |
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
 | Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
 | Switch the [chain](/concepts/vocabulary#chain) of an item that has not started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
-| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#pause-and-resume) |
+| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 
 ### Watching
 
@@ -43,7 +44,6 @@ Each command links to its entry.
 | Follow the agent's log | [`kraft view logs -f`](/reference/cli/view#read-a-sessions-log) |
 | See what happened to an item, in order | [`kraft view events`](/reference/cli/view#following-a-running-item) |
 | Watch the board live | [`kraft view watch`](/reference/cli/view#following-a-running-item) |
-| Pause a running item | [`kraft item pause`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#what-repo-list-prints) |
 | Go to an item's worktree | [`kraft repo path`](/reference/cli/repo) or [`kraft repo open`](/reference/cli/repo) |
 
@@ -61,6 +61,7 @@ Each command links to its entry.
 | List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Mark a thread resolved, or reopen it | [`kraft item resolve`, `kraft item reopen`](/reference/cli/item#reviewing-a-change) |
 | Pass a gate without running it | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
+| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
 
 ### When it stops
 
@@ -72,6 +73,7 @@ Each command links to its entry.
 | Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |
 | Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#addressing-work-by-path) |
+| Pause a running item | [`kraft item pause`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#escalate-a-stopped-item) |
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
 | Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#set-item-wide-overrides), or [`kraft item set-node-override`](/reference/cli/item#one-nodes-agent-tasks) |
@@ -93,8 +95,6 @@ Each command links to its entry.
 | See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/admin) |
 | Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/admin) |
 | Register Kraft with an agent | [`kraft admin init`](/reference/cli/admin) |
-| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
-| Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#disconnect-a-repo) |
 
 `kraft item progress` and `kraft item reply` are [called by a worker](/reference/cli/item#verbs-a-worker-calls), not by you.
 
