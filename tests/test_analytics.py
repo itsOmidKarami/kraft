@@ -337,10 +337,44 @@ def test_median_lead_time_and_human_wait_pct(conn):
 
 def test_fix_cycles_reads_the_verify_node(conn):
     t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
-    assert t["fix_cycles"] == pytest.approx(
-        1.5
-    )  # 3 verify rounds / 2 items, from the existing fixture
+    # w1 repaired once (round 1); w2's lone round 0 is no repair
+    assert t["fix_cycles"] == pytest.approx(1.0)
     assert t["fix_cycles_capped"] == 1
+
+
+@pytest.mark.parametrize(
+    ("items", "overview", "by_repo"),
+    [
+        pytest.param({"w1": ("/a", [0, 1])}, 1.0, {"/a": 1.0}, id="first-pass-and-one-repair"),
+        pytest.param({"w1": ("/a", [0, -1])}, 0.0, {"/a": 0.0}, id="repair-pass-is-no-repair"),
+        pytest.param(
+            {"w1": ("/a", [0, 1, 2]), "w2": ("/a", [0])},
+            2.0,
+            {"/a": 2.0},
+            id="item-without-repair-left-out",
+        ),
+        pytest.param(
+            {"w1": ("/a", [0, 1, 2]), "w2": ("/b", [0, 1]), "w3": ("/a", [0])},
+            1.5,
+            {"/a": 2.0, "/b": 1.0},
+            id="by-repo-uses-the-overview-definition",
+        ),
+    ],
+)
+def test_repairs_per_item_that_needed_one(tmp_path, items, overview, by_repo):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    for wid, (repo, rounds) in items.items():
+        _item(conn, wid, repo=repo, created=_at(1))
+        for rnd in rounds:
+            _session(conn, f"{wid}-{rnd}", wid, "verify", round=rnd)
+    conn.commit()
+    try:
+        a = analytics.compute(conn, range_="7d", now=NOW)
+    finally:
+        conn.close()
+    assert a["totals"]["fix_cycles"] == pytest.approx(overview)
+    assert {r["repo"]: r["cycles"] for r in a["by_repo"]} == pytest.approx(by_repo)
 
 
 def test_fix_cycles_capped_counts_items_not_sessions(tmp_path):
@@ -636,7 +670,8 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     _session(conn, "s2", "w1", "verification", round=0)
     _session(conn, "s3", "w1", "verification", round=1)
     _session(conn, "s4", "w1", "merge_request_feedback", round=0, status="capped_out")
-    # the repair pass is no round: it must not add to the 3
+    _session(conn, "s9", "w1", "merge_request_feedback", round=1)
+    # the repair pass is no round: it must not add to the 2
     _session(conn, "s6", "w1", "verification", round=-1)
     _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
     # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
@@ -656,7 +691,7 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
         conn.close()
 
     assert t["mrs_merged"] == 2
-    assert t["fix_cycles"] == pytest.approx(2.0)  # (3 + 1) loop rounds / 2 items with a loop
+    assert t["fix_cycles"] == pytest.approx(2.0)  # 2 repairs (one per loop node) / 1 item that needed one
     assert t["fix_cycles_capped"] == 1
 
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from kraft import caps as _caps
@@ -475,24 +476,24 @@ def compute(
     for node_id, seen in node_rounds.items():
         by_node[node_id]["rounds"] = len(seen)
     roles = {r["id"]: _node_roles(r) for r in items}
-    loop_rounds = {
-        (wid, node_id, rnd)
+    # A repair is a round from 1 up that ran a worker session in a fix-loop node:
+    # the first pass (0) and the repair pass (`_REPAIR_ROUND`, below 0) are none.
+    repairs = Counter(
+        wid
         for node_id, seen in worked_rounds.items()
         for wid, rnd in seen
-        # The repair pass (`_REPAIR_ROUND`, below 0) is no round of its own.
-        if node_id in roles[wid][1] and rnd >= 0
-    }
-    if loop_rounds:
-        loop_items = {wid for wid, _, _ in loop_rounds}
-        totals["fix_cycles"] = round(len(loop_rounds) / len(loop_items), 1)
-        totals["fix_cycles_capped"] = len(
-            {
-                wid
-                for node_id, wids in node_capped_items.items()
-                for wid in wids
-                if node_id in roles[wid][1]
-            }
-        )
+        if node_id in roles[wid][1] and rnd >= 1
+    )
+    if repairs:
+        totals["fix_cycles"] = round(sum(repairs.values()) / len(repairs), 1)
+    totals["fix_cycles_capped"] = len(
+        {
+            wid
+            for node_id, wids in node_capped_items.items()
+            for wid in wids
+            if node_id in roles[wid][1]
+        }
+    )
     for node in by_node.values():
         node["avg_ms"] = node["wall_ms"] // node["runs"] if node["runs"] else 0
     # an item's rounds is the deepest single node's loop count, summed over items
@@ -501,11 +502,12 @@ def compute(
     )
     totals["work_items_run"] = len(item_node_rounds)
 
-    repo_item_rounds: dict[str, list[int]] = {}
-    for wid, seen in item_node_rounds.items():
-        repo_item_rounds.setdefault(repo_of[wid], []).append(max((r for _, r in seen), default=0))
+    # same denominator as `fix_cycles`: the repo's items that needed a repair
+    repo_repairs: dict[str, list[int]] = {}
+    for wid, n in repairs.items():
+        repo_repairs.setdefault(repo_of[wid], []).append(n)
     for repo_key, rr in by_repo.items():
-        rl = repo_item_rounds.get(repo_key, [])
+        rl = repo_repairs.get(repo_key, [])
         rr["cycles"] = round(sum(rl) / len(rl), 1) if rl else 0.0
 
     # ── events: merges and human wait ────────────────────────────────────────
