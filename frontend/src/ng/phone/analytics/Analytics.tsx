@@ -42,8 +42,8 @@ export function Analytics() {
             <div className="ph-tiles">
               <Tile label="Spent" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} spent ÷ completed` : "nothing completed yet"} />
               <Tile label="Items done" value={String(t.completed)} sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, `${running} running now`].join(" · ")} />
-              <Tile label="Time at gates" value={elapsed(t.human_wait_ms)} sub={`${t.human_wait_pct}% of completed items' lead time`} />
-              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`fix-loop rounds per item that ran one · ${t.fix_cycles_capped} hit their cap`} />
+              <Tile label="Time at gates" value={elapsed(t.human_wait_ms)} sub={`completed items waited ${t.human_wait_pct}% of their lead time`} />
+              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`rounds per item that ran a fix-loop node · ${t.fix_cycles_capped} hit their cap`} />
             </div>
             {empty ? (
               <p className="ph-empty">Nothing has completed in this range yet.</p>
@@ -69,7 +69,7 @@ export function Analytics() {
                       {report.by_repo.map((r) => (
                         <div key={r.repo} className="ph-stat-row">
                           <span className="ph-stat-name">{repoName(r.repo)}</span>
-                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg max round {r.cycles}</span>
+                          <span className="ph-stat-meta">{r.items} items · {r.done} done · avg deepest fix round {r.cycles}</span>
                           <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}</span>
                         </div>
                       ))}

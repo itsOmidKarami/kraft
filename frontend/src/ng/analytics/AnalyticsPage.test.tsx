@@ -47,7 +47,7 @@ describe("ng AnalyticsPage", () => {
     for (const note of FOOTNOTES) expect(screen.getByText(note)).toBeVisible();
     expect(screen.getByText("+8 vs previous · $7.08 cost ÷ completed")).toBeInTheDocument();
     expect(screen.getByText("median create → completion · 25% waiting on you")).toBeInTheDocument();
-    expect(screen.getByText("1.5 fix-loop rounds per item that ran one · 6 capped · 9 rejected gates")).toBeInTheDocument();
+    expect(screen.getByText("1.5 rounds per item that ran a fix-loop node · 6 capped · 9 rejected gates")).toBeInTheDocument();
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {

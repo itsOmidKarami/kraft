@@ -101,7 +101,7 @@ export function AnalyticsPage() {
                 sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} cost ÷ completed` : null].filter(Boolean).join(" · ")}
               />
               <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median create → completion · ${t.human_wait_pct}% waiting on you`} />
-              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} fix-loop rounds per item that ran one · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
+              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} rounds per item that ran a fix-loop node · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
             </div>
           </Section>
 
@@ -158,7 +158,7 @@ export function AnalyticsPage() {
                 <p className="an-empty">Nothing here yet.</p>
               ) : (
                 <table className="an-table an-repos">
-                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num" title="Average, over the repo's items that ran, of the deepest round any node reached; the first pass is round 0">avg max round</th></tr></thead>
+                  <thead><tr><th>repo</th><th className="an-num">items</th><th className="an-num">done</th><th className="an-num">cost</th><th className="an-num" title="Average, over the repo's items that ran a worker session, of the deepest round any node reached; the first pass is round 0">avg deepest fix round</th></tr></thead>
                   <tbody>
                     {report.by_repo.map((r) => (
                       <tr key={r.repo} data-repo={r.repo}>
