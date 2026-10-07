@@ -227,7 +227,8 @@
 /reference/configuration/sandbox#proxy-and-ca: /reference/configuration/sandbox/sandbox-yaml#proxy
 /reference/configuration/repos#tool-policy: /reference/configuration/sandbox#tool-policy
 /reference/configuration/repos#the-image: /reference/configuration/sandbox#the-image
-/reference/configuration/repos#not-yet-covered: /reference/configuration/sandbox#not-yet-covered
+/reference/configuration/repos#not-yet-covered: /reference/configuration/sandbox#limits
+/reference/configuration/sandbox#not-yet-covered: /reference/configuration/sandbox#limits
 /reference/configuration/repos#callbacks-from-a-sandbox: /reference/configuration/sandbox/callbacks-and-limits#callbacks-from-a-sandbox
 /reference/configuration/repos#without-network: /reference/configuration/sandbox/callbacks-and-limits#without-network
 /reference/configuration/repos#resource-limits: /reference/configuration/sandbox/callbacks-and-limits#resource-limits
@@ -251,7 +252,8 @@
 /reference/configuration/repos#where-the-value-is-kept: /reference/configuration/sandbox/credentials#where-the-value-is-kept
 /reference/configuration/repos#credential-limits: /reference/configuration/sandbox/credentials#credential-limits
 /reference/configuration/repos#kits: /reference/configuration/sandbox/kits
-/reference/configuration/repos#operator-authored-kits-only: /reference/configuration/sandbox/kits#operator-authored-kits-only
+/reference/configuration/repos#operator-authored-kits-only: /reference/configuration/sandbox/kits#kits-you-build
+/reference/configuration/sandbox/kits#operator-authored-kits-only: /reference/configuration/sandbox/kits#kits-you-build
 /reference/configuration/repos#declaring-a-kit: /reference/configuration/sandbox/kits#declaring-a-kit
 /reference/configuration/repos#what-a-launch-runs: /reference/configuration/sandbox/kits#what-a-launch-runs
 /reference/configuration/repos#when-it-is-read: /reference/configuration/sandbox/kits#when-it-is-read
@@ -434,3 +436,7 @@
 /reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/events#test_scopes_selected: /reference/events#chain-and-nodes
 /reference/events#notes-on-node_id: /reference/events
+/reference/harnesses/agent-profiles#define-a-profile: /reference/harnesses/agent-profiles#define-an-agent-profile
+/reference/harnesses/agent-profiles#select-a-profile-in-a-task: /reference/harnesses/agent-profiles#select-an-agent-profile-in-a-task
+/reference/harnesses/agent-profiles#precedence-and-when-a-profile-is-read: /reference/harnesses/agent-profiles#precedence-and-when-an-agent-profile-is-read
+/reference/harnesses/agent-profiles#shipped-profiles: /reference/harnesses/agent-profiles#shipped-agent-profiles

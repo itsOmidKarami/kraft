@@ -5,7 +5,7 @@ navigation:
 description: The sandbox key of repos.yaml, what reaches a sandboxed worker's container, and how its refs, credentials, proxy and tool policy are handled.
 ---
 
-A repository's [`sandbox`](/reference/configuration/repos#sandbox) setting runs its workers in a container. This page lists the keys of that setting and what reaches the container from the host. The other pages in this section cover each part in turn.
+A repository's [`sandbox`](/reference/configuration/repos#sandbox) setting runs its [workers](/concepts/vocabulary#worker) in a container. This page lists the keys of that setting and what reaches the container from the host. The other pages in this section cover each part in turn.
 
 ```yaml [config/repos.yaml]
 repos:
@@ -33,7 +33,7 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 | `network` | mapping | `docker`, optional. `kit` refuses it. | The hosts a task may reach. Unset, egress is open. See [Network policy](/reference/configuration/sandbox/network-policy). |
 | `credentials` | list of mappings | `docker`, optional, and it needs `network`. `kit` refuses it. | Secrets the container never holds. See [Credentials](/reference/configuration/sandbox/credentials). |
 
-How to set the key in `repos.yaml` or in a policy, and why no chain, node or task can change it, is under [`sandbox`](/reference/configuration/repos#sandbox) in Repos.
+Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
 
 ## What reaches the container
 
@@ -87,8 +87,7 @@ The container's own environment still holds the values, so `docker inspect` show
 ## Tool policy
 
 - Amp's and OpenCode's rules travel with the launch, and Amp's rules file is mounted read-only.
-- Codex's policy is held by Kraft's permission hook, which reaches Kraft only through a [network policy](/reference/configuration/sandbox/network-policy)'s channel (see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks-and-limits#callbacks-from-a-sandbox)). Without `network:`, a Codex or Cursor task with `allowed_tools`, `deny_tools` or a grant other than `git-commit` is refused.
-- Claude asks Kraft through an MCP tool on every launch, so a sandboxed Claude task without `network:` is refused whatever its policy.
+- Codex's and Claude's policy is asked of Kraft through a [network policy](/reference/configuration/sandbox/network-policy)'s channel, and Cursor is refused under one. Without `network:`, a task that needs that channel is refused: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks-and-limits#callbacks-from-a-sandbox).
 - Codex runs with `sandbox_mode=danger-full-access` unless a task or [harness profile](/concepts/vocabulary#harness-profile) sets a mode other than `workspace-write`, because its own sandbox cannot start inside Docker.
 
 ## The image
@@ -106,7 +105,7 @@ Before a task's first launch in an image, Kraft asks the image, through its own 
 
 Pull it before filing work, or the first launch pulls it inside the task's time cap.
 
-## Not yet covered
+## Limits
 
 - Without a [network policy](/reference/configuration/sandbox/network-policy), the container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable.
 - A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch.

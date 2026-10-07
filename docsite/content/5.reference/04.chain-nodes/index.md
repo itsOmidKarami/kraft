@@ -99,7 +99,7 @@ A recovery that concludes no repair can help reports `failed` with a
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `message` | string | none | The text shown to the person who decides the gate. |
+| `message` | string | none | The text shown to a person deciding the gate. |
 | `artifact` | string | none | The document the gate is decided on: a kind an earlier node `produces`. |
 | `artifact_required` | boolean | `false` | `true` refuses approval while the `artifact` document is missing, with a `422` that says to retry the node that owes it. Needs an `artifact`. |
 | `reject_to` | string | see Meaning | The exec node a rejection re-enters, with the reviewer's note. It must be before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
@@ -159,7 +159,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `kind` | string | required, unless `extends` supplies it | `agent`, `subprocess`, `builtin` or `forge`. |
 | `extends` | string | none | The library task this one builds on. |
 | `scope` | string | `once` | `each_repository` runs the task once per selected repository of a workspace item. `once` runs it once. |
-| `steering` | list | `[]` | Names from the library's `steering` section. Only an agent task reads it. |
+| `steering` | list | `[]` | Names of [steering profiles](/concepts/vocabulary#steering-profile) from the library's `steering` section. Only an agent task reads it. |
 | `on_failure` | mapping | none | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
 | `policy` | mapping | none | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
 | `skippable` | boolean | `true` | `false` refuses a skip of this task. |
@@ -178,12 +178,12 @@ Every task takes these keys, then the keys of its kind. A task takes no
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `harness` | string | required | The [harness profile](/reference/harnesses) to run on, an ID from `harnesses.yaml`. A missing or disabled profile stops the task and waits for you unless the task declares `fallback`. |
+| `harness` | string | required | The [harness profile](/concepts/vocabulary#harness-profile) to run on, an ID from `harnesses.yaml`. A missing or disabled harness profile stops the task and waits for you unless the task declares `fallback`. |
 | `prompt` | string | required | What the task is asked to do. Kraft's output contract comes before the skill and steering. |
 | `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that cannot load stops the task and waits for you. |
 | `produces` | string | none | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`). |
 | `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
-| `model`, `effort` | string | none | This task's runtime options, checked against what the profile's [provider](/concepts/vocabulary#provider) accepts. Not allowed with `profile`. |
+| `model`, `effort` | string | none | This task's runtime options, checked against what the [provider](/concepts/vocabulary#provider) of the task's harness profile accepts. Not allowed with `profile`. |
 | `fallback` | list | unset | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |
 | `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings` or `previous_review`. |
 
@@ -259,7 +259,7 @@ icon in its place.
 ## The library and extends
 
 `config/library.yaml` holds reusable `tasks`, `steps`, `nodes`, and named
-`steering` profiles. A chain component takes one with `extends: <name>`.
+`steering` profiles (the named guidance a task or a repository selects). A chain component takes one with `extends: <name>`.
 
 - A component extends one parent of its own kind. A node extends a node, never a
   task.

@@ -11,21 +11,21 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 
 | File | What it configures | Created | Page |
 |---|---|---|---|
-| `repos.yaml` | Connected repos: setup command, env, steering, workspaces. | Seeded, empty | [Repos](/reference/configuration/repos); its `sandbox` field: [Sandboxed workers](/reference/configuration/sandbox), [Callbacks and resource limits](/reference/configuration/sandbox/callbacks-and-limits), [Network policy](/reference/configuration/sandbox/network-policy), [Credentials](/reference/configuration/sandbox/credentials), [Kits](/reference/configuration/sandbox/kits) |
-| `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [Policy](/reference/configuration/policy) |
+| `repos.yaml` | Connected repos: setup command, env, steering, workspaces, and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
+| `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [policy.yaml](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
 | `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [`harnesses.yaml`](/reference/configuration/harnesses-file) |
-| `access.yaml` | Bind address, password, remote access. | The first save in Settings | [Access](/reference/configuration/access) |
-| `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [Intake](/reference/configuration/intake) |
+| `access.yaml` | Bind address, password, remote access. | The first save in Settings | [access.yaml](/reference/configuration/access) |
+| `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [intake.yaml](/reference/configuration/intake) |
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [`sandbox.yaml`](/reference/configuration/sandbox/sandbox-yaml) |
-| `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [Detectors](/reference/configuration/repos/detectors) |
+| `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](#notifyyaml) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](#themeyaml) |
 | `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
 
 ## How Kraft treats the directory
 
-- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. The files marked "You" or "The first save in Settings" are never seeded.
+- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. [Upgrade your configuration](/guides/run/upgrade-your-configuration) takes what a new release ships in `library.yaml` and `chains/`. The files marked "You" or "The first save in Settings" are never seeded.
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml` and `harnesses/`, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
@@ -56,7 +56,7 @@ Settings › Appearance writes this file. A save changes only the keys it sends,
 |---|---|---|---|
 | `surface` | `graphite`, `slate`, `ink`, `sand` or `moss` | `ink` | The base colors of the page. |
 | `accent` | `none`, `blue`, `violet`, `green`, `amber` or `rose` | `violet` | The accent color. |
-| `colour_amount` | `mono`, `subtle` or `full` | `full` | How much color the surfaces, the accent and the status colors carry. `mono` leaves only grey. |
+| `colour_amount` | `mono`, `subtle` or `full` | `full` | How much color the surfaces, the accent and the status colors carry. `mono` leaves only gray. |
 | `mode` | `light`, `dark` or `system` | `dark` | The color mode. |
 | `density` | `compact` or `comfortable` | `compact` | How tightly rows and text are spaced. |
 | `code_scheme.light` | `auto`, `none` or `solarized-light` | `auto` | The syntax colors in review diffs in light mode. |
@@ -83,19 +83,15 @@ A `palette` key in an old file (`nocturne`, `rose`, `forest`, `amber` or `slate`
 | `amber` | `sand` | `amber` |
 | `slate` | `slate` | `blue` |
 
-A file that already sets its own `surface` only loses the `palette`. A file that does not parse or holds a value Kraft does not know is left alone. The backup names and how to restore one are in [Upgrading from 1.4](/guides/run/upgrade-from-1-4#where-the-pages-moved).
+A file that already sets its own `surface` only loses the `palette`. A file that does not parse or holds a value Kraft does not know is left alone. The backup names and how to restore one are in [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4#your-theme).
 
 ## In this section
 
-- [Repos](/reference/configuration/repos): every field in `repos.yaml`, and the pages for detectors and workspaces.
-- [Policy](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
+- [repos.yaml](/reference/configuration/repos): every field in `repos.yaml`, and the pages for how connect proposes commands, `detectors.yaml` and workspaces.
+- [policy.yaml](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
 - [Library and chains](/reference/configuration/library-and-chains): the sections of `library.yaml`, and how `chains/*.yaml` files compose them into chains.
 - [`harnesses.yaml`](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
-- [Access](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
-- [Intake](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
+- [access.yaml](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
+- [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's network, credentials, Kits and `sandbox.yaml`.
 - [Environment variables](/reference/configuration/environment-variables): the variables that move this directory, every other variable Kraft reads, and the variables a worker gets.
-
-## Related
-
-- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take what a new release ships in `library.yaml` and `chains/`.

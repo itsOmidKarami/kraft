@@ -15,7 +15,7 @@ An `agent` task in [`library.yaml`](/reference/configuration/library-and-chains#
 spec_author: { kind: agent, harness: claude, prompt: "...", produces: spec }
 ```
 
-That name is a key in `harnesses.yaml`. The entry's `provider` says which of the harnesses below the profile runs:
+That name is a key in `harnesses.yaml`. The entry's `provider` says which of the harnesses below the harness profile runs:
 
 ```yaml [config/harnesses.yaml]
 harnesses:
@@ -46,12 +46,13 @@ In the Resume and Fallback columns, a tick means the harness declares the capabi
 What the columns mean:
 
 - **Model, effort**: which of `model` and `effort` the harness takes. `amp` takes no `model`, because Amp picks it, and its `effort` is Amp's mode. `cursor`, `opencode` and `gemini` take no `effort`.
-- **Tool lists**: how Kraft enforces `deny_tools` and `allowed_tools` on an unattended worker. **Gate**: the [permission gate](/reference/permissions) answers each call. **Rules**: the CLI enforces rules Kraft wrote for the launch. **Refused**: a task with a tool list does not launch. See [Unattended runs](/reference/harnesses/unattended-runs).
+- **Tool lists**: how Kraft enforces `deny_tools` and `allowed_tools` on an unattended [worker](/concepts/vocabulary#worker). **Gate**: the [permission gate](/reference/permissions) answers each call. **Rules**: the CLI enforces rules Kraft wrote for the launch. **Refused**: a task with a tool list does not launch. See [Unattended runs](/reference/harnesses/unattended-runs).
 - **Cost**: **Yes** means the harness reports a dollar cost. **Tokens** means it reports tokens only, and Kraft estimates the cost. **Agent-written** means the agent writes its own counts into the result file. See [Cost reporting](/reference/harnesses/cost-reporting).
 - **Context**: how Kraft passes its context to the agent. **System prompt** is out of band. **Prompt** is in band, folded into the task's prompt.
+- **Resume**: the harness declares `resume`, so Kraft can continue an earlier session by id.
 - **Fallback**: a rate limit on this harness can trigger a switch to the next entry of a [`fallback:` list](/reference/harnesses/fallback-and-escalation).
 
-Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `mcp_config`, and only `codex` declares `writable_dirs`. A task or profile that sets an option whose capability its harness lacks is rejected at load. [Harness definition files](/reference/harnesses/harness-files#capabilities) lists every capability.
+Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `mcp_config`, and only `codex` declares `writable_dirs`. A task or harness profile that sets an option whose capability its harness lacks is rejected at load. [Harness definition files](/reference/harnesses/harness-files#capabilities) lists every capability.
 
 ## The harnesses in detail
 
@@ -68,7 +69,7 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 | Command | `codex exec`. |
 | API key | `CODEX_API_KEY`. |
 | Config keys | Its context, effort, permission mode and writable-roots options are `-c` config keys. |
-| Tool lists | A `PreToolUse` hook passed with `-c` and trusted for that launch only. Web search never reaches it. See [Codex](/reference/permissions#codex). |
+| Tool lists | Enforced through a `PreToolUse` hook. See [Codex](/reference/permissions#codex). |
 | Read from its log | Tokens, the thread id and a usage-limit stop, off its `--json` log. The log gives no reset time for a limit. |
 
 ### Cursor details
@@ -128,7 +129,7 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 |---|---|
 | Command | `amp --no-archive-after-execute`. The prompt follows `-x`. |
 | API key | `AMP_API_KEY`. |
-| Model and effort | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). An [agent profile](/concepts/vocabulary#agent-profile) cannot select `amp`, because a profile needs a model for the provider. A task on `amp` sets `effort:` itself. |
+| Model and effort | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). An [agent profile](/concepts/vocabulary#agent-profile) cannot select `amp`, because an agent profile needs a model for the provider. A task on `amp` sets `effort:` itself. |
 | Tool lists | A settings file of the launch's own (`--settings-file`), when the task's policy sets either. See [OpenCode and Amp](/reference/permissions#opencode-and-amp-rules-written-at-launch). |
 | Launch | Both command lines pass `--no-archive-after-execute`, because an archived thread cannot be resumed. |
 | Read from its log | Tokens and the thread id `resume` takes, off its `--stream-json` log. The token counts are the thread's own, message by message, and match `amp threads export`. |
