@@ -83,6 +83,7 @@ jobs:
       - run: uv run python dev/check_docs_walls.py
       - run: uv run python dev/check_docs_redirects.py
       - run: uv run python dev/check_docs_landings.py
+      - run: uv run python dev/check_docs_shell.py
       - run: uv run python dev/check_tests.py
 
   test:

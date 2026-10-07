@@ -8,6 +8,8 @@ This checks, against `docsite/content/` as it is in this checkout:
 
 - every map entry: its target is a real page (and heading), its source is not
   (or the entry would never be reached), and it does not lead to another entry;
+- every `](/page#heading)` link between the docs' own pages: it is a real page
+  and heading (dead), and not an address the map forwards (stale);
 - every docs address the repository links to outside the docs themselves
   (the CLI, the web UI, the VS Code extension, the plugins, the READMEs,
   install.sh, package metadata): it is a real page and heading, or the map
@@ -51,6 +53,11 @@ ENTRY = re.compile(rf"^({_ADDRESS}):\s+({_ADDRESS})$")
 # link a user can reach; fix the link or the page and delete its line. The
 # check fails on an entry here that resolves, so this list can only shrink.
 KNOWN_BROKEN: dict[str, str] = {}
+
+# A link between two pages (`](/path#anchor)`) or inside one (`](#anchor)`).
+# /assets and /diagrams are files, not pages.
+_PAGE_LINK = re.compile(r"\]\((/[a-z0-9/._-]*(?:#[A-Za-z0-9._-]+)?|#[A-Za-z0-9._-]+)\)")
+_FILE_ROOTS = ("/assets/", "/diagrams/")
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
@@ -177,6 +184,11 @@ def check_map(entries: dict[str, str], site: dict[str, set[str]]) -> list[str]:
             )
         elif not exists(target, site):
             problems.append(f"{source} forwards to {target}, which is not a page and heading")
+        if anchor and (anchor[:1].isdigit() or re.sub(r"-+", "-", anchor).strip("-") != anchor):
+            problems.append(
+                f"{source} has an anchor the site never generates: it puts `_` before one that "
+                "starts with a digit and never leaves `--` or a `-` at either end"
+            )
         if not anchor and path in site:
             problems.append(f"{source} is still a real page, so its entry is never reached")
         elif anchor and path not in site and path not in entries:
@@ -212,6 +224,33 @@ def check_links(
     return problems
 
 
+def check_page_links(
+    content: Path, entries: dict[str, str], site: dict[str, set[str]]
+) -> list[str]:
+    """Every link between the docs' pages that is dead or forwarded by the map.
+
+    A forwarded one still works, but opens through a redirect and ends up on
+    the address the entry names: write that instead.
+    """
+    problems = []
+    for page in sorted(content.rglob("*.md")):
+        name, here = page.relative_to(content), route(page.relative_to(content))
+        for number, line in enumerate(page.read_text(encoding="utf-8").splitlines(), 1):
+            for link in _PAGE_LINK.findall(line):
+                address = here + link if link.startswith("#") else link
+                if address.startswith(_FILE_ROOTS):
+                    continue
+                address = address.rstrip("/") if address != "/" else address
+                target = forward(address, entries)
+                if target != address:
+                    problems.append(
+                        f"{name}:{number}: {link} is forwarded by {MAP_NAME}: write ]({target})"
+                    )
+                elif not exists(address, site):
+                    problems.append(f"{name}:{number}: {link} is not a page and heading")
+    return problems
+
+
 def site_path(url: str) -> str:
     """A docs URL as a site path: no base, no `/next`, no trailing slash."""
     # A URL that ends a sentence takes the full stop with it.
@@ -241,7 +280,12 @@ def check(root: Path) -> list[str]:
     if not links:
         # Zero is the grep failing, not Kraft having no docs links.
         problems.append("found no docs links anywhere in the repository")
-    return problems + check_map(entries, site) + check_links(links, entries, site, KNOWN_BROKEN)
+    return (
+        problems
+        + check_map(entries, site)
+        + check_page_links(content, entries, site)
+        + check_links(links, entries, site, KNOWN_BROKEN)
+    )
 
 
 def main() -> int:
@@ -251,7 +295,7 @@ def main() -> int:
     if problems:
         print(f"{len(problems)} docs address problem(s)", file=sys.stderr)
         return 1
-    print("ok: every moved address and every docs link in Kraft resolves")
+    print("ok: every moved address, every link between pages and every docs link in Kraft resolves")
     return 0
 
 
