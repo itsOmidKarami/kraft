@@ -51,7 +51,7 @@ function forwardingPage(from: string, to: string): string {
 
 export default defineNuxtConfig({
   extends: ['docus'],
-  css: ['~/assets/css/hero.css'],
+  css: ['~/assets/css/hero.css', '~/assets/css/prose.css'],
   app: {
     baseURL,
     head: {
