@@ -9,8 +9,9 @@ Still deciding whether Kraft is for you? Read [Why Kraft](/get-started/why-kraft
 and the [FAQ](/get-started/faq). Ready to try it? [Install](/get-started/install)
 Kraft, then run [your first work item](/get-started/first-work-item) through its
 gates to a merge-ready diff. If something goes wrong, see
-[Troubleshooting](/troubleshooting); to upgrade from 1.4, see
-[What's new in 2.0](/project/whats-new).
+[Troubleshooting](/troubleshooting). To upgrade from 1.4, see
+[Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4), and
+[What's new in 2.0](/project/whats-new) for what changed.
 
 ## In this section
 
