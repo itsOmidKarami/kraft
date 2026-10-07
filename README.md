@@ -21,7 +21,7 @@
 | src/kraft/adapters/hook\_install.py          |      232 |       10 |     96% |91, 185-188, 264-265, 290-291, 380 |
 | src/kraft/adapters/profiles.py               |       32 |        0 |    100% |           |
 | src/kraft/adapters/subprocess.py             |      409 |       12 |     97% |243-244, 258-259, 286, 487-488, 552, 894, 920-921, 1090 |
-| src/kraft/analytics.py                       |      262 |        7 |     97% |52-53, 191, 197, 453-455 |
+| src/kraft/analytics.py                       |      262 |        7 |     97% |53-54, 192, 198, 454-456 |
 | src/kraft/api/\_\_init\_\_.py                |       44 |        0 |    100% |           |
 | src/kraft/api/apidocs.py                     |       24 |        0 |    100% |           |
 | src/kraft/api/config\_check.py               |      329 |       23 |     93% |111, 188, 203-204, 246, 282-283, 293-294, 391, 410, 466-469, 494, 545-546, 598-599, 614-615, 617, 623, 625 |
