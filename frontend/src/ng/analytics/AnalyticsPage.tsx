@@ -33,7 +33,7 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub: string 
 
 /** Analytics (UX V2 W16 F): where the time and the money went, rolled up from
  *  recorded worker sessions and event history. Every section the shipped page
- *  has, the filters it has (repo, chain), and nothing estimated. */
+ *  has, and the filters it has (repo, chain). */
 export function AnalyticsPage() {
   const items = useStore((s) => Object.values(s.workItems));
   const [repo, setRepo] = useState<string | null>(null);
@@ -93,15 +93,15 @@ export function AnalyticsPage() {
       {!report && !error && <p className="an-empty">Loading…</p>}
       {report && t && (
         <>
-          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history; nothing is estimated.">
+          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history. Dollars are what agents reported, plus Kraft's own estimate for a session whose agent reported none.">
             <div className="an-kpis">
               <Kpi
                 label="Completed"
                 value={String(t.completed)}
                 sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, t.completed ? `${usd(t.cost_usd / t.completed)} each` : null].filter(Boolean).join(" · ")}
               />
-              <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median create → merge · ${t.human_wait_pct}% waiting on you`} />
-              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} fix cycles per verify · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
+              <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median create → completion · ${t.human_wait_pct}% waiting on you`} />
+              <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={`${t.fix_cycles.toFixed(1)} rounds per fix-loop item · ${t.fix_cycles_capped} capped · ${t.rejected_gates} rejected gates`} />
             </div>
           </Section>
 
@@ -149,7 +149,7 @@ export function AnalyticsPage() {
                 </tbody>
               </table>
             )}
-            <p className="an-note">Minutes are the median per completed item. Tokens and dollars are what agents reported; a trailing "+" marks a sum that is missing a session.</p>
+            <p className="an-note">Minutes are the mean wall time of one worker session, over every item in range. Tokens and dollars are what the sessions recorded, Kraft's estimates included; a trailing "+" marks a sum that is missing a session.</p>
           </Section>
 
           <div className="an-pair">
@@ -189,7 +189,7 @@ export function AnalyticsPage() {
                 </ul>
               )}
               <p className="an-note">
-                {t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → green CI {elapsed(t.open_mr_to_green_ci_ms)} median
+                {t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {elapsed(t.open_mr_to_green_ci_ms)} median
               </p>
             </Section>
           </div>

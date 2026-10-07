@@ -492,21 +492,6 @@ def test_unplanned_touches_and_open_mr_to_green_are_zero_safe_with_no_completed_
     assert t["open_mr_to_green_ci_ms"] == 0
 
 
-def test_open_mr_to_green_ci_ms_spans_open_mr_to_settled_mr_checks(tmp_path):
-    conn = db._connect(tmp_path / "orchestrator.db")
-    db.migrate(conn)
-    _item(conn, "w1", status="completed", created=_at(2))
-    _event(conn, "w1", "node_started", {"node_id": "open_mr"}, _at(1.5))
-    _event(conn, "w1", "node_completed", {"node_id": "mr_checks"}, _at(1.0))
-    _event(conn, "w1", "work_item_completed", {}, _at(0.9))
-    conn.commit()
-    try:
-        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
-    finally:
-        conn.close()
-    assert t["open_mr_to_green_ci_ms"] == pytest.approx(0.5 * 24 * 3600 * 1000, rel=1e-6)
-
-
 def test_unplanned_touches_per_item_breaks_out_by_chain_template(tmp_path):
     """Same slicing mechanism `repo`/`template` already give every other
     total -- filtered, not grouped, exactly like `by_repo`'s own filter args."""
@@ -665,3 +650,38 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     assert t["mrs_merged"] == 2
     assert t["fix_cycles"] == pytest.approx(3.0)  # 3 loop rounds / 1 item with a loop
     assert t["fix_cycles_capped"] == 1
+
+
+@pytest.mark.parametrize(
+    ("chain", "started", "completed", "expected_days"),
+    [
+        pytest.param("default", "draft_merge_request", "merge_request_feedback", 0.5, id="default"),
+        # The ids this figure once read: no shipped chain has them, and a
+        # node's name is not what says it opens a merge request.
+        pytest.param("default", "open_mr", "mr_checks", 0, id="old-ids"),
+        pytest.param("quick-task", "draft_merge_request", "merge_request_feedback", 0, id="no-mr"),
+    ],
+)
+def test_open_mr_to_green_ci_reads_what_a_node_does_not_its_id(
+    tmp_path, chain, started, completed, expected_days
+):
+    """Kraft-05b5i: from the node running `mr.open_draft` starting to the node
+    running `mr.ci` completing, read off the materialized chain, so a shipped
+    chain does not read 0s. `quick-task` has neither node and adds nothing."""
+    from pathlib import Path
+
+    from kraft.templates.library import TemplateLibrary
+
+    seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "config")
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _v1_item(conn, "w1", seed.resolve_chain(chain), created=_at(2))
+    _event(conn, "w1", "node_started", {"node_id": started}, _at(1.5))
+    _event(conn, "w1", "node_completed", {"node_id": completed}, _at(1.0))
+    _event(conn, "w1", "work_item_completed", {}, _at(0.9))
+    conn.commit()
+    try:
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    finally:
+        conn.close()
+    assert t["open_mr_to_green_ci_ms"] == pytest.approx(expected_days * 24 * 3600 * 1000)

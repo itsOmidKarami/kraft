@@ -39,7 +39,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(tile("Time at gates")).getByText("14m")).toBeInTheDocument();
     expect(within(tile("Time at gates")).getByText("8% of the time waiting on you")).toBeInTheDocument();
     expect(within(tile("Fix loops")).getByText("1.5")).toBeInTheDocument();
-    expect(within(tile("Fix loops")).getByText("cycles per verify · 2 hit their cap")).toBeInTheDocument();
+    expect(within(tile("Fix loops")).getByText("rounds per fix-loop item · 2 hit their cap")).toBeInTheDocument();
   });
 
   it("makes its scrolling area reachable from the keyboard (R14b-03)", async () => {
@@ -70,7 +70,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
     expect(screen.getByText(/a trailing "\+" marks a sum that is missing a session/)).toBeInTheDocument();
-    expect(screen.getByText("0.25 unplanned touches per item · open MR → green CI 10m median")).toBeInTheDocument();
+    expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();
   });
 
   it("asks for the range the person picks, 7 days first", async () => {

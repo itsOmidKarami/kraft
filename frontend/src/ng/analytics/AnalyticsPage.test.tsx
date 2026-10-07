@@ -30,10 +30,11 @@ const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "analytic
 // What the shipped views/Analytics.tsx shows that this page must too (GAP §2 #39).
 const SECTIONS = ["Overview", "Throughput by week", "By node", "By repo", "Why items stopped for a person"];
 const FOOTNOTES = [
-  /Minutes are the median per completed item/,
-  /a trailing "\+" marks a sum that is missing a session/,
+  /Minutes are the mean wall time of one worker session, over every item in range/,
+  /Kraft's estimates included; a trailing "\+" marks a sum that is missing a session/,
+  /Kraft's own estimate for a session whose agent reported none/,
   /bars count merges, not completions/,
-  /unplanned touches per item · open MR → green CI/,
+  /unplanned touches per item · open MR → checks done/,
   /current week is partial/,
 ];
 const TILES = ["Completed", "Lead time", "Cost"];
@@ -45,8 +46,8 @@ describe("ng AnalyticsPage", () => {
     for (const label of TILES) expect(screen.getByText(label, { selector: ".an-kpi-label" })).toBeInTheDocument();
     for (const note of FOOTNOTES) expect(screen.getByText(note)).toBeVisible();
     expect(screen.getByText("+8 vs previous · $7.08 each")).toBeInTheDocument();
-    expect(screen.getByText("median create → merge · 25% waiting on you")).toBeInTheDocument();
-    expect(screen.getByText("1.5 fix cycles per verify · 6 capped · 9 rejected gates")).toBeInTheDocument();
+    expect(screen.getByText("median create → completion · 25% waiting on you")).toBeInTheDocument();
+    expect(screen.getByText("1.5 rounds per fix-loop item · 6 capped · 9 rejected gates")).toBeInTheDocument();
   });
 
   it("says its scope once, in the header row, with no visible heading of its own (AN-1)", async () => {

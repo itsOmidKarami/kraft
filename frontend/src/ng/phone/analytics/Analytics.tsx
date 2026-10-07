@@ -43,7 +43,7 @@ export function Analytics() {
               <Tile label="Spent" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
               <Tile label="Items done" value={String(t.completed)} sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, `${running} running now`].join(" · ")} />
               <Tile label="Time at gates" value={elapsed(t.human_wait_ms)} sub={`${t.human_wait_pct}% of the time waiting on you`} />
-              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`cycles per verify · ${t.fix_cycles_capped} hit their cap`} />
+              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`rounds per fix-loop item · ${t.fix_cycles_capped} hit their cap`} />
             </div>
             {empty ? (
               <p className="ph-empty">Nothing has completed in this range yet.</p>
@@ -87,7 +87,7 @@ export function Analytics() {
                       ))}
                     </div>
                   )}
-                  <p className="ph-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → green CI {elapsed(t.open_mr_to_green_ci_ms)} median</p>
+                  <p className="ph-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {elapsed(t.open_mr_to_green_ci_ms)} median</p>
                 </Block>
               </>
             )}
