@@ -445,7 +445,7 @@
 /get-started/install#where-state-lives: /get-started/install#uninstall-and-where-state-lives
 /get-started/install#uninstall: /get-started/install#uninstall-and-where-state-lives
 /guides/kraft-lite#slash-commands: /guides/kraft-lite#run-your-first-chain
-/guides/harnesses/worker-kit#5-check-it: /guides/harnesses/worker-kit#check-it-worked
+/guides/harnesses/worker-kit#_5-check-it: /guides/harnesses/worker-kit#check-it-worked
 /guides/day-to-day/review-a-change#gates-dont-ask-twice: /guides/day-to-day/review-a-change#a-gate-with-a-must-fix-does-not-open
 /guides/day-to-day: /guides#day-to-day
 /guides/customize: /guides#customize-the-chain

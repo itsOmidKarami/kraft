@@ -108,7 +108,7 @@ ui:
   wrapper: text-left items-start
   title: text-left
 ---
-Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` chain also needs a GitHub or GitLab remote. [Install](/get-started/install) lists the rest. Before you run it on real code, read [Security](/project/security) and [Data and privacy](/project/data-and-privacy). Once it runs, [Concepts](/concepts) explains how it thinks, [Guides](/guides) each take one task, and the [Reference](/reference) lists every command and file.
+Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` chain also needs a GitHub or GitLab remote. [Install](/get-started/install) lists the rest. Before you run it on real code, read [Security](/project/security) and [Data and privacy](/project/data-and-privacy).
 
 :::u-page-list
 ---
@@ -147,6 +147,33 @@ variant: ghost
 to: /troubleshooting
 title: Troubleshooting
 description: Why an item stopped, and what to do about it.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
+to: /concepts
+title: Concepts
+description: Vocabulary, caps and budgets, and why Kraft has a permission gate.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
+to: /guides
+title: Guides
+description: Use Kraft from your agent, run Kraft Lite, reach the board from a phone, add a harness.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
+to: /reference
+title: Reference
+description: The CLI, every configuration file, chain nodes, permissions, harnesses, and triggers.
 variant: ghost
 ---
 ::::
