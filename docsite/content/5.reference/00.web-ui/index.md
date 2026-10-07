@@ -14,3 +14,4 @@ Kraft's web UI is the server's own page: start `kraft` and open `http://127.0.0.
 - [An item's page](/reference/web-ui/item-page): one work item in full, with the header's actions, the chain graph and the inspector.
 - [The review page](/reference/web-ui/review-page): an item's diff with Compare, Viewed marks, line comments and the Finish review dialog.
 - [Templates and Settings](/reference/web-ui/templates-and-settings): the Chains and Library screens, and each Settings screen that edits Kraft's setup.
+- [Analytics](/reference/web-ui/analytics): the Repo and Chain filters, the overview figures, the weekly merge chart, and the node, repo and stop tables, with what each number counts.
