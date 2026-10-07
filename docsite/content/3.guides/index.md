@@ -10,7 +10,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 ## Where to start
 
 - **You have just installed Kraft and nothing is connected.** Follow [Your first work item](/get-started/first-work-item) from a terminal or your agent, or [The setup wizard on first start](/guides/day-to-day/first-run) in the web UI. Then read [File a work item](/guides/day-to-day/file-a-work-item).
-- **A work item is waiting at a gate, or you want to comment on one.** Read [Reviewing a change](/guides/day-to-day/review-a-change).
+- **A work item is waiting at a gate for you to approve or reject, or you want to comment on one.** Read [Reviewing a change](/guides/day-to-day/review-a-change).
 - **You work in a coding agent and want to drive Kraft from it.** Read [Use Kraft from your agent](/guides/day-to-day/agent-integration).
 - **An item stopped on a cap.** Read [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap).
 - **You want the board on your phone.** Read [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone), then [Remote access](/guides/run/remote-access).
@@ -24,13 +24,13 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [The setup wizard on first start](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
 - [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
-- [Reviewing a change](/guides/day-to-day/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
+- [Reviewing a change](/guides/day-to-day/review-a-change): approve or reject the gate a work item waits at, in the web UI or the CLI, and comment on it at any point.
 - [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap): raise the cap that stopped a work item from the interface or the command line, and retry it.
 - [Kraft for VS Code](/guides/day-to-day/vscode): clear gates, review a branch and edit config files from the editor.
 - [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone): the phone layout, its bottom bar, the board's cards and the buttons on a stopped item.
 - [Get notified when an item needs you](/guides/day-to-day/notifications): send a webhook or show a browser alert when an item waits at a gate or stops, and test it.
 
-### Customize the chain
+### Customize and automate
 
 - [Write your own chain](/guides/customize/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
 - [Add a security review or a gate reviewer](/guides/customize/add-review-agents): put the shipped `security-review` and `gate-review` skills into a chain of your own.
@@ -55,6 +55,4 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, the steps to update from it, and how to upgrade from a release candidate or an older release.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
 
-### Without a server
-
-- [Kraft Lite](/guides/kraft-lite): run a chain inside one agent session with no service.
+**Without a server.** [Kraft Lite](/guides/kraft-lite): run a chain inside one agent session with no service.
