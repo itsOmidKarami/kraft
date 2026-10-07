@@ -1,0 +1,21 @@
+flowchart TD
+  tool["The agent wants to run<br/>one tool call:<br/>a shell command, a file edit"]
+  nobody["A prompt to a person<br/>nobody is watching:<br/>it stalls, or the tool<br/>runs anyway"]
+  ask["Claude Code, Cursor, Codex:<br/>the CLI asks Kraft<br/>instead of a person"]
+  gate["Kraft's gate decides<br/>from the task's policy:<br/>allowed_tools, deny_tools,<br/>grants"]
+  allow(["Allow<br/>the policy<br/>permits it"])
+  deny(["Deny<br/>the policy<br/>forbids it"])
+  none(["No opinion<br/>Cursor, Codex, no<br/>allowed_tools:<br/>the CLI decides,<br/>nothing logged"])
+  log["permission_decision<br/>on the item's timeline:<br/>allow or deny, and why"]
+
+  tool -.->|"left to<br/>the CLI"| nobody
+  tool -->|"with the<br/>gate"| ask --> gate
+  gate --> allow --> log
+  gate --> deny --> log
+  gate --> none
+
+  classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
+  classDef off fill:#eef0f3,stroke:#7b8494,color:#1d1d1f,stroke-dasharray:4 3
+  class tool,ask,gate,allow,deny,none,log box
+  class nobody off
+  linkStyle default stroke:#7b8494

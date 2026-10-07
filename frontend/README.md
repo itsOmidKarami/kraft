@@ -227,12 +227,14 @@ pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Seven images are shown, in five places: the root README uses `board`, `gate`,
+Ten images are shown, in six places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
-`analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
-web UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item` and
-`review`; and the phone guide
-(`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`
+`analytics` and `mobile`; the first-work-item page `board` and `gate`; the web
+UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item`,
+`review`, `analytics`, `chains` and `policy`; the phone guide
+(`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`; and
+the setup wizard guide (`docsite/content/3.guides/1.day-to-day/2.first-run.md`)
+`setup`
 (`docsite/public/assets` is a link to this folder).
 Retake the ones whose screen changed, and all of them when a release is cut:
 
@@ -244,21 +246,42 @@ Retake the ones whose screen changed, and all of them when a release is cut:
 | `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: the chain as a graph, and the inspector with the gate's files, open thread and Approve and Reject… |
 | `review.png` | 1440×700 | the review page of that item on `calc.py`, with a comment being written on lines −2 to +2 (the removed line and its replacement), Must fix selected |
 | `analytics.png` | 1440×660 | the Analytics page |
+| `chains.png` | 1440×700 | Templates › Chains on the `default` chain, with the `spec_approval` gate selected and its settings in the inspector |
+| `policy.png` | 1440×700 | Settings › Policy on its Limits section |
+| `setup.png` | 1440×700 | the setup wizard's first step, on a home with no repo connected |
 | `mobile.png` | 390×844 | the board in the phone layout |
 
 All are the default look (graphite, dark, no accent), of a repo named `repo`
-and the items `just dev-seed` files (the committed ones have a dozen or so;
-file more through the composer). `item` and `review` are of the same item as
+and the items `just dev-seed` files, plus more filed in step 3. `setup` is the
+exception: it is of a second, empty home. `item` and `review` are of the same item as
 `gate`, the one at `spec_approval`; its worktree's `calc.py` is `a - b` changed
 to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
 
-1. Start a clean, seeded instance:
+**Every command here runs against the throwaway instance in `.dev`. A `kraft`
+command without `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766` in front acts on your own
+Kraft, in `~/.kraft`: run these from the repository root, and type the two
+variables on each one.**
+
+1. Start a clean, seeded instance. No comment sits in these blocks: an
+   interactive zsh does not read `#` as one. In one terminal, the backend on
+   :8766, serving `frontend/dist`:
 
    ```bash
    (cd frontend && npm run build)
-   just dev-reset && just api       # in one terminal: backend on :8766, serving frontend/dist
-   just dev-seed                    # in another: four items, one at a gate
+   just dev-reset && just api
    ```
+
+   In another, the seed: four items, one at a gate:
+
+   ```bash
+   just dev-seed
+   ```
+
+   The seed's two failing and slow items carry `KRAFT_FAIL` and `KRAFT_SLOW`
+   in their titles, which a screenshot should not show. Abandon them
+   (`KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item abandon ID --yes`)
+   and file the same work as clean titles with the marker in the description,
+   which the fake agent reads too (below).
 
 2. Give search something to find. It indexes only what git tracks under
    `.engineering/`, and the folder names the kind shown beside a hit
@@ -278,23 +301,71 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
    `add -A`, which would also stage the agent's `.engineering/sessions/` file.
    The item's id is in its address on the board. For `item`, which lists an
-   open thread, add one with `kraft item comment <id> --body "why is this here?"`
-   (a comment on no file is a thread on the whole change), against the same dev
-   home: `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment ...`.
+   open thread, add one:
+   `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment <id> --body "why is this here?"`
+   (a comment on no file is a thread on the whole change). The comment is a
+   draft until a review is sent, which is how `item` and `review` show it
+   ("1 open thread", "pending").
+
+   File a few more with `item create`, then the failed and paused ones.
+   Not started: two without `--autostart`. A second gate: one `--autostart` on
+   the default chain. Done: a few `--chain quick-task --autostart`, which
+   finish. Running: two `--description KRAFT_SLOW`, which run for 15 seconds,
+   so take `board` and `mobile` (`ONLY=board,mobile`, below) in that window:
+
+   ```bash
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Rename the harness profiles" --repo .dev/repo --chain quick-task
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Add a retry to the sync command" --repo .dev/repo --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Trim the startup log" --repo .dev/repo --chain quick-task --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Rewrite the parser" --repo .dev/repo --chain quick-task --autostart --description KRAFT_FAIL
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Investigate the flaky import test" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item pause ID
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Retry flaky uploads in the sync worker" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Migrate the board filters to URL params" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   ```
+
+   `ID` in the `item pause` line is the id the `item create` before it printed;
+   run the pause while that item still runs.
+
+   The Done group sorts the newest first, and the frame cuts it after one row:
+   finish a clean item last, so an abandoned one is not the row that shows.
+
+   Analytics needs merged items: Throughput counts merges, and the dev repo
+   uses the in-process fake forge, so a default-chain item reaches `merge`.
+   File three with `--autostart` on the default chain (the `item create` line
+   below, run three times with three titles), then approve each gate
+   as it comes (`spec_approval`, `plan_approval`, `local_review`,
+   `final_review`) until the item is `completed`. Read the state with `view
+   list`; give the wait a limit of a few minutes. Do not use the item that
+   `gate`, `item` and `review` show:
+
+   ```bash
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Cache the schema lookups" --repo .dev/repo --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft view list --all
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item approve ID
+   ```
+
+   Run `view list` and `item approve` again for each gate: an item takes four
+   approvals and about 30 seconds, and `open MR → checks done` reads `0s` on
+   the fake forge, which answers at once.
+
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
-   as `GATED_ID=<id> node e2e-shots/shot.mjs`:
+   as `GATED_ID=<id> node e2e-shots/shot.mjs`. `ONLY=board,mobile` takes just
+   those, and `ONLY=setup` takes the wizard (step 6):
 
    ```js
    import { chromium } from "@playwright/test";
 
    const base = "http://127.0.0.1:8766";
    const out = process.env.OUT ?? "../.github/assets";
+   const only = process.env.ONLY?.split(",");
    const browser = await chromium.launch();
    const desktop = { colorScheme: "dark", viewport: { width: 1440, height: 700 } };
    const phone = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 
    async function shoot(name, context, go) {
+     if (only && !only.includes(name)) return;
      const page = await (await browser.newContext(context)).newPage();
      await page.goto(base + "/");
      await go(page);
@@ -320,10 +391,16 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
      await pick("old", 2).click(); // the removed line ...
      await pick("new", 2).click({ modifiers: ["Shift"] }); // ... to the line that replaced it
      await pick("new", 2).hover();
-     await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Comment on lines -2 to +2"
-     await p.getByRole("button", { name: "Must fix", exact: true }).click();
+     await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Lines -2 to +2"
+     await p.getByRole("radio", { name: "Must fix", exact: true }).click();
      await p.getByRole("textbox", { name: "Comment" }).fill("Good catch. Add a test that pins it: add(2, 3) == 5.");
    });
+   await shoot("chains", desktop, async (p) => {
+     await p.goto(`${base}/templates/chains/default`);
+     await p.getByText("spec_approval", { exact: true }).first().click(); // the gate's own settings in the inspector
+   });
+   await shoot("policy", desktop, (p) => p.goto(`${base}/settings/policy/limits`));
+   await shoot("setup", desktop, (p) => p.getByText("Nothing on the board yet").waitFor()); // a home with no repo: ONLY=setup
    await shoot("mobile", phone, () => {});
    await browser.close();
    ```
@@ -332,23 +409,44 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    or a name of yours, and that its size is the table's.
 
    The `review` steps are the contract suite's range pick
-   (`e2e/contract/review.spec.ts`) pointed at `calc.py`; they have not been
-   run against the dev seed, so check the composer header reads "Comment on
-   lines −2 to +2" before you save the frame. The committed `review.png` shows
-   `calc.py` inline and alone; if your frame lists both files or shows two
-   columns, change the diff settings (Inline, one file at a time) before the
-   shot.
+   (`e2e/contract/review.spec.ts`) pointed at `calc.py`; check the composer
+   header reads "Lines −2 to +2" before you save the frame. `?file=calc.py`
+   shows that file alone; if your frame shows two columns, change the diff
+   settings (Inline) before the shot.
+
+6. Take `setup`, the wizard that replaces the board when no repo is connected,
+   from a second home that nothing else uses. It needs the port `.dev` has, so
+   stop that instance first (Ctrl-C in its terminal). From the repository root,
+   in a shell whose working directory is that root (`echo $PWD`):
+
+   ```bash
+   W=$PWD
+   [ -d config ] && mkdir .dev-wizard && cp -R config .dev-wizard/config && rm -f .dev-wizard/config/access.yaml
+   cd "$(mktemp -d)"
+   KRAFT_HOME="${W:?set W to the repository root first}/.dev-wizard" KRAFT_PORT=8766 KRAFT_FRONTEND_DIST="$W/frontend/dist" PATH="$W/fixtures/bin:$PATH" "$W/.venv/bin/python" -m kraft
+   ```
+
+   The `cd` is to a folder that is not a checkout: the wizard offers the folder
+   it starts in as the repo's path.
+
+   With it running, from `frontend/` in another terminal:
+   `ONLY=setup node e2e-shots/shot.mjs`. Stop it with Ctrl-C, go back to the
+   repository root and delete the home: `rm -rf .dev-wizard`. Both homes are
+   inside the checkout and the shell sets `KRAFT_HOME` for the one command
+   only, so nothing here reaches `~/.kraft`. The picture shows the dev port
+   (`127.0.0.1:8766`), not 8765; the guide's alt text says so.
 
 The footer under the sidebar prints the instance's version. A checkout prints a
 dev version (`2.0.0rc9.dev1+g…` on a tagged clone, `0.1.devN` in one without
-tags; `uv run kraft --version` shows it), while the committed set was taken
-from installed 1.5 release candidates (their footers read `v1.5.0rc10`, and
-also showed the instance's address, which the footer no longer does). For the set that goes out
-with a release, run that release's `kraft` against the seeded dev home rather
-than the checkout; `dev_env` in the root `justfile` lists the variables a dev
-instance sets, and `fixtures/bin` has to be first on `PATH` so the agents stay
-fake. A pull request that changes only these PNGs counts as docs-only to CI.
-The README and docs site link to them by file name, so keep the names.
+tags; `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft --version` shows it),
+and the committed set shows the build it was taken from. For the set that goes
+out with a release, retake all ten from the tagged build: run that release's
+`kraft` against the seeded dev home rather than the checkout, so the footers
+read the release's version. `dev_env` in the root `justfile` lists the
+variables a dev instance sets, and `fixtures/bin` has to be first on `PATH` so
+the agents stay fake. A pull request that changes only these PNGs counts as
+docs-only to CI. The README and docs site link to them by file name, so keep
+the names.
 
 ## Other generated files
 
