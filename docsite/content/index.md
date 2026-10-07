@@ -155,7 +155,7 @@ variant: ghost
 ---
 to: /concepts
 title: Concepts
-description: Vocabulary, caps and budgets, and why Kraft has a permission gate.
+description: How a work item runs, caps and budgets, the permission gate, and the vocabulary.
 variant: ghost
 ---
 ::::

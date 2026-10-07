@@ -11,7 +11,8 @@ Find the message you are looking at in the first column, then follow its link.
 
 | What you see | Go to |
 |---|---|
-| A [work item](/concepts/vocabulary#work-item) under **Needs you**, with a reason such as `task failed in node ...`, `could not start ...`, `budget cap reached`, `stuck: ...`, or a sandbox or Kit reason | [Why did my item stop?](/troubleshooting/why-did-my-item-stop#find-your-reason) |
+| A [work item](/concepts/vocabulary#work-item) under **Needs you**, with a reason such as `task failed in node ...`, `could not start ...`, `budget cap reached` or `stuck: ...` | [Why did my item stop?](/troubleshooting/why-did-my-item-stop#find-your-reason) |
+| A sandbox, Kit, workspace-member or nested-repository reason, such as `a process in the sandbox was killed by its memory limit` or `the Kit ... cannot be used` | [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops#find-your-reason) |
 | `no setup_command declared for ...` on a first work item | [`no setup_command declared`](/troubleshooting/why-did-my-item-stop#no-setup_command-declared) |
 | `no user.name configured in ...` | [`no user.name configured`](/troubleshooting/why-did-my-item-stop#no-username-configured) |
 | `... nothing registers it for Claude Code: ...` | [`nothing registers it for Claude Code`](/troubleshooting/why-did-my-item-stop#nothing-registers-it-for-claude-code) |
@@ -21,8 +22,8 @@ Find the message you are looking at in the first column, then follow its link.
 | `kraft: command not found` | [`kraft`: command not found](/troubleshooting/starting-and-reaching-kraft#kraft-command-not-found) |
 | `kraft: refusing to start`, or a port that is already in use | [Kraft won't start: port already in use](/troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use) |
 | A webhook or proxy gets 403 `unexpected Host` | [A webhook or proxy gets 403 "unexpected Host"](/troubleshooting/starting-and-reaching-kraft#a-webhook-or-proxy-gets-403-unexpected-host) |
-| A `kraft admin doctor` row that prints `FAIL` or `warn` | [Doctor failures](/troubleshooting/doctor-failures#common-kraft-admin-doctor-failures) |
-| A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where did a page go, and why does my theme look different?](/guides/run/upgrade-from-1-4#where-the-pages-moved) |
+| A `kraft admin doctor` row that prints `FAIL` or `warn` | [Doctor failures](/troubleshooting/doctor-failures#doctor-rows) |
+| A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where the pages moved](/guides/run/upgrade-from-1-4#where-the-pages-moved) |
 | A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, Kraft Lite or the permission gate | [FAQ](/get-started/faq) |
 | None of these matches | [Getting help](/project/status-and-support#getting-help) |
 
@@ -31,4 +32,4 @@ Find the message you are looking at in the first column, then follow its link.
 - [Why did my item stop?](/troubleshooting/why-did-my-item-stop): every other stop reason Kraft shows, with its fix, and the two waits that need no stop.
 - [Starting and reaching Kraft](/troubleshooting/starting-and-reaching-kraft): a missing `kraft` command, a taken port, and a rejected `Host`.
 - [Doctor failures](/troubleshooting/doctor-failures): every row `kraft admin doctor` can print, and how to clear it.
-- [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit and workspace-member stops of a sandboxed item.
+- [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit, workspace-member and nested-repository stops of a sandboxed item.
