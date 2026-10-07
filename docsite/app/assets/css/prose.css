@@ -168,14 +168,31 @@
 }
 
 /* The copy button sits over the top right corner of a code block, and the end
-   of a long first line was under it even scrolled as far as it goes. The 48px
-   of padding at the end of the block (app.config.ts, prose.pre) did nothing
-   by itself: a scroll box adds its end padding to what it can scroll only
-   after a box that overflows it, and a long line is text overflowing its
-   line, not a box. The code element is made as wide as its longest line (and
-   at least as wide as the block), so it is that box. */
+   of a long first line was under it even scrolled as far as it goes (the
+   backup file name on Roll back). The first line of the block gets 3rem of
+   padding at its end, and so it ends clear of the button (28px, 11px from the
+   edge). Only the first
+   line: the same padding on the whole block made the blocks that fit scroll
+   sideways for 30px of nothing, and would have stopped a highlighted line
+   short of the edge. And only a block without a title: with one the button is
+   in the title bar, not over the code.
+   Padding on a line does nothing by itself: a long line is text overflowing
+   its box, and a scroll box counts the padding only of a box that overflows.
+   So the code element is made as wide as its longest line (and at least as
+   wide as the block), and a line is as wide as it, padding included. The
+   block's own end padding (1rem) is taken back with a negative margin: left
+   in, a line that ended within 1rem of the edge, which had been shown whole,
+   would scroll for the padding. A block whose first line is the longest, or
+   long enough to reach the button, scrolls the extra, as it must.
+   A block of plain text (no .line spans, a bare string in the code element)
+   has no first line to pad: ::first-line takes no padding. It keeps what it
+   had. */
 main pre code {
   display: block;
   width: max-content;
   min-width: 100%;
+  margin-inline-end: -1rem;
+}
+main div:not(:has(> div)) > pre code .line:first-child {
+  padding-inline-end: 3rem;
 }
