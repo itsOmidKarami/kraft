@@ -61,7 +61,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `setup_command` | string | *(required, no fallback)* | Runs in every new [worktree](/concepts/vocabulary#worktree) before any node starts. See [`setup_command`](#setup_command). |
+| `setup_command` | string | `null` | Runs in every new [worktree](/concepts/vocabulary#worktree) before any node starts. Unset, the file still loads, but the repo's next work item stops before its first task. See [`setup_command`](#setup_command). |
 | `test_command` | string | `null` | The command CI actually runs for this repo: what the changed-test-scope verification runs, as one scope over every path. See [`test_command`](#test_command). |
 | `test_scopes` | list of `{paths, command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. See [`test_scopes`](#test_scopes). |
 | `areas` | mapping of id to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
@@ -96,7 +96,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 ### `enabled`
 
 - It governs auto-intake only: you can still file and run items on a disabled repo (from the CLI or an agent; the web composer lists only enabled repos), and running items keep going.
-- `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`.
+- `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it runs its agent tasks, then stops at `verification` until it has a `test_command` or `test_scopes`.
 - An absent key counts as enabled.
 - Kraft refuses an edit that would leave an enabled repo with neither a `test_command` (`""` counts) nor `test_scopes`.
 

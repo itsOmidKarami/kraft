@@ -9,13 +9,25 @@ A **harness** is one agent runtime, described as data: a fact about a CLI, not c
 
 ## How a task picks a harness
 
-An `agent` task in [`library.yaml`](/reference/configuration/library-and-chains#libraryyaml-reusable-components) names a **[harness profile](/concepts/vocabulary#harness-profile)** in its `harness:` field. `harnesses.yaml` says which harness, the profile's `provider`, that profile runs:
+An `agent` task in [`library.yaml`](/reference/configuration/library-and-chains#libraryyaml-reusable-components) names a **[harness profile](/concepts/vocabulary#harness-profile)** in its `harness:` field:
 
 ```yaml [config/library.yaml]
 spec_author: { kind: agent, harness: claude, prompt: "...", produces: spec }
 ```
 
-Every agent task Kraft ships names `claude`. To run a task on another harness, follow [Switch a task to another harness](/guides/harnesses/switch-harness).
+That name is a key in `harnesses.yaml`. The entry's `provider` says which of the harnesses below the profile runs:
+
+```yaml [config/harnesses.yaml]
+harnesses:
+  claude:
+    provider: claude
+    enabled: true
+    executable: claude
+    defaults:
+      model: sonnet
+```
+
+Kraft ships two harness profiles, `claude` and `codex`, and every agent task it ships names `claude`. The other five harnesses, `cursor`, `opencode`, `antigravity`, `gemini` and `amp`, are ready to use but need a harness profile of your own. [Switch a task to another harness](/guides/harnesses/switch-harness#_1-add-the-harness-profile) adds one and moves a task onto it.
 
 ## Compare the harnesses
 
