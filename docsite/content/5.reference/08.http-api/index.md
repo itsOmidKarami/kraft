@@ -180,7 +180,7 @@ The pages can change in any release. A script that must keep working calls the [
 | [`PUT /api/work-items/{id}/viewed`](/reference/http-api/budget-and-events#put-apiwork-itemsidviewed) | Marks a file viewed. |
 | [`DELETE /api/work-items/{id}/viewed`](/reference/http-api/budget-and-events#delete-apiwork-itemsidviewed) | Clears the mark. |
 | [`GET /api/work-items/{id}/fix-target`](/reference/http-api/budget-and-events#get-apiwork-itemsidfix-target) | Answers where a request-changes review would restart. |
-| [`POST /api/work-items/{id}/review`](/reference/http-api/budget-and-events#post-apiwork-itemsidreview) | Submits a review; this page covers its `digest`. |
+| [`POST /api/work-items/{id}/review`](/reference/http-api/budget-and-events#post-apiwork-itemsidreview) | Submits a review. Its entry documents only `digest`. |
 | [`POST /api/work-items/{id}/gates/{gate}/review`](/reference/http-api/budget-and-events#post-apiwork-itemsidreview) | Submits a review for a named gate, as `/review` does for the pending one. |
 
 ### Documents
@@ -221,7 +221,7 @@ The pages can change in any release. A script that must keep working calls the [
 | [`GET /api/templates/library`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateslibrary) | Answers `library.yaml` and every component in it. |
 | [`GET /api/templates/library/{ref}`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateslibraryref) | Answers one library component. |
 | [`GET /api/templates/steering/preview`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplatessteeringpreview) | Shows what an agent task reads at launch. |
-| [`POST /api/templates/reload`](/reference/http-api/repos-chains-harnesses-and-server#post-apitemplatesreload) | Does the same and answers what it refused. |
+| [`POST /api/templates/reload`](/reference/http-api/repos-chains-harnesses-and-server#post-apitemplatesreload) | Rereads the library, `policy.yaml` and `intake.yaml`, and answers what it refused. |
 
 ### Harnesses and providers
 
