@@ -964,7 +964,7 @@ async def _kit_checks(repo: config.RepoEntry, policy) -> tuple[object, list[dict
 
 def _egress_check(repo: config.RepoEntry, policy) -> dict | None:
     """A sandbox with no `network:` has open egress, the cloud metadata
-    address included, and every launch into it is refused unless the sandbox
+    address included, and every agent launch into it is refused unless the sandbox
     says `unrestricted_network: true` (`adapters.agent`): a failure here, a
     warning once it does."""
     if policy.network is not None:
@@ -981,7 +981,7 @@ def _egress_check(repo: config.RepoEntry, policy) -> dict | None:
     return _check(
         f"egress {_label(repo)}",
         False,
-        "the sandbox has no `network:`, so every launch into it is refused: add a "
+        "the sandbox has no `network:`, so every agent launch into it is refused: add a "
         "`network:` policy, or set `unrestricted_network: true` on the sandbox to run "
         "with open egress and gates not enforced",
     )
