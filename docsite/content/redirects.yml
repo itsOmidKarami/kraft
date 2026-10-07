@@ -59,7 +59,7 @@
 /guides/harnesses/switch-harness#cost-reporting-changes: /reference/harnesses/cost-reporting#harnesses-that-report-no-cost
 /guides/harnesses/switch-harness#verify: /guides/harnesses/switch-harness#check-it-worked
 /guides/harnesses/adding-a-harness#verify: /guides/harnesses/adding-a-harness#check-it-worked
-/guides/harnesses/adding-a-harness#verify-1: /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in
+/guides/harnesses/adding-a-harness#verify-1: /guides/harnesses/give-a-worker-its-login#check-it-worked
 /guides/harnesses/worker-kit#changing-the-kit: /guides/harnesses/worker-kit#change-the-kit
 /reference/harnesses#capabilities-not-flags: /reference/harnesses/harness-files#capabilities
 /reference/harnesses#amp: /reference/harnesses#amp-details
@@ -348,12 +348,12 @@
 /reference/cli/admin#a-repository-whose-sandbox-is-a-kit: /troubleshooting/doctor-failures#the-sandbox-row
 /reference/triggers#a-cron-kraft-cannot-run: /reference/configuration/intake#when-the-file-does-not-load
 /reference/chain-nodes#editing-keys-in-the-interface: /reference/web-ui/templates-and-settings#chains
-/guides/harnesses/adding-a-harness#pass-an-api-key-to-a-worker: /guides/day-to-day/agent-integration#run-workers-on-your-agent
-/guides/harnesses/adding-a-harness#amp: /guides/day-to-day/agent-integration#run-workers-on-your-agent
-/guides/harnesses/adding-a-harness#cursor: /guides/day-to-day/agent-integration#run-workers-on-your-agent
-/guides/harnesses/adding-a-harness#antigravity: /guides/day-to-day/agent-integration#run-workers-on-your-agent
-/guides/harnesses/adding-a-harness#check-that-a-worker-can-log-in: /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in
-/guides/harnesses/adding-a-harness#set-up-harness-credentials: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/harnesses/adding-a-harness#pass-an-api-key-to-a-worker: /guides/harnesses/give-a-worker-its-login#_2-pass-a-key-to-the-worker
+/guides/harnesses/adding-a-harness#amp: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
+/guides/harnesses/adding-a-harness#cursor: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
+/guides/harnesses/adding-a-harness#antigravity: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
+/guides/harnesses/adding-a-harness#check-that-a-worker-can-log-in: /guides/harnesses/give-a-worker-its-login#check-it-worked
+/guides/harnesses/adding-a-harness#set-up-harness-credentials: /guides/harnesses/give-a-worker-its-login#_2-pass-a-key-to-the-worker
 /guides/run/upgrade-kraft#update-from-14: /guides/run/upgrade-from-1-4#update-from-14
 /guides/run/upgrade-kraft#if-you-used-14s-update-anyway: /guides/run/upgrade-from-1-4#if-you-used-14s-update-anyway
 /guides/run/upgrade-kraft#what-changed: /guides/run/upgrade-from-1-4#what-changed
@@ -391,3 +391,7 @@
 /guides/run/operations: /guides/run/restart-kraft
 /guides/customize/upgrading-templates: /guides/run/upgrade-your-configuration
 /guides/run/operations#before-you-start: /reference/configuration/environment-variables
+/guides/day-to-day/agent-integration#run-workers-on-your-agent: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
+/guides/day-to-day/agent-integration#check-that-a-worker-can-log-in: /guides/harnesses/give-a-worker-its-login#check-it-worked
+/guides/day-to-day/agent-integration#what-an-agent-cannot-do: /guides/day-to-day/agent-integration#example-hand-work-to-kraft
+/guides/day-to-day/agent-integration#mcp-tools: /reference/mcp-tools
