@@ -124,7 +124,12 @@
   main table:has(th:nth-child(3)) td:empty {
     display: none;
   }
+  /* Two declarations: a browser that does not parse the alt-text form
+     (`/ ""`) drops the second one whole, and without the first a phone would
+     show stacked cells with no labels at all. Where the second is read, the
+     label has an empty alternative text. */
   main table:has(th:nth-child(3)) td[data-label]:not(:first-child)::before {
+    content: attr(data-label) ": ";
     content: attr(data-label) ": " / "";
     color: var(--ui-text-muted);
     font-weight: 500;
