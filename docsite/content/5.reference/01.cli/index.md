@@ -105,6 +105,7 @@ It is the same call the matching [MCP tool](/reference/mcp-tools) makes, but not
 always the same value:
 
 - `kraft view show --json` prints the item's full detail (its effective chain, [worker](/concepts/vocabulary#worker) sessions and stop), where the `get_work_item` tool hands an agent a trimmed item.
+- `kraft item create --json` prints a trimmed object, not the raw payload: `id`, `status` and `title`, plus `slots`, `repo_warning`, `bead_warning` or `duplicate_warning` when one applies.
 - `kraft view list --json` is scoped to the repo you are in unless you pass `--all` or `--repo`; `list_work_items` is never scoped.
 
 These verbs do not print the payload:
@@ -131,7 +132,7 @@ These verbs do not print the payload:
 
 The item itself is in `--json`, or in `kraft view show`.
 
-The reads you script against print as follows: [`view list`](/reference/cli/view#what-view-list-prints), [`view show`](/reference/cli/view#what-view-show-prints), [`repo list`](/reference/cli/repo#what-repo-list-prints), [`admin health`](/reference/cli/admin#what-health-prints), [`admin doctor`](/reference/cli/admin#what-doctor-checks) and [`item create`](/reference/cli/item#what-create-prints). With `--json` they print the API's own answer: see the [HTTP API](/reference/http-api) pages.
+The reads you script against print as follows: [`view list`](/reference/cli/view#what-view-list-prints), [`view show`](/reference/cli/view#what-view-show-prints), [`repo list`](/reference/cli/repo#what-repo-list-prints), [`admin health`](/reference/cli/admin#what-health-prints), [`admin doctor`](/reference/cli/admin#what-doctor-checks) and [`item create`](/reference/cli/item#what-create-prints). With `--json`, all but `item create` print the API's own answer: see the [HTTP API](/reference/http-api) pages.
 
 `kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
 object per line, because a stream has no end on which to close an array.
