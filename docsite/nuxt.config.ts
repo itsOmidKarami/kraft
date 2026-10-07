@@ -63,6 +63,11 @@ export default defineNuxtConfig({
   content: {
     build: {
       markdown: {
+        // `text` blocks get .line spans like the rest (rehype-text-lines.mjs).
+        // Content imports a plugin by its key, so the key is the file's path.
+        rehypePlugins: {
+          [fileURLToPath(new URL('./rehype-text-lines.mjs', import.meta.url))]: {},
+        },
         highlight: {
           theme: {
             light: 'github-light-high-contrast',

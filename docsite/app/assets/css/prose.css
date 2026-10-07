@@ -217,9 +217,11 @@
    in, a line that ended within 1rem of the edge, which had been shown whole,
    would scroll for the padding. A block whose first line is the longest, or
    long enough to reach the button, scrolls the extra, as it must.
-   A block of plain text (no .line spans, a bare string in the code element)
-   has no first line to pad: ::first-line takes no padding. It keeps what it
-   had. */
+   A block of plain text (language `text`) is not highlighted, so it had no
+   .line spans and ::first-line takes no padding: 32 of the 215 scrolling
+   blocks still ended their first line under the button. The site wraps its
+   lines the way the highlighter does (rehype-text-lines.mjs in docsite/, set
+   in nuxt.config.ts) and this rule reaches them. */
 main pre code {
   display: block;
   width: max-content;
