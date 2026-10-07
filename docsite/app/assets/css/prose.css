@@ -17,10 +17,13 @@
    SVGs state no pixel width, so the overlay cannot show them larger than the
    screen; the tap is switched off, as the diagram is already readable here.
    structure.svg and everything in diagrams/portrait/ are portrait and fit as they were.
+   The diagrams have no background of their own, so they read on the dark
+   theme too (docs-diagrams in the justfile).
 
    Nothing showed that the diagram goes on to the right. The table's edge
    shadow (.scroll-hint) is a background of the scrolling box, and the
-   diagram's own white background painted over it. So here the shadows are two
+   diagram's own white background painted over it (the diagram is clear now,
+   but its boxes still cover a background shadow). So here the shadows are two
    strips drawn on top (the paragraph's ::before and ::after, sticky at its
    left and right edge, so they stay put while the diagram scrolls under them)
    and a scroll-driven animation shows each only while there is diagram past
@@ -52,14 +55,14 @@
   main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"], [src*="/diagrams/portrait/"]))::before {
     left: 0;
     margin-right: -0.75rem;
-    background: radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.3), transparent);
+    background: radial-gradient(farthest-side at 0 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent);
     opacity: 0;
     animation-range: 0 2rem;
   }
   main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"], [src*="/diagrams/portrait/"]))::after {
     right: 0;
     margin-left: -0.75rem;
-    background: radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.3), transparent);
+    background: radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent);
     animation-direction: reverse;
     animation-range: calc(100% - 2rem) 100%;
   }
