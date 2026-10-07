@@ -388,3 +388,4 @@
 /guides/day-to-day/the-board: /reference/web-ui/sidebar-search-and-keyboard
 /guides/run/operations: /guides/run/restart-kraft
 /guides/customize/upgrading-templates: /guides/run/upgrade-your-configuration
+/guides/run/operations#before-you-start: /reference/configuration/environment-variables
