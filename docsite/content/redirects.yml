@@ -30,7 +30,8 @@
 /guides/worker-kit: /guides/harnesses/worker-kit
 /guides/remote-access: /guides/run/remote-access
 /guides/operations: /guides/run/operations
-/get-started/whats-new: /guides/run/whats-new
+/get-started/whats-new: /project/whats-new
+/guides/run/whats-new: /project/whats-new
 /get-started/install#upgrading-from-14: /guides/run/upgrade-kraft#upgrading-from-14
 /get-started/install#upgrading-from-a-150-release-candidate: /guides/run/upgrade-kraft#upgrading-from-a-150-release-candidate
 /get-started/install#upgrading-from-older-releases: /guides/run/upgrade-kraft#upgrading-from-older-releases
@@ -58,7 +59,7 @@
 /guides/harnesses/switch-harness#cost-reporting-changes: /reference/harnesses/cost-reporting#harnesses-that-report-no-cost
 /guides/harnesses/switch-harness#verify: /guides/harnesses/switch-harness#check-it-worked
 /guides/harnesses/adding-a-harness#verify: /guides/harnesses/adding-a-harness#check-it-worked
-/guides/harnesses/adding-a-harness#verify-1: /guides/harnesses/adding-a-harness#check-that-a-worker-can-log-in
+/guides/harnesses/adding-a-harness#verify-1: /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in
 /guides/harnesses/worker-kit#changing-the-kit: /guides/harnesses/worker-kit#change-the-kit
 /reference/harnesses#capabilities-not-flags: /reference/harnesses/harness-files#capabilities
 /reference/harnesses#amp: /reference/harnesses#amp-details
@@ -321,7 +322,7 @@
 /reference/triggers#the-cron-field: /reference/triggers#cron-syntax
 /reference/triggers#when-a-403-is-returned: /reference/http-api#who-may-call
 /reference/triggers#pre-20-triggers-with-a-bad-cron: /reference/triggers#when-a-schedule-fires
-/reference/triggers#an-intakeyaml-with-a-cron-kraft-cant-run: /reference/triggers#a-cron-kraft-cannot-run
+/reference/triggers#an-intakeyaml-with-a-cron-kraft-cant-run: /reference/configuration/intake#when-the-file-does-not-load
 /reference/chain-nodes#other-task-kinds: /reference/chain-nodes#subprocess-task-keys
 /reference/chain-nodes/result-file#example: /reference/chain-nodes/result-file#examples
 /guides/customize/write-your-own-chain#verify: /guides/customize/write-your-own-chain#check-it-worked
@@ -336,3 +337,13 @@
 /guides/run/upgrade-kraft#where-did-a-page-go-and-why-does-my-theme-look-different: /guides/run/upgrade-kraft#where-the-pages-moved
 /guides/run/logs-and-disk-space#line-times-in-a-session-log: /guides/run/logs-and-disk-space#find-the-logs
 /guides/run/remote-access#verify: /guides/run/remote-access#check-it-worked
+/reference/cli/admin#the-sandbox-row: /troubleshooting/doctor-failures#the-sandbox-row
+/reference/cli/admin#a-repository-whose-sandbox-is-a-kit: /troubleshooting/doctor-failures#the-sandbox-row
+/reference/triggers#a-cron-kraft-cannot-run: /reference/configuration/intake#when-the-file-does-not-load
+/reference/chain-nodes#editing-keys-in-the-interface: /reference/web-ui/templates-and-settings#chains
+/guides/harnesses/adding-a-harness#pass-an-api-key-to-a-worker: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/harnesses/adding-a-harness#amp: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/harnesses/adding-a-harness#cursor: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/harnesses/adding-a-harness#antigravity: /guides/day-to-day/agent-integration#run-workers-on-your-agent
+/guides/harnesses/adding-a-harness#check-that-a-worker-can-log-in: /guides/day-to-day/agent-integration#check-that-a-worker-can-log-in
+/guides/harnesses/adding-a-harness#set-up-harness-credentials: /guides/day-to-day/agent-integration#run-workers-on-your-agent

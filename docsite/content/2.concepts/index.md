@@ -6,7 +6,7 @@ description: The vocabulary, lifecycle, limits, and permission model behind Kraf
 ---
 
 These pages explain how Kraft thinks, before you configure it. Read Vocabulary
-first, then How a work item runs.
+first, then How a [work item](/concepts/vocabulary#work-item) runs.
 
 ## In this section
 

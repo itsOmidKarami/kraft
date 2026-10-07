@@ -312,7 +312,7 @@ Page rules:
 - Pages live under `docsite/content/`, one Markdown file per page, with MDC
   syntax for the odd embedded component.
 - A page's route follows its folder, minus the number prefixes:
-  `content/5.reference/2.configuration/3.policy.md` is served at
+  `content/5.reference/03.configuration/3.policy.md` is served at
   `/reference/configuration/policy`. A folder's `index.md` is its landing
   page, and its `.navigation.yml` sets its sidebar title.
 - A nested MDC component block needs one more `:` per level of nesting
@@ -331,22 +331,22 @@ Page rules:
 
 | Source | Docs page |
 |---|---|
-| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/5.reference/1.cli/` |
-| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `src/kraft/templates/library.py`, `src/kraft/config.py`, `src/kraft/policy.py`) | `docsite/content/5.reference/2.configuration/` |
-| A chain template's node fields | `docsite/content/5.reference/3.chain-nodes/index.md` |
-| How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/5.reference/3.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
-| The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/5.reference/3.chain-nodes/3.fix-loop.md` |
+| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/5.reference/01.cli/` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `src/kraft/templates/library.py`, `src/kraft/config.py`, `src/kraft/policy.py`) | `docsite/content/5.reference/03.configuration/` |
+| A chain template's node fields | `docsite/content/5.reference/04.chain-nodes/index.md` |
+| How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/5.reference/04.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
+| The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/5.reference/04.chain-nodes/3.fix-loop.md` |
 | A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
-| Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/5.reference/6.triggers.md` |
-| The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/5.reference/4.permissions.md` |
-| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/5.harnesses/` |
-| An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/8.mcp-tools.md` |
+| Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/5.reference/07.triggers.md` |
+| The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/5.reference/06.permissions.md` |
+| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/05.harnesses/` |
+| An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/09.mcp-tools.md` |
 | A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/4.agent-integration.md` |
-| A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/2.configuration/9.environment-variables.md` |
-| A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/9.events.md` |
+| A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/9.environment-variables.md` |
+| A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/4.troubleshooting/1.why-did-my-item-stop.md` (a stop reason), `docsite/content/4.troubleshooting/3.doctor-failures.md` (a doctor check) |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/1.remote-access.md`, and `SECURITY.md` if it's security-relevant |
-| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/5.reference/0.web-ui/` (each screen: the board, an item's page, the review page, Templates and Settings), `docsite/content/3.guides/1.day-to-day/2.first-run.md` (the setup wizard), `docsite/content/3.guides/1.day-to-day/3.file-a-work-item.md` (the composer), `docsite/content/3.guides/1.day-to-day/5.review-a-change.md` (the review page), `docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md` (the phone), `docsite/content/3.guides/4.run/1.remote-access.md` (Access), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
+| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/5.reference/00.web-ui/` (each screen: the board, an item's page, the review page, Templates and Settings), `docsite/content/3.guides/1.day-to-day/2.first-run.md` (the setup wizard), `docsite/content/3.guides/1.day-to-day/3.file-a-work-item.md` (the composer), `docsite/content/3.guides/1.day-to-day/5.review-a-change.md` (the review page), `docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md` (the phone), `docsite/content/3.guides/4.run/1.remote-access.md` (Access), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer

@@ -12,13 +12,13 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - **You have just installed Kraft and nothing is connected.** Follow [The first run](/guides/day-to-day/first-run), then [File a work item](/guides/day-to-day/file-a-work-item).
 - **You work in a coding agent and want to drive Kraft from it.** Read [Use Kraft from your agent](/guides/day-to-day/agent-integration).
 - **An item stopped on a cap.** Read [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap).
-- **You want to change the chain, a harness or the server.** Pick from the groups below.
+- **You want to change the chain, a [harness](/concepts/vocabulary#harness) or the server.** Pick from the groups below.
 
 ## In this section
 
 ### Day to day
 
-- [The board and the web UI](/guides/day-to-day/the-board): find a screen, and what the sidebar, search and shortcuts do on every one.
+- [The board and the web UI](/guides/day-to-day/the-board): the sidebar, search and shortcuts every screen shares, and where each screen is described.
 - [The first run](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
 - [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
@@ -32,7 +32,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Write your own chain](/guides/customize/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
 - [Add a security review or a gate reviewer](/guides/customize/add-review-agents): put the shipped `security-review` and `gate-review` skills into a chain of your own.
 - [Schedule or webhook work](/guides/customize/schedule-and-webhook-work): file paused work items from a cron schedule or an HTTP call.
-- [Upgrade your templates](/guides/customize/upgrading-templates): take new shipped chains and library tasks after an upgrade without losing your edits.
+- [Upgrade your configuration](/guides/customize/upgrading-templates): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
 
 ### Agents and harnesses
 
@@ -47,6 +47,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Back up and restore the database](/guides/run/back-up-and-restore): copy the database while the server runs, restore it, and use the copy Kraft makes before an upgrade.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
 - [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
+- [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, what changed from 1.4 to 2.0, and how to pin or roll back a version.
 
 ### Without a server
 
