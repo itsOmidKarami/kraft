@@ -55,4 +55,4 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, the steps to update from it, and how to upgrade from a release candidate or an older release.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
 
-[Kraft Lite](/guides/kraft-lite): run a chain inside one agent session with no service.
+**Without a server.** [Kraft Lite](/guides/kraft-lite): run a chain inside one agent session with no service.
