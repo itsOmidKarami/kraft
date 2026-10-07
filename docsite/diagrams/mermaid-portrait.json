@@ -1,7 +1,7 @@
 {
   "theme": "neutral",
   "htmlLabels": false,
-  "flowchart": { "htmlLabels": false, "curve": "basis", "nodeSpacing": 28, "rankSpacing": 34 },
+  "flowchart": { "htmlLabels": false, "curve": "basis", "nodeSpacing": 4, "rankSpacing": 24, "padding": 4 },
   "themeVariables": {
     "fontFamily": "ui-sans-serif, system-ui, sans-serif",
     "fontSize": "15px",

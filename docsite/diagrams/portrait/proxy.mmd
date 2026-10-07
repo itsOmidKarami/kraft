@@ -1,22 +1,26 @@
 flowchart TD
-  sender["Sender: a webhook or script<br/>on another device<br/>Host: the name it used"]
-  proxy["Proxy on this machine<br/>sends Host: localhost<br/>sets X-Forwarded-For<br/>to the sender's address"]
-  host["Kraft on 127.0.0.1<br/>checks the Host"]
-  client["Kraft takes the client<br/>from X-Forwarded-For"]
-  token["Kraft asks for a credential:<br/>session, mcp-token bearer,<br/>or trigger token on<br/>POST /api/triggers"]
-  api(["API answers"])
+  sender["Sender: another device<br/>Host: the name it used"]
+  proxy["Proxy on this machine<br/>sends Host: localhost and<br/>X-Forwarded-For: the sender"]
+  peer["Kraft finds the client:<br/>the last X-Forwarded-For<br/>that is not loopback"]
+  r403a(["403 refused:<br/>no password set"])
+  host["Kraft checks the Host"]
   r403(["403<br/>unexpected Host"])
-  open(["No sign-in asked:<br/>the whole API is open"])
+  local["Is the client<br/>this machine?"]
+  open(["No sign-in asked:<br/>the API is open"])
+  token["A credential: session,<br/>mcp-token bearer, or<br/>trigger token on<br/>POST /api/triggers"]
+  api(["API answers"])
   r401(["401<br/>no valid credential"])
 
-  sender --> proxy --> host
-  host -->|"localhost"| client
-  host -->|"any other"| r403
-  client -->|"a remote<br/>address"| token
-  client -->|"header<br/>missing"| open
+  sender --> proxy --> peer
+  peer -->|"remote,<br/>no password"| r403a
+  peer -->|"otherwise"| host
+  host -->|"not<br/>localhost"| r403
+  host -->|"localhost"| local
+  local -->|"yes: header<br/>missing, or loopback<br/>passed through"| open
+  local -->|"no"| token
   token -->|"valid"| api
   token -->|"none valid"| r401
 
   classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
-  class sender,proxy,host,client,token,api,r403,open,r401 box
+  class sender,proxy,peer,r403a,host,r403,local,open,token,api,r401 box
   linkStyle default stroke:#7b8494

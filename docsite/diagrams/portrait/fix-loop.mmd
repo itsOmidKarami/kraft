@@ -1,19 +1,28 @@
 flowchart TD
-  measure["Measure the node:<br/>read every task's<br/>findings"]
-  open["A finding at a loop<br/>severity, or a task<br/>failed with none?"]
-  cycle["One cycle, checks in order:<br/>needs_context,<br/>only Kraft-run failures,<br/>budget, the judge when due,<br/>attempt or wall-clock limit,<br/>same findings again"]
-  repair["Repair task,<br/>told the failing<br/>findings"]
-  pass(["Node<br/>completes"])
-  stuck(["Node stuck:<br/>escalation first,<br/>then the item<br/>waits for you"])
+  measure["Measure the node:<br/>read the findings"]
+  open["A loop-severity<br/>finding, or a task<br/>failed with none?"]
+  c1["Checks 1 to 3:<br/>needs_context, only<br/>Kraft-run failures,<br/>a budget spent"]
+  judge["Check 4: the judge,<br/>when it is due"]
+  c2["Checks 5 and 6:<br/>attempt or wall-<br/>clock limit, same<br/>findings again"]
+  repair["Repair<br/>task"]
+  pass(["Pass: node<br/>completes"])
+  wait(["Item stops<br/>and waits<br/>for you"])
+  down(["Judge says<br/>stop_downgrade:<br/>completes"])
+  human(["Judge says<br/>stop_needs_human:<br/>stuck"])
+  cap(["Limit or same<br/>findings:<br/>stuck"])
 
   measure --> open
-  open -->|"no"| pass
-  open -->|"yes"| cycle
-  cycle -->|"nothing<br/>stops it"| repair
-  repair -->|"measure the<br/>whole node again"| measure
-  cycle -->|"judge:<br/>stop_downgrade"| pass
-  cycle -->|"attempts or wall clock<br/>past the limit, same<br/>findings again, or judge:<br/>stop_needs_human"| stuck
+  open -->|"yes"| c1
+  c1 -->|"none"| judge
+  judge -->|"else"| c2
+  c2 -->|"none"| repair
+  repair -->|"again"| measure
+  open --> pass
+  c1 --> wait
+  judge --> down
+  judge --> human
+  c2 --> cap
 
   classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
-  class measure,open,cycle,repair,pass,stuck box
+  class measure,open,c1,judge,c2,repair,pass,wait,down,human,cap box
   linkStyle default stroke:#7b8494

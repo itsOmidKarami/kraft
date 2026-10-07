@@ -227,7 +227,7 @@ pin the same thing in both.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Ten images are shown, in eight places: the root README uses `board`, `gate`,
+Ten images are shown, in six places: the root README uses `board`, `gate`,
 `mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
 `analytics` and `mobile`; the first-work-item page `board` and `gate`; the web
 UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item`,
@@ -257,6 +257,11 @@ exception: it is of a second, empty home. `item` and `review` are of the same it
 `gate`, the one at `spec_approval`; its worktree's `calc.py` is `a - b` changed
 to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
 
+**Every command here runs against the throwaway instance in `.dev`. A `kraft`
+command without `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766` in front acts on your own
+Kraft, in `~/.kraft`: run these from the repository root, and type the two
+variables on each one.**
+
 1. Start a clean, seeded instance:
 
    ```bash
@@ -267,8 +272,9 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
 
    The seed's two failing and slow items carry `KRAFT_FAIL` and `KRAFT_SLOW`
    in their titles, which a screenshot should not show. Abandon them
-   (`kraft item abandon ID --yes`) and file the same work as clean titles with
-   the marker in the description, which the fake agent reads too (below).
+   (`KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item abandon ID --yes`)
+   and file the same work as clean titles with the marker in the description,
+   which the fake agent reads too (below).
 
 2. Give search something to find. It indexes only what git tracks under
    `.engineering/`, and the folder names the kind shown beside a hit
@@ -288,31 +294,36 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
    `add -A`, which would also stage the agent's `.engineering/sessions/` file.
    The item's id is in its address on the board. For `item`, which lists an
-   open thread, add one with `kraft item comment <id> --body "why is this here?"`
-   (a comment on no file is a thread on the whole change), against the same dev
-   home: `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment ...`.
-   The comment is a draft until a review is sent, which is how `item` and
-   `review` show it ("1 open thread", "pending").
+   open thread, add one:
+   `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment <id> --body "why is this here?"`
+   (a comment on no file is a thread on the whole change). The comment is a
+   draft until a review is sent, which is how `item` and `review` show it
+   ("1 open thread", "pending").
 
-   File a few more, each as `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft
-   item create "title" --repo .dev/repo ...`: two with `--chain quick-task` and
-   no `--autostart` (Not started), one more with `--autostart` on the default
-   chain (a second gate), and a few with `--chain quick-task --autostart` that
-   finish (Done). For Running, file two with `--chain quick-task --autostart
-   --description KRAFT_SLOW`, which run for 15 seconds, and take `board` and
-   `mobile` in that window (`ONLY=board,mobile`, below). `Rewrite the parser`
-   with `--description KRAFT_FAIL` is the failed one; `Investigate the flaky
-   import test` with `KRAFT_SLOW`, then `kraft item pause ID` while it runs, is
-   the paused one. The Done group sorts the newest first, and the frame cuts
-   it after one row: finish a clean item last, so an abandoned one is not the
-   row that shows.
+   File a few more with `item create`, then the failed and paused ones.
+   Not started: two without `--autostart`. A second gate: one `--autostart` on
+   the default chain. Done: a few `--chain quick-task --autostart`, which
+   finish. Running: two `--description KRAFT_SLOW`, which run for 15 seconds,
+   so take `board` and `mobile` (`ONLY=board,mobile`, below) in that window:
+
+   ```bash
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Rename the harness profiles" --repo .dev/repo --chain quick-task
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Add a retry to the sync command" --repo .dev/repo --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Trim the startup log" --repo .dev/repo --chain quick-task --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Rewrite the parser" --repo .dev/repo --chain quick-task --autostart --description KRAFT_FAIL
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Investigate the flaky import test" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item pause ID   # the id `item create` printed, while it still runs
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Retry flaky uploads in the sync worker" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Migrate the board filters to URL params" --repo .dev/repo --chain quick-task --autostart --description KRAFT_SLOW
+   ```
+
+   The Done group sorts the newest first, and the frame cuts it after one row:
+   finish a clean item last, so an abandoned one is not the row that shows.
+
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
    as `GATED_ID=<id> node e2e-shots/shot.mjs`. `ONLY=board,mobile` takes just
-   those; `setup` is taken on its own (`ONLY=setup`), against a second home
-   with no repo, started from a folder that is not a checkout (the wizard
-   offers the checkout it was started in as a path) and with its own copy of
-   `config/`, as `just api` makes for `.dev`:
+   those, and `ONLY=setup` takes the wizard (step 6):
 
    ```js
    import { chromium } from "@playwright/test";
@@ -351,7 +362,7 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
      await pick("old", 2).click(); // the removed line ...
      await pick("new", 2).click({ modifiers: ["Shift"] }); // ... to the line that replaced it
      await pick("new", 2).hover();
-     await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Comment on lines -2 to +2"
+     await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Lines -2 to +2"
      await p.getByRole("radio", { name: "Must fix", exact: true }).click();
      await p.getByRole("textbox", { name: "Comment" }).fill("Good catch. Add a test that pins it: add(2, 3) == 5.");
    });
@@ -374,16 +385,36 @@ to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
    shows that file alone; if your frame shows two columns, change the diff
    settings (Inline) before the shot.
 
+6. Take `setup`, the wizard that replaces the board when no repo is connected,
+   from a second home that nothing else uses. It needs the port `.dev` has, so
+   stop that instance first (Ctrl-C in its terminal). From the repository root,
+   in a shell whose working directory is that root (`echo $PWD`):
+
+   ```bash
+   W=$PWD
+   mkdir .dev-wizard && cp -R config .dev-wizard/config && rm -f .dev-wizard/config/access.yaml
+   cd "$(mktemp -d)"   # not a checkout: the wizard offers the one it starts in as a path
+   KRAFT_HOME=$W/.dev-wizard KRAFT_PORT=8766 KRAFT_FRONTEND_DIST=$W/frontend/dist PATH=$W/fixtures/bin:$PATH $W/.venv/bin/python -m kraft
+   ```
+
+   With it running, from `frontend/` in another terminal:
+   `ONLY=setup node e2e-shots/shot.mjs`. Stop it with Ctrl-C, go back to the
+   repository root and delete the home: `rm -rf .dev-wizard`. Both homes are
+   inside the checkout and the shell sets `KRAFT_HOME` for the one command
+   only, so nothing here reaches `~/.kraft`. The picture shows the dev port
+   (`127.0.0.1:8766`), not 8765; the guide's alt text says so.
+
 The footer under the sidebar prints the instance's version. A checkout prints a
 dev version (`2.0.0rc9.dev1+g…` on a tagged clone, `0.1.devN` in one without
-tags; `uv run kraft --version` shows it), while the committed set was taken
-from installed 1.5 release candidates (their footers read `v1.5.0rc10`, and
-also showed the instance's address, which the footer no longer does). For the set that goes out
-with a release, run that release's `kraft` against the seeded dev home rather
-than the checkout; `dev_env` in the root `justfile` lists the variables a dev
-instance sets, and `fixtures/bin` has to be first on `PATH` so the agents stay
-fake. A pull request that changes only these PNGs counts as docs-only to CI.
-The README and docs site link to them by file name, so keep the names.
+tags; `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft --version` shows it),
+and the committed set shows the build it was taken from. For the set that goes
+out with a release, retake all ten from the tagged build: run that release's
+`kraft` against the seeded dev home rather than the checkout, so the footers
+read the release's version. `dev_env` in the root `justfile` lists the
+variables a dev instance sets, and `fixtures/bin` has to be first on `PATH` so
+the agents stay fake. A pull request that changes only these PNGs counts as
+docs-only to CI. The README and docs site link to them by file name, so keep
+the names.
 
 ## Other generated files
 
