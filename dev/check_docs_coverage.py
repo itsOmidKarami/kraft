@@ -144,19 +144,19 @@ def env_vars() -> set[str]:
 # (label, extractor, docsite page or folder; a folder counts every page in
 # it). A subset of CONTRIBUTING.md's "User-facing docs" table: only sources with a
 # machine-readable list of names.
-_LIBRARY = "5.reference/03.configuration/4.library-and-chains.md"
+_LIBRARY = "5.reference/03.configuration/04.library-and-chains.md"
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("kraft CLI commands", cli_commands, "5.reference/01.cli"),
     ("MCP tools", mcp_tool_names, "5.reference/09.mcp-tools.md"),
-    ("environment variables", env_vars, "5.reference/03.configuration/9.environment-variables.md"),
-    ("policy.yaml fields", policy_fields, "5.reference/03.configuration/3.policy.md"),
-    ("access.yaml fields", access_fields, "5.reference/03.configuration/6.access.md"),
+    ("environment variables", env_vars, "5.reference/03.configuration/11.environment-variables.md"),
+    ("policy.yaml fields", policy_fields, "5.reference/03.configuration/03.policy.md"),
+    ("access.yaml fields", access_fields, "5.reference/03.configuration/06.access.md"),
     (
         "sandbox.yaml fields",
         sandbox_fields,
-        "5.reference/03.configuration/8.sandbox/6.sandbox-yaml.md",
+        "5.reference/03.configuration/10.sandbox/6.sandbox-yaml.md",
     ),
-    ("sandbox policy fields", sandbox_policy_fields, "5.reference/03.configuration/8.sandbox"),
+    ("sandbox policy fields", sandbox_policy_fields, "5.reference/03.configuration/10.sandbox"),
     (
         "library.yaml agent task keys",
         agent_task_keys,
