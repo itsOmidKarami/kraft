@@ -9,8 +9,12 @@ from kraft import harness
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
-DOCKER = {"kind": "docker", "image": "x"}
-NETWORKED = {**DOCKER, "network": {"runtime": {"allow": ["x.io"]}}}
+BARE = {"kind": "docker", "image": "x"}
+#: No `network:`, knowingly: the launch runs, and the checks below are the ones
+#: that still apply to it.
+DOCKER = {**BARE, "unrestricted_network": True}
+NETWORKED = {**BARE, "network": {"runtime": {"allow": ["x.io"]}}}
+PROVIDERS = sorted(p.stem for p in harness.BUNDLED.glob("*.yaml"))
 
 
 @pytest.mark.parametrize("harness", ["codex", "cursor"])
@@ -36,6 +40,19 @@ def test_a_hook_enforced_policy_is_refused_in_a_sandbox_without_network(
             sandbox=DOCKER,
             **policy,
         )
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_a_sandbox_without_network_is_refused_unless_unrestricted(run, tmp_path, provider):
+    """Nothing keeps a container with no `network:` from dialing Kraft, so
+    gates are not enforced: refused for every harness, naming both fixes,
+    unless the repo says it accepts that. (claude is refused on its own
+    account, below.)"""
+    args = dict(harness=provider, command=provider, run_dirs=RunDirs(base=tmp_path))
+    with pytest.raises(LaunchRefused, match=r"/repo.*add a `network:` policy.*unrestricted_network"):
+        run(**args, sandbox=BARE)
+    if provider != "claude":
+        assert run(**args, sandbox=DOCKER)["sandbox"] == DOCKER
 
 
 def test_a_proxy_unaware_harness_under_network_is_refused_before_launch(run, tmp_path):

@@ -44,6 +44,25 @@ def test_a_sandbox_without_network_dumps_as_it_always_did():
     assert policy.SandboxPolicy.model_validate(_POLICED).model_dump() == _POLICED
 
 
+def test_unrestricted_network_is_kept_when_true_and_absent_when_false():
+    """The opt-out survives a dump and reload (a snapshot, repos.yaml); false
+    is the default and dumps as no key at all."""
+    open_ = policy.SandboxPolicy.model_validate({**_PLAIN, "unrestricted_network": True})
+    assert open_.model_dump() == {**_PLAIN, "unrestricted_network": True}
+    off = policy.SandboxPolicy.model_validate({**_PLAIN, "unrestricted_network": False})
+    assert off.model_dump() == _PLAIN
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [_POLICED, {**_POLICED, "network": {"runtime": {}}}],
+    ids=["allow-list", "deny-everything"],
+)
+def test_unrestricted_network_with_network_is_refused_at_load(sandbox):
+    with pytest.raises(ValidationError, match="'unrestricted_network' and 'network' contradict"):
+        policy.SandboxPolicy.model_validate({**sandbox, "unrestricted_network": True})
+
+
 @pytest.mark.parametrize(
     "network",
     [{"runtime": {"allow": []}}, {"install": {}, "runtime": {"deny": []}}],

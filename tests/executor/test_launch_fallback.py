@@ -496,7 +496,7 @@ async def test_a_sandboxed_launch_skips_the_host_path_check(
     fake_harness_home(tmp_path, ["kraft-in-container"], harness_id="boxfake")
     _profiles(fake_agent, {"boxed": {"provider": "boxfake", "executable": "kraft-in-container"}})
     sandboxed = entry_of(
-        {"setup_command": "", "sandbox": {"kind": "docker", "image": "kraft-worker:py"}}
+        {"setup_command": "", "sandbox": {"kind": "docker", "image": "kraft-worker:py", "unrestricted_network": True}}
     )
 
     status, evts, sessions, _ = await _walk(
