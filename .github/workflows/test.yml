@@ -82,6 +82,7 @@ jobs:
       # docs-only pull request, which is where a wall of text arrives.
       - run: uv run python dev/check_docs_walls.py
       - run: uv run python dev/check_docs_redirects.py
+      - run: uv run python dev/check_docs_landings.py
       - run: uv run python dev/check_tests.py
 
   test:

@@ -186,7 +186,7 @@ CI's order, on the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
-| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14)` *(code)* | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
@@ -328,6 +328,14 @@ Page rules:
   a search result all keep opening the old address.
   `dev/check_docs_redirects.py` (the `lint` job) fails on a bad entry, and on
   any docs address that Kraft itself links to and that no longer resolves.
+- When you add, move or remove a page, update its folder's `index.md`: the
+  list under `## In this section` names the pages and sub-folders of that
+  folder, in file name order. A sub-folder with no `index.md` of its own is
+  listed as its pages, and a page deeper inside a sub-folder may be listed
+  too. Link a page of another section under another heading.
+  `dev/check_docs_landings.py` (the `lint` job) fails when the list and the
+  folder disagree. Number prefixes in one folder all have the same number of
+  digits (`01.` to `10.`), because the sidebar sorts by name.
 
 | Source | Docs page |
 |---|---|

@@ -378,6 +378,7 @@ ci-test:
     uv run python dev/check_docs_coverage.py
     uv run python dev/check_docs_walls.py
     uv run python dev/check_docs_redirects.py
+    uv run python dev/check_docs_landings.py
     uv run python dev/check_tests.py
     uv run pytest -m "not e2e" -n auto
     uv run python -m kraft.intent
