@@ -1,7 +1,7 @@
 ---
 title: Chain file keys
 navigation:
-  title: Chain file keys
+  title: Overview
 description: Every key a chain file accepts, from the chain down to each kind of task, plus read_only, extends, icons and canonical paths.
 ---
 

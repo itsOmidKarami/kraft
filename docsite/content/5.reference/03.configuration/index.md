@@ -14,14 +14,14 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `repos.yaml` | Connected repos: setup command, env, steering, workspaces. | Seeded, empty | [Repos](/reference/configuration/repos); its `sandbox` field: [Sandboxed workers](/reference/configuration/sandbox), [Callbacks and resource limits](/reference/configuration/sandbox/callbacks-and-limits), [Network policy](/reference/configuration/sandbox/network-policy), [Credentials](/reference/configuration/sandbox/credentials), [Kits](/reference/configuration/sandbox/kits) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [Policy](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
-| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [Harnesses file](/reference/configuration/harnesses-file) |
+| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [`harnesses.yaml`](/reference/configuration/harnesses-file) |
 | `access.yaml` | Bind address, password, remote access. | The first save in Settings | [Access](/reference/configuration/access) |
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [Intake](/reference/configuration/intake) |
-| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [Sandbox host](/reference/configuration/sandbox/sandbox-yaml) |
+| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [`sandbox.yaml`](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [Detectors](/reference/configuration/repos/detectors) |
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](#notifyyaml) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](#themeyaml) |
-| `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness files](/reference/harnesses/harness-files) |
+| `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
 
 ## How Kraft treats the directory
 
@@ -90,7 +90,7 @@ A file that already sets its own `surface` only loses the `palette`. A file that
 - [Repos](/reference/configuration/repos): every field in `repos.yaml`, and the pages for detectors and workspaces.
 - [Policy](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
 - [Library and chains](/reference/configuration/library-and-chains): the sections of `library.yaml`, and how `chains/*.yaml` files compose them into chains.
-- [Harnesses file](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
+- [`harnesses.yaml`](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
 - [Access](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
 - [Intake](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's network, credentials, Kits and `sandbox.yaml`.
@@ -98,4 +98,4 @@ A file that already sets its own `surface` only loses the `palette`. A file that
 
 ## Related
 
-- [Upgrade your configuration](/guides/customize/upgrading-templates): take what a new release ships in `library.yaml` and `chains/`.
+- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take what a new release ships in `library.yaml` and `chains/`.
