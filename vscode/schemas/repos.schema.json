@@ -518,6 +518,11 @@
           ],
           "default": null,
           "title": "Runtime"
+        },
+        "unrestricted_network": {
+          "default": false,
+          "title": "Unrestricted Network",
+          "type": "boolean"
         }
       },
       "required": [

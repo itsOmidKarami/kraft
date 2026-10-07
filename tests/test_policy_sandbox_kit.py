@@ -41,8 +41,9 @@ def test_a_kit_is_pinned_by_digest(ref, loads):
         {"network": {"runtime": {"allow": ["x.io"]}}},
         {"resources": {"cpu": 2.0}},
         {"credentials": [{"env": "K"}]},
+        {"unrestricted_network": True},
     ],
-    ids=["image", "network", "resources", "credentials"],
+    ids=["image", "network", "resources", "credentials", "unrestricted-network"],
 )
 def test_a_kit_sandbox_takes_no_local_fields(field):
     """Open question 4: the enforced surface is exactly the Kit's."""

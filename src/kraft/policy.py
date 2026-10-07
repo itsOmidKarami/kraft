@@ -1048,7 +1048,7 @@ def _allows(phase: NetworkPhase, domain: str) -> bool:
 #: A Kit reference pinned by digest: `<name>[:<tag>]@sha256:<64 hex>`.
 KIT_REF = r"^[^@\s]+@sha256:[0-9a-f]{64}$"
 #: What `kind: kit` refuses beside the Kit.
-_KIT_REFUSES = ("image", "network", "resources", "credentials")
+_KIT_REFUSES = ("image", "network", "resources", "credentials", "unrestricted_network")
 
 
 class SandboxPolicy(BaseModel):
@@ -1077,6 +1077,11 @@ class SandboxPolicy(BaseModel):
     resources: SandboxResources | None = None
     #: Egress, deny-by-default once set. Unset: open, as it always was.
     network: SandboxNetwork | None = None
+    #: Knowingly launching with no `network:`: Kraft sets up no channel and
+    #: does not restrict the container's network, so nothing keeps a worker
+    #: from reaching Kraft's API and gates are not enforced. Without this or
+    #: `network`, the launch is refused (`adapters.agent.run_agent_task`).
+    unrestricted_network: StrictBool = False
     #: Credentials the container holds only as a sentinel, the egress proxy
     #: injecting the real value (spec §6). Needs `network`: without it
     #: there is no proxy to inject them.
@@ -1101,6 +1106,15 @@ class SandboxPolicy(BaseModel):
     def _no_empty_credentials(cls, value: tuple | None) -> tuple | None:
         """`credentials: []` manages none: the same sandbox as no key."""
         return value or None
+
+    @model_validator(mode="after")
+    def _network_or_unrestricted(self) -> SandboxPolicy:
+        if self.unrestricted_network and self.network is not None:
+            raise ValueError(
+                "'unrestricted_network' and 'network' contradict: the first accepts a "
+                "container with no egress policy, the second is one"
+            )
+        return self
 
     @model_validator(mode="after")
     def _credentials_are_reachable(self) -> SandboxPolicy:
@@ -1146,6 +1160,8 @@ class SandboxPolicy(BaseModel):
         always did. `credentials` as a list: YAML's safe dumper refuses a
         tuple."""
         dumped = _without_unset(handler, self)
+        if not dumped.get("unrestricted_network"):
+            dumped.pop("unrestricted_network", None)
         if "credentials" in dumped:
             dumped["credentials"] = list(dumped["credentials"])
         return dumped

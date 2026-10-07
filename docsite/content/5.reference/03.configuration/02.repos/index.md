@@ -167,7 +167,7 @@ This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENT
 
 ### `sandbox`
 
-`sandbox` is part of the repository policy layer. [Sandboxed workers](/reference/configuration/sandbox#the-sandbox-key) lists its keys, which go with `kind: docker` and which with `kind: kit`, and says why no chain, node or task can change it.
+`sandbox` is part of the repository policy layer. [Sandboxed workers](/reference/configuration/sandbox#the-sandbox-key) lists its keys, which go with `kind: docker` and which with `kind: kit`, and says why no chain, node or task can change it. A sandbox needs a `network:` policy or `unrestricted_network: true`: a launch into one with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy).
 
 ### Automated review
 

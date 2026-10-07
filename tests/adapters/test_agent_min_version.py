@@ -53,5 +53,10 @@ def test_a_sandboxed_opencode_is_asked_in_its_image(run, tmp_path, monkeypatch):
 
     monkeypatch.setattr("kraft.worker.backends.docker.oneshot", lambda *a: Image())
     with pytest.raises(LaunchRefused, match=r"sandbox image has 1\.0\.4"):
-        _opencode(run, tmp_path, "opencode v2.0.15", sandbox={"kind": "docker", "image": "x"})
+        _opencode(
+            run,
+            tmp_path,
+            "opencode v2.0.15",
+            sandbox={"kind": "docker", "image": "x", "unrestricted_network": True},
+        )
     assert Image.closed

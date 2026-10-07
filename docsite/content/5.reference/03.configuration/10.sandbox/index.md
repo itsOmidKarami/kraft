@@ -30,7 +30,8 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 | `runtime` | `docker` | `kit`, required. `docker` refuses it. | The runtime that runs the Kit. |
 | `kit` | string, pinned by digest | `kit`, required. `docker` refuses it. | The Kit image, `<name>[:<tag>]@sha256:<64 hex>`. See [Kits](/reference/configuration/sandbox/kits). |
 | `resources` | mapping | `docker`, optional. `kit` refuses it. | CPU, memory and process limits. See [Resource limits](/reference/configuration/sandbox/resource-limits). |
-| `network` | mapping | `docker`, optional. `kit` refuses it. | The hosts a task may reach. Unset, egress is open. See [Network policy](/reference/configuration/sandbox/network-policy). |
+| `network` | mapping | `docker`, optional. `kit` refuses it. | The hosts a task may reach. Set it or `unrestricted_network`: a launch into a sandbox with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy). |
+| `unrestricted_network` | boolean | `docker`, optional, default `false`. `kit` refuses it, and so does `network` beside it. | `true` lets a launch run with no `network`: the worker's network is not restricted and gates are not enforced. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy). |
 | `credentials` | list of mappings | `docker`, optional, and it needs `network`. `kit` refuses it. | Secrets the container never holds. See [Credentials](/reference/configuration/sandbox/credentials). |
 
 Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
@@ -87,9 +88,9 @@ Pull it before filing work, or the first launch pulls it inside the task's time 
 
 ## Limits
 
-- Without a [network policy](/reference/configuration/sandbox/network-policy), the container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable.
+- With `unrestricted_network: true` and no [network policy](/reference/configuration/sandbox/network-policy), the container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable.
 - A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch.
-- Without a network policy a worker has no channel to Kraft, and its network is not restricted: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks).
+- Without a network policy a worker has no channel to Kraft, and its network is not restricted, so Kraft refuses the launch unless `unrestricted_network: true` is set: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks).
 - Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
 
 ## In this section
