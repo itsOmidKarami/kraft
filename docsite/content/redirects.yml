@@ -509,9 +509,9 @@
 /guides/the-board#the-chain: /reference/web-ui/item-page#the-chain
 /guides/the-board#a-node: /reference/web-ui/item-page#a-node
 /guides/the-board#a-task: /reference/web-ui/item-page#a-task
-/guides/the-board#a-node-with-a-fix-loop: /reference/web-ui/item-page#a-node-with-a-fix-loop
-/guides/the-board#a-changed-test-scope-task: /reference/web-ui/item-page#a-changed-test-scope-task
-/guides/the-board#before-the-item-starts: /reference/web-ui/item-page#before-the-item-starts
+/guides/the-board#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop
+/guides/the-board#a-changed-test-scope-task: /reference/web-ui/fix-loops-and-test-scopes#a-changed-test-scope-task
+/guides/the-board#before-the-item-starts: /reference/web-ui/config-before-start
 /guides/the-board#a-gate-that-is-waiting: /reference/web-ui/item-page#a-gate-that-is-waiting
 /guides/the-board#moving-the-range: /reference/web-ui/review-page#moving-the-range
 /guides/the-board#after-you-add-the-comment: /reference/web-ui/review-page#after-you-add-the-comment
@@ -520,9 +520,9 @@
 /guides/day-to-day/the-board#the-chain: /reference/web-ui/item-page#the-chain
 /guides/day-to-day/the-board#a-node: /reference/web-ui/item-page#a-node
 /guides/day-to-day/the-board#a-task: /reference/web-ui/item-page#a-task
-/guides/day-to-day/the-board#a-node-with-a-fix-loop: /reference/web-ui/item-page#a-node-with-a-fix-loop
-/guides/day-to-day/the-board#a-changed-test-scope-task: /reference/web-ui/item-page#a-changed-test-scope-task
-/guides/day-to-day/the-board#before-the-item-starts: /reference/web-ui/item-page#before-the-item-starts
+/guides/day-to-day/the-board#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop
+/guides/day-to-day/the-board#a-changed-test-scope-task: /reference/web-ui/fix-loops-and-test-scopes#a-changed-test-scope-task
+/guides/day-to-day/the-board#before-the-item-starts: /reference/web-ui/config-before-start
 /guides/day-to-day/the-board#a-gate-that-is-waiting: /reference/web-ui/item-page#a-gate-that-is-waiting
 /guides/day-to-day/the-board#moving-the-range: /reference/web-ui/review-page#moving-the-range
 /guides/day-to-day/the-board#after-you-add-the-comment: /reference/web-ui/review-page#after-you-add-the-comment
