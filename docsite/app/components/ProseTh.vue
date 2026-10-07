@@ -7,9 +7,10 @@ import UiProseTh from '@nuxt/ui/components/prose/Th.vue'
 export default defineComponent({
   inheritAttrs: false,
   setup(_, { attrs, slots }) {
+    const cell = useTableCell()
     return () => {
       const nodes = slots.default?.() ?? []
-      columnLabel(true, nodes)
+      setHeader(cell, nodes)
       return h(UiProseTh, attrs, () => nodes)
     }
   },

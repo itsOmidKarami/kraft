@@ -8,9 +8,10 @@ import UiProseTd from '@nuxt/ui/components/prose/Td.vue'
 export default defineComponent({
   inheritAttrs: false,
   setup(_, { attrs, slots }) {
+    const cell = useTableCell()
     return () => {
       const nodes = slots.default?.() ?? []
-      const label = columnLabel(false, nodes)
+      const label = labelFor(cell)
       return h(UiProseTd, label ? { ...attrs, 'data-label': label } : attrs, () => nodes)
     }
   },
