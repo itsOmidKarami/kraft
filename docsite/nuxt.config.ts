@@ -52,6 +52,27 @@ function forwardingPage(from: string, to: string): string {
 export default defineNuxtConfig({
   extends: ['docus'],
   css: ['~/assets/css/hero.css', '~/assets/css/prose.css'],
+  // Nuxt UI's code theme is Material (lighter / palenight). On the code
+  // block's background its light strings were 2.2:1, keys 2.6:1 and comments
+  // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
+  // patched the comments through a generated class name that a theme change
+  // renames. GitHub's high-contrast pair has no token under 4.5:1 in either
+  // mode (measured on the block's #f8fafc and #1d293d), comments included, so
+  // nothing needs patching. `default` is what shows before the colour mode
+  // is known.
+  content: {
+    build: {
+      markdown: {
+        highlight: {
+          theme: {
+            light: 'github-light-high-contrast',
+            default: 'github-light-high-contrast',
+            dark: 'github-dark-high-contrast',
+          },
+        },
+      },
+    },
+  },
   app: {
     baseURL,
     head: {

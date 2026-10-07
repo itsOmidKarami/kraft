@@ -11,29 +11,60 @@
     radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent) right / 0.75rem 100% no-repeat scroll;
 }
 
-/* The code theme's comment colour was 2.5:1 on the code block in light mode
-   and 3.0:1 in dark, under WCAG AA's 4.5:1. Nuxt Content turns each theme
-   colour into a class and puts the colour in --shiki-* variables on it; this
-   is the class of the theme's comments (the italic ones), so it moves if the
-   theme does. Light is the theme's own darker comment colour (5.2:1 on the
-   block), dark is the same blue-grey lightened (5.4:1). */
-:root pre.shiki code .sHwdD,
-:root code.shiki .sHwdD {
-  --shiki-light: #546e7a;
-  --shiki-dark: #959cc0;
-}
-
 /* The landscape diagrams (public/diagrams/*.svg, 1100 to 1650px wide) shrank
    to 343px on a phone, 4 to 5px text. Under 640px they keep a width where
    the text can be read and scroll sideways inside their own paragraph. The
    SVGs state no pixel width, so the overlay cannot show them larger than the
    screen; the tap is switched off, as the diagram is already readable here.
-   structure.svg is portrait and fits as it was. */
+   structure.svg is portrait and fits as it was.
+
+   Nothing showed that the diagram goes on to the right. The table's edge
+   shadow (.scroll-hint) is a background of the scrolling box, and the
+   diagram's own white background painted over it. So here the shadows are two
+   strips drawn on top (the paragraph's ::before and ::after, sticky at its
+   left and right edge, so they stay put while the diagram scrolls under them)
+   and a scroll-driven animation shows each only while there is diagram past
+   that edge: the left one fades in over the first 2rem scrolled, the right
+   one fades out over the last 2rem. A browser without scroll-driven
+   animations shows the right one all the time and never the left, which is
+   still true at the start and a harmless hint at the end. The paragraph is a
+   flex box so that the strips take their height from it. */
 @media (max-width: 639px) {
+  @keyframes diagram-edge {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"])) {
+    display: flex;
     overflow-x: auto;
   }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::before,
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::after {
+    content: "";
+    flex: none;
+    position: sticky;
+    z-index: 1;
+    width: 0.75rem;
+    pointer-events: none;
+    animation: diagram-edge linear both;
+    animation-timeline: scroll(nearest inline);
+  }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::before {
+    left: 0;
+    margin-right: -0.75rem;
+    background: radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.3), transparent);
+    opacity: 0;
+    animation-range: 0 2rem;
+  }
+  main p:has(> img[src*="/diagrams/"]:not([src$="/structure.svg"]))::after {
+    right: 0;
+    margin-left: -0.75rem;
+    background: radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.3), transparent);
+    animation-direction: reverse;
+    animation-range: calc(100% - 2rem) 100%;
+  }
   main img[src*="/diagrams/"]:not([src$="/structure.svg"]) {
+    flex: none;
     width: 1100px;
     max-width: none;
     pointer-events: none;
@@ -42,5 +73,70 @@
      screenshot at 1440px wide. mobile.png is 390px: let it fit the screen. */
   .fixed img[src$="/mobile.png"] {
     width: 95vw;
+  }
+}
+
+/* A table of three or more columns, on a phone, is a list of blocks. Squeezed
+   into 343px the first column was about 40px wide and the name a reader looks
+   up (`max_concurrent`) was cut into pieces of two to four letters, and the
+   tables that did fit ran two or three screens of narrow cells with a fix far
+   from its symptom. Each row is now one block: the first cell is its heading,
+   whole, and every other cell is a line that starts with its column's header
+   (data-label, written when the page is rendered: ProseTd.vue). Two-column
+   tables stay tables, and from 640px up nothing here applies.
+   Table semantics survive the display change in two ways: the header row is
+   only moved out of sight (not display: none), and the label is generated
+   content with an empty alternative text, so a screen reader hears the real
+   column header once and not the label as well. */
+@media (max-width: 639px) {
+  main table:has(th:nth-child(3)) {
+    display: block;
+    border-radius: 0;
+  }
+  main table:has(th:nth-child(3)) :is(tbody, tr) {
+    display: block;
+  }
+  main table:has(th:nth-child(3)) thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  main table:has(th:nth-child(3)) tr {
+    margin-bottom: 0.5rem;
+    padding: 0.375rem 0.25rem;
+    border: 1px solid var(--ui-border-muted);
+    border-radius: var(--ui-radius);
+  }
+  main table:has(th:nth-child(3)) td {
+    display: block;
+    padding: 0.125rem 0.5rem;
+    border: 0;
+    border-radius: 0;
+  }
+  /* The heading: the first cell, whole, with no label. */
+  main table:has(th:nth-child(3)) td:first-child {
+    padding-bottom: 0.25rem;
+    font-weight: 600;
+  }
+  /* A cell with nothing in it would only be a bare label. */
+  main table:has(th:nth-child(3)) td:empty {
+    display: none;
+  }
+  /* Two declarations: a browser that does not parse the alt-text form
+     (`/ ""`) drops the second one whole, and without the first a phone would
+     show stacked cells with no labels at all. Where the second is read, the
+     label has an empty alternative text. */
+  main table:has(th:nth-child(3)) td[data-label]:not(:first-child)::before {
+    content: attr(data-label) ": ";
+    content: attr(data-label) ": " / "";
+    color: var(--ui-text-muted);
+    font-weight: 500;
+  }
+  /* Beside a paragraph or a list the label would be a stray word at the end
+     of the line before: put it on its own line. */
+  main table:has(th:nth-child(3)) td:has(> :is(p, ul, ol, pre, div))::before {
+    display: block;
   }
 }
