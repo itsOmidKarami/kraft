@@ -44,3 +44,63 @@
     width: 95vw;
   }
 }
+
+/* A table of three or more columns, on a phone, is a list of blocks. Squeezed
+   into 343px the first column was about 40px wide and the name a reader looks
+   up (`max_concurrent`) was cut into pieces of two to four letters, and the
+   tables that did fit ran two or three screens of narrow cells with a fix far
+   from its symptom. Each row is now one block: the first cell is its heading,
+   whole, and every other cell is a line that starts with its column's header
+   (data-label, written when the page is rendered: ProseTd.vue). Two-column
+   tables stay tables, and from 640px up nothing here applies.
+   Table semantics survive the display change in two ways: the header row is
+   only moved out of sight (not display: none), and the label is generated
+   content with an empty alternative text, so a screen reader hears the real
+   column header once and not the label as well. */
+@media (max-width: 639px) {
+  main table:has(th:nth-child(3)) {
+    display: block;
+    border-radius: 0;
+  }
+  main table:has(th:nth-child(3)) :is(tbody, tr) {
+    display: block;
+  }
+  main table:has(th:nth-child(3)) thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  main table:has(th:nth-child(3)) tr {
+    margin-bottom: 0.5rem;
+    padding: 0.375rem 0.25rem;
+    border: 1px solid var(--ui-border-muted);
+    border-radius: var(--ui-radius);
+  }
+  main table:has(th:nth-child(3)) td {
+    display: block;
+    padding: 0.125rem 0.5rem;
+    border: 0;
+    border-radius: 0;
+  }
+  /* The heading: the first cell, whole, with no label. */
+  main table:has(th:nth-child(3)) td:first-child {
+    padding-bottom: 0.25rem;
+    font-weight: 600;
+  }
+  /* A cell with nothing in it would only be a bare label. */
+  main table:has(th:nth-child(3)) td:empty {
+    display: none;
+  }
+  main table:has(th:nth-child(3)) td[data-label]:not(:first-child)::before {
+    content: attr(data-label) ": " / "";
+    color: var(--ui-text-muted);
+    font-weight: 500;
+  }
+  /* Beside a paragraph or a list the label would be a stray word at the end
+     of the line before: put it on its own line. */
+  main table:has(th:nth-child(3)) td:has(> :is(p, ul, ol, pre, div))::before {
+    display: block;
+  }
+}
