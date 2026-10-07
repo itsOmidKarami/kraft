@@ -29,7 +29,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml` and `harnesses/`, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
-- **An old directory.** Before 2.0, the directory was `templates/`; see [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating an older template configuration](/reference/cli/admin#migrating-an-older-template-configuration).
+- **An old directory.** Before 2.0, the directory was `templates/`; see [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating an older template configuration](/guides/run/upgrade-from-1-4#migrating-a-home-from-0x).
 
 Three commands check and reload the files:
 
