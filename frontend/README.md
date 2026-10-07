@@ -322,7 +322,8 @@ variables on each one.**
 
    Analytics needs merged items: Throughput counts merges, and the dev repo
    uses the in-process fake forge, so a default-chain item reaches `merge`.
-   File three with `--autostart` on the default chain, then approve each gate
+   File three with `--autostart` on the default chain (the `item create` line
+   below, run three times with three titles), then approve each gate
    as it comes (`spec_approval`, `plan_approval`, `local_review`,
    `final_review`) until the item is `completed`. Read the state with `view
    list`; give the wait a limit of a few minutes. Do not use the item that
@@ -410,9 +411,9 @@ variables on each one.**
 
    ```bash
    W=$PWD
-   mkdir .dev-wizard && cp -R config .dev-wizard/config && rm -f .dev-wizard/config/access.yaml
+   [ -d config ] && mkdir .dev-wizard && cp -R config .dev-wizard/config && rm -f .dev-wizard/config/access.yaml
    cd "$(mktemp -d)"   # not a checkout: the wizard offers the one it starts in as a path
-   KRAFT_HOME=$W/.dev-wizard KRAFT_PORT=8766 KRAFT_FRONTEND_DIST=$W/frontend/dist PATH=$W/fixtures/bin:$PATH $W/.venv/bin/python -m kraft
+   KRAFT_HOME="${W:?set W to the repository root first}/.dev-wizard" KRAFT_PORT=8766 KRAFT_FRONTEND_DIST="$W/frontend/dist" PATH="$W/fixtures/bin:$PATH" "$W/.venv/bin/python" -m kraft
    ```
 
    With it running, from `frontend/` in another terminal:
