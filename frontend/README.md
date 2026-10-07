@@ -320,6 +320,24 @@ variables on each one.**
    The Done group sorts the newest first, and the frame cuts it after one row:
    finish a clean item last, so an abandoned one is not the row that shows.
 
+   Analytics needs merged items: Throughput counts merges, and the dev repo
+   uses the in-process fake forge, so a default-chain item reaches `merge`.
+   File three with `--autostart` on the default chain, then approve each gate
+   as it comes (`spec_approval`, `plan_approval`, `local_review`,
+   `final_review`) until the item is `completed`. Read the state with `view
+   list`; give the wait a limit of a few minutes. Do not use the item that
+   `gate`, `item` and `review` show:
+
+   ```bash
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item create "Cache the schema lookups" --repo .dev/repo --autostart
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft view list --all
+   KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item approve ID
+   ```
+
+   Run `view list` and `item approve` again for each gate: an item takes four
+   approvals and about 30 seconds, and `open MR → checks done` reads `0s` on
+   the fake forge, which answers at once.
+
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
    as `GATED_ID=<id> node e2e-shots/shot.mjs`. `ONLY=board,mobile` takes just
