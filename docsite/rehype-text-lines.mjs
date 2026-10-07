@@ -4,8 +4,10 @@
 // block has a `.line` span per line. The copy button sits over the end of the
 // first line, and assets/css/prose.css clears it by padding `.line:first-child`;
 // a bare string has no first line to pad. This wraps each line of such a block
-// the way the highlighter does (the newline inside the span, an empty line as a
-// span holding only the newline), so the same rule reaches it.
+// the way the highlighter does (the newline inside the span), so the same rule
+// reaches it. An empty line gets the highlighter's own placeholder child:
+// Content drops a text node that is only whitespace, so a bare "\n" in the
+// span vanished and the blank line with it.
 export default function rehypeTextLines() {
   const lines = (node) => {
     if (node.type === 'element' && node.tagName === 'pre' && node.properties?.language === 'text') {
@@ -15,7 +17,9 @@ export default function rehypeTextLines() {
           type: 'element',
           tagName: 'span',
           properties: { className: ['line'] },
-          children: [{ type: 'text', value: `${line}\n` }],
+          children: line
+            ? [{ type: 'text', value: `${line}\n` }]
+            : [{ type: 'element', tagName: 'span', properties: { emptyLinePlaceholder: true }, children: [{ type: 'text', value: '\n' }] }],
         }))
       }
     }
