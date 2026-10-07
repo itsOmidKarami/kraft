@@ -40,7 +40,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 
 - [Switch a task to another harness](/guides/harnesses/switch-harness): run agent tasks on Codex or another CLI instead of Claude Code.
 - [Add or override a harness](/guides/harnesses/adding-a-harness): add an agent CLI with a YAML file.
-- [Build a worker Kit](/guides/harnesses/worker-kit): build a Docker Sandbox Kit for Claude [workers](/concepts/vocabulary#worker) and run a repository's sandbox from it.
+- [Build a worker Kit](/guides/harnesses/worker-kit): build a Docker Sandbox Kit for Claude workers and run a repository's sandbox from it.
 - [Give a worker its login](/guides/harnesses/give-a-worker-its-login): give the agent CLI a worker runs on a login it can use headless, and check that it works.
 
 ### Run the server
@@ -51,7 +51,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
 - [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
 - [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, and pin a version.
-- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take new shipped chains, library tasks and [policy](/concepts/vocabulary#policy) after an upgrade without losing your edits.
+- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
 - [Upgrade from 1.4 or an older release](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, the steps to update from it, and how to upgrade from a release candidate or an older release.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
 
