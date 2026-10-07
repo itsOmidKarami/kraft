@@ -57,7 +57,7 @@ Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `
 
 Each table starts with the command Kraft runs and the variable that carries an API key to a worker, then lists what the comparison leaves out for that harness.
 
-A worker can use the CLI's own stored login instead where it has one; [Run workers on your agent](/guides/day-to-day/agent-integration#run-workers-on-your-agent) has each login.
+A worker can use the CLI's own stored login instead where it has one; [Give a worker its login](/guides/harnesses/give-a-worker-its-login) has each login.
 
 `claude` has no table: it runs `claude`, takes its API key in `ANTHROPIC_API_KEY`, and the columns above say the rest.
 
@@ -105,13 +105,13 @@ A worker can use the CLI's own stored login instead where it has one; [Run worke
 | Topic | What to know |
 |---|---|
 | Command | `agy`. The prompt follows `-p`. |
-| API key | None: sign-in with `agy`. A `GEMINI_API_KEY` route exists and is untested: see [Run workers on your agent](/guides/day-to-day/agent-integration#run-workers-on-your-agent). |
+| API key | None: sign-in with `agy`. A `GEMINI_API_KEY` route exists and is untested: see [Give a worker its login](/guides/harnesses/give-a-worker-its-login). |
 | Accounts | Google's Antigravity CLI, for an individual Google account. `gemini` serves a Gemini API key or Gemini Code Assist: see [Gemini details](#gemini-details). |
 | Control | Kraft has no per-action control over an `agy` worker. See [Unattended runs](/reference/harnesses/unattended-runs#notes-by-harness). |
 | Effort | `effort` is `--effort low\|medium\|high\|max`, checked by `agy` against the model. |
 | Model | Name the base model (`gemini-3.8-flash`) and set `effort`, not a slug with the effort in it (`gemini-3.8-flash-low`), or Kraft cannot price the session. |
 | Read from its log | Tokens, the conversation id `resume` takes and a quota stop, off its `stream-json` log. |
-| Needs | A prior interactive sign-in (`agy` once) on the machine, or a Gemini API key. See [Run workers on your agent](/guides/day-to-day/agent-integration#run-workers-on-your-agent). |
+| Needs | A prior interactive sign-in (`agy` once) on the machine, or a Gemini API key. See [Give a worker its login](/guides/harnesses/give-a-worker-its-login). |
 
 ### Gemini details
 
@@ -133,7 +133,7 @@ A worker can use the CLI's own stored login instead where it has one; [Run worke
 | Launch | Both command lines pass `--no-archive-after-execute`, because an archived thread cannot be resumed. |
 | Read from its log | Tokens and the thread id `resume` takes, off its `--stream-json` log. The token counts are the thread's own, message by message, and match `amp threads export`. |
 | Cost | Amp's bill (`amp threads usage`) can count a few requests that are not in the thread. It is the only place Amp reports cost, so Kraft records none. |
-| Needs | Credentials a headless process can use. See [Run workers on your agent](/guides/day-to-day/agent-integration#run-workers-on-your-agent). |
+| Needs | Credentials a headless process can use. See [Give a worker its login](/guides/harnesses/give-a-worker-its-login). |
 
 ## In this section
 
