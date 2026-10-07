@@ -29,7 +29,7 @@ Each command links to its entry.
 | File it with a spec or plan I wrote | [`kraft item create "title" --spec PATH --plan PATH`](/reference/cli/item#attach-a-spec-or-plan) |
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
 | Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
-| Switch the chain of an item that has not started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
+| Switch the [chain](/concepts/vocabulary#chain) of an item that has not started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
 | Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#pause-and-resume) |
 
 ### Watching
@@ -39,24 +39,26 @@ Each command links to its entry.
 | See the board | [`kraft view list`](/reference/cli/view#reading-the-board) |
 | See where one item stands | [`kraft view show`](/reference/cli/view#what-view-show-prints) |
 | Find a spec, plan or summary | [`kraft view search "query"`](/reference/cli/view#reading-the-board) |
+| List an item's specs, plans and summaries, or read one | [`kraft view docs`, `kraft view doc ID`](/reference/cli/view#reviewing-before-you-approve) |
 | Follow the agent's log | [`kraft view logs -f`](/reference/cli/view#read-a-sessions-log) |
 | See what happened to an item, in order | [`kraft view events`](/reference/cli/view#following-a-running-item) |
 | Watch the board live | [`kraft view watch`](/reference/cli/view#following-a-running-item) |
 | Pause a running item | [`kraft item pause`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#what-repo-list-prints) |
 | Go to an item's worktree | [`kraft repo path`](/reference/cli/repo) or [`kraft repo open`](/reference/cli/repo) |
 
 ### At a gate
 
 | I want to | Command |
 |---|---|
-| Read the document the gate is about | [`kraft view artifact`](/reference/cli/view#reviewing-before-you-approve) |
+| Read the document the [gate](/concepts/vocabulary#gate) is about | [`kraft view artifact`](/reference/cli/view#reviewing-before-you-approve) |
 | Read the change | [`kraft view diff`](/reference/cli/view#reviewing-before-you-approve) |
 | Compare two attempts, or the change since my last review | [`kraft view compare`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Approve | [`kraft item approve`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | Comment on a line of the change | [`kraft item comment`](/reference/cli/item#comment-on-a-change) |
 | Send my comments with an outcome | [`kraft item review`](/reference/cli/item#send-a-review) |
-| List review threads | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
+| List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Mark a thread resolved, or reopen it | [`kraft item resolve`, `kraft item reopen`](/reference/cli/item#reviewing-a-change) |
 | Pass a gate without running it | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
 
@@ -65,10 +67,10 @@ Each command links to its entry.
 | I want to | Command |
 |---|---|
 | See why it stopped | [`kraft view show`](/reference/cli/view#what-view-show-prints), then [`kraft view logs`](/reference/cli/view#read-a-sessions-log) |
-| Run the stopped node again | [`kraft item retry`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#addressing-work-by-path) |
 | Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |
-| Raise a time or token cap | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
+| Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#addressing-work-by-path) |
 | Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#escalate-a-stopped-item) |
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
@@ -80,13 +82,16 @@ Each command links to its entry.
 
 | I want to | Command |
 |---|---|
-| Check that the server is up | [`kraft admin health`](/reference/cli/admin) |
+| Check that the server is up | [`kraft admin health`](/reference/cli/admin#what-health-prints) |
 | Check the whole install | [`kraft admin doctor`](/reference/cli/admin#what-doctor-checks) |
 | Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/admin#run-the-server) |
 | Run Kraft as a service | [`kraft admin install-service`](/reference/cli/admin) |
 | Install the newest release | [`kraft admin update`](/reference/cli/admin#update-kraft) |
-| Reread the templates and policy after editing them | [`kraft admin reload`](/reference/cli/admin#reload-the-configuration) |
+| Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/admin#reload-the-configuration) |
 | Check my chains | [`kraft admin templates lint`](/reference/cli/admin#lint-the-templates) |
+| Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`, `templates library`](/reference/cli/admin#show-a-chain) |
+| See the [harness](/concepts/vocabulary#harness) profiles and what selects each | [`kraft admin harnesses`](/reference/cli/admin) |
+| Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/admin) |
 | Register Kraft with an agent | [`kraft admin init`](/reference/cli/admin) |
 | Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
 | Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#disconnect-a-repo) |
@@ -99,7 +104,7 @@ Every read and action verb accepts `--json`, which prints the raw API payload.
 It is the same call the matching [MCP tool](/reference/mcp-tools) makes, but not
 always the same value:
 
-- `kraft view show --json` prints the item's full detail (its effective chain, worker sessions and stop), where the `get_work_item` tool hands an agent a trimmed item.
+- `kraft view show --json` prints the item's full detail (its effective chain, [worker](/concepts/vocabulary#worker) sessions and stop), where the `get_work_item` tool hands an agent a trimmed item.
 - `kraft view list --json` is scoped to the repo you are in unless you pass `--all` or `--repo`; `list_work_items` is never scoped.
 
 These verbs do not print the payload:
@@ -125,6 +130,8 @@ These verbs do not print the payload:
 | `kraft item comment`, `resolve`, `reopen` | The thread and where it sits. |
 
 The item itself is in `--json`, or in `kraft view show`.
+
+The reads you script against print as follows: [`view list`](/reference/cli/view#what-view-list-prints), [`view show`](/reference/cli/view#what-view-show-prints), [`repo list`](/reference/cli/repo#what-repo-list-prints), [`admin health`](/reference/cli/admin#what-health-prints), [`admin doctor`](/reference/cli/admin#what-doctor-checks) and [`item create`](/reference/cli/item#what-create-prints). With `--json` they print the API's own answer: see the [HTTP API](/reference/http-api) pages.
 
 `kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
 object per line, because a stream has no end on which to close an array.

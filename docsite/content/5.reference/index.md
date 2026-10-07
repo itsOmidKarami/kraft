@@ -11,14 +11,14 @@ Look up a command, field, endpoint, tool, status or event.
 
 **Use Kraft**
 
-- [Web UI](/reference/web-ui): when you want a screen explained: the board, an item's page, the review page, Templates and Settings.
+- [Web UI](/reference/web-ui): when you want a screen explained: the sidebar, search and keyboard shortcuts, the board, an item's page, the review page, Templates and Settings, and Analytics.
 - [CLI](/reference/cli): when you want the verb for a task, or a verb's flags and output.
 - [Work item statuses](/reference/statuses): when you want to know what a status means and what moves an item to the next.
 
 **Configure Kraft**
 
 - [Configuration](/reference/configuration): when you edit a YAML file and want its fields, defaults and limits.
-- [Environment variables](/reference/configuration/environment-variables): when you want a `KRAFT_*` variable, or a variable Kraft passes to workers.
+- [Environment variables](/reference/configuration/environment-variables): when you want a `KRAFT_*` variable, or a variable Kraft passes to workers. It sits last inside Configuration in the sidebar.
 - [Chain file keys](/reference/chain-nodes): when you write a chain and want the node kinds, the subprocess task and fix loop contracts, and the result file.
 - [Agent harnesses](/reference/harnesses): when you want the agent CLIs Kraft runs and what each supports.
 - [Permission gate](/reference/permissions): when you want to know how Kraft answers a worker's asks, and the grants.

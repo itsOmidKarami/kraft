@@ -33,7 +33,7 @@ The answer carries:
 |---|---|
 | `status` | `ok` or `degraded`. |
 | `invalid_templates`, `invalid_policy`, `invalid_intake` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`. |
-| `intake_off` | Whether auto-intake and `intake.yaml`'s schedules are off for it. |
+| `intake_off` | Whether [auto-intake](/concepts/vocabulary#auto-intake) and `intake.yaml`'s schedules are off for it. |
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
@@ -41,7 +41,7 @@ The answer carries:
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 
-`intake_off` is `true` when the server started on an `intake.yaml` that does not load. A trigger left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
+`intake_off` is `true` when the server started on an `intake.yaml` that does not load. A [trigger](/concepts/vocabulary#trigger) left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
 
 ## Who may call
 
@@ -98,13 +98,10 @@ load `/openapi.json` into your own OpenAPI viewer.
 
 ## In this section
 
-Routes written on the pages below without the `/api`
-prefix are relative to it, except the three paths under
-[The schema](#the-schema), which are at the server root. A bare `GET /artifact`
-is shorthand for `GET /api/work-items/{id}/artifact`.
+The pages below describe the board's routes. They can change in any release, so a script that must keep working calls the [stable routes](#stable-routes), or the `kraft` command with `--json`. Each route is written in full, with its `/api` prefix.
 
-- [Work items](/reference/http-api/work-items): status, overrides, cancelling, retrying and a merge request closed on the forge.
-- [Budget, dry run and events](/reference/http-api/budget-and-events): the daily total, the dry run, events paging and the run summary.
+- [Work items](/reference/http-api/work-items): creating a work item, its status and `stop` fields, overrides, cancelling, retrying, duplicating, acting in bulk, and a merge request closed on the forge.
+- [Budget, dry run and events](/reference/http-api/budget-and-events): the daily total, the dry run of a create, events paging, the run summary, and the other fields of a work item's detail.
 - [Repos, chains, harnesses and the server](/reference/http-api/repos-chains-harnesses-and-server): connecting a repo, chain templates, harnesses, changes saved but not applied, the update check and editors.
 - [Drafts](/reference/http-api/drafts): the routes behind the Templates and Settings editors' drafts, and the `result` they answer.
-- [Ops for each draft area](/reference/http-api/draft-ops): the ops a draft takes, and a work item's own draft.
+- [Ops for each draft area](/reference/http-api/draft-ops): the ops a draft takes in each area, and a work item's own draft.
