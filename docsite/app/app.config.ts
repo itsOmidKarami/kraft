@@ -48,25 +48,20 @@ export default defineAppConfig({
       // when it works that out, so one long code span in a cell kept the
       // column wide and 126 of 252 tables scrolled sideways at 390px.
       // wrap-anywhere does count it, so the column can shrink to fit. Under
-      // 640px only: wider, it let a column shrink below its own identifier
-      // (work_item_ / id) to make room for its neighbour's prose. And not
-      // everywhere under 640px, by columns:
-      //  - Five or more: those scroll on a phone anyway, so breaking code
-      //    there bought no fit and cut claud / e in half. None fits only
-      //    because of it.
-      //  - Three or four: any code span may break. The reference tables of
-      //    four columns fit only if their short identifiers give way (they
-      //    scroll if only a long one may: 22 tables, against 4 now).
-      //  - Two: a span of up to 14 characters stays whole (ProseCode adds
-      //    code-long above that; work_item_id was cut to work / _ite / m_id on
-      //    Events, with room to spare) and only a long one may break. All 131
-      //    two-column tables still fit.
+      // 640px, and only in a table of two columns: a span of up to 14
+      // characters stays whole (ProseCode adds code-long above that;
+      // work_item_id was cut to work / _ite / m_id on Events, with room to
+      // spare) and only a long one may break. "Whole" needs nowrap: the
+      // span's max-w-full lets its column shrink below it, and a name with a
+      // hyphen (--description) then broke at the hyphen. A table of three or more
+      // columns is a list of blocks on a phone instead (assets/css/prose.css),
+      // each block as wide as the screen, so no code breaks there at all.
       // Where a table still does not fit it scrolls inside its own box;
       // scroll-hint (assets/css/prose.css) shows there is more to the right.
       table: {
         slots: {
           root: 'scroll-hint',
-          base: 'max-sm:[&:has(th:nth-child(3)):not(:has(th:nth-child(5)))_code]:wrap-anywhere max-sm:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere',
+          base: 'max-sm:[&:not(:has(th:nth-child(3)))_code.code-long]:wrap-anywhere max-sm:[&:not(:has(th:nth-child(3)))_code:not(.code-long)]:whitespace-nowrap',
         },
       },
       // A 1440px screenshot is 343px wide on a phone, and tapping it opened
@@ -83,11 +78,6 @@ export default defineAppConfig({
           zoomedImage: 'max-sm:w-[1440px] max-sm:shrink-0 max-sm:max-w-none max-sm:max-h-none',
         },
       },
-      // Nuxt UI pads every cell 16px a side, which is 128px of a 343px phone
-      // table spent on four columns of padding. 8px on a phone, 16px from
-      // 640px up.
-      th: { base: 'px-2 sm:px-4' },
-      td: { base: 'px-2 sm:px-4' },
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.
       pre: {
