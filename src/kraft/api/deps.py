@@ -42,6 +42,7 @@ from kraft.templates.environment import (
     branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
+from kraft.vocab import ENDED
 from kraft.worker import steering as steering_mod
 
 logger = logging.getLogger(__name__)
@@ -247,7 +248,7 @@ def _live_work_item_row(st, wid):
     answers 409 naming its status, because nothing runs its chain again
     (Kraft-dncfg)."""
     row = _work_item_row(st, wid)
-    if row["status"] in store.ENDED:
+    if row["status"] in ENDED:
         raise HTTPException(409, f"work item is {row['status']}; its chain does not run again")
     return row
 
