@@ -323,6 +323,11 @@ e2e-ci:
 schemas:
     uv run python dev/export_config_schemas.py
 
+# Regenerate frontend/src/types/vocab.generated.ts from kraft.vocab
+[doc("Regenerate the generated TS status vocabulary")]
+vocab:
+    uv run python dev/gen_vocab.py
+
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
 [doc("Regenerate the lucide icon list after a lucide-react bump")]
