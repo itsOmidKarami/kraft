@@ -9,8 +9,8 @@ headline: '$ uv tool install kraft-sdlc && kraft'
 title: 'A local orchestrator that takes your coding agent from spec to pull request.'
 description: "It stops only when a decision is yours. Kraft isn't another coding agent. It runs the one you already use, and adds what a single session can't: a process the agent can't skip, checks it doesn't grade itself on, and a person at the decisions that matter. Hand it a spec and walk away; retries and spend are capped."
 links:
-  - label: Install Kraft
-    to: /get-started/install
+  - label: Get started
+    to: /get-started
     color: primary
   - label: View on GitHub
     to: https://github.com/itsOmidKarami/kraft
