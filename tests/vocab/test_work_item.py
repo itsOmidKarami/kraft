@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from kraft.vocab import (
@@ -90,3 +93,31 @@ def test_every_display_status_is_reachable_from_the_table_or_the_stop_rules():
         DisplayStatus.ARCHIVED,
     }
     assert from_table | from_rules == set(DisplayStatus)
+
+
+DOORS = json.loads((Path(__file__).parents[1] / "api" / "lifecycle_doors.json").read_text())
+DOOR_VERB = {
+    "pause": Verb.PAUSE,
+    "resume": Verb.RESUME,
+    "steer": Verb.STEER,
+    "retry": Verb.RETRY,
+    "skip": Verb.SKIP,
+    "escalate": Verb.ESCALATE,
+    "budget_raise": Verb.RAISE_BUDGET,
+    "abandon": Verb.ABANDON,
+    "archive": Verb.ARCHIVE,
+}
+
+
+@pytest.mark.parametrize("door", sorted(DOOR_VERB))
+def test_a_verbs_statuses_are_the_statuses_of_the_states_its_door_takes(door):
+    taken = {DOORS["states"][s]["status"] for s in DOORS["doors"][door]["takes"]}
+    assert taken == {str(s) for s in admitting(DOOR_VERB[door])}
+
+
+def test_every_status_has_a_state_in_the_door_table():
+    assert {st["status"] for st in DOORS["states"].values()} == {str(s) for s in WorkItemStatus}
+
+
+def test_every_verb_has_a_door():
+    assert set(DOOR_VERB.values()) == set(Verb)

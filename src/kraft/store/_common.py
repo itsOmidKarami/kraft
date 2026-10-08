@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-#: The statuses an item never leaves (Kraft-dncfg): no door runs its chain
-#: again, and no write that makes an item runnable takes one.
-ENDED = ("completed", "abandoned")
+from kraft.vocab import ENDED as ENDED  # the statuses an item never leaves (Kraft-dncfg)
+from kraft.vocab.sql import marks
 
 
 def write_status(conn, sql: str, params: tuple) -> bool:
@@ -17,7 +16,9 @@ def write_status(conn, sql: str, params: tuple) -> bool:
     each claim. The ending writes (`mark_completed`, `MANUAL_ENDS`,
     `abandon_work_item`) do not: ending is the one move an item may always make.
     """
-    return conn.execute(f"{sql} AND status NOT IN (?, ?)", (*params, *ENDED)).rowcount == 1
+    return (
+        conn.execute(f"{sql} AND status NOT IN ({marks(ENDED)})", (*params, *ENDED)).rowcount == 1
+    )
 
 
 def _now() -> str:

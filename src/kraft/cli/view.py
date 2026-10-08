@@ -9,18 +9,11 @@ import sys
 
 from kraft import client, render, usage
 from kraft.cli import common
+from kraft.vocab import WorkItemStatus
 
-#: `work_items.status`'s CHECK in `db.SCHEMA_SQL`, which a test holds this to:
-#: without `choices=` a typo answered with an empty board, not an error.
-STATUSES = (
-    "active",
-    "waiting",
-    "rate_limited",
-    "needs_human",
-    "paused",
-    "completed",
-    "abandoned",
-)
+#: argparse choices; a typo answers an error, not an empty board. Plain strings,
+#: not members: argparse prints `repr(choice)` in its error.
+STATUSES = tuple(s.value for s in WorkItemStatus)
 
 _LIST_COLUMNS = [
     ("ID", "id"),

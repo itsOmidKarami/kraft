@@ -27,3 +27,18 @@ For the vocabulary, see
 
 The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to SVG with
 `just docs-diagrams`.
+
+## Closed sets
+
+Work item status, session status, stop kind and display status are defined once in `src/kraft/vocab/`. Each has a `StrEnum`; the two statuses also have a traits table built with `total()`, and the groups other code reads (`ENDED`, `STOPPED`, `LIVE`, ...) are computed from it. The SQLite CHECK text, the stop-kind trigger and `frontend/src/types/vocab.generated.ts` (`just vocab`) are produced from the same definition.
+
+To add a status, add the member and its row; each piece you miss fails a named guard:
+
+| Missing piece | Guard that trips |
+|---|---|
+| a row in `TRAITS` / `SESSION_TRAITS` | importing `kraft.vocab` raises, naming the member |
+| the table-rebuild migration | `tests/test_db.py` fails on the database migrated from v1 |
+| the regenerated TS | `tests/test_vocab_generated.py` |
+| a case in a TS table | `tsc -b` |
+| a door-table state | `tests/vocab/test_work_item.py` (and each door's `takes` must agree with `admits_status`) |
+| the exact-line old-schema fixtures | adding a member re-wraps the generated CHECK, so update the lines matched in `tests/test_db_migrations.py` in the same change |
