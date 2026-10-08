@@ -32,7 +32,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
-from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
+from kraft.vocab import ENDED, HOLDS_SLOT, LIVE, WorkItemStatus
 from kraft.vocab.sql import in_list
 from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
@@ -683,7 +683,7 @@ async def reattach(
 ) -> tuple[ReattachSummary, dict[str, asyncio.Task]]:
     rows = db.read(
         lambda c: c.execute(
-            "SELECT * FROM worker_sessions WHERE status IN ('pending', 'running')"
+            f"SELECT * FROM worker_sessions WHERE status IN ({in_list(LIVE)})"
         ).fetchall()
     )
     summary = ReattachSummary(scanned=len(rows))

@@ -63,6 +63,7 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
 )
+from kraft.vocab import ADVANCING, COMMAND_FINISHED, LIVE, UNFINISHED, SessionStatus
 from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
@@ -670,12 +671,12 @@ def scope_results(
     table = _scope_table(repo_entry)
     results = []
     for command, row in latest.items():
-        if row["status"] not in ("done", "failed"):
+        if row["status"] not in COMMAND_FINISHED:
             continue
         entry: dict = {"command": command, **_scope_facts(table, command)}
         if (code := _exit_code(row["result_path"])) is not None:
             entry["exit_code"] = code
-        entry["passed"] = row["status"] == "done"
+        entry["passed"] = row["status"] == SessionStatus.DONE
         entry["session_id"] = row["id"]
         results.append(entry)
     return results
@@ -712,17 +713,11 @@ def _scope_order(table: list[dict], command: str) -> float | None:
     return None
 
 
-#: Session statuses that say a command has not finished; any other has.
-_UNFINISHED = frozenset(
-    {"pending", "running", "paused", "waiting", "rate_limited", "needs_context"}
-)
-
-
 def _scope_passed(status: str) -> bool | None:
     """Whether a command passed: None until it finishes, False for every way of not passing."""
-    if status in ("done", "done_with_concerns"):
+    if status in ADVANCING:
         return True
-    return None if status in _UNFINISHED else False
+    return None if status in UNFINISHED else False
 
 
 def _current_pass_start(marks: list[tuple[int, int]]) -> int:
@@ -908,7 +903,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
             (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
         ).fetchall()
     )
-    open_rows = [r for r in rows if r["status"] in ("pending", "running", "waiting")]
+    open_rows = [r for r in rows if r["status"] in (*LIVE, SessionStatus.WAITING)]
     if not rows:
         sid, log_path, result_path = await _builtins.start_session(
             db,
@@ -2393,7 +2388,7 @@ ESCALATION_HOOK = "escalation"
 #: Statuses that mean the judge session actually finished thinking -- the
 #: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
 #: applies, phrased as the allowlist its own `VERDICTS` check mirrors.
-_JUDGE_TRUSTED_STATUS = frozenset({"done", "done_with_concerns"})
+_JUDGE_TRUSTED_STATUS = ADVANCING
 _JUDGE_VERDICTS = frozenset({"continue", "stop_needs_human", "stop_downgrade"})
 
 

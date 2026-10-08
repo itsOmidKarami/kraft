@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { WorkItemStatus } from "./vocab.generated";
+import type { SessionStatus, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -408,21 +408,7 @@ export interface Finding {
   reported_severity?: string;
 }
 
-export type SessionStatus =
-  | "pending"
-  | "running"
-  | "done"
-  | "done_with_concerns"
-  | "needs_context"
-  | "failed"
-  | "capped_out"
-  | "paused"
-  | "unknown"
-  | "rate_limited"
-  | "config_error"
-  // A forge task (ci_poll) parked on a pipeline that has not settled; the
-  // wait scheduler re-enters it when retry_at comes due (Kraft-ru98).
-  | "waiting";
+export type { SessionStatus };
 
 /** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
  *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup

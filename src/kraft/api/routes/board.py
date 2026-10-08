@@ -13,7 +13,8 @@ from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 from kraft.cap_levels import SCOPE_CAP_FIELDS
-from kraft.vocab import COMMANDS_MAY_START, STOPPED, WorkItemStatus
+from kraft.vocab import COMMANDS_MAY_START, LIVE, STOPPED, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 
 def _pending_gate(st, wid: str) -> str | None:
@@ -86,7 +87,7 @@ def _turn_live(session_status: str | None, message_at: str) -> bool:
     message is new. A turn that exited (failed, done, asked a question) is
     not live: the item is back with the person."""
     if session_status is not None:
-        return session_status in ("pending", "running")
+        return session_status in LIVE
     age = datetime.fromisoformat(store._now()) - datetime.fromisoformat(message_at)
     return age.total_seconds() < _LAUNCH_WINDOW_S
 
@@ -567,7 +568,7 @@ def _running_session(st, wid: str) -> dict | None:
         lambda c: c.execute(
             "SELECT s.node_id, s.hook_point, s.attempt, s.started_at FROM worker_sessions s "
             "JOIN work_items w ON w.id = s.work_item_id "
-            "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
+            f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
             "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') "
             "ORDER BY s.created_at DESC LIMIT 1",
             (wid,),

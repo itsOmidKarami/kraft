@@ -56,7 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
-from kraft.vocab import STOPPED, WorkItemStatus
+from kraft.vocab import LIVE, STOPPED, WorkItemStatus
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -538,9 +538,7 @@ def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
             unknown = sum(
                 1
                 for s in under
-                if s["cost_usd"] is None
-                and _usage.spent(s) > 0
-                and s["status"] not in ("pending", "running")
+                if s["cost_usd"] is None and _usage.spent(s) > 0 and s["status"] not in LIVE
             )
             spent = sum(s["cost_usd"] or 0.0 for s in under)
             if unknown or spent >= cap:

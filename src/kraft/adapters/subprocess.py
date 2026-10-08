@@ -23,6 +23,7 @@ from kraft import caps, events, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
+from kraft.vocab import AGENT_REPORTABLE, UNREADABLE_EXIT
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
+_AGENT_STATUSES = AGENT_REPORTABLE
 
 #: Test seam. `run_task`'s flush wait is the one sleep a test needs to observe
 #: without paying, because the whole point of it is ordering against
@@ -368,7 +369,7 @@ async def record_oom_kill(
         )
     payload = {"session_id": session_id, "memory": oom.memory, "confirmed": oom.confirmed}
     await db.write(lambda c: events.append(c, work_item_id, SANDBOX_OOM_KILLED, payload))
-    return "config_error" if status in (None, "failed", "unknown") else status
+    return "config_error" if status is None or status in UNREADABLE_EXIT else status
 
 
 def _resolve_exit_file(path: Path) -> str | None:

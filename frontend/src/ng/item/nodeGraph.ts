@@ -1,5 +1,5 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, SessionStatus, WorkerSession } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
@@ -11,7 +11,8 @@ export const ESCALATION = "escalation";
 /** A gate's reviewer: its sessions run at `<gate>.auto_review`, a path no step of the chain lists. */
 export const AUTO_REVIEW = "auto_review";
 export const isEscalation = (s: WorkerSession) => s.hook_point === ESCALATION || s.hook_point.endsWith(`.${ESCALATION}`);
-const LIVE = new Set(["running", "pending", "rate_limited", "waiting", "needs_context"]);
+// What the graph counts as in flight; not `LIVE_SESSION_STATUSES` (pending and running only).
+const LIVE = new Set<SessionStatus>(["running", "pending", "rate_limited", "waiting", "needs_context"]);
 
 /** A node's sessions in the pass it is on, oldest first, each with the round it reads in. A retry or a base change
  *  restarts a fix loop at round 0, so a measurement below the highest one seen starts a new pass (`node_started` fires
@@ -58,17 +59,26 @@ export function messagesThrough(msgs: { session: string | null; node: string | n
   return k >= 0 && k < here.length ? here[k] + 1 : msgs.length;
 }
 
+type Look = Pick<GraphItem, "state" | "meta" | "running" | "paused" | "attemptStopped">;
+const FAILED_LOOK = (): Look => ({ state: "failed" });
+const DONE_LOOK = (s: WorkerSession): Look => ({ state: "done", meta: s.wall_ms != null ? elapsed(s.wall_ms) : undefined });
+const LOOK: Record<SessionStatus, (s: WorkerSession, now: number) => Look> = {
+  pending: () => ({ state: "todo", meta: "pending" }),
+  running: (s, now) => ({ state: "current", running: true, meta: `running · ${elapsedBetween(s.started_at, null, now)}` }),
+  paused: () => ({ state: "current", paused: true, meta: "paused" }),
+  rate_limited: () => ({ state: "amber", meta: "waiting" }),
+  waiting: () => ({ state: "amber", meta: "waiting" }),
+  needs_context: () => ({ state: "current", meta: "needs you" }),
+  failed: FAILED_LOOK, config_error: FAILED_LOOK, unknown: FAILED_LOOK,
+  conflict: FAILED_LOOK, infra: FAILED_LOOK, infra_stop: FAILED_LOOK,
+  capped_out: () => ({ state: "failed", attemptStopped: true }),
+  done: DONE_LOOK, done_with_concerns: DONE_LOOK,
+};
+
 /** What a session draws as: its glyph state and the one meta word (Decisions §5 Task meta: duration only). */
-export function sessionLook(s: WorkerSession | undefined, now: number): Pick<GraphItem, "state" | "meta" | "running" | "paused" | "attemptStopped"> {
+export function sessionLook(s: WorkerSession | undefined, now: number): Look {
   if (!s) return { state: "todo" };
-  if (s.status === "pending") return { state: "todo", meta: "pending" };
-  if (s.status === "running") return { state: "current", running: true, meta: `running · ${elapsedBetween(s.started_at, null, now)}` };
-  if (s.status === "paused") return { state: "current", paused: true, meta: "paused" };
-  if (s.status === "rate_limited" || s.status === "waiting") return { state: "amber", meta: "waiting" };
-  if (s.status === "needs_context") return { state: "current", meta: "needs you" };
-  if (s.status === "failed" || s.status === "config_error" || s.status === "unknown") return { state: "failed" };
-  if (s.status === "capped_out") return { state: "failed", attemptStopped: true };
-  return { state: "done", meta: s.wall_ms != null ? elapsed(s.wall_ms) : undefined };
+  return (LOOK[s.status] ?? DONE_LOOK)(s, now); // a status from a newer server reads as done, as before
 }
 
 /** The step a fix loop's own tasks are selected under: `<node>.fix_loop.<task>`. */

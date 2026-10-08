@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ChainNode, WorkerSession } from "../../types";
+import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
+import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { footerState, loopRounds, nodeGraph, passOf } from "./nodeGraph";
+import { footerState, loopRounds, nodeGraph, passOf, sessionLook } from "./nodeGraph";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -193,5 +194,17 @@ describe("a fix loop that started over", () => {
     const resumed = looped({ worker_sessions: [...LOOP_RUN, s("verification.checks.lint", { round: 1, attempt: 3, status: "running", wall_ms: null })] });
     expect(loopRounds(resumed, node)).toEqual({ latest: 2, total: 3 });
     expect(passOf(resumed, "verification")).toHaveLength(LOOP_RUN.length + 1);
+  });
+});
+
+describe("sessionLook covers every session status", () => {
+  it.each(SESSION_STATUSES)("%s has a look", (status) => {
+    expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBeDefined();
+  });
+  it.each(["conflict", "infra", "infra_stop"] as const)("draws %s as failed", (status) => {
+    expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBe("failed");
+  });
+  it("does not throw on a status a newer server sends", () => {
+    expect(() => sessionLook(s("verification.checks.lint", { status: "brand_new" as SessionStatus }), 0)).not.toThrow();
   });
 });

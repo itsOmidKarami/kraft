@@ -1,6 +1,6 @@
 import { elapsed, elapsedBetween } from "../../format";
 import { EXPAND_W } from "../graph/nodeLayout";
-import type { ScopeRun, WorkerSession } from "../../types";
+import type { ScopeRun, SessionStatus, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
 import { passOf } from "./nodeGraph";
 import type { ItemDetail } from "./useItem";
@@ -83,15 +83,14 @@ export function reposOf(item: ItemDetail): { id: string | null; name: string }[]
   return ids.length ? ids.map((id) => ({ id, name: id })) : [{ id: null, name: basename(item.repo) }];
 }
 
-const FAILED = new Set(["failed", "capped_out", "config_error", "unknown", "conflict", "infra", "infra_stop"]);
+const CHIP: Record<SessionStatus, ChipState> = {
+  running: "running", pending: "waiting", paused: "waiting", needs_context: "waiting", rate_limited: "waiting", waiting: "waiting",
+  done: "done", done_with_concerns: "done",
+  failed: "failed", capped_out: "failed", config_error: "failed", unknown: "failed", conflict: "failed", infra: "failed", infra_stop: "failed",
+};
 
 function chipState(s: WorkerSession | undefined, passed: boolean | null): ChipState {
-  if (s) {
-    if (s.status === "running") return "running";
-    if (FAILED.has(s.status)) return "failed";
-    if (s.status === "done" || s.status === "done_with_concerns") return "done";
-    return "waiting";
-  }
+  if (s) return CHIP[s.status] ?? "waiting";
   return passed === null ? "running" : passed ? "done" : "failed";
 }
 
