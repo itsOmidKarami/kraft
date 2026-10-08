@@ -374,7 +374,8 @@ def test_the_extension_changelog_takes_the_release_notes_the_way_the_root_one_do
     plan_release.write_changelog("1.5.0", "### New\n\n- new (#4)\n", path)
     text = path.read_text()
     assert text.startswith("# Changelog\n\nNotable changes to the Kraft VS Code extension")
-    assert text.endswith("\n\n## 1.5.0\n\n### New\n\n- new (#4)\n")
+    # The newest section, above any the file already holds (2.0.0 was the first stamped).
+    assert text[text.index("\n## ") :].startswith("\n## 1.5.0\n\n### New\n\n- new (#4)\n")
     assert "do not\nedit this file by hand" in text
 
 
