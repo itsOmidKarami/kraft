@@ -13,6 +13,7 @@ from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 from kraft.cap_levels import SCOPE_CAP_FIELDS
+from kraft.vocab import COMMANDS_MAY_START, STOPPED, WorkItemStatus
 
 
 def _pending_gate(st, wid: str) -> str | None:
@@ -221,9 +222,9 @@ async def list_work_items(request: Request):
 
     def _read(c):
         rows = c.execute(
-            "SELECT * FROM work_items WHERE (? OR status != 'abandoned') "
+            "SELECT * FROM work_items WHERE (? OR status != ?) "
             "AND (archived_at IS NOT NULL) = ? ORDER BY created_at",
-            (include_abandoned, archived),
+            (include_abandoned, WorkItemStatus.ABANDONED, archived),
         ).fetchall()
         cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
         # The latest gate request or gate closer per item, in one pass — the
@@ -375,7 +376,7 @@ def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
     item's latest `_STOP_BOUNDARY` row from the one grouped query `_read`
     already ran, not a per-item scan."""
     status = row["status"]
-    if status not in ("needs_human", "waiting", "rate_limited"):
+    if status not in STOPPED:
         return None
     payload = _boundary_payload(boundary)
     reason = payload["reason"] if payload else None
@@ -647,7 +648,7 @@ def _rate_limit_retries(st, row) -> dict | None:
     counter `rate_limit_retry._retry_one` bumps rather than keeping a second
     one -- None off a rate-limited item (nothing to show), or when there is
     no current node to key the counter by."""
-    if row["status"] != "rate_limited" or row["current_node_id"] is None:
+    if row["status"] != WorkItemStatus.RATE_LIMITED or row["current_node_id"] is None:
         return None
     counter = st.db.read(
         lambda c: store.read_counter(c, row["id"], f"rate_limit:{row['current_node_id']}")
@@ -843,12 +844,7 @@ def _scope_runs(st, row) -> list[dict]:
 
     def live(node) -> bool:
         # Whether the walk is still on this node, so a command it picked can still start.
-        return row["current_node_id"] == node.id and row["status"] in (
-            "active",
-            "paused",
-            "waiting",
-            "rate_limited",
-        )
+        return row["current_node_id"] == node.id and row["status"] in COMMANDS_MAY_START
 
     runs = []
     for node, t in verifies:
@@ -867,7 +863,7 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     """`stop` on the detail response (B.3): `None` unless the item is
     currently `needs_human`, `waiting` or `rate_limited`."""
     status = row["status"]
-    if status not in ("needs_human", "waiting", "rate_limited"):
+    if status not in STOPPED:
         return None
     node = row["current_node_id"]
     task, attempt = _stop_task_and_attempt(sessions, node)

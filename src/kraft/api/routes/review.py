@@ -20,6 +20,7 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board, lifecycle
 from kraft.api.routes import gates as gate_routes
 from kraft.executor import stops
+from kraft.vocab import RUNNING, WorkItemStatus
 
 
 class Suggestion(BaseModel):
@@ -500,10 +501,10 @@ async def _request_changes_now(st, request, row, body, head, base):
         lambda c: store.request_rewind(c, wid, review_id=rid, target=target, note=note)
     )
     try:
-        if row["status"] == "needs_human":
+        if row["status"] == WorkItemStatus.NEEDS_HUMAN:
             await lifecycle.retry_work_item(wid, lifecycle.Retry(), request)
             action = "retried"
-        elif row["status"] in ("active", "waiting") and idx == current:
+        elif row["status"] in RUNNING and idx == current:
             await lifecycle.pause_work_item(wid, request)
             try:
                 await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
