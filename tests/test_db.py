@@ -2,45 +2,68 @@
 single-writer `Database`."""
 
 import asyncio
+import re
 import sqlite3
 
 import pytest
 from support import schema
+from test_db_migrations import _build_old_db
 
 from kraft import db
+from kraft.vocab import STOPPED, SessionStatus, WorkItemStatus
+
+
+def _migrated(tmp_path):
+    """A database upgraded from the oldest schema `_build_old_db` can build.
+
+    Independent of the enums on purpose: `_build_old_db(conn, 1)` starts below
+    migrations 23 (work_items) and 26 (worker_sessions), which rebuild those
+    tables from literal text, so the CHECKs here are history, not today's
+    vocabulary. Do not raise the start version.
+    """
+    conn = db._connect(tmp_path / "old.db")
+    _build_old_db(conn, 1)
+    db.migrate(conn)
+    return conn
+
+
+def _members(sql, pattern):
+    return set(re.findall(r"'(\w+)'", re.search(pattern, sql, re.S)[1]))
+
+
+@pytest.fixture(params=["fresh", "migrated"])
+def either(request, tmp_path):
+    return schema.fresh(tmp_path) if request.param == "fresh" else _migrated(tmp_path)
 
 
 @pytest.mark.parametrize(
-    ("table", "status", "allowed"),
-    [
-        # the row state a CI wait becomes (Kraft-ru98)
-        ("work_items", "waiting", True),
-        ("work_items", "rate_limited", True),
-        ("work_items", "bogus", False),
-        # `forge.run_task` closes its session with the handler's own status, so
-        # the sentinel has to be legal on both tables the way 'rate_limited' is
-        ("worker_sessions", "waiting", True),
-        # a missing binary is a bad-config stop, not an IntegrityError three
-        # frames up (Kraft-579)
-        ("worker_sessions", "config_error", True),
-        ("worker_sessions", "done_with_concerns", True),
-        ("worker_sessions", "needs_context", True),
-        ("worker_sessions", "bogus", False),
-    ],
-    ids=lambda v: v if isinstance(v, str) else ("allowed" if v else "refused"),
+    ("table", "enum"),
+    [("work_items", WorkItemStatus), ("worker_sessions", SessionStatus)],
 )
-def test_status_check_constraint(tmp_path, table, status, allowed):
-    """Each table's status CHECK admits exactly the statuses Kraft writes."""
-    conn = schema.fresh(tmp_path)
-    schema.insert_item(conn)
-    schema.insert_session(conn)
-    update = f"UPDATE {table} SET status = ?"
-    if not allowed:
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(update, (status,))
-        return
-    conn.execute(update, (status,))
-    assert conn.execute(f"SELECT status FROM {table}").fetchone()[0] == status
+def test_the_check_admits_every_member_and_refuses_bogus(either, table, enum):
+    schema.insert_item(either)
+    schema.insert_session(either)
+    for member in enum:
+        either.execute(f"UPDATE {table} SET status = ?", (member,))
+    with pytest.raises(sqlite3.IntegrityError):
+        either.execute(f"UPDATE {table} SET status = ?", ("bogus",))
+
+
+@pytest.mark.parametrize(
+    ("table", "enum"),
+    [("work_items", WorkItemStatus), ("worker_sessions", SessionStatus)],
+)
+def test_the_check_text_lists_exactly_the_enum(either, table, enum):
+    sql = either.execute("SELECT sql FROM sqlite_master WHERE name = ?", (table,)).fetchone()[0]
+    assert _members(sql, r"CHECK \(status IN\s*\(([^)]*)\)") == {m.value for m in enum}
+
+
+def test_the_stop_kind_trigger_lists_exactly_the_stopped_statuses(either):
+    sql = either.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' "
+        "AND name = 'work_items_stop_kind_clear'"
+    ).fetchone()[0]
+    assert _members(sql, r"NOT IN \(([^)]*)\)") == {s.value for s in STOPPED}
 
 
 def test_migrate_creates_schema_from_empty(tmp_path):

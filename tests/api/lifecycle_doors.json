@@ -272,6 +272,43 @@
         "gate_under_review",
         "gate_with_escalation"
       ]
+    },
+    "steer": {
+      "path": "steer",
+      "body": {
+        "text": "go left"
+      },
+      "takes": [
+        "not_started",
+        "question"
+      ]
+    },
+    "abandon": {
+      "path": "abandon",
+      "body": {},
+      "takes": [
+        "waiting_ci",
+        "rate_limited",
+        "paused",
+        "paused_walk_live",
+        "not_started",
+        "gate",
+        "gate_under_review",
+        "gate_with_escalation",
+        "question",
+        "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
+        "budget_item_cap",
+        "budget_daily",
+        "mr_closed",
+        "escalated",
+        "completed",
+        "abandoned",
+        "archived"
+      ]
     }
   }
 }

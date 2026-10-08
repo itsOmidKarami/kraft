@@ -4,17 +4,16 @@ behaviour is in `test_verbs.py` and `test_watching.py`."""
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 
-from kraft import cli, db
+from kraft import cli
 from kraft.cli import view
+from kraft.vocab import WorkItemStatus
 
 
-def test_list_status_offers_every_status_the_schema_allows():
-    allowed = re.findall(r"'(\w+)'", re.search(r"status IN\s*\(([^)]*)\)", db.SCHEMA_SQL)[1])
-    assert set(view.STATUSES) == set(allowed)
+def test_the_list_filter_offers_exactly_the_work_item_statuses():
+    assert view.STATUSES == tuple(s.value for s in WorkItemStatus)
 
 
 def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys):
