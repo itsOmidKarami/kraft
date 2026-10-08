@@ -1,6 +1,6 @@
 {
   "name": "kraft-lite",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
   "license": "Apache-2.0",
   "author": {
