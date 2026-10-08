@@ -10,6 +10,8 @@ from kraft import store as _store
 from kraft.adapters import agent as _agent
 from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
+from kraft.vocab import ADVANCING
+from kraft.vocab.sql import marks
 from kraft.worker import callback as _callback
 
 FIX_PROMPT = (
@@ -587,7 +589,7 @@ def fix_attempt_note(row) -> str:
 #: A review session that did not finish is not a head anything was reviewed at.
 #: Same "was this a real judgement" allowlist `dispatch._JUDGE_TRUSTED_STATUS`
 #: and `gate_review._UNTRUSTWORTHY` apply, for the same reason.
-_REVIEWED_STATUS = ("done", "done_with_concerns")
+_REVIEWED_STATUS = ADVANCING
 
 
 def last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
@@ -622,7 +624,7 @@ def last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | 
         lambda c: c.execute(
             "SELECT head_sha, result_path, session_summary_ref FROM worker_sessions "
             "WHERE work_item_id = ? AND hook_point = ? "
-            f"AND head_sha IS NOT NULL AND status IN ({','.join('?' * len(_REVIEWED_STATUS))}) "
+            f"AND head_sha IS NOT NULL AND status IN ({marks(_REVIEWED_STATUS)}) "
             "ORDER BY created_at DESC LIMIT 1",
             (work_item_id, task_hook, *_REVIEWED_STATUS),
         ).fetchone()

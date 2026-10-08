@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kraft.caps import TIME_CAPPED
+from kraft.vocab import ADVANCING
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
@@ -44,7 +45,7 @@ WAIT_TIMED_OUT = "capped_out"
 #: at the next gate, not a control-flow change. Shared by `resuming.py` (whole-
 #: node reconciliation) and `dispatch.measure_node` (per-group), so a status
 #: that counts as "moved the node forward" cannot drift between the two.
-_ADVANCING = ("done", "done_with_concerns")
+_ADVANCING = ADVANCING
 
 #: A task moved the branch onto a newer origin tip, in a node that declares
 #: `on_base_changed` (the forge reports it only there). Deliberately not in

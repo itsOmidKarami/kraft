@@ -24,6 +24,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
 from kraft.templates.models import AgentTask, ResolvedNode
+from kraft.vocab import GATE_REVIEW_UNTRUSTED
 from kraft.worker import steering as _steering
 
 #: The only strings a verdict may be. Anything else -- a typo, a sentence, a
@@ -32,7 +33,7 @@ VERDICTS = frozenset({"approve", "reject", "fixed", "undecided"})
 
 #: Statuses that mean the session did not finish thinking. A verdict written
 #: beside one of these is not a judgement, whatever it says.
-_UNTRUSTWORTHY = frozenset({"failed", "needs_context", "rate_limited"})
+_UNTRUSTWORTHY = frozenset(GATE_REVIEW_UNTRUSTED)
 
 _PROMPT = (
     "This is a gate review. A Kraft work item has reached the gate "

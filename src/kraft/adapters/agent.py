@@ -28,6 +28,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
 from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
+from kraft.vocab import ADVANCING
 from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
@@ -420,7 +421,7 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: 
         # stopped, and `kraft.executor.dispatch.needs_context_question` matches
         # on this status: downgrading it to `failed` loses the question, makes the
         # stop reason generic, and 409s both /steer and /resume.
-        if artifact is None or status not in ("done", "done_with_concerns"):
+        if artifact is None or status not in ADVANCING:
             return status
         if (Path(cwd) / artifact_path(artifact, work_item_id)).is_file():
             return status

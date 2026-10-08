@@ -10,6 +10,8 @@ from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
 from kraft.usage import Usage
+from kraft.vocab import LIVE, SessionStatus
+from kraft.vocab.sql import in_list
 
 
 def create_session(
@@ -411,7 +413,7 @@ def latest_session_per_task(
         row = conn.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
             "AND hook_point = ? "
-            "ORDER BY (status IN ('pending', 'running')) DESC, created_at DESC LIMIT 1",
+            f"ORDER BY (status IN ({in_list(LIVE)})) DESC, created_at DESC LIMIT 1",
             (work_item_id, node_id, hook_point),
         ).fetchone()
         if row is not None:
@@ -696,6 +698,7 @@ def session_exited(
     none) — this event is the only place they are recorded, so a human-review
     gate or a needs_context stop can read them back without a per-request file
     read (`adapters.subprocess.read_concerns`/`read_question` off disk)."""
+    status = SessionStatus(status)
     now = _now()
     row = conn.execute(
         "SELECT work_item_id, started_at, created_at, status FROM worker_sessions WHERE id = ?",
@@ -832,7 +835,7 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     # agent is still writing in (code review finding).
     return conn.execute(
         "SELECT s.id, s.pid FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
-        "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
+        f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
         "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
         (work_item_id,),
     ).fetchall()
@@ -845,7 +848,7 @@ def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
         r["id"]
         for r in conn.execute(
             "SELECT id FROM worker_sessions WHERE work_item_id = ? "
-            "AND status IN ('running', 'pending')",
+            f"AND status IN ({in_list(LIVE)})",
             (work_item_id,),
         ).fetchall()
     ]
@@ -888,7 +891,7 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
     nothing beside it."""
     return conn.execute(
         "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
-        "AND status IN ('running', 'pending') "
+        f"AND status IN ({in_list(LIVE)}) "
         "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
         (work_item_id, path, path + ".", path + "."),
     ).fetchall()

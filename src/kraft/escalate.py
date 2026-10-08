@@ -23,6 +23,8 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, GateNode, TaskKind
+from kraft.vocab import LIVE
+from kraft.vocab.sql import in_list
 from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
@@ -218,7 +220,7 @@ def escalation_running(db, work_item_id: str) -> str | None:
     row = db.read(
         lambda c: c.execute(
             "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-            "AND status IN ('pending', 'running') LIMIT 1",
+            f"AND status IN ({in_list(LIVE)}) LIMIT 1",
             (work_item_id,),
         ).fetchone()
     )

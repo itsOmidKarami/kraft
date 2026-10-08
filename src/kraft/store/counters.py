@@ -5,6 +5,8 @@ import sqlite3
 from kraft import events
 from kraft.policy import Cap
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.vocab import CAP_SWEEP_LEAVES
+from kraft.vocab.sql import in_list
 
 
 def bump_counter(
@@ -216,7 +218,7 @@ def mark_sessions_capped_out(
     placeholders = ",".join("?" * len(hook_points))
     where = (
         f"work_item_id = ? AND node_id = ? AND hook_point IN ({placeholders}) "
-        f"AND status NOT IN ('done', 'done_with_concerns', 'capped_out', 'waiting')"
+        f"AND status NOT IN ({in_list(CAP_SWEEP_LEAVES)})"
     )
     args = (work_item_id, node_id, *hook_points)
     capped = conn.execute(f"SELECT id FROM worker_sessions WHERE {where}", args).fetchall()

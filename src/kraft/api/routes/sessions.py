@@ -22,6 +22,7 @@ from kraft.api import api_router, deps, perimeter
 from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
 from kraft.grants import matching
 from kraft.templates.models import AgentTask
+from kraft.vocab import LIVE
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
         # not *finished* -- a session still in 'pending' has an agent about to
         # write to this log, and a stream opened on it used to get one poll and
         # an end event
-        running = _session_row(st, sid)["status"] in ("pending", "running")
+        running = _session_row(st, sid)["status"] in LIVE
         await asyncio.sleep(poll_s)
     yield "event: end\ndata: {}\n\n"
 
