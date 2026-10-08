@@ -56,6 +56,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
+from kraft.vocab import STOPPED, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -600,14 +602,14 @@ async def tick(db, *, now: str | None = None) -> list[str]:
             "THEN json_extract(e.payload, '$.gate') END FROM events e "
             f"WHERE e.work_item_id = w.id AND e.type IN ('gate_requested', {marks}) "
             "ORDER BY e.seq DESC LIMIT 1) AS pending_gate "
-            "FROM work_items w WHERE w.status IN ('waiting', 'rate_limited', 'needs_human')",
+            f"FROM work_items w WHERE w.status IN ({in_list(STOPPED)})",
             _GATE_SETTLED,
         ).fetchall()
     )
     stopped = []
     for row in rows:
-        gate = row["pending_gate"] if row["status"] == "needs_human" else None
-        if row["status"] == "needs_human" and gate is None:
+        gate = row["pending_gate"] if row["status"] == WorkItemStatus.NEEDS_HUMAN else None
+        if row["status"] == WorkItemStatus.NEEDS_HUMAN and gate is None:
             continue
         try:
             hit = db.read(lambda c, r=row, g=gate: parked(c, r, gate=g, now=now))
@@ -640,7 +642,7 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
         seen["current_node_id"],
     ):
         return False
-    if seen["status"] == "needs_human" and now["pending_gate"] != seen["pending_gate"]:
+    if seen["status"] == WorkItemStatus.NEEDS_HUMAN and now["pending_gate"] != seen["pending_gate"]:
         return False
     events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
     store.mark_needs_human(

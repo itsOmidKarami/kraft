@@ -23,7 +23,6 @@ from kraft.api import config_check, deps
 from kraft.api.routes import settings
 from kraft.drafts import authored
 from kraft.policy import Policy, PolicyError, TaskPolicyOverride, TemplatePolicyOverride
-from kraft.store import ENDED
 from kraft.templates import catalogue, positions
 from kraft.templates.library import (
     LIBRARY_FILE,
@@ -45,6 +44,7 @@ from kraft.templates.models import (
     TaskBase,
     _scoped,
 )
+from kraft.vocab import ENDED
 
 # ponytail: a `#` inside a quoted string warns too.
 _COMMENT = re.compile(r"^\s*#|\s#", re.MULTILINE)

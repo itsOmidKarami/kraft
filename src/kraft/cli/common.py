@@ -8,6 +8,8 @@ import asyncio
 import json
 
 from kraft import client, render
+from kraft.vocab import WorkItemStatus
+from kraft.vocab.total import total
 
 
 def emit(value, renderer, as_json: bool) -> None:
@@ -53,22 +55,27 @@ def _is_item_row(result: object) -> bool:
 
 
 #: What a row's `status` reads as, after "the item is now".
-_NOW = {
-    "active": "running",
-    "paused": "paused",
-    "completed": "complete",
-    # Cancel and abandon both store `abandoned`: only the verb that ended it can tell.
-    "abandoned": "ended",
-    "waiting": "waiting on something outside Kraft",
-    "rate_limited": "waiting for the agent's rate limit to reset",
-}
+_NOW = total(
+    WorkItemStatus,
+    {
+        WorkItemStatus.ACTIVE: "running",
+        WorkItemStatus.PAUSED: "paused",
+        WorkItemStatus.COMPLETED: "complete",
+        # Cancel and abandon both store `abandoned`: only the verb that ended it can tell.
+        WorkItemStatus.ABANDONED: "ended",
+        WorkItemStatus.WAITING: "waiting on something outside Kraft",
+        WorkItemStatus.RATE_LIMITED: "waiting for the agent's rate limit to reset",
+        WorkItemStatus.NEEDS_HUMAN: None,  # item_now words it, with the id
+    },
+    name="_NOW",
+)
 
 
 def item_now(row: dict) -> str:
     """Where the item stands, as the end of a sentence."""
-    if row["status"] == "needs_human":
+    if row["status"] == WorkItemStatus.NEEDS_HUMAN:
         return f"stopped for a person: kraft view show {row['id']} says why"
-    return _NOW.get(row["status"], row["status"])
+    return _NOW.get(row["status"]) or row["status"]
 
 
 def item_action(done, *, status: bool = True, small=None):

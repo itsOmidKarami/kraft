@@ -11,6 +11,7 @@ import yaml
 
 from kraft import client, render
 from kraft.cli import common
+from kraft.vocab import WorkItemStatus
 
 _POLICY_HELP = (
     "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
@@ -153,7 +154,7 @@ def _is_cancelled(item_id: str | None) -> bool:
     `abandoned`, and the server cannot tell them apart. A server that does not answer,
     or an id that is not an item, only costs the refusal its detail."""
     try:
-        return asyncio.run(client.get_work_item(item_id)).get("status") == "abandoned"
+        return asyncio.run(client.get_work_item(item_id)).get("status") == WorkItemStatus.ABANDONED
     except Exception:  # noqa: BLE001
         return False
 

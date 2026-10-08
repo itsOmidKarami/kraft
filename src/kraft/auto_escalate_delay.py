@@ -25,6 +25,8 @@ import logging
 
 from kraft import events, store
 from kraft.executor import gates
+from kraft.vocab import HOLDS_SLOT, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,7 @@ async def tick(app) -> list[str]:
     placeholders = ",".join("?" * len(live))
     busy = st.db.read(
         lambda c: c.execute(
-            "SELECT COUNT(*) FROM work_items WHERE status = 'active'"
+            f"SELECT COUNT(*) FROM work_items WHERE status IN ({in_list(HOLDS_SLOT)})"
             + (f" OR id IN ({placeholders})" if live else ""),
             live,
         ).fetchone()[0]
@@ -108,7 +110,8 @@ async def tick(app) -> list[str]:
     # rest of the backlog still gets its turn.
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT * FROM work_items WHERE status = 'needs_human' ORDER BY RANDOM()"
+            "SELECT * FROM work_items WHERE status = ? ORDER BY RANDOM()",
+            (WorkItemStatus.NEEDS_HUMAN,),
         ).fetchall()
     )
     default_delay = int(st.policy.auto_escalate_delay_s if st.policy else 0)

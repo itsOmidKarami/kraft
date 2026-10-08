@@ -38,6 +38,7 @@ from kraft.paths import (
     pre_2_config_dir,
 )
 from kraft.policy import CarriedPolicy
+from kraft.vocab import WorkItemStatus
 
 #: launchd label / systemd unit name. One daemon, one name -- not
 #: per-instance, since the spec is about supervising *the* daemon.
@@ -1166,7 +1167,7 @@ def _confirm_running_agents(
     is the usual reason to stop one, and the stop must not wait on it."""
     try:
         items = asyncio.run(
-            asyncio.wait_for(client.list_work_items("active"), timeout=_LIST_TIMEOUT)
+            asyncio.wait_for(client.list_work_items(WorkItemStatus.ACTIVE), timeout=_LIST_TIMEOUT)
         )
     except TimeoutError:
         print(

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { shortId } from "../../format";
 import type { WorkItem } from "../../types";
+import { pausable } from "../item/status";
 import { showToast } from "../ui/Toast";
 import { CANCEL_WINDOW_MS, cancelLater, items, sendBulk, useBulk, VERB } from "./bulk";
 
-const PAUSABLE = new Set(["active", "waiting"]);
 const ended = (i: WorkItem) => i.display_status === "done" || i.display_status === "cancelled";
 
 /** The selection bar (AreaBoard 92–94, Decisions §14 Board): Pause the running
@@ -15,7 +15,7 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
   const last = useBulk((s) => s.last);
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState("");
-  const pause = checked.filter((i) => PAUSABLE.has(i.status));
+  const pause = checked.filter(pausable);
   const cancel = checked.filter((i) => !ended(i));
   const archive = checked.filter(ended);
   // Cleared before the send; the board checks the failed ones again from the answer.

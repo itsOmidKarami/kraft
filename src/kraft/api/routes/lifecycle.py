@@ -27,6 +27,7 @@ from kraft.policy import NO_CAP, PolicyError
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
+from kraft.vocab import ENDED, HOLDS_SLOT, RUNNING, Verb, WorkItemStatus, admitting
 from kraft.worker import backends
 
 logger = logging.getLogger(__name__)
@@ -437,13 +438,13 @@ async def abandon_work_item(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
-    if row["status"] == "active":
+    if row["status"] not in admitting(Verb.ABANDON):
         raise HTTPException(409, "work item is active; pause it before abandoning")
     # An already-abandoned item is a cancelled one (cancel stores `abandoned`
     # and keeps everything) or a second call: either way it is reclaimed
     # again, without a second `work_item_abandoned`. A second call finds
     # nothing left and answers `worktree_removed: false`.
-    if row["status"] != "abandoned":
+    if row["status"] != WorkItemStatus.ABANDONED:
         await st.db.write(lambda c: store.abandon_work_item(c, wid))
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
@@ -510,7 +511,7 @@ async def archive_work_item(wid: str, request: Request):
     stayed because it holds commits nothing else does."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    if row["status"] not in ("completed", "abandoned"):
+    if row["status"] not in admitting(Verb.ARCHIVE):
         raise HTTPException(409, "only a completed or abandoned item can be archived")
     if row["archived_at"]:
         return {"id": wid, "archived_by": row["archived_by"], "worktree_removed": False}
@@ -598,7 +599,7 @@ async def pause_work_item(wid: str, request: Request):
     # write below is the whole operation. 'rate_limited' too (R10b-01's
     # follow-up): the board offers Pause there, and nothing else stops the
     # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
-    if row["status"] not in ("active", "waiting", "rate_limited"):
+    if row["status"] not in admitting(Verb.PAUSE):
         raise HTTPException(409, f"work item is {row['status']}, not running")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
@@ -708,7 +709,7 @@ def review_reachable(row) -> bool:
 def _not_stopped(row) -> str:
     """The 409 a retry on an item that is not stopped gets. A paused one is
     told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
-    if row["status"] == "paused":
+    if row["status"] == WorkItemStatus.PAUSED:
         return "work item is paused, not stopped: resume it instead, or skip what it would run"
     return "work item is not stopped"
 
@@ -718,14 +719,14 @@ def not_paused(row, gate: str | None = None) -> str:
     one is told what to do (Ruling 183: a steer never reaches a running item),
     and so is one waiting for a person: at a `gate`, approve or reject it;
     stopped anywhere else, retry it, which takes a steer too (R11a)."""
-    if row["status"] in ("active", "waiting"):
+    if row["status"] in RUNNING:
         return f"work item is {row['status']}: it is running, so pause it first"
-    if row["status"] == "needs_human" and gate is not None:
+    if row["status"] == WorkItemStatus.NEEDS_HUMAN and gate is not None:
         return (
             f"work item is waiting at its {gate} gate, not paused: approve or reject it "
             f"(kraft item approve {row['id']}, or kraft item reject {row['id']} --note ...)"
         )
-    if row["status"] == "needs_human":
+    if row["status"] == WorkItemStatus.NEEDS_HUMAN:
         return (
             "work item is needs_human, not paused: it stopped, so retry it instead "
             f"(kraft item retry {row['id']}, which takes --steer too)"
@@ -753,7 +754,7 @@ def steerable(st, row) -> bool:
     """`GET /work-items/{id}`'s `steerable`: what the door this item's status
     offers would accept -- a paused item's own agent task, else (a retry or a
     needs_context answer) an agent task downstream (`steer_reachable`)."""
-    if row["status"] == "paused":
+    if row["status"] == WorkItemStatus.PAUSED:
         return paused_steer_refusal(st.db, row) is None
     return steer_reachable(row)
 
@@ -762,14 +763,14 @@ def steerable(st, row) -> bool:
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
-    if row["status"] != "paused" and not (
-        row["status"] == "needs_human" and board._needs_context_stop(st, wid)
+    if row["status"] not in admitting(Verb.STEER) or (
+        row["status"] == WorkItemStatus.NEEDS_HUMAN and not board._needs_context_stop(st, wid)
     ):
         raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
-    if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+    if row["status"] == WorkItemStatus.PAUSED and (why := paused_steer_refusal(st.db, row)):
         raise HTTPException(409, why)
     await st.db.write(lambda c: store.set_steer(c, wid, text))
     return {"id": wid, "steer": text}
@@ -781,9 +782,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
-    from_statuses = ["paused"]
-    if row["status"] == "needs_human" and board._needs_context_stop(st, wid):
-        from_statuses.append("needs_human")
+    from_statuses = [
+        s
+        for s in admitting(Verb.RESUME)
+        if s != WorkItemStatus.NEEDS_HUMAN
+        or (row["status"] == WorkItemStatus.NEEDS_HUMAN and board._needs_context_stop(st, wid))
+    ]
     if row["status"] not in from_statuses:
         # Same reason as retry: claim_for_run below still decides, but an item
         # that was never paused should hear that, not a complaint about its
@@ -815,7 +819,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                     "this text would be dropped",
                 )
         else:
-            if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+            if row["status"] == WorkItemStatus.PAUSED and (why := paused_steer_refusal(st.db, row)):
                 raise HTTPException(409, why)
             found = row["current_node_id"] in store.chain_node_ids(row)
             if found and not steer_reachable(row):
@@ -1035,7 +1039,7 @@ async def _retry(wid: str, body: Retry, request: Request):
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
-    if row["status"] != "needs_human":
+    if row["status"] not in admitting(Verb.RETRY):
         # Cheap precondition, ahead of the steer and slot checks: claim_for_run
         # below is still the authoritative gate, but reaching it only after
         # those meant an item that was never stopped got told its steer text
@@ -1211,7 +1215,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         handed_off=lambda: deps.task_is_live(request.app, wid),
     ):
         claimed = await st.db.write(
-            lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
+            lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.RETRY), limit=limit)
         )
         if not claimed:
             if st.db.read(store.active_count) >= limit:
@@ -1454,7 +1458,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
-    if row["status"] != "needs_human":
+    if row["status"] not in admitting(Verb.RAISE_BUDGET):
         raise HTTPException(409, "work item is not stopped")
     stop = (board._current_stop(st, wid) or {}).get("budget") or {}
     scope = stop.get("scope")
@@ -1574,12 +1578,12 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         raise HTTPException(409, "a walk is already running for this work item")
     async with deps.skip_lock(request.app, wid):
         row = deps._work_item_row(st, wid)
-        if row["status"] not in ("active", "waiting", "paused", "needs_human"):
+        if row["status"] not in admitting(Verb.SKIP):
             raise HTTPException(409, f"work item is {row['status']}, cannot skip")
         running = escalate.escalation_running(st.db, wid)
         if running is not None:
             raise HTTPException(409, f"an escalation turn ({running}) is already running")
-        if row["status"] in ("paused", "needs_human") and deps.task_is_live(request.app, wid):
+        if row["status"] not in RUNNING and deps.task_is_live(request.app, wid):
             # active/waiting's own live task is the walk this skip is about to
             # cancel below, so it's expected there -- but paused/needs_human
             # are supposed to have none, and occasionally still do (a pending
@@ -1601,7 +1605,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 )
         if target is not None:
             return await _skip_within_node(st, request, wid, row, target, body.note)
-        if row["status"] in ("active", "waiting"):
+        if row["status"] in RUNNING:
             # Cancel the old walk *first*, before the claim and before
             # skip_node. Cancelling afterwards left a window -- every await
             # between here and there is a chance for the event loop to resume
@@ -1658,9 +1662,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             handed_off=lambda: deps.task_is_live(request.app, wid),
         ):
             claimed = await st.db.write(
-                lambda c: store.claim_for_run(
-                    c, wid, from_statuses=["active", "waiting", "paused", "needs_human"]
-                )
+                lambda c: store.claim_for_run(c, wid, from_statuses=admitting(Verb.SKIP))
             )
             if not claimed:
                 raise HTTPException(409, "work item status changed; try again")
@@ -1736,7 +1738,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
     note = (note or "").strip() or None
     sessions = st.db.read(lambda c: store.running_sessions_under(c, wid, target.path))
     session_ids = [s["id"] for s in sessions]
-    if row["status"] == "active":
+    if row["status"] in HOLDS_SLOT:
         # mark first, then signal: the same race `pause_work_item` guards against.
         await st.db.write(
             lambda c: store.skip_scope(c, wid, target.path, note, session_ids=session_ids)
@@ -1753,7 +1755,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
     ):
         claimed = await st.db.write(
             lambda c: store.claim_for_run(
-                c, wid, from_statuses=["waiting", "paused", "needs_human"]
+                c, wid, from_statuses=[s for s in admitting(Verb.SKIP) if s not in HOLDS_SLOT]
             )
         )
         if not claimed:
@@ -1899,7 +1901,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     reason = reason.strip()
     if not reason:
         raise HTTPException(422, "reason: a terminal action needs a reason")
-    if row["status"] in store.ENDED:
+    if row["status"] in ENDED:
         raise HTTPException(409, f"work item is already {row['status']}")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
@@ -1922,7 +1924,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
-    if row["status"] not in ("needs_human", "paused"):
+    if row["status"] not in admitting(Verb.ESCALATE):
         raise HTTPException(409, "work item is not needs_human or paused")
     # A `paused` item that has never started (current_node_id is NULL, per
     # /work-items' "it lands paused" default) has no node/context to
@@ -1933,7 +1935,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     if row["current_node_id"] is None:
         raise HTTPException(409, "work item has not started")
     budget = (board._current_stop(st, wid) or {}).get("budget") or {}
-    if row["status"] == "needs_human" and budget:
+    if row["status"] == WorkItemStatus.NEEDS_HUMAN and budget:
         # The escalation's agent spends against the same cap, which refused
         # its session with nothing on the item to say so (R12E-05). Every
         # budget stop, the daily cap's too (`tests/api/lifecycle_doors.json`).
@@ -2023,7 +2025,7 @@ async def stop_escalation(wid: str, request: Request):
     )
     await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
     _terminate(row["pid"] if row else None)
-    return {"id": wid, "session_id": running, "status": "paused"}
+    return {"id": wid, "session_id": running, "status": WorkItemStatus.PAUSED}
 
 
 # Kraft-xh0q layer 3. The human-gate model: design §6 rule 2.

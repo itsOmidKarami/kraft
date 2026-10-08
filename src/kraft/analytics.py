@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from kraft import caps as _caps
 from kraft.store._common import session_wall_ms, wait_sessions, wait_timed_out_sessions
 from kraft.usage import KINDS, spent
+from kraft.vocab import WorkItemStatus
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
@@ -383,10 +384,10 @@ def compute(
                 "cycles": 0.0,
             },
         )["items"] += 1
-        if r["status"] == "completed":
+        if r["status"] == WorkItemStatus.COMPLETED:
             by_repo[r["repo"]]["done"] += 1
 
-    completed_items = [r for r in items if r["status"] == "completed"]
+    completed_items = [r for r in items if r["status"] == WorkItemStatus.COMPLETED]
     totals["completed"] = len(completed_items)
 
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────

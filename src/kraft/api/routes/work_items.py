@@ -27,6 +27,7 @@ from kraft.overrides import (
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
+from kraft.vocab import HOLDS_SLOT, WorkItemStatus
 
 
 class Attachment(BaseModel):
@@ -417,7 +418,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             repository_policies=per_repository,
             repository_steering=repo_steering,
             attachments=attachments,
-            status="active" if body.autostart else "paused",
+            status=WorkItemStatus.ACTIVE if body.autostart else WorkItemStatus.PAUSED,
             # Folded into intake's own INSERT transaction, not a separate
             # `active_count` read here: two autostart creates racing a few
             # milliseconds apart must not both see a free slot and both win
@@ -462,12 +463,12 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
         # current_node_id falls through that handler's `next(..., 0)` default.
-        return {"id": wid, "status": "paused", **extra}
+        return {"id": wid, "status": WorkItemStatus.PAUSED, **extra}
 
     row = st.db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
     )
-    if row["status"] != "active":
+    if row["status"] not in HOLDS_SLOT:
         # Lost the capacity race inside `intake`'s own INSERT (Kraft-m43g,
         # Kraft-nxht): landed "paused" same as an explicit `not autostart`,
         # not rejected -- there is no walk to spawn. `slots` says why, so a
@@ -645,7 +646,7 @@ async def duplicate_work_item(wid: str, request: Request):
             repository_policies=per_repository,
             repository_steering=repo_steering,
             attachments=attachments,
-            status="paused",
+            status=WorkItemStatus.PAUSED,
             auto_gate=True,
             policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
             if item_policy is not None
@@ -661,7 +662,7 @@ async def duplicate_work_item(wid: str, request: Request):
             + ". To revise its spec or plan, use `kraft item set-attachments` on it "
             "rather than filing again; abandon whichever of the two is not wanted"
         )
-    return {"id": new_id, "status": "paused", **extra}
+    return {"id": new_id, "status": WorkItemStatus.PAUSED, **extra}
 
 
 def _check_title(title: str) -> None:
@@ -749,7 +750,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             repository_steering=repo_steering,
             chain_template=chain_template,
             bd_cwd=deps.bd_cwd(),
-            status="paused",
+            status=WorkItemStatus.PAUSED,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         raise HTTPException(502, f"intake failed: {exc}") from exc
@@ -918,7 +919,7 @@ def _repairs_refused_model(row, node_id: str, fields: dict) -> bool:
     its lock answered 409 to the very command the stop names, and a retry
     stopped again. No agent of that node ever ran with that model, so there
     is nothing the change could misreport."""
-    if row["status"] != "needs_human" or row["current_node_id"] != node_id:
+    if row["status"] != WorkItemStatus.NEEDS_HUMAN or row["current_node_id"] != node_id:
         return False
     if not set(fields) <= _MODEL_FIELDS:
         return False

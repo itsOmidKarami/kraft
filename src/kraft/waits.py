@@ -43,6 +43,7 @@ from typing import Literal
 from kraft import events, store
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates.models import WaitBounds
+from kraft.vocab import WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +219,8 @@ async def tick(app, *, now: str | None = None) -> list[str]:
             # and cannot find it in a column the SELECT never fetched.
             "SELECT id, repo, current_node_id, chain_definition, "
             "materialized_chain FROM work_items "
-            "WHERE status = 'waiting' AND retry_at <= ?",
-            (now or _now(),),
+            "WHERE status = ? AND retry_at <= ?",
+            (WorkItemStatus.WAITING, now or _now()),
         ).fetchall()
     )
     reentered: list[str] = []

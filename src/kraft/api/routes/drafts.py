@@ -25,6 +25,7 @@ from kraft.policy import PolicyError
 from kraft.templates import revision
 from kraft.templates.library import LIBRARY_FILE
 from kraft.templates.models import AgentTask
+from kraft.vocab import ENDED
 
 
 def _area(area: str, key: str) -> store.Area:
@@ -503,7 +504,7 @@ async def apply_item_draft(wid: str, request: Request):
 
     def apply(c) -> tuple[int, dict | None]:
         row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
-        if row["status"] in items.ENDED:
+        if row["status"] in ENDED:
             return 409, {"detail": f"work item is {row['status']}; its chain does not run again"}
         draft = store.get_item(c, wid)
         if draft is None:

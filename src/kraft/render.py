@@ -17,6 +17,9 @@ import unicodedata
 from datetime import UTC, datetime
 from typing import TextIO
 
+from kraft.vocab import WorkItemStatus
+from kraft.vocab.total import total
+
 RESET = "\033[0m"
 DIM = "\033[2m"
 
@@ -26,12 +29,19 @@ DIM = "\033[2m"
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 #: Status -> ANSI colour. Anything unlisted renders unpainted.
-STATUS_COLORS = {
-    "active": "\033[32m",
-    "needs_human": "\033[33m",
-    "paused": DIM,
-    "failed": "\033[31m",
-}
+STATUS_COLORS = total(
+    WorkItemStatus,
+    {
+        WorkItemStatus.ACTIVE: "\033[32m",
+        WorkItemStatus.NEEDS_HUMAN: "\033[33m",
+        WorkItemStatus.PAUSED: DIM,
+        WorkItemStatus.COMPLETED: "",
+        WorkItemStatus.ABANDONED: "",
+        WorkItemStatus.RATE_LIMITED: "",
+        WorkItemStatus.WAITING: "",
+    },
+    name="STATUS_COLORS",
+)
 
 
 def use_color(stream: TextIO | None = None) -> bool:

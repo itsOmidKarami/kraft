@@ -13,6 +13,7 @@ import httpx
 from kraft import auth
 from kraft.client import context, transport
 from kraft.paths import RunDirs, default_run_dir
+from kraft.vocab import WorkItemStatus
 
 
 async def board(
@@ -32,7 +33,7 @@ async def board(
     """
     # As a param, not in the path: `_get` always hands httpx a `params` dict,
     # and httpx replaces a query written into the URL with it.
-    wanted = include_abandoned or status == "abandoned"
+    wanted = include_abandoned or status == WorkItemStatus.ABANDONED
     payload = await transport._get("/work-items", include_abandoned="true" if wanted else None)
     return trim_work_items(payload["items"], status), payload["cursor"]
 

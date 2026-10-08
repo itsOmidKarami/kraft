@@ -110,7 +110,7 @@ def _raise_hint(item: dict) -> str | None:
     reader was never pointed at (R10a-10). A node's, a token or the daily cap
     is not one `raise-budget` takes (`item/status.ts`'s `budgetRaise`)."""
     stop = item.get("stop") or {}
-    if item.get("status") != "needs_human" or stop.get("kind") != "budget":
+    if item.get("status") != WorkItemStatus.NEEDS_HUMAN or stop.get("kind") != "budget":
         return None
     if not (stop.get("limit") or stop.get("scope") == "work_item"):
         return None
@@ -180,7 +180,7 @@ async def _logs_session(work_item_id: str | None, follow: bool) -> str:
     if not sessions:
         raise ValueError("no worker session has run for this work item yet")
     newest = sessions[-1]
-    stop = item.get("stop") if item.get("status") == "needs_human" else None
+    stop = item.get("stop") if item.get("status") == WorkItemStatus.NEEDS_HUMAN else None
     stopped = newest
     if stop:
         named = (stop.get("facts") or {}).get("session_id")

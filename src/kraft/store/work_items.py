@@ -7,7 +7,9 @@ from typing import Literal
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import ENDED, write_status
+from kraft.store._common import write_status
+from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
+from kraft.vocab.sql import in_list, marks
 
 #: Why a `needs_human`/`waiting`/`rate_limited` row is stopped (Kraft UI v2 ·
 #: B1). The first ten are `needs_human` kinds, written by `mark_needs_human`.
@@ -82,7 +84,7 @@ def create_work_item(
     submodules: list[str] | None = None,
     root_merge_policy: str | None = None,
     attachments: list[dict] | None = None,
-    status: str = "active",
+    status: WorkItemStatus = WorkItemStatus.ACTIVE,
     bead_cwd: str | None = None,
     implements_beads: list[str] | None = None,
     #: Whether this item's `auto_escalate` gates may be reviewed by an agent
@@ -126,6 +128,7 @@ def create_work_item(
     `implements_beads` are the sub-bead ids this item's description names
     (Kraft-p8q1) -- closed alongside `bead_id` on completion.
     """
+    status = WorkItemStatus(status)
     now = _now()
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
@@ -425,13 +428,16 @@ def active_count(conn: sqlite3.Connection) -> int:
     slot is taken. Two copies of this query would let those two disagree about
     what "busy" means.
     """
-    return conn.execute("SELECT COUNT(*) FROM work_items WHERE status = 'active'").fetchone()[0]
+    return conn.execute(
+        f"SELECT COUNT(*) FROM work_items WHERE status IN ({in_list(HOLDS_SLOT)})"
+    ).fetchone()[0]
 
 
 def open_counts_by_repo(conn: sqlite3.Connection) -> dict[str, int]:
     """Items not ended, per repository path: what a repo cannot be removed under."""
     rows = conn.execute(
-        "SELECT repo, COUNT(*) FROM work_items WHERE status NOT IN (?, ?) GROUP BY repo", ENDED
+        f"SELECT repo, COUNT(*) FROM work_items WHERE status NOT IN ({marks(ENDED)}) GROUP BY repo",
+        ENDED,
     ).fetchall()
     return {r[0]: r[1] for r in rows}
 
@@ -695,7 +701,7 @@ def claim_for_run(
     work_item_id: str,
     *,
     from_statuses: list[str],
-    to_status: str = "active",
+    to_status: str = WorkItemStatus.ACTIVE,
     limit: int | None = None,
 ) -> bool:
     """Conditionally flip `work_item_id` to `to_status`. True when this caller
@@ -726,11 +732,15 @@ def claim_for_run(
     column, so a caller that loses the race can 409 before writing anything
     else.
     """
-    placeholders = ",".join("?" for _ in from_statuses)
+    from_statuses = [WorkItemStatus(s) for s in from_statuses]
+    to_status = WorkItemStatus(to_status)
+    placeholders = marks(from_statuses)
     capacity_clause = ""
     params: tuple = (to_status, _now(), work_item_id, *from_statuses)
     if limit is not None:
-        capacity_clause = " AND (SELECT COUNT(*) FROM work_items WHERE status = 'active') < ?"
+        capacity_clause = (
+            f" AND (SELECT COUNT(*) FROM work_items WHERE status IN ({in_list(HOLDS_SLOT)})) < ?"
+        )
         params = (*params, limit)
     return write_status(
         conn,
@@ -800,7 +810,7 @@ def open_duplicates(
     out = []
     for row in conn.execute(
         "SELECT id, title, status, implements_beads FROM work_items "
-        "WHERE repo = ? AND status NOT IN (?, ?) ORDER BY created_at",
+        f"WHERE repo = ? AND status NOT IN ({marks(ENDED)}) ORDER BY created_at",
         (repo, *ENDED),
     ):
         shared = sorted(set(implements_beads) & set(json.loads(row["implements_beads"] or "[]")))

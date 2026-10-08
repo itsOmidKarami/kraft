@@ -1,5 +1,6 @@
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
+import { ENDED_STATUSES } from "../../types/vocab.generated";
 import { groupOf, type GroupKey } from "./model";
 
 /** The board's counts, defined once. "N need you" and "N running" are the
@@ -17,8 +18,8 @@ export function useGroupCount(g: GroupKey, except?: string): number {
   return useStore((s) => countIn(Object.values(s.workItems).filter((i) => i.id !== except), g));
 }
 
-/** Stored statuses that end an item (`store/_common.py` `ENDED`). */
-const ENDED = new Set(["completed", "abandoned"]);
+/** Stored statuses that end an item (generated from the server's `ENDED`). */
+const ENDED = new Set<string>(ENDED_STATUSES);
 
 /** Not ended: every Needs you, Running and Not started row. What a repo's
  *  disconnect waits on and what keeps its version through a publish; the

@@ -7,6 +7,7 @@ from kraft import policy as _policy
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
 from kraft.templates.models import ExecNode, ResolvedNode
+from kraft.vocab import ENDED
 
 
 async def reconcile_current_node(
@@ -166,7 +167,7 @@ async def resume_once(
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
-    if row["status"] in store.ENDED:
+    if row["status"] in ENDED:
         return row["status"]  # before reconciliation settles anything (Kraft-dncfg)
     nodes = walk.chain_of(row).chain.nodes
     current = next((i for i, n in enumerate(nodes) if n.id == row["current_node_id"]), None)

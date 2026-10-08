@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta
 
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.vocab import Verb, admitting
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ async def tick(app) -> list[str]:
     cutoff = (datetime.fromisoformat(_now()) - timedelta(days=after_days)).isoformat()
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT * FROM work_items WHERE status IN ('completed', 'abandoned') "
+            f"SELECT * FROM work_items WHERE status IN ({in_list(admitting(Verb.ARCHIVE))}) "
             "AND archived_at IS NULL AND updated_at <= ?",
             (cutoff,),
         ).fetchall()

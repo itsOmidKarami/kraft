@@ -21,6 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from kraft import client
 from kraft.update import installed
+from kraft.vocab import WorkItemStatus
 
 
 def _refusals_reach_the_agent(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -68,7 +69,7 @@ def build() -> MCPServer:
     server = _Server("kraft", version=installed())
 
     @server.tool()
-    async def list_work_items(status: str | None = None) -> list[dict]:
+    async def list_work_items(status: WorkItemStatus | None = None) -> list[dict]:
         """List Kraft work items — the board. Optionally filter by one exact
         status: "paused", "active", "waiting", "rate_limited", "needs_human",
         "completed" or "abandoned". Abandoned items, cancelled ones included,

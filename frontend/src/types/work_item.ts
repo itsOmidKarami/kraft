@@ -1,4 +1,5 @@
 import type { RepoRow } from "./settings";
+import type { WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -108,19 +109,7 @@ export interface ChainDefinition {
   nodes: ChainNode[];
 }
 
-export type WorkItemStatus =
-  | "active"
-  | "needs_human"
-  | "completed"
-  | "paused"
-  // Terminal, and off the board unless explicitly asked for (Kraft-x85).
-  | "abandoned"
-  // Waiting on an API rate limit to reset; the poller relaunches it, no
-  // human paged.
-  | "rate_limited"
-  // Parked on a pipeline that has not settled; the wait scheduler re-enters
-  // the node when retry_at comes due, no human paged (Kraft-ru98).
-  | "waiting";
+export type { WorkItemStatus };
 
 export interface WorkItemAttachment {
   kind: "spec" | "plan";

@@ -19,6 +19,7 @@ from kraft import events
 from kraft import store as _store
 from kraft.adapters.agent import artifact_path
 from kraft.config import git_read
+from kraft.vocab import HOLDS_SLOT
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ def chain_implementation_node(row) -> str | None:
 def active_implementation_node(row) -> str | None:
     """The implementation node's id while `row` is running it, else None."""
     node_id = chain_implementation_node(row)
-    if node_id and row["status"] == "active" and row["current_node_id"] == node_id:
+    if node_id and row["status"] in HOLDS_SLOT and row["current_node_id"] == node_id:
         return node_id
     return None
 
