@@ -87,14 +87,14 @@ def say(msg: str) -> None:
     print(f"seed: {msg}", flush=True)
 
 
-def snapshot(client: httpx.Client, wid: str) -> tuple[str, str]:
-    """(state, where): the end state in the vocabulary ITEMS uses, and where
-    the item is right now -- its current node and whether an agent is live.
+def describe(item: dict) -> tuple[str, str]:
+    """(state, where) of a work-item detail: the end state in the vocabulary
+    ITEMS uses, and where the item is right now -- its current node and whether
+    an agent is live.
 
     A pending gate and a dead agent are both `needs_human` on the row;
     `pending_gate` tells them apart, and only while the gate is still waiting.
     """
-    item = client.get(f"/work-items/{wid}").raise_for_status().json()
     node = item.get("current_node_id") or "-"
     live = any(s["status"] == "running" for s in item.get("worker_sessions") or [])
     where = f"node {node}" + (", agent running" if live else "")
@@ -102,6 +102,10 @@ def snapshot(client: httpx.Client, wid: str) -> tuple[str, str]:
     if status != "needs_human":
         return status, where
     return ("gate" if item.get("pending_gate") else "failed"), where
+
+
+def snapshot(client: httpx.Client, wid: str) -> tuple[str, str]:
+    return describe(client.get(f"/work-items/{wid}").raise_for_status().json())
 
 
 #: How often `settle` says it is still waiting when nothing has changed.
@@ -114,7 +118,7 @@ def settle(client: httpx.Client, wid: str, want: str, timeout: float = 90.0) -> 
     on a slow item must not look the same as a hung one."""
     start = time.monotonic()
     deadline = start + timeout
-    seen, last, beat = "active", None, start
+    seen, where, last, beat = "active", "-", None, start
     while time.monotonic() < deadline:
         seen, where = snapshot(client, wid)
         now = time.monotonic()
@@ -130,7 +134,7 @@ def settle(client: httpx.Client, wid: str, want: str, timeout: float = 90.0) -> 
             )
             beat = now
         time.sleep(0.5)
-    say(f"{wid[:8]} gave up after {timeout:.0f}s: still {seen}, wanted {want}")
+    say(f"{wid[:8]} gave up after {timeout:.0f}s: still {seen} ({where}), wanted {want}")
     return seen
 
 
@@ -144,18 +148,23 @@ def pause_mid_flight(client: httpx.Client, wid: str, timeout: float = 30.0) -> s
     item: dict = {"worker_sessions": []}
     while time.monotonic() < deadline:
         item = client.get(f"/work-items/{wid}").raise_for_status().json()
-        if any(s["status"] == "running" for s in item["worker_sessions"]):
+        statuses = {s["status"] for s in item["worker_sessions"]}
+        if "running" in statuses:
             say(f"{wid[:8]} agent running, pausing it")
             client.post(f"/work-items/{wid}/pause").raise_for_status()
             return settle(client, wid, "paused", timeout=15)
+        if statuses and not statuses & {"pending", "running"}:
+            # Its agent came and went between two polls: nothing left to pause.
+            say(f"{wid[:8]} its agent exited before it could be paused")
+            return describe(item)[0]
         time.sleep(0.3)
     # Filed paused at capacity, it never ran: its row says "paused" too, but it
     # is a not-started item, not the mid-flight pause this was asked for.
     if not item["worker_sessions"]:
         say(f"{wid[:8]} no agent started within {timeout:.0f}s")
         return "never started"
-    say(f"{wid[:8]} its agent exited before it could be paused")
-    return snapshot(client, wid)[0]
+    say(f"{wid[:8]} its agent never got past pending within {timeout:.0f}s")
+    return describe(item)[0]
 
 
 def settle_order(created: list) -> list:
@@ -210,7 +219,7 @@ def main() -> int:
     rows, ok = [], True
     # A paused item is filed and paused before the rest are filed, so its slot
     # is free again by the time they take theirs.
-    for title, template, want in settle_order(ITEMS):
+    for n, (title, template, want) in enumerate(settle_order(ITEMS), 1):
         wid = (
             client.post(
                 "/work-items",
@@ -226,13 +235,14 @@ def main() -> int:
         )
         say(f"{wid[:8]} filed {title!r} ({template}), want {want}")
         if want == "paused":
+            say(f"[{n}/{len(ITEMS)}] waiting for {wid[:8]} to start, to pause it")
             got = pause_mid_flight(client, wid)
             ok &= got == want
             rows.append((wid[:8], title, want, got))
         else:
-            created.append((wid, title, want))
+            created.append((n, wid, title, want))
 
-    for n, (wid, title, want) in enumerate(created, len(rows) + 1):
+    for n, wid, title, want in created:
         say(f"[{n}/{len(ITEMS)}] waiting for {wid[:8]} to reach {want}")
         got = settle(client, wid, want)
         ok &= got == want

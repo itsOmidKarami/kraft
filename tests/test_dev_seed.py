@@ -46,6 +46,19 @@ class _Answer:
         return self.body
 
 
+@pytest.fixture
+def seed(monkeypatch):
+    """`dev/seed.py` on a fake clock: its sleeps advance time instead of
+    spending it, so a wait runs out at once and the same way every run."""
+    mod = _seed()
+    clock = [0.0]
+    fake = types.SimpleNamespace(
+        monotonic=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)
+    )
+    monkeypatch.setattr(mod, "time", fake)
+    return mod
+
+
 class _NeverRunning:
     """A server whose item never shows a running session: filed paused at
     capacity (no session, ever), or its agent came and went between polls."""
@@ -67,18 +80,25 @@ class _NeverRunning:
         pytest.param("paused", [], "never started", "no agent started", id="never-ran"),
         pytest.param(
             "completed",
-            [{"status": "completed"}],
+            [{"status": "done"}],
             "completed",
             "exited before it could be paused",
             id="ran-between-polls",
         ),
+        pytest.param(
+            "active",
+            [{"status": "pending"}],
+            "active",
+            "never got past pending",
+            id="stuck-pending",
+        ),
     ],
 )
 def test_a_paused_item_whose_agent_was_never_seen_running_is_not_reported_as_paused(
-    capsys, status, sessions, got, said
+    seed, capsys, status, sessions, got, said
 ):
     client = _NeverRunning(status, sessions)
-    assert _seed().pause_mid_flight(client, "w1", timeout=0.5) == got
+    assert seed.pause_mid_flight(client, "w1", timeout=30) == got
     assert client.posts == []
     assert said in capsys.readouterr().out
 
@@ -90,15 +110,9 @@ class _Stuck:
         return _Answer({"status": "active", "current_node_id": "implement", "worker_sessions": []})
 
 
-def test_a_wait_that_never_settles_keeps_saying_so_and_says_when_it_gives_up(monkeypatch, capsys):
-    seed = _seed()
-    clock = [0.0]
-    fake = types.SimpleNamespace(
-        monotonic=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)
-    )
-    monkeypatch.setattr(seed, "time", fake)
+def test_a_wait_that_never_settles_keeps_saying_so_and_says_when_it_gives_up(seed, capsys):
     assert seed.settle(_Stuck(), "w1234567", "completed", timeout=25) == "active"
     out = capsys.readouterr().out
     assert "w1234567 active (node implement)" in out
     assert "w1234567 still active (node implement), want completed -- 10s of 25s" in out
-    assert "w1234567 gave up after 25s: still active, wanted completed" in out
+    assert "w1234567 gave up after 25s: still active (node implement), wanted completed" in out
