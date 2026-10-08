@@ -19,6 +19,7 @@ from kraft import executor
 from kraft.api import deps as api_deps
 from kraft.executor.entry import one_line_title
 from kraft.policy import PolicyError, Trigger, cron_due
+from kraft.vocab import WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
                 effective_policy=api_deps.item_policy(st, trig.repo),
                 repository_steering=api_deps.repository_steering(st, trig.repo),
                 chain_template=trig.chain,
-                status="paused",
+                status=WorkItemStatus.PAUSED,
             )
         except ValueError as exc:
             # Intake's own refusal (a chain `policy:` past the instance maxima,

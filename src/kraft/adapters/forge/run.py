@@ -25,6 +25,8 @@ from kraft.adapters.forge.models import (
 from kraft.automated_review import AutomatedReview
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_WAIT, WaitBounds
+from kraft.vocab import RUNNING
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -868,7 +870,7 @@ async def _run_one(
                                 # usefully be warned: `paused`/`needs_human`
                                 # are already stopped, and a completed item
                                 # has nothing left to rebase.
-                                "SELECT id FROM work_items WHERE status IN ('active', 'waiting') "
+                                f"SELECT id FROM work_items WHERE status IN ({in_list(RUNNING)}) "
                                 "AND base_ref = ? AND id != ?",
                                 (head_sha, work_item_id),
                             ).fetchall()

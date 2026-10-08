@@ -15,6 +15,7 @@ from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.render import plain_text
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import ResolvedChain
+from kraft.vocab import HOLDS_SLOT, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ async def intake(
     #: checkout's.
     repository_policies: dict[str, InstancePolicy] | None = None,
     attachments: list[dict] | None = None,
-    status: str = "active",
+    status: WorkItemStatus = WorkItemStatus.ACTIVE,
     #: When given, `status="active"` is downgraded to `"paused"` if
     #: `active_count()` is already at `limit` -- read on the same connection
     #: the INSERT below runs on, inside the same `db.write` transaction, so
@@ -202,8 +203,12 @@ async def intake(
 
     def _create(c):
         effective_status = status
-        if limit is not None and status == "active" and store.active_count(c) >= limit:
-            effective_status = "paused"
+        if (
+            limit is not None
+            and WorkItemStatus(status) in HOLDS_SLOT
+            and store.active_count(c) >= limit
+        ):
+            effective_status = WorkItemStatus.PAUSED
         store.create_work_item(
             c,
             id=work_item_id,

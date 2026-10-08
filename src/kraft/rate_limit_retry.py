@@ -17,6 +17,7 @@ import logging
 from kraft import policy as policy_mod
 from kraft import store
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.vocab import WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,8 @@ async def tick(app) -> list[str]:
             # `materialized_chain` too, for `store.node_index` -- see waits.py.
             "SELECT id, repo, current_node_id, chain_definition, materialized_chain "
             "FROM work_items "
-            "WHERE status = 'rate_limited' AND retry_at <= ?",
-            (_now(),),
+            "WHERE status = ? AND retry_at <= ?",
+            (WorkItemStatus.RATE_LIMITED, _now()),
         ).fetchall()
     )
     relaunched: list[str] = []
@@ -109,7 +110,7 @@ async def _retry_one(app, row) -> bool:
         handed_off=lambda: deps.task_is_live(app, wid),
     ):
         claimed = await st.db.write(
-            lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
+            lambda c: store.claim_for_run(c, wid, from_statuses=[WorkItemStatus.RATE_LIMITED])
         )
         if not claimed:
             # Something else (a human abandoning it, most plausibly) already moved

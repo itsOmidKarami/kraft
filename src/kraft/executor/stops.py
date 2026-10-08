@@ -19,6 +19,7 @@ from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.usage import cap_usd as _cap_usd
 from kraft.usage import usd as _usd
+from kraft.vocab import HOLDS_SLOT
 from kraft.worker import sandbox as _sandbox
 
 #: Parses a raw event payload (the DB's dict, read back from JSON) into the
@@ -92,7 +93,7 @@ async def claimed_or_stopped(
                     "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
                 ).fetchone()
             )
-            if row is not None and row["status"] == "active":
+            if row is not None and row["status"] in HOLDS_SLOT:
                 stop = reason + cause
                 await db.write(
                     lambda c: store.mark_needs_human(

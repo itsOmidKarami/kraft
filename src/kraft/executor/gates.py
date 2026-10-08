@@ -14,6 +14,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+from kraft.vocab import Verb, admitting
 from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
@@ -1122,7 +1123,7 @@ async def resume_after_escalation(
         handed_off=lambda: not claimed,
     ):
         claimed = await db.write(
-            lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
+            lambda c: store.claim_for_run(c, work_item_id, from_statuses=admitting(Verb.RETRY))
         )
         if not claimed:
             status = status_of(db, work_item_id)

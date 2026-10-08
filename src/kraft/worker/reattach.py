@@ -32,6 +32,8 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
+from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
+from kraft.vocab.sql import in_list
 from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
 from kraft.worker import sandbox as _sandbox
@@ -72,10 +74,10 @@ def still_orphaned(conn, unknown: list[str]) -> list[str]:
     marks = ",".join("?" * len(unknown))
     rows = conn.execute(
         f"SELECT s.id FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
-        f"WHERE s.id IN ({marks}) AND w.status = 'needs_human' AND NOT EXISTS ("
+        f"WHERE s.id IN ({marks}) AND w.status = ? AND NOT EXISTS ("
         "SELECT 1 FROM worker_sessions n WHERE n.work_item_id = s.work_item_id "
         "AND n.rowid > s.rowid)",
-        tuple(unknown),
+        (*unknown, WorkItemStatus.NEEDS_HUMAN),
     ).fetchall()
     kept = {r["id"] for r in rows}
     return [sid for sid in unknown if sid in kept]
@@ -379,7 +381,7 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
         ).fetchone()
     )
     snapshot = store.materialized_chain_of(item) if item is not None else None
-    if snapshot is None or item["status"] in store.ENDED:
+    if snapshot is None or item["status"] in ENDED:
         return
     task = next(
         (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
@@ -846,7 +848,9 @@ async def reattach(
         logger.warning("removed egress socket directories no live session owns: %s", stale)
 
     active = db.read(
-        lambda c: c.execute("SELECT id FROM work_items WHERE status = 'active'").fetchall()
+        lambda c: c.execute(
+            f"SELECT id FROM work_items WHERE status IN ({in_list(HOLDS_SLOT)})"
+        ).fetchall()
     )
     summary.resumed_work_items = [row["id"] for row in active]
 

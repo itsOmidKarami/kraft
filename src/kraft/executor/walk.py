@@ -43,6 +43,7 @@ from kraft.templates.models import (
     ResolvedNode,
     ResolvedTask,
 )
+from kraft.vocab import ENDED, HOLDS_SLOT
 
 
 def chain_of(row) -> MaterializedChain:
@@ -1905,7 +1906,7 @@ async def run_once(
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
-    if row["status"] in store.ENDED:
+    if row["status"] in ENDED:
         # Whatever door got here, an ended item's chain does not run again
         # (Kraft-dncfg) -- not even the bookkeeping and worktree set-up below.
         return row["status"]
@@ -2073,7 +2074,7 @@ async def run_once(
                 (work_item_id,),
             ).fetchone()
         )
-        if now["status"] != "active":
+        if now["status"] not in HOLDS_SLOT:
             return "paused"
         # A chain revised under this walk (an applied item draft) is the one it
         # goes on with, at this node boundary and never inside a node: the node
