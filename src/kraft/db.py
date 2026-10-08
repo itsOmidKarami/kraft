@@ -8,6 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
 
+from kraft.vocab import STOPPED, SessionStatus, WorkItemStatus
+from kraft.vocab.sql import in_list
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -16,7 +19,7 @@ _STOP = object()
 
 SCHEMA_VERSION = 52
 
-SCHEMA_SQL = """
+_SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
   id               TEXT PRIMARY KEY,
   bead_id          TEXT,
@@ -32,8 +35,7 @@ CREATE TABLE work_items (
   chain_definition TEXT NOT NULL,
   current_node_id  TEXT,
   status           TEXT NOT NULL CHECK (status IN
-                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
-                      'rate_limited', 'waiting')),
+                     (__WORK_ITEM_STATUSES__)),
   -- steer text a human left while paused, consumed by the next agent launch
   pending_steer_context TEXT,
   -- cross-repo (06): submodule paths chosen at intake, and what happens to the
@@ -150,9 +152,7 @@ CREATE TABLE worker_sessions (
   log_path       TEXT NOT NULL,
   result_path    TEXT NOT NULL,
   status         TEXT NOT NULL CHECK (status IN
-                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
-                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
-                    'waiting', 'conflict', 'infra', 'infra_stop')),
+                   (__SESSION_STATUSES__)),
   attempt        INTEGER NOT NULL DEFAULT 1,
   thread         INTEGER NOT NULL DEFAULT 1,
   session_summary_ref TEXT,
@@ -381,6 +381,13 @@ CREATE TABLE intake_checks (
 )
 """
 
+#: The DDL with the vocabulary filled in. A placeholder, not an f-string: the
+#: comments in the template contain braces. `start`/`hang`/`width` reproduce the
+#: hand-written line breaks, which old-schema test fixtures match.
+SCHEMA_SQL = _SCHEMA_TEMPLATE.replace(
+    "__WORK_ITEM_STATUSES__", in_list(WorkItemStatus, start=22, hang=22, width=96)
+).replace("__SESSION_STATUSES__", in_list(SessionStatus, start=20, hang=20, width=96))
+
 #: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
 #: the two statements that make a fork immutable live here and run after it.
 _RUN_FORK_TRIGGERS = [
@@ -392,10 +399,17 @@ _RUN_FORK_TRIGGERS = [
 
 #: `stop_kind` is only meaningful while a row is stopped -- this clears it the
 #: instant the row's status leaves the stop set, so a resumed/cancelled/done
-#: item can never be read as still pointing at its last stop's kind. Shared
-#: between the fresh-install path and migration 44, which both need the exact
-#: same trigger body.
+#: item can never be read as still pointing at its last stop's kind. Built from
+#: `vocab.STOPPED` for a fresh install; migration 44 carries its own frozen copy.
 _WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER = (
+    "CREATE TRIGGER work_items_stop_kind_clear AFTER UPDATE OF status ON work_items "
+    f"WHEN NEW.status NOT IN ({in_list(STOPPED)}) "
+    "BEGIN UPDATE work_items SET stop_kind = NULL WHERE id = NEW.id; END"
+)
+
+#: Migration 44's trigger as it was written then. Frozen: history is not
+#: rebuilt from today's vocabulary.
+_MIGRATION_44_STOP_KIND_CLEAR_TRIGGER = (
     "CREATE TRIGGER work_items_stop_kind_clear AFTER UPDATE OF status ON work_items "
     "WHEN NEW.status NOT IN ('needs_human', 'waiting', 'rate_limited') "
     "BEGIN UPDATE work_items SET stop_kind = NULL WHERE id = NEW.id; END"
@@ -1036,7 +1050,7 @@ FROM worker_sessions""",
     # them recorded why they stopped.
     44: [
         "ALTER TABLE work_items ADD COLUMN stop_kind TEXT",
-        _WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER,
+        _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER,
     ],
     # Events carry their node (Kraft UI v2 · B13): backfilled from whichever of
     # the payload's `node_id`/`node` keys is a string -- `json_type(...) =
