@@ -91,8 +91,8 @@ def snapshot(client: httpx.Client, wid: str) -> tuple[str, str]:
     """(state, where): the end state in the vocabulary ITEMS uses, and where
     the item is right now -- its current node and whether an agent is live.
 
-    A pending gate and a dead agent are both `needs_human` on the row; only the
-    event stream tells them apart.
+    A pending gate and a dead agent are both `needs_human` on the row;
+    `pending_gate` tells them apart, and only while the gate is still waiting.
     """
     item = client.get(f"/work-items/{wid}").raise_for_status().json()
     node = item.get("current_node_id") or "-"
@@ -101,12 +101,7 @@ def snapshot(client: httpx.Client, wid: str) -> tuple[str, str]:
     status = item["status"]
     if status != "needs_human":
         return status, where
-    events = client.get(f"/work-items/{wid}/events").raise_for_status().json()
-    return ("gate" if any(e["type"] == "gate_requested" for e in events) else "failed"), where
-
-
-def state(client: httpx.Client, wid: str) -> str:
-    return snapshot(client, wid)[0]
+    return ("gate" if item.get("pending_gate") else "failed"), where
 
 
 #: How often `settle` says it is still waiting when nothing has changed.
@@ -154,10 +149,13 @@ def pause_mid_flight(client: httpx.Client, wid: str, timeout: float = 30.0) -> s
             client.post(f"/work-items/{wid}/pause").raise_for_status()
             return settle(client, wid, "paused", timeout=15)
         time.sleep(0.3)
-    say(f"{wid[:8]} no agent started within {timeout:.0f}s")
     # Filed paused at capacity, it never ran: its row says "paused" too, but it
     # is a not-started item, not the mid-flight pause this was asked for.
-    return state(client, wid) if item["worker_sessions"] else "never started"
+    if not item["worker_sessions"]:
+        say(f"{wid[:8]} no agent started within {timeout:.0f}s")
+        return "never started"
+    say(f"{wid[:8]} its agent exited before it could be paused")
+    return snapshot(client, wid)[0]
 
 
 def settle_order(created: list) -> list:
@@ -234,8 +232,8 @@ def main() -> int:
         else:
             created.append((wid, title, want))
 
-    for n, (wid, title, want) in enumerate(created, 1):
-        say(f"[{n}/{len(created)}] waiting for {wid[:8]} to reach {want}")
+    for n, (wid, title, want) in enumerate(created, len(rows) + 1):
+        say(f"[{n}/{len(ITEMS)}] waiting for {wid[:8]} to reach {want}")
         got = settle(client, wid, want)
         ok &= got == want
         rows.append((wid[:8], title, want, got))

@@ -8,7 +8,10 @@ session, bounded, rather than on a margin.
 """
 
 import importlib.util
+import types
 from pathlib import Path
+
+import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "seed.py"
 
@@ -43,26 +46,41 @@ class _Answer:
         return self.body
 
 
-class _NeverRan:
-    """A server whose item was filed paused at capacity: no session, ever."""
+class _NeverRunning:
+    """A server whose item never shows a running session: filed paused at
+    capacity (no session, ever), or its agent came and went between polls."""
 
-    def __init__(self):
-        self.posts = []
+    def __init__(self, status, sessions):
+        self.status, self.sessions, self.posts = status, sessions, []
 
     def get(self, path):
-        if path.endswith("/events"):
-            return _Answer([])
-        return _Answer({"status": "paused", "worker_sessions": []})
+        return _Answer({"status": self.status, "worker_sessions": self.sessions})
 
     def post(self, path):
         self.posts.append(path)
         return _Answer({})
 
 
-def test_a_paused_item_that_never_ran_is_reported_as_never_started_not_as_paused():
-    client = _NeverRan()
-    assert _seed().pause_mid_flight(client, "w1", timeout=0.5) == "never started"
+@pytest.mark.parametrize(
+    ("status", "sessions", "got", "said"),
+    [
+        pytest.param("paused", [], "never started", "no agent started", id="never-ran"),
+        pytest.param(
+            "completed",
+            [{"status": "completed"}],
+            "completed",
+            "exited before it could be paused",
+            id="ran-between-polls",
+        ),
+    ],
+)
+def test_a_paused_item_whose_agent_was_never_seen_running_is_not_reported_as_paused(
+    capsys, status, sessions, got, said
+):
+    client = _NeverRunning(status, sessions)
+    assert _seed().pause_mid_flight(client, "w1", timeout=0.5) == got
     assert client.posts == []
+    assert said in capsys.readouterr().out
 
 
 class _Stuck:
@@ -74,9 +92,13 @@ class _Stuck:
 
 def test_a_wait_that_never_settles_keeps_saying_so_and_says_when_it_gives_up(monkeypatch, capsys):
     seed = _seed()
-    monkeypatch.setattr(seed, "HEARTBEAT", 0.4)
-    assert seed.settle(_Stuck(), "w1234567", "completed", timeout=1.2) == "active"
+    clock = [0.0]
+    fake = types.SimpleNamespace(
+        monotonic=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)
+    )
+    monkeypatch.setattr(seed, "time", fake)
+    assert seed.settle(_Stuck(), "w1234567", "completed", timeout=25) == "active"
     out = capsys.readouterr().out
     assert "w1234567 active (node implement)" in out
-    assert "w1234567 still active (node implement), want completed" in out
-    assert "w1234567 gave up after 1s: still active, wanted completed" in out
+    assert "w1234567 still active (node implement), want completed -- 10s of 25s" in out
+    assert "w1234567 gave up after 25s: still active, wanted completed" in out
