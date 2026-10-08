@@ -63,3 +63,20 @@ def test_a_paused_item_that_never_ran_is_reported_as_never_started_not_as_paused
     client = _NeverRan()
     assert _seed().pause_mid_flight(client, "w1", timeout=0.5) == "never started"
     assert client.posts == []
+
+
+class _Stuck:
+    """A server whose item sits on one node and never reaches what was asked."""
+
+    def get(self, path):
+        return _Answer({"status": "active", "current_node_id": "implement", "worker_sessions": []})
+
+
+def test_a_wait_that_never_settles_keeps_saying_so_and_says_when_it_gives_up(monkeypatch, capsys):
+    seed = _seed()
+    monkeypatch.setattr(seed, "HEARTBEAT", 0.4)
+    assert seed.settle(_Stuck(), "w1234567", "completed", timeout=1.2) == "active"
+    out = capsys.readouterr().out
+    assert "w1234567 active (node implement)" in out
+    assert "w1234567 still active (node implement), want completed" in out
+    assert "w1234567 gave up after 1s: still active, wanted completed" in out
