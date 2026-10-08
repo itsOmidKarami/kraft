@@ -37,7 +37,7 @@ describe("BulkBar", () => {
   it("counts each action from what is checked: Pause what the pause route takes, Cancel what has not ended, Archive what has", () => {
     mount([RUN, WAIT, NEED, DONE]);
     expect(screen.getByText("4 selected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "‖ Pause 1" })).toBeInTheDocument(); // rate_limited is not pausable
+    expect(screen.getByRole("button", { name: "‖ Pause 2" })).toBeInTheDocument(); // running and rate-limited: the pause route takes both
     expect(screen.getByRole("button", { name: "Cancel 3…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive 1" })).toBeEnabled();
   });
