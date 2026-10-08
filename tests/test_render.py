@@ -8,6 +8,12 @@ from datetime import UTC, datetime
 import pytest
 
 from kraft import render
+from kraft.vocab import WorkItemStatus
+
+
+@pytest.mark.parametrize("status", list(WorkItemStatus))
+def test_every_status_has_a_colour_entry(status):
+    assert status in render.STATUS_COLORS
 
 
 def test_table_aligns_columns_and_prints_a_header():

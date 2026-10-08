@@ -20,6 +20,7 @@ from support.server import child_env
 
 from kraft import client, db, mcp
 from kraft.update import installed
+from kraft.vocab import WorkItemStatus
 
 
 def _tools():
@@ -114,6 +115,12 @@ def test_list_work_items_names_every_status_the_schema_allows():
     allowed = set(re.findall(r"'(\w+)'", re.search(r"status IN\s*\(([^)]*)\)", db.SCHEMA_SQL)[1]))
     listing = next(t for t in _tools() if t.name == "list_work_items")
     assert set(re.findall(r'"(\w+)"', listing.description)) == allowed
+
+
+def test_list_work_items_schema_lists_the_statuses():
+    listing = next(t for t in _tools() if t.name == "list_work_items")
+    schema = json.dumps(listing.input_schema)
+    assert all(f'"{s.value}"' in schema for s in WorkItemStatus)
 
 
 @pytest.mark.slow
