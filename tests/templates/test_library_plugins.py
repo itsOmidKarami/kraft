@@ -2,11 +2,11 @@
 addressed as `<namespace>:<name>`, and a bare local name stays local."""
 
 import pytest
+from support.plugins import AGENT, chain, home, installed
 
 from kraft import harness
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
-from support.plugins import AGENT, chain, home, installed
 
 
 def _chain_id(tmp_path):
@@ -46,14 +46,25 @@ PLUGIN_LIBRARY = {
         "implementer": {"extends": "base", "steering": ["house"]},
         "own": {"extends": "release:base", "prompt": "own qualified"},
         "tiered": {"extends": "base", "profile": "strong"},
+        "methodical": {"extends": "base", "skill": "deploy-review"},
     },
 }
-PLUGIN_CHAINS = {"ship": chain("implementer"), "own": chain("own"), "tiered": chain("tiered")}
+PLUGIN_CHAINS = {
+    "ship": chain("implementer"),
+    "own": chain("own"),
+    "tiered": chain("tiered"),
+    "skilled": chain("methodical"),
+}
 
 
 def _load(tmp_path, *, alias=None, local_extends="base"):
     plugin = installed(
-        tmp_path, "release", alias=alias, library=PLUGIN_LIBRARY, chains=PLUGIN_CHAINS
+        tmp_path,
+        "release",
+        alias=alias,
+        library=PLUGIN_LIBRARY,
+        chains=PLUGIN_CHAINS,
+        skills={"deploy-review": "plugin method"},
     )
     root = home(tmp_path, chains={"local": chain(local_extends)})
     return TemplateLibrary.from_yaml_dir(root, plugins=[plugin])
@@ -70,6 +81,7 @@ def _task(library, id):
         (None, "implementer", "local", None, "extends no task named 'implementer'"),
         (None, "base", "release:ship", "prompt", "plugin base"),
         (None, "base", "release:ship", "steering", ["release:house"]),
+        (None, "base", "release:skilled", "skill", "release:deploy-review"),
         (None, "base", "release:tiered", "profile", "strong"),
         ("rel", "rel:implementer", "local", "steering", ["rel:house"]),
         ("rel", "base", "rel:own", "prompt", "own qualified"),
@@ -79,6 +91,7 @@ def _task(library, id):
         "bare-local-is-not-a-plugin-component",
         "plugin-bare-extends",
         "plugin-bare-steering",
+        "plugin-bare-skill",
         "plugin-bare-profile-is-instance",
         "alias-from-outside",
         "alias-own-qualified-ref",
@@ -117,7 +130,7 @@ def test_a_plugin_without_a_library_file_loads(tmp_path):
 
 
 _BOMB = "a: &a [x,x,x,x,x,x,x,x,x,x]\n" + "".join(
-    f"{k}: &{k} [{','.join(['*' + p] * 10)}]\n" for p, k in zip("abcd", "bcde")
+    f"{k}: &{k} [{','.join(['*' + p] * 10)}]\n" for p, k in zip("abcd", "bcde", strict=True)
 )
 
 

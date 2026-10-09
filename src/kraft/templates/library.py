@@ -273,6 +273,8 @@ class TemplateLibrary:
         #: The installed plugins whose declarations sit in the maps above under
         #: `<namespace>:<name>`.
         self.plugins = tuple(plugins)
+        #: Namespace to store directory, for `skill.validate`.
+        self.plugin_dirs = {p.namespace: p.root for p in self.plugins}
 
     @classmethod
     def from_yaml_dir(
@@ -577,12 +579,18 @@ class TemplateLibrary:
                         )
                 # A skill that names no method is refused here, where lint and
                 # intake see it, never discovered by an agent at launch
-                # (Kraft-vhcop). Another plugin's skill cannot be looked up
-                # from here; `skill.UNAVAILABLE` has the agent stop on it.
+                # (Kraft-vhcop). A loaded Kraft plugin's skill is looked up in
+                # its store; another tool's cannot be, and `skill.UNAVAILABLE`
+                # has the agent stop on it.
                 selected = getattr(task.task, "skill", None)
                 if selected is not None:
                     try:
-                        _skill.validate(self.skills_dir, selected, where=task.path)
+                        _skill.validate(
+                            self.skills_dir,
+                            selected,
+                            where=task.path,
+                            plugin_dirs=self.plugin_dirs,
+                        )
                     except _skill.SkillError as exc:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects skill {selected!r}, "

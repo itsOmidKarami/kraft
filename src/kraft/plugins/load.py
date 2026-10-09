@@ -60,8 +60,7 @@ def qualify(data: object, plugin: InstalledPlugin) -> object:
             out[key] = _reference(value, plugin, bare_is_own=True)
         elif key == "steering" and isinstance(value, list):
             out[key] = [
-                _reference(v, plugin, bare_is_own=True) if isinstance(v, str) else v
-                for v in value
+                _reference(v, plugin, bare_is_own=True) if isinstance(v, str) else v for v in value
             ]
         elif key == "profile" and isinstance(value, str):
             out[key] = _reference(value, plugin, bare_is_own=False)
