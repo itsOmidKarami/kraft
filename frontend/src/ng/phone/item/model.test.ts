@@ -37,6 +37,8 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["failed", mk("failed", stop("failed")), ["escalate", "retry"]],
     ["rate limit", mk("waiting", stop("rate_limit")), ["pause", null]],
     ["waiting on CI", mk("waiting", stop("wait")), ["pause", null]],
+    ["blocked", mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "active", met: false }] }), ["unblock", "pause"]],
+    ["blocked, nothing left to wait for", mk("blocked", null, { dependencies: [] }), [null, "pause"]],
     ["done", mk("done"), [null, "board"]],
     ["cancelled", mk("cancelled"), [null, "board"]],
     ["archived", mk("archived"), [null, "restore"]],
@@ -97,6 +99,9 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("failed", stop("failed", { reason: "exit 1", task: "verification.review.code_review", attempt: 2 })))).toMatchObject({ tone: "bad", title: "Failed", text: "exit 1", where: "verification › review › code_review · attempt 2" });
     expect(cardOf(mk("waiting", stop("rate_limit", { facts: { harness: "claude", fallback_allowed: ["codex"] } })))?.text).toMatch(/claude hit its rate limit/);
     expect(cardOf(mk("needs_you", stop("conflict", { facts: { unresolved: ["a.py"], resolved: ["b.py"] } })))?.facts).toEqual([["unresolved", "a.py"], ["resolved", "b.py"]]);
+    expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
+      .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first"], ["completed", "Old cleanup"]] });
+    expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
     expect(cardOf(mk("paused"))).toMatchObject({ title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged" });

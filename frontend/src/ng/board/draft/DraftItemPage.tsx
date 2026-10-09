@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
-import { repoName } from "../../../format";
+import { repoName, shortId } from "../../../format";
 import { useStore } from "../../../store";
 import type { ChainNode, Repo, TemplateSummary, Workspace } from "../../../types";
 import { Inspector } from "../../graph/Inspector";
@@ -63,6 +63,10 @@ export function DraftItemPage() {
   const set = (p: Partial<DraftState>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
   const setPageItem = usePageItem((s) => s.set);
+  const items = useStore((s) => s.workItems);
+  // What it can come after: every item that has not ended (the server refuses a cancelled one), less the ones picked.
+  const afterOpen = Object.values(items).filter((w) => !["done", "cancelled", "archived"].includes(w.display_status ?? "") && !d.after.includes(w.id));
+  const afterName = (id: string) => (items[id] ? `${items[id].bead_id || shortId(id)} · ${items[id].title}` : shortId(id));
 
   useEffect(() => {
     api.getRepos().then((r) => {
@@ -200,6 +204,27 @@ export function DraftItemPage() {
             {d[k] && <span className="draft-skips">{skipsOf(k)}</span>}
           </span>
         ))}
+        {(d.after.length > 0 || afterOpen.length > 0) && (
+          <>
+            <span className="draft-gap" />
+            <span>Comes after</span>
+            {d.after.map((id) => (
+              <span key={id} className="composer-chip composer-attached" title={afterName(id)}>
+                <span className="composer-path">{afterName(id)}</span>
+                <button type="button" className="composer-x" {...tip(`Do not come after ${afterName(id)}`)} onClick={() => set({ after: d.after.filter((x) => x !== id) })}>✕</button>
+              </span>
+            ))}
+            {afterOpen.length > 0 && (
+              <Menu
+                label="Comes after"
+                triggerClass="composer-add"
+                trigger="+ item"
+                items={afterOpen.map((w) => ({ label: afterName(w.id), hint: repoName(w.repo), onSelect: () => set({ after: [...d.after, w.id] }) }))}
+                note="Started before they complete, this item is blocked until they do."
+              />
+            )}
+          </>
+        )}
         {ws && memberRows.length > 0 && (
           <button type="button" className={d.members.length ? "composer-chip" : "composer-add"} onClick={() => { setSel(null); setTab("overview"); setPaneOpen(true); setAddOpen(true); }}>
             {d.members.length ? `${d.members.length} member${d.members.length === 1 ? "" : "s"} · chosen in the chain pane` : "+ members"}
@@ -404,6 +429,7 @@ function yamlRows(d: DraftState, overrides: Record<string, Record<string, unknow
   }
   if (!node) {
     for (const k of ["spec", "plan"] as const) if (d[k]) rows.push([`attached ${k}`, d[k]]);
+    if (d.after.length) rows.push(["comes after", d.after.map(shortId).join(", ")]);
     if (d.budget.trim()) rows.push(["budget", d.budget.trim()]);
     if (!d.autoGate) rows.push(["agent reviews first", "off"]);
     if (d.members.length) rows.push(["members", `${d.members.join(", ")} · root pointer ${d.pointer}`]);

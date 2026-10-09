@@ -13,6 +13,8 @@ const at = (id: string) => `/work-items/${encodeURIComponent(id)}`;
 /** Every write the item page makes. Cancel is `/cancel` (R17): it keeps the branch and worktree; the route that deletes them stays CLI-only. */
 export const act = {
   pause: (id: string) => post(`${at(id)}/pause`),
+  /** Stop the item coming after what it still waits on; Kraft queues a blocked one on its next pass. */
+  unblock: (id: string) => post(`${at(id)}/unblock`),
   resume: (id: string, steer?: string | null, steers?: Record<string, string>) => post(`${at(id)}/resume`, { steer: steer || null, ...(steers ? { steers } : {}) }),
   retry: (id: string, body: { path?: string; steer?: string | null; task_config?: Record<string, unknown> } = {}) => post<{ attempt?: number }>(`${at(id)}/retry`, body),
   skip: (id: string, path: string, note?: string) => post(`${at(id)}/skip`, { path, ...(note ? { note } : {}) }),

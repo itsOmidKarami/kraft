@@ -48,6 +48,9 @@ export function budgetRaise(item: Pick<WorkItem, "stop">): "limit" | "item" | nu
 /** What a budget stop the item cannot raise says instead of offering a raise. */
 export const NOT_RAISABLE = "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap.";
 
+/** A blocked item with nothing left to wait for (after Unblock, until the scheduler's next pass), in both layouts' words. */
+export const RELEASED = { where: "nothing left to wait for", text: "Kraft queues it within seconds." };
+
 /** A paused item with no current node was filed and never started (the
  *  server's row says so, as `board/model`'s `groupOf` reads it): it is "not
  *  started", with Start, wherever it is shown, never "paused" with Resume.

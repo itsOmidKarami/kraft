@@ -8,7 +8,7 @@ import { Toaster } from "../nav/Toaster";
 import { Item } from "./Item";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /work-items/w1/draft/apply", "PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/cancel", "POST /work-items/w1/gates/plan_approval/reject", "POST /work-items/w1/pause", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("POST /work-items/w1/draft/apply", "PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/cancel", "POST /work-items/w1/gates/plan_approval/reject", "POST /work-items/w1/pause", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/unblock");
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const SESSION = { id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: null };
@@ -123,6 +123,13 @@ describe("the item screen (C)", () => {
       fireEvent.click(apply);
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
     });
+  });
+
+  it("a blocked item says what it waits on, and Unblock posts /unblock", async () => {
+    const calls = mount(item("blocked", null, { status: "blocked", dependencies: [{ id: "a1", title: "Schema first", status: "active", met: false }] }));
+    expect(await screen.findByText("Schema first")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Unblock" }));
+    await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/unblock"]));
   });
 
   it("opens a node on a tap of its row", async () => {
