@@ -778,7 +778,11 @@ async def put_notify(body: NotifyBody, request: Request):
     # URL ever set" (body.url is None and cfg["url"] was already empty).
     if why := config_check.notify_problem(cfg):
         raise HTTPException(422, why)
-    config_mod.Notify.model_validate(cfg).save(path)
+    try:
+        notify = config_mod.Notify.model_validate(cfg)
+    except ValidationError as exc:
+        raise HTTPException(422, config_mod.Notify.refusal(exc)) from None
+    notify.save(path)
     st.notifier.reload()
     return _notify_view(cfg, st.notifier.last_test)
 
