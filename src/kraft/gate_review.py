@@ -24,16 +24,12 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
 from kraft.templates.models import AgentTask, ResolvedNode
-from kraft.vocab import GATE_REVIEW_UNTRUSTED
+from kraft.vocab import ADVANCING
 from kraft.worker import steering as _steering
 
 #: The only strings a verdict may be. Anything else -- a typo, a sentence, a
 #: missing key -- is `undecided`, which leaves the gate pending for a human.
 VERDICTS = frozenset({"approve", "reject", "fixed", "undecided"})
-
-#: Statuses that mean the session did not finish thinking. A verdict written
-#: beside one of these is not a judgement, whatever it says.
-_UNTRUSTWORTHY = frozenset(GATE_REVIEW_UNTRUSTED)
 
 _PROMPT = (
     "This is a gate review. A Kraft work item has reached the gate "
@@ -356,7 +352,10 @@ async def review(
     result_path = run_dirs.results / f"{session_id}.json"
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
-    if status in _UNTRUSTWORTHY or verdict not in VERDICTS:
+    # A verdict counts only from a session that finished thinking (`vocab.ADVANCING`),
+    # the same rule the fix-loop judge applies. One written beside any other status
+    # (failed, capped_out, paused, unknown, ...) is not a judgement, whatever it says.
+    if status not in ADVANCING or verdict not in VERDICTS:
         return "undecided", note
     if verdict in ("reject", "fixed") and not note.strip():
         # The note is the steering instruction for the re-run. Without one there

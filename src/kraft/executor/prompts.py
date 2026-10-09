@@ -588,7 +588,7 @@ def fix_attempt_note(row) -> str:
 
 #: A review session that did not finish is not a head anything was reviewed at.
 #: Same "was this a real judgement" allowlist `dispatch._JUDGE_TRUSTED_STATUS`
-#: and `gate_review._UNTRUSTWORTHY` apply, for the same reason.
+#: and gate review apply (all `vocab.ADVANCING`), for the same reason.
 _REVIEWED_STATUS = ADVANCING
 
 

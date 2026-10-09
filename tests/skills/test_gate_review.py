@@ -95,6 +95,10 @@ def _fake_agent(result: dict | None, seen: dict):
         ({"status": "done", "verdict": "APPROVE!"}, "undecided"),
         ({"status": "failed", "verdict": "approve"}, "undecided"),
         ({"status": "needs_context", "verdict": "approve"}, "undecided"),
+        ({"status": "capped_out", "verdict": "approve"}, "undecided"),
+        ({"status": "paused", "verdict": "approve"}, "undecided"),
+        ({"status": "unknown", "verdict": "approve"}, "undecided"),
+        ({"status": "config_error", "verdict": "approve"}, "undecided"),
         # A rejection with no reason is worthless as a steer note.
         ({"status": "done", "verdict": "reject", "concerns": ""}, "undecided"),
         (None, "undecided"),

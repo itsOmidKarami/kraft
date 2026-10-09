@@ -81,9 +81,6 @@ def render() -> str:
         _group("ADVANCING_SESSION_STATUSES", "SessionStatus", vocab.ADVANCING),
         _group("AGENT_REPORTABLE_SESSION_STATUSES", "SessionStatus", vocab.AGENT_REPORTABLE),
         _group("CAP_SWEEP_LEAVES_SESSION_STATUSES", "SessionStatus", vocab.CAP_SWEEP_LEAVES),
-        _group(
-            "GATE_REVIEW_UNTRUSTED_SESSION_STATUSES", "SessionStatus", vocab.GATE_REVIEW_UNTRUSTED
-        ),
         _group("COMMAND_FINISHED_SESSION_STATUSES", "SessionStatus", vocab.COMMAND_FINISHED),
         _group("UNREADABLE_EXIT_SESSION_STATUSES", "SessionStatus", vocab.UNREADABLE_EXIT),
         _traits("SESSION_TRAITS", "SessionStatus", vocab.SESSION_TRAITS, {}),

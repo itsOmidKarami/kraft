@@ -2386,8 +2386,7 @@ def last_measurement(
 ESCALATION_HOOK = "escalation"
 
 #: Statuses that mean the judge session actually finished thinking -- the
-#: same "was this a real judgement" gate `gate_review._UNTRUSTWORTHY`
-#: applies, phrased as the allowlist its own `VERDICTS` check mirrors.
+#: same "was this a real judgement" allowlist gate review applies too.
 _JUDGE_TRUSTED_STATUS = ADVANCING
 _JUDGE_VERDICTS = frozenset({"continue", "stop_needs_human", "stop_downgrade"})
 
