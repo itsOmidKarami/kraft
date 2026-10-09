@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arcYAt, curve, G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { arcYAt, curve, G, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 
 const step = (id: string, n: number): NodeStep => ({ id, tasks: Array.from({ length: n }, (_, i) => ({ id: `${id}${i}` })) });
 
@@ -66,7 +66,7 @@ describe("node layout", () => {
     expect(lay.H).toBe(labelY + 16);
   });
   it("makes an arc that carries tasks deeper by the prototype's 78px of control depth, with its label on the line", () => {
-    const bare = nodeLayout([step("a", 1)], { loop: true }), full = nodeLayout([step("a", 1)], { loop: true, loopTasks: true });
+    const bare = nodeLayout([step("a", 1)], { loop: true }), full = nodeLayout([step("a", 1)], { loop: true, loopTasks: 2 });
     // NodeGraph.dc.html: the world grows 92 instead of 34 and the controls sit at H − 30 + 40, not + 20.
     expect(full.loopY).toBe(bare.loopY + 78);
     expect(full.loopY).toBe(bare.H - 34 + 102);
@@ -75,7 +75,7 @@ describe("node layout", () => {
     expect(full.H).toBeGreaterThan(loopArc(full, "fix").label!.y + 22 + 40);
   });
   it("seats the repair left of centre and the judge right of it, ±110px or a quarter of the arc's width, on the curve", () => {
-    const wide = nodeLayout([step("a", 1), step("b", 1), step("c", 1)], { loop: true, loopTasks: true });
+    const wide = nodeLayout([step("a", 1), step("b", 1), step("c", 1)], { loop: true, loopTasks: 2 });
     const mid = (wide.endX + 23) / 2;
     const [repair, judge] = loopSlots(wide, 1, true);
     expect([repair.x, judge.x]).toEqual([mid - 110, mid + 110]);
@@ -83,11 +83,81 @@ describe("node layout", () => {
     expect(repair.y).toBeGreaterThan(wide.TY + 60);
     expect(repair.y).toBeLessThanOrEqual(loopArc(wide, "x").label!.y + 1e-6);
     expect(Math.abs(repair.y - judge.y)).toBeLessThan(1);
-    const narrow = nodeLayout([step("a", 1)], { loop: true, loopTasks: true });
+    const narrow = nodeLayout([step("a", 1)], { loop: true, loopTasks: 2 });
     const [nr, nj] = loopSlots(narrow, 1, true);
     expect(nj.x - nr.x).toBe((narrow.endX - 23) / 2);
     // A repair alone sits left of centre too, where the prototype puts the first of its tasks.
     expect(loopSlots(narrow, 1, false)[0].x).toBe((narrow.endX + 23) / 2 - (narrow.endX - 23) / 4);
+    // A second repair task (repair, then sync) shares the arc: all three under it and between its ends, a column apart.
+    const two = nodeLayout([step("a", 1), step("b", 1)], { loop: true, loopTasks: 3 });
+    const three = loopSlots(two, 2, true);
+    expect(three[0].x).toBeGreaterThan(23 + G.BOX);
+    expect(three[2].x).toBeLessThan(two.endX - G.BOX);
+    expect(three[1].x - three[0].x).toBeGreaterThanOrEqual(G.COL);
+    expect(three[2].x - three[1].x).toBe(three[1].x - three[0].x);
+    for (const s of three) expect(s.y).toBeGreaterThan(two.TY + 60);
+    // The label moves off the middle one, onto the line between the last two.
+    const label = loopArc(two, "round 1 of 4", (three[1].x + three[2].x) / 2).label!;
+    expect(label.x).toBe((three[1].x + three[2].x) / 2);
+    expect(label.y).toBeCloseTo(arcYAt(two.TY, two.endX, 23, two.loopY, label.x), 5);
+    // Two repairs and no judge are a pair, where a repair and the judge sit.
+    expect(loopSlots(two, 2, false).map((s) => s.x)).toEqual(loopSlots(two, 1, true).map((s) => s.x));
+    // Where the steps are too few to hold them a column apart, the end mark moves out; a pair moves nothing.
+    const one = nodeLayout([step("a", 1)], { loop: true, loopTasks: 4 });
+    expect(one.endX).toBeGreaterThan(narrow.endX);
+    const four = loopSlots(one, 3, true).map((s) => s.x);
+    expect(four[0]).toBeGreaterThan(23 + G.BOX);
+    expect(four[3]).toBeLessThan(one.endX - G.BOX);
+    expect(four[1] - four[0]).toBeCloseTo(G.COL + 10, 5);
+    expect(two.endX).toBe(nodeLayout([step("a", 1), step("b", 1)], { loop: true, loopTasks: 2 }).endX);
+  });
+  it("opens a loop step of several tasks as a frame on the arc, and makes room for it", () => {
+    // `<step>.<task>`: one step's tasks are one stop on the arc, and the judge, which has no step, its own.
+    const cols = (ids: string[]) => loopCols(ids.map((id) => ({ id }))).map((c) => [c.step, c.tasks.map((t) => t.id)]);
+    expect(cols(["fix.lint", "fix.types", "sync.sync", "judge"])).toEqual([["fix", ["fix.lint", "fix.types"]], ["sync", ["sync.sync"]], [undefined, ["judge"]]]);
+    const steps = [step("a", 1), step("b", 1)];
+    const arc = nodeLayout(steps, { loop: true, loopTasks: 2 }), shut = nodeLayout(steps, { loop: true, loopTasks: 2, loopLane: true }), lay = nodeLayout(steps, { loop: true, loopTasks: 2, loopLane: true, loopOpen: 2 });
+    // A loop with such a step is a lane, open or not: straight down from the end mark, level along the arc's lowest
+    // point, straight up into the start, and every stop sits on that level line. Any other loop stays the arc.
+    const lowOf = (l: typeof lay) => l.TY + 0.75 * (l.loopY - l.TY) + 2.375, low = lowOf(lay);
+    const lane = (l: typeof lay) => `M${l.endX} ${l.TY + 9} V${lowOf(l) - 28} Q${l.endX} ${lowOf(l)} ${l.endX - 28} ${lowOf(l)} H51 Q23 ${lowOf(l)} 23 ${lowOf(l) - 28} V${l.TY + 10}`;
+    expect(loopArc(lay).d).toBe(lane(lay));
+    expect(loopArc(shut).d).toBe(lane(shut));
+    expect(loopSlots(shut, 1, true).map((s) => s.y)).toEqual([lowOf(shut), lowOf(shut)]);
+    expect(loopArc(arc).d).toContain(` C${arc.endX} ${arc.loopY} 23 ${arc.loopY} `);
+    // Closed, the step is one box: the lane is as deep and as wide as the arc would be, but under a single step,
+    // where the label at its middle would touch the boxes it is level with.
+    expect([shut.loopY, shut.endX, shut.H]).toEqual([arc.loopY, arc.endX, arc.H]);
+    const slim = loopSlots(nodeLayout([step("a", 1)], { loop: true, loopTasks: 2, loopLane: true }), 1, true);
+    expect(slim[1].x - slim[0].x).toBe(2 * (22 + 35 + 9));
+    const [fix, judge] = loopSlots(lay, 1, true);
+    expect([fix.y, judge.y]).toEqual([low, low]);
+    expect(loopArc(lay, "round 1", fix.x + 150).label).toEqual({ x: fix.x + 150, y: low, text: "round 1" });
+    const column = loopColumn(fix, 2), { ys, frame } = column;
+    // Its rows centre on the lane, a row apart under a 40px head; the frame ends 50px under the last box, for its label and meta.
+    expect(ys).toEqual([low - G.ROW / 2, low + G.ROW / 2]);
+    expect(frame).toEqual({ x: fix.x - 92, y: ys[0] - 22 - 4 - 40, w: 184, h: 40 + 4 + G.ROW + 44 + 50 });
+    // The loop goes deeper, so the frame's top is no higher than the step's closed box was.
+    expect(lay.loopY).toBe(shut.loopY + G.ROW + 80);
+    expect(frame.y).toBeGreaterThanOrEqual(loopSlots(shut, 1, true)[0].y - G.BOX / 2);
+    // The end mark moves out: the frame clears the lane's corner, the label (some 70px) fits before the judge's box, and the world ends under the frame.
+    expect(lay.endX).toBeGreaterThan(shut.endX);
+    expect(frame.x).toBeGreaterThanOrEqual(23 + 28);
+    expect(judge.x - G.BOX / 2 - (frame.x + frame.w)).toBeGreaterThanOrEqual(70);
+    expect(lay.H).toBeGreaterThanOrEqual(frame.y + frame.h);
+    // Inside the frame the lane forks, as a parallel step does off the axis: from a join on the frame's right edge
+    // (the loop runs right to left) a branch to each task's box, and from each on to a join on the left edge. The
+    // lane's own line is cut between the joins.
+    const fork = loopFork(fix, column);
+    expect(fork.dots).toEqual([{ x: frame.x + frame.w, y: low }, { x: frame.x, y: low }]);
+    expect(fork.edges.map((e) => e.d)).toEqual(ys.flatMap((y) => [curve(frame.x + frame.w, low, fix.x + 26, y), curve(fix.x - 26, y, frame.x, low)]));
+    expect(fork.cut).toEqual([frame.x, frame.x + frame.w]);
+    // One of three stops open, three tasks tall, under a three-row step: clear of the lane's corner and of that step's own frame.
+    const tall = nodeLayout([step("a", 3), step("b", 1)], { loop: true, loopTasks: 3, loopLane: true, loopOpen: 3 });
+    const top = loopColumn(loopSlots(tall, 2, true)[0], 3).frame;
+    expect(top.x).toBeGreaterThanOrEqual(23 + 28);
+    expect(top.y).toBeGreaterThan(tall.cols[0].frame!.y + tall.cols[0].frame!.h);
+    expect(tall.H).toBeGreaterThanOrEqual(top.y + top.h);
   });
 
   describe("an open task", () => {
@@ -121,10 +191,10 @@ describe("node layout", () => {
       expect(dots.map((d) => d.x)).toEqual([(lay.cx[0] + lay.cx[1]) / 2, (lay.cx[1] + lay.cx[2]) / 2]);
     });
     it("keeps the arc clear of the frame's foot, and moves the loop's tasks with the columns", () => {
-      const lay = nodeLayout(steps, { loop: true, loopTasks: true, expand: { ...open, h: 360 } });
+      const lay = nodeLayout(steps, { loop: true, loopTasks: 2, expand: { ...open, h: 360 } });
       const x1 = G.startX + 9, f0 = lay.cx[1] - 380;
       for (const x of [f0, f0 + 380, f0 + 760]) expect(arcYAt(lay.TY, lay.endX, x1, lay.loopY, x)).toBeGreaterThanOrEqual(lay.TY + 180 + 28);
-      const bare = nodeLayout(steps, { loop: true, loopTasks: true });
+      const bare = nodeLayout(steps, { loop: true, loopTasks: 2 });
       expect(loopSlots(lay, 1, true)[0].x).toBe(loopSlots(bare, 1, true)[0].x + 334);
     });
     it("takes the frame's height in its row, siblings 48px clear of it above and below, the step's frame wrapping them", () => {

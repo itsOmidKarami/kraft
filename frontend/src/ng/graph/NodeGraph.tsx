@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { NodeGlyph } from "./NodeGlyph";
-import { G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { G, LOOP_FRAME, loopArc, loopCols, loopColumn, loopFork, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 import { RoundPicker } from "./RoundPicker";
 import { chipKey, ScopeFrame } from "./ScopeFrame";
 import { frameHeight, frameWidth, type ScopesView } from "../item/scopeView";
 import type { Rounds } from "../item/nodeGraph";
-import { accessibleName, breakable, type GraphItem } from "./types";
+import { accessibleName, breakable, type GlyphState, type GraphItem } from "./types";
 import { useCamera } from "./useCamera";
 import { useExpand, useReducedMotion, useSettled } from "./useExpand";
 import { useRoving } from "./useRoving";
@@ -24,7 +24,7 @@ type Props = {
   selected?: NodeSel;
   /** The escalation task, on a dashed branch off the end. */
   side?: GraphItem;
-  loop?: { tone?: "idle" | "active" | "red"; label?: string; /** The repair tasks, then the judge, drawn on the arc. */ tasks?: GraphItem[] };
+  loop?: { tone?: "idle" | "active" | "red"; label?: string; /** The repair tasks, then the judge, drawn on the arc. A repair's id is `<step>.<task>`: a step of several is one box there, which opens into them. */ tasks?: GraphItem[] };
   /** The fix-loop rounds, with the one the canvas shows; picking one (undefined: the newest) is `onRound`. */
   rounds?: Rounds;
   onRound?: (round: number | undefined) => void;
@@ -51,6 +51,14 @@ type Props = {
 };
 
 const taskKey = (s: string, t: string) => `t:${s}/${t}`;
+/** A fix-loop step of several tasks, closed: one stop, which selects nothing and opens. */
+const loopStepKey = (s: string) => `g:${s}`;
+/** That box's look: the worst of its tasks, running while any runs. */
+function stepLook(tasks: GraphItem[]): Pick<GraphItem, "state" | "running" | "faded"> {
+  const has = (s: GlyphState) => tasks.some((t) => (t.state ?? "todo") === s);
+  const state = (["failed", "current", "amber"] as const).find(has) ?? (has("done") ? (has("todo") ? "current" : "done") : "todo");
+  return { state, running: tasks.some((t) => t.running), faded: tasks.every((t) => t.faded) };
+}
 const labelKey = (s: string) => `l:${s}`;
 const parse = (key: string): NodeSel => {
   const [step, task, ...rest] = key.slice(2).split("/");
@@ -59,12 +67,28 @@ const parse = (key: string): NodeSel => {
 
 /** A node's inside: steps in order, parallel tasks as rows (NodeGraph.dc.html). */
 export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, expand, onScope, onCollapse, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
-  const loopTasks = loop?.tasks ?? [];
+  const calm = useReducedMotion();
+  // What the arc carries: a loop step's tasks run together, so a step of several is one box, open as a frame of them
+  // while one of them is the selection or it was opened here.
+  const arcCols = loopCols(loop?.tasks ?? []);
+  const several = (step: string | undefined) => (step === undefined ? undefined : arcCols.find((c) => c.step === step && c.tasks.length > 1));
+  const selStep = selected?.step === "fix_loop" ? arcCols.find((c) => c.tasks.length > 1 && c.tasks.some((t) => t.id === selected.task))?.step : undefined;
+  const [loopOpen, setLoopOpen] = useState(selStep);
+  useEffect(() => { if (selStep) setLoopOpen(selStep); }, [selStep]);
+  const loopKept = useRef(loopOpen);
+  if (several(loopOpen)) loopKept.current = loopOpen;
+  const loopPhase = useExpand(!!several(loopOpen), calm);
+  // Its tasks show while the canvas is laid out for it; closing, the frame shrinks back onto the box first.
+  const openCol = loopPhase.layout ? several(loopKept.current) : undefined;
+  // The focus follows the box into its tasks and back when the keys or a click moved it, not when a selection did.
+  const follow = useRef(false);
+  const toggleLoop = (step: string | undefined) => { follow.current = step !== loopOpen; setLoopOpen(step); };
   // The frame stays in the page while it closes, which takes the view it was drawn from with it.
   const kept = useRef(expand);
   if (expand) kept.current = expand;
-  const calm = useReducedMotion();
-  const phase = useExpand(!!expand, calm);
+  const expanding = useExpand(!!expand, calm);
+  // Either frame moving holds the camera and glides the rest.
+  const phase = { ...expanding, glide: expanding.glide || loopPhase.glide };
   const shown = expand ?? (phase.mounted ? kept.current : undefined);
   const openStep = shown ? steps.findIndex((st) => st.id === shown.step) : -1;
   const openRow = shown && openStep >= 0 ? steps[openStep].tasks.findIndex((t) => t.id === shown.task) : -1;
@@ -76,8 +100,9 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     held.current = { key, w: Math.max(key === held.current.key ? held.current.w : 0, frameWidth(shown.view)) };
   }
   const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: held.current.w, h: frameHeight(shown.view) } : undefined;
-  const laid = { side: !!side, loop: !!loop, loopTasks: loopTasks.length > 0, footer: !!onFailure };
-  const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, loopTasks.length, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A loop with a parallel step is a lane, open or not: its stops on a level line, as steps are on the axis.
+  const laid = { side: !!side, loop: !!loop, loopTasks: arcCols.length, loopLane: arcCols.some((c) => c.tasks.length > 1), loopOpen: openCol?.tasks.length ?? 0, footer: !!onFailure };
+  const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, arcCols.length, laid.loopLane, laid.loopOpen, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
   const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.w, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const lay = phase.layout && open ? wide : closed;
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
@@ -104,8 +129,17 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (!phase.mounted && inside.current && document.activeElement === document.body && was) roving.go(taskKey(was.step, was.task));
   }, [phase.mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A loop step's box gives way to its tasks, and they to it: the focus goes with them, without panning a camera that is still settling.
+  useEffect(() => {
+    if (!follow.current) return;
+    follow.current = false;
+    quiet.current = true;
+    roving.go(openCol ? taskKey("fix_loop", openCol.tasks[0].id) : loopKept.current && loopStepKey(loopKept.current));
+    quiet.current = false;
+  }, [loopPhase.layout]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ←/→ to the neighbouring step at the same row (clamped), ↑/↓ within a step, ↑ from the top task to the step's label.
-  const loopKeys = loopTasks.map((t) => taskKey("fix_loop", t.id));
+  const loopKeys = arcCols.map((col) => (col.tasks.length > 1 && col !== openCol ? [loopStepKey(col.step!)] : col.tasks.map((t) => taskKey("fix_loop", t.id))));
   const chipRows = shown ? shown.view.rows.map((r) => r.chips.map((c) => chipKey(shown.step, shown.task, c.key))).filter((r) => r.length) : [];
   const move = (key: string, dir: string): string | undefined => {
     const { step, task } = parse(key);
@@ -120,11 +154,16 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
       return;
     }
     if (shown && phase.mounted && key === taskKey(shown.step, shown.task) && dir === "ArrowDown" && chipRows.length) return chipRows[0][0];
-    // The loop's tasks sit on the arc, left to right: ←/→ between them, ↑ back to the last step.
-    if (step === "fix_loop") {
-      const j = loopKeys.indexOf(key);
-      if (dir === "ArrowLeft") return loopKeys[Math.max(0, j - 1)];
-      if (dir === "ArrowRight") return loopKeys[Math.min(loopKeys.length - 1, j + 1)];
+    // The loop's stops sit on the arc, left to right: ←/→ between them at the same row (clamped), ↑/↓ within an
+    // open step, ↑ from a stop's top back to the last step.
+    const c = loopKeys.findIndex((col) => col.includes(key));
+    if (c >= 0) {
+      const r = loopKeys[c].indexOf(key);
+      const at = (cc: number, row: number) => { const col = loopKeys[Math.max(0, Math.min(loopKeys.length - 1, cc))]; return col?.[Math.min(row, col.length - 1)]; };
+      if (dir === "ArrowLeft") return at(c - 1, r);
+      if (dir === "ArrowRight") return at(c + 1, r);
+      if (dir === "ArrowDown") return at(c, r + 1);
+      if (dir === "ArrowUp" && r > 0) return at(c, r - 1);
       const end = steps.at(-1);
       if (dir === "ArrowUp" && end) return end.tasks.length ? taskKey(end.id, end.tasks.at(-1)!.id) : labelKey(end.id);
       return;
@@ -141,13 +180,15 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (dir === "ArrowRight") return at(k + 1, i);
     if (dir === "ArrowLeft") return at(k - 1, i);
     if (dir === "ArrowUp") return at(k, i - 1);
-    if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && loopKeys.length ? loopKeys[0] : at(k, i + 1);
+    if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && loopKeys.length ? loopKeys[0][0] : at(k, i + 1);
   };
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") { e.preventDefault(); onEscape?.(); return; }
+    // Esc steps back one: an open loop step to its box first.
+    if (e.key === "Escape") { e.preventDefault(); if (several(loopOpen)) toggleLoop(undefined); else onEscape?.(); return; }
     const key = roving.active;
     if (!key || !(e.target as Element).closest(".graph-node, .step-label, .scope-chip, .scope-task")) return;
     if (e.key.startsWith("Arrow")) { e.preventDefault(); roving.go(move(key, e.key)); }
+    else if (e.key === "Enter" && key.startsWith("g:")) { e.preventDefault(); toggleLoop(key.slice(2)); }
     else if (e.key === "Enter") {
       e.preventDefault();
       // A scope chip opens its scope, as Space and a click do.
@@ -162,9 +203,18 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   // The prototype moves a path by transitioning the CSS `d` (Chrome); elsewhere it snaps to its new place.
   const glide = (d: string) => (phase.glide ? ({ d: `path("${d}")` } as CSSProperties) : undefined);
   const { cam } = camera;
-  const loopShape = loop && loopArc(lay, loop.label);
-  const judged = loopTasks.length > 0 && loopTasks.at(-1)!.id === "judge";
-  const slots = loopSlots(lay, loopTasks.length - (judged ? 1 : 0), judged);
+  const judged = arcCols.at(-1)?.tasks[0].id === "judge";
+  const slots = loopSlots(lay, arcCols.length - (judged ? 1 : 0), judged);
+  const openAt = openCol ? arcCols.indexOf(openCol) : -1;
+  const openFrame = openAt >= 0 ? loopColumn(slots[openAt], openCol!.tasks.length) : undefined;
+  // Inside the open frame the loop's line gives way to a fork: a branch to each task, joined again on the far side.
+  const fork = openFrame && loopFork(slots[openAt], openFrame);
+  const clip = useId();
+  // The label sits at the arc's middle. More than a pair puts a task there, and an open step's frame reaches it:
+  // it then goes midway between the last two stops' edges, or just right of a frame that is alone.
+  const edge = (c: number) => (c === openAt ? LOOP_FRAME.w / 2 : G.BOX / 2), n = slots.length;
+  const labelX = n > 2 || (n === 2 && openFrame) ? (slots[n - 2].x + edge(n - 2) + slots[n - 1].x - edge(n - 1)) / 2 : n === 1 && openFrame ? slots[0].x + LOOP_FRAME.w / 2 + 45 : undefined;
+  const loopShape = loop && loopArc(lay, loop.label, labelX);
   const sb = side && sideBranch(lay);
   const isSel = (s: NodeSel) => selected?.step === s.step && selected?.task === s.task && !selected?.scope;
   const last = lay.cols[lay.cols.length - 1];
@@ -187,7 +237,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         aria-hidden={away || undefined}
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${away ? " is-away" : ""}${extra}`}
         style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
-        onFocus={() => { roving.go(key); camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
+        onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
         onClick={() => onSelect?.(s)}
         onDoubleClick={() => onExpand?.(s)}
       >
@@ -212,8 +262,16 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           {sb && <path d={sb.d} style={glide(sb.d)} className="edge is-side" />}
           {loopShape && (
             <g className={`arc tone-${loop.tone ?? "idle"}`}>
-              <path d={loopShape.d} style={glide(loopShape.d)} className="is-dashed" />
+              {/* The loop runs from one join to the other only as the fork: its own line is cut between them. */}
+              {fork && <clipPath id={clip}><path clipRule="evenodd" d={`M-1e5 -1e5H1e5V1e5H-1e5Z M${fork.cut[0]} -1e5H${fork.cut[1]}V1e5H${fork.cut[0]}Z`} /></clipPath>}
+              <path d={loopShape.d} style={glide(loopShape.d)} className="is-dashed" clipPath={fork ? `url(#${clip})` : undefined} />
               <path d={loopShape.arrow} />
+              {fork && (
+                <g className="arc-fork">
+                  {fork.edges.map((e) => <path key={e.key} d={e.d} className="is-dashed" />)}
+                  {fork.dots.map((d, i) => <circle key={i} cx={d.x} cy={d.y} r={3} />)}
+                </g>
+              )}
             </g>
           )}
         </svg>
@@ -252,7 +310,46 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
             st.seamBefore && seam(`sf${st.id}`, k === 0 ? (G.startX + 18 + cx - G.BOX / 2) / 2 : (lay.cols[k - 1].right + lay.cols[k].left) / 2, lay.TY, "Add a step here", (el) => onSeam?.("before", k, el)),
           ];
         })}
-        {loopTasks.map((t, i) => taskButton({ step: "fix_loop", task: t.id }, t, slots[i].x, slots[i].y, `fix-loop ${t.id === "judge" ? "judge" : "repair"} ${t.taskKind ?? "agent"} task`, t.faded ? " is-faded" : ""))}
+        {loopPhase.mounted && several(loopKept.current) && (() => {
+          // The frame grows from the step's box and shrinks back onto it, as an open task's does.
+          const col = several(loopKept.current)!, at = slots[arcCols.indexOf(col)];
+          const f = openFrame?.frame ?? { x: at.x - G.BOX / 2, y: at.y - G.BOX / 2, w: G.BOX, h: G.BOX };
+          return (
+            <div role="group" aria-label={`${col.step}, tasks in parallel`} className={`scope-frame loop-frame${loopPhase.content ? " is-on" : ""}${!several(loopOpen) && !loopPhase.layout ? " is-out" : ""}`} style={{ left: f.x, top: f.y, width: f.w, height: f.h }}>
+              <div className="scope-head" style={{ width: LOOP_FRAME.w }}>
+                <span className="loop-step">{col.step}</span>
+                <span className="scope-sub">in parallel</span>
+                {/* Out of the Tab order, as the scope frame's: Esc closes it from the keys. */}
+                <button type="button" tabIndex={-1} className="scope-close" {...tip("Close")} onClick={() => toggleLoop(undefined)}>✕</button>
+              </div>
+            </div>
+          );
+        })()}
+        {arcCols.map((col, c) => {
+          const kind = (t: GraphItem) => `fix-loop ${t.id === "judge" ? "judge" : "repair"} ${t.taskKind ?? "agent"} task`;
+          if (col === openCol) return col.tasks.map((t, j) => taskButton({ step: "fix_loop", task: t.id }, t, slots[c].x, openFrame!.ys[j], kind(t), " is-framed"));
+          if (col.tasks.length === 1) return taskButton({ step: "fix_loop", task: col.tasks[0].id }, col.tasks[0], slots[c].x, slots[c].y, kind(col.tasks[0]), col.tasks[0].faded ? " is-faded" : "");
+          // A step of several, closed: one box that opens into them. It selects nothing itself.
+          const key = loopStepKey(col.step!), look = stepLook(col.tasks), { x, y } = slots[c], n = col.tasks.length;
+          return (
+            <button
+              key={key}
+              ref={roving.ref(key)}
+              type="button"
+              tabIndex={roving.tabIndex(key)}
+              aria-expanded={false}
+              aria-label={accessibleName({ id: col.step!, ...look }, `fix-loop step of ${n} parallel tasks`)}
+              className={`graph-node is-task${look.state === "current" ? " is-bold" : ""}${look.state === "todo" ? " is-todo" : ""}${look.state === "amber" ? " is-warn" : ""}${look.faded ? " is-faded" : ""}`}
+              style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
+              onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
+              onClick={() => toggleLoop(col.step)}
+            >
+              <NodeGlyph icon="layers" {...look} size="md" sel={selStep === col.step} />
+              <span className="graph-label" style={{ maxWidth: G.COL - 6 }}>{breakable(col.step!)}</span>
+              <span className="graph-meta tone-muted">{n} in parallel</span>
+            </button>
+          );
+        })}
         {shown && open && phase.mounted && (
           <ScopeFrame
             view={shown.view}
