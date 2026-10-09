@@ -100,6 +100,15 @@ def test_notify_enabled_without_a_url(ctx):
     assert issue.message == "set a webhook URL before enabling notifications"
 
 
+def test_notify_unknown_event_reads_like_the_notify_route(ctx):
+    [issue] = config_check.check("notify.yaml", "events: [gate_requsted]\n", ctx)
+    assert issue.message == (
+        "notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
+        "for the names"
+    )
+    assert issue.loc == ("events",)
+
+
 def test_intake_interval_below_the_floor(ctx):
     issues = config_check.check(
         "intake.yaml", "enabled: true\ninterval_s: 5\npriority_ceiling: 2\n", ctx

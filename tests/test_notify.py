@@ -62,8 +62,22 @@ def test_notify_yaml_loads_with_every_missing_key_defaulted(tmp_path, text, expe
             "^notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
             "for the names$",
         ),
+        (
+            "events: [" + "https://hook.invalid/" + "a" * 20 + "MARKER" + "]\n",
+            r"^notify.yaml: events: unknown event type 'https://hook.invalid/a{19}\.\.\.'; see",
+        ),
+        (
+            "events: [" + ", ".join(f"bad{i}" for i in range(7)) + "]\n",
+            r"unknown event types 'bad0', 'bad1', 'bad2', 'bad3', 'bad4' and 2 more; see",
+        ),
     ],
-    ids=["malformed-yaml", "malformed-base-url", "unknown-event"],
+    ids=[
+        "malformed-yaml",
+        "malformed-base-url",
+        "unknown-event",
+        "long-unknown-event-is-cut",
+        "many-unknown-events-are-counted",
+    ],
 )
 def test_notify_load_refuses_a_file_it_cannot_use(tmp_path, text, error):
     """A file that does not parse, or that parses into a value the model
@@ -73,6 +87,7 @@ def test_notify_load_refuses_a_file_it_cannot_use(tmp_path, text, error):
     with pytest.raises(config.ConfigError, match=error) as refused:
         config.Notify.load(path)
     assert "t0ken" not in str(refused.value)
+    assert "MARKER" not in str(refused.value)
 
 
 def test_notify_events_accept_every_known_event_type_and_none():

@@ -1171,7 +1171,10 @@ class Notify(_Model):
         unknown = [e for e in events if e not in BY_VALUE]
         if unknown:
             kind = "type" if len(unknown) == 1 else "types"
-            names = ", ".join(repr(e) for e in unknown)
+            # A mis-indented webhook URL can land here; echo only a short head of it.
+            names = ", ".join(repr(e[:40] + "..." if len(e) > 40 else e) for e in unknown[:5])
+            if len(unknown) > 5:
+                names += f" and {len(unknown) - 5} more"
             raise ValueError(
                 f"unknown event {kind} {names}; see the Events reference for the names"
             )
