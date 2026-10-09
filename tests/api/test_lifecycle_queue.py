@@ -1,6 +1,7 @@
 """A queued item: what pausing it and a gate decision do to it. The doors that
 queue a start are pinned beside the doors themselves."""
 
+import asyncio
 import dataclasses
 import json
 from pathlib import Path
@@ -85,3 +86,30 @@ def test_pausing_an_item_the_scheduler_just_took_is_refused(client, repo, monkey
 
     assert r.status_code == 409, r.text
     assert "try again" in r.json()["detail"]
+
+
+def test_pausing_an_item_while_the_queue_starts_it_says_so(client, repo, monkeypatch):
+    """Between the scheduler's take and the door's claim the row reads paused.
+    Pause answers that a start is under way, not that the item is held."""
+    from kraft import start_queue
+    from kraft.api.routes import lifecycle
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    wid = _in_state(client, repo, DOORS["states"]["queued"])
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def door(*_):
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(lifecycle, "resume_work_item", door)
+    start = client.portal.start_task_soon(start_queue._start_one, client.app, wid)
+    client.portal.call(asyncio.wait_for, entered.wait(), 10)
+
+    r = client.post(f"/api/work-items/{wid}/pause", json={})
+
+    client.portal.call(release.set)
+    start.result(timeout=10)
+    assert r.status_code == 409, r.text
+    assert "being started from the queue" in r.json()["detail"]
+    assert wid not in start_queue.starting(client.app)

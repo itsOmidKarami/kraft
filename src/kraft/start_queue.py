@@ -54,6 +54,17 @@ def _request(app, headers: dict[str, str]) -> Request:
     )
 
 
+def starting(app) -> set[str]:
+    """The ids `_start_one` is starting right now. Between its take and the
+    door's claim the row reads `paused` or `needs_human`, so this is the only
+    place that says a start is under way; `pause` reads it. In memory: the
+    server is one process, and a restart ends every start in flight."""
+    ids = getattr(app.state, "_starting", None)
+    if ids is None:
+        ids = app.state._starting = set()
+    return ids
+
+
 async def tick(app) -> list[str]:
     """One pass. Returns the work item ids started, which is usually none."""
     st = app.state
@@ -71,6 +82,14 @@ async def tick(app) -> list[str]:
 
 
 async def _start_one(app, wid: str) -> bool:
+    starting(app).add(wid)  # before the take, so no pause can read the row in between
+    try:
+        return await _take_and_start(app, wid)
+    finally:
+        starting(app).discard(wid)
+
+
+async def _take_and_start(app, wid: str) -> bool:
     from kraft.api.routes import lifecycle  # deferred: kraft.api starts this module's poller
 
     st = app.state

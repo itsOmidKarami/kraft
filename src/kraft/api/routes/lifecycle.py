@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, node_runs, store
+from kraft import escalate, events, executor, node_runs, start_queue, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -600,6 +600,10 @@ async def _bulk_one(request: Request, wid: str, action: str, reason: str | None)
     return {"id": wid, "ok": True, "status": row["status"] if row is not None else None}
 
 
+#: What `pause` answers while the start queue is starting the item.
+_STARTING = "work item is being started from the queue: pause it again in a moment"
+
+
 # 02 §10.2.
 @api_router.post("/work-items/{wid}/pause")
 async def pause_work_item(wid: str, request: Request):
@@ -611,6 +615,7 @@ async def pause_work_item(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
+    being_started = wid in start_queue.starting(request.app)
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
     # is no session to signal in that state -- the wait is a row now -- so the
@@ -618,12 +623,19 @@ async def pause_work_item(wid: str, request: Request):
     # follow-up): the board offers Pause there, and nothing else stops the
     # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
     if row["status"] not in admitting(Verb.PAUSE):
+        if being_started and row["status"] in (WorkItemStatus.PAUSED, WorkItemStatus.NEEDS_HUMAN):
+            # Taken by the start queue and not yet claimed: the row reads paused
+            # or needs_human, but it is about to run.
+            raise HTTPException(409, _STARTING)
         raise HTTPException(409, f"work item is {row['status']}, not running")
     if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         # Nothing of it runs: pausing withdraws the start it asked for.
         if not await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused")):
-            # The scheduler took it first: it is starting, not leaving the hold.
-            raise HTTPException(409, "work item status changed; try again")
+            # Something took it first: the scheduler, which is starting it, or a
+            # blocked item's abandoned dependency.
+            raise HTTPException(
+                409, _STARTING if being_started else "work item status changed; try again"
+            )
         return {"id": wid, "paused_sessions": []}
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
