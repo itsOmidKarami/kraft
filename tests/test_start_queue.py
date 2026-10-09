@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from support.api import (
+    _come_after,
     _force_node,
     _paused,
     _poll_events,
@@ -140,3 +141,52 @@ def test_the_rebuilt_request_names_the_app_and_the_caller(client):
     assert request.app is client.app
     assert request.headers.get("x-kraft-session-id") == "s1"
     assert request.headers.get("x-kraft-client") is None
+
+
+@pytest.fixture
+def quiet(client):
+    """The app's own poller stopped, so only a test's ticks move anything."""
+    client.portal.call(client.app.state.queue_task.cancel)
+
+
+def _blocked_after(client, repo):
+    """(dep, wid): `wid` started while `dep` is unfinished, so it is blocked."""
+    dep = _paused(client, repo, chain_template="default")
+    wid = _paused(client, repo, chain_template="default")
+    _come_after(wid, [dep])
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
+    return dep, wid
+
+
+def test_a_blocked_item_starts_once_what_it_comes_after_completes(client, repo, quiet):
+    dep, wid = _blocked_after(client, repo)
+
+    assert _tick(client) == []
+    assert _status_of(client, wid) == "blocked"
+
+    _set_status(dep, "completed")
+    assert _tick(client) == [wid]
+    _poll_events(client, wid, "work_item_resumed")
+    types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert types.index("work_item_unblocked") < types.index("work_item_resumed")
+
+
+def test_a_released_item_waits_in_the_queue_when_the_board_is_full(client, repo, board):
+    dep, wid = _blocked_after(client, repo)
+    _set_status(dep, "completed")
+
+    assert _tick(client) == []
+
+    assert _status_of(client, wid) == "queued"
+    assert _status_of(client, board) == "active"
+
+
+def test_a_blocked_item_is_put_back_when_what_it_comes_after_is_abandoned(client, repo, quiet):
+    dep, wid = _blocked_after(client, repo)
+    _set_status(dep, "abandoned")
+
+    assert _tick(client) == []
+
+    assert _status_of(client, wid) == "paused"
+    last = client.get(f"/api/work-items/{wid}/events").json()[-1]
+    assert (last["type"], last["payload"]["why"]) == ("work_item_dequeued", "dependency_abandoned")
