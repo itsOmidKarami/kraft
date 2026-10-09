@@ -7,11 +7,7 @@ import sqlite3
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-
-# `StopKind` is defined in `kraft.vocab.stop`; `store.StopKind` stays importable
-# for `walk.py`.
-from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, SessionStatus, WorkItemStatus
-from kraft.vocab import StopKind as StopKind
+from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, SessionStatus, StopKind, WorkItemStatus
 from kraft.vocab.sql import in_list, marks
 
 #: How much of the title goes into the branch name. A Kraft title is a
