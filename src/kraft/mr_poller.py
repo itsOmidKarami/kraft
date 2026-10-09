@@ -19,7 +19,7 @@ import logging
 from kraft import store
 from kraft.adapters import forge as forge_mod
 from kraft.templates.models import ForgeTask
-from kraft.vocab import MR_WATCHED
+from kraft.vocab import MR_WATCHED, StopKind
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ async def tick(app) -> list[str]:
     rows = st.db.read(
         lambda c: c.execute(
             f"SELECT * FROM work_items WHERE status IN ({in_list(MR_WATCHED)}) "
-            "AND archived_at IS NULL AND stop_kind IS NOT 'mr_closed'"
+            f"AND archived_at IS NULL AND stop_kind IS NOT '{StopKind.MR_CLOSED}'"
         ).fetchall()
     )
     stopped: list[str] = []
@@ -109,7 +109,7 @@ async def _check_one(st, row) -> bool:
             wid,
             node_id,
             REASON,
-            kind="mr_closed",
+            kind=StopKind.MR_CLOSED,
             facts={"ref": ref["number"], "url": ref["url"]},
         )
         return True

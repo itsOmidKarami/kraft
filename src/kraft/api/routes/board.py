@@ -13,7 +13,16 @@ from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 from kraft.cap_levels import SCOPE_CAP_FIELDS
-from kraft.vocab import COMMANDS_MAY_START, LIVE, STOPPED, WorkItemStatus
+from kraft.vocab import (
+    COMMANDS_MAY_START,
+    FAILURE_KINDS,
+    LIVE,
+    STOPPED,
+    TRAITS,
+    DisplayStatus,
+    StopKind,
+    WorkItemStatus,
+)
 from kraft.vocab.sql import in_list
 
 
@@ -130,7 +139,9 @@ def _current_stop(st, wid: str) -> dict | None:
     return _stop_episode(st, wid)[0]
 
 
-def display_status(row, stop_kind: str | None, escalated: bool, pending_gate: str | None) -> str:
+def display_status(
+    row, stop_kind: str | None, escalated: bool, pending_gate: str | None
+) -> DisplayStatus:
     """The design vocabulary's status badge (Kraft Design Decisions §1, §14):
     exactly one of `archived`, `done`, `cancelled`, `paused`, `running`,
     `waiting`, `needs_you`, `escalated`, `failed`. The stored `status` column
@@ -147,27 +158,17 @@ def display_status(row, stop_kind: str | None, escalated: bool, pending_gate: st
     point `escalated` takes over.
     """
     if row["archived_at"] is not None:
-        return "archived"
-    status = row["status"]
-    if status == "completed":
-        return "done"
-    if status == "abandoned":
-        return "cancelled"
-    if status == "paused":
-        return "paused"
-    if status == "active":
-        return "running"
-    if status in ("waiting", "rate_limited"):
-        return "waiting"
-    if status == "needs_human":
-        if pending_gate:
-            return "needs_you"
-        if escalated:
-            return "escalated"
-        if stop_kind in ("failed", "config", "infra"):
-            return "failed"
-        return "needs_you"
-    return "running"
+        return DisplayStatus.ARCHIVED
+    shown = TRAITS[WorkItemStatus(row["status"])].display
+    if shown is not None:
+        return shown
+    # needs_human: the badge depends on the stop. An unrecognised stored kind
+    # (a downgrade, a future kind) is simply not a failure.
+    if pending_gate:
+        return DisplayStatus.NEEDS_YOU
+    if escalated:
+        return DisplayStatus.ESCALATED
+    return DisplayStatus.FAILED if stop_kind in FAILURE_KINDS else DisplayStatus.NEEDS_YOU
 
 
 def _stop_reason(st, wid: str) -> str | None:
@@ -678,21 +679,24 @@ def _legacy_needs_human_kind(payload: dict | None) -> str:
 
 def _stop_kind(
     stop_kind: str | None, status: str, pending_gate: str | None, payload: dict | None = None
-) -> str:
+) -> str | None:
     """`stop.kind` (B.3): the stored `stop_kind`, unless a gate is pending
     (`gate` -- a gate stop writes no `stop_kind`, it is `gate_requested`), or
     the row predates migration 45 and carries none. Then the status says
     whether it was a wait or a rate limit, and a `needs_human` row is read off
-    its stop event (`payload`): never called a rate limit."""
+    its stop event (`payload`): never called a rate limit. None off the
+    stopped statuses."""
     if pending_gate:
-        return "gate"
+        return StopKind.GATE
     if stop_kind is not None:
         return stop_kind
-    if status == "waiting":
-        return "wait"
-    if status == "needs_human":
+    status = WorkItemStatus(status)
+    implied = TRAITS[status].implied_stop_kind
+    if implied is not None:
+        return implied
+    if status is WorkItemStatus.NEEDS_HUMAN:
         return _legacy_needs_human_kind(payload)
-    return "rate_limit"
+    return None
 
 
 def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, int | None]:
@@ -870,12 +874,14 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     task, attempt = _stop_task_and_attempt(sessions, node)
     kind = _stop_kind(row["stop_kind"], status, pending_gate, stop_payload)
     facts = dict(stop_payload.get("facts") or {}) if stop_payload else {}
-    if kind == "rate_limit":
+    if kind == StopKind.RATE_LIMIT:
         facts.update(_rate_limit_facts(st, row, task))
     limit = _stop_limit(row, stop_payload)
     # Which cap stopped a budget stop (`caps.Breach.scope`): `work_item`, the
     # item's own, is the one `/budget/raise` takes; it refuses the rest.
-    scope = ((stop_payload or {}).get("budget") or {}).get("scope") if kind == "budget" else None
+    scope = (
+        ((stop_payload or {}).get("budget") or {}).get("scope") if kind == StopKind.BUDGET else None
+    )
     return {
         "kind": kind,
         "node": node,

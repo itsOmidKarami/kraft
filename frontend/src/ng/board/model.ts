@@ -1,5 +1,5 @@
 import { repoName } from "../../format";
-import type { WorkItem } from "../../types";
+import type { DisplayStatus, WorkItem } from "../../types";
 
 /** Every list decision of the board, once (W6 brief A.4). Reads the server's
  *  `display_status` and the raw row; nothing is derived on the client. */
@@ -18,20 +18,16 @@ export const STATUS_GROUPS: { key: GroupKey; label: string; empty: string }[] = 
 /** The board group of an item. A paused item with no current node was
  *  created and never resumed (the server's row says so, not a guess); one
  *  paused mid-chain waits on a person. `archived` is never on the list. */
+const GROUP: Record<DisplayStatus, GroupKey | null> = {
+  needs_you: "needs", failed: "needs", paused: null /* needs, or not_started without a node */,
+  done: "done", cancelled: "done", archived: "done",
+  running: "running", waiting: "running", escalated: "running",
+};
+
 export function groupOf(i: Pick<WorkItem, "display_status" | "current_node_id">): GroupKey {
-  switch (i.display_status) {
-    case "needs_you":
-    case "failed":
-      return "needs";
-    case "paused":
-      return i.current_node_id ? "needs" : "not_started";
-    case "done":
-    case "cancelled":
-    case "archived":
-      return "done";
-    default:
-      return "running";
-  }
+  const g = i.display_status ? GROUP[i.display_status] : undefined;
+  if (g === undefined) return "running"; // none, or a display status from a newer server
+  return g ?? (i.current_node_id ? "needs" : "not_started");
 }
 
 export interface Filter {

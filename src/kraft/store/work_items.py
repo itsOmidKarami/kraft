@@ -3,35 +3,16 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from typing import Literal
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
-from kraft.vocab.sql import in_list, marks
 
-#: Why a `needs_human`/`waiting`/`rate_limited` row is stopped (Kraft UI v2 ·
-#: B1). The first ten are `needs_human` kinds, written by `mark_needs_human`.
-#: `wait` and `rate_limit` are written only by `mark_waiting` and
-#: `mark_rate_limited`, in the same `UPDATE` that sets the status. `gate` is
-#: never written here -- a gate stop is `gate_requested`, not
-#: `work_item_needs_human`, and `board.display_status` reports `gate` for it
-#: without reading this column. B5 adds `worker_lost` itself.
-StopKind = Literal[
-    "gate",
-    "question",
-    "cap",
-    "budget",
-    "failed",
-    "conflict",
-    "mr_closed",
-    "config",
-    "infra",
-    "stuck",
-    "wait",
-    "rate_limit",
-]
+# `StopKind` is defined in `kraft.vocab.stop`; `store.StopKind` stays importable
+# for `walk.py`.
+from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, WorkItemStatus
+from kraft.vocab import StopKind as StopKind
+from kraft.vocab.sql import in_list, marks
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -227,6 +208,9 @@ def mark_needs_human(
     stopped it: `{path, key, value}`, `path` being `""` item-wide or a node id.
     Given only where a `PATCH policy` can raise it; the detail adds `maximum`.
     """
+    kind = StopKind(kind)
+    if STOP_TRAITS[kind].status != WorkItemStatus.NEEDS_HUMAN.value or not STOP_TRAITS[kind].stored:
+        raise ValueError(f"mark_needs_human cannot record a {kind.value!r} stop")
     if not write_status(
         conn,
         "UPDATE work_items SET status = 'needs_human', stop_kind = ?, retry_at = NULL, "

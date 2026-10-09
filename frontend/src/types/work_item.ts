@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { SessionStatus, WorkItemStatus } from "./vocab.generated";
+import type { DisplayStatus, SessionStatus, StopKind as GeneratedStopKind, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -121,34 +121,10 @@ export interface WorkItemAttachment {
  *  exactly one of these, so a pending gate, a plain failure and a
  *  stuck-but-not-yet-escalated stop -- all `needs_human` in `status` -- read
  *  apart with no client-side derivation. */
-export type DisplayStatus =
-  | "archived"
-  | "done"
-  | "cancelled"
-  | "paused"
-  | "running"
-  | "waiting"
-  | "needs_you"
-  | "escalated"
-  | "failed";
+export type { DisplayStatus };
 
-/** `work_items.stop_kind` (Kraft UI v2 · B1), plus `gate` (a pending gate,
- *  never written to the column itself) and `worker_lost` (added by B5,
- *  elsewhere). */
-export type StopKind =
-  | "gate"
-  | "question"
-  | "cap"
-  | "budget"
-  | "failed"
-  | "conflict"
-  | "mr_closed"
-  | "config"
-  | "infra"
-  | "stuck"
-  | "wait"
-  | "rate_limit"
-  | "worker_lost";
+/** The generated kinds plus `worker_lost`, planned (store/work_items.py) and already branched on by StateCard. */
+export type StopKind = GeneratedStopKind | "worker_lost";
 
 /** `stop` on a work item response (B.3/B.4): `null` unless `status` is
  *  `needs_human`, `waiting` or `rate_limited`. The list omits `task`,

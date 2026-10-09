@@ -14,6 +14,32 @@ from kraft import events, store
 from kraft import policy as policy_mod
 from kraft.api.routes import board
 
+
+@pytest.mark.parametrize(
+    ("stored", "status", "gate", "payload", "want"),
+    [
+        (None, "active", None, None, None),
+        (None, "completed", None, None, None),
+        (None, "waiting", None, None, "wait"),
+        (None, "rate_limited", None, None, "rate_limit"),
+        (None, "needs_human", None, None, "failed"),
+        ("cap", "needs_human", None, None, "cap"),
+        (None, "needs_human", "plan", None, "gate"),
+    ],
+    ids=[
+        "active-none",
+        "completed-none",
+        "waiting",
+        "rate_limited",
+        "legacy-needs_human-failed",
+        "stored",
+        "gate",
+    ],
+)
+def test_stop_kind_for_a_row(stored, status, gate, payload, want):
+    assert board._stop_kind(stored, status, gate, payload) == want
+
+
 # ── display_status (B.1) ──────────────────────────────────────────────────
 
 
