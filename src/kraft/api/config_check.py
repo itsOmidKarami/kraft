@@ -380,7 +380,11 @@ def _check_theme(path, data, ctx):
 
 
 def url_problem(value: str, field: str) -> str | None:
-    if urlsplit(value).scheme not in ("http", "https"):
+    try:
+        scheme = urlsplit(value).scheme
+    except ValueError:  # `http://[x`: urlsplit refuses an unclosed IPv6 bracket
+        scheme = ""
+    if scheme not in ("http", "https"):
         return f"{field} must be an http or https URL"
     return None
 

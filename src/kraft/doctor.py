@@ -375,7 +375,7 @@ def _notify_check(templates: Path) -> dict:
             f"{exc}; no notification is sent - fix it, then kraft admin restart",
         )
     if why := config_check.notify_problem(cfg):
-        return _check("notify.yaml", False, f"notify.yaml: {why}")
+        return _check("notify.yaml", False, f"notify.yaml: {why}; then kraft admin restart")
     if not cfg["enabled"]:
         return _check("notify.yaml", True, "parses (enabled: false)")
     return _check("notify.yaml", True, f"parses (enabled, {len(cfg['events'])} event type(s))")

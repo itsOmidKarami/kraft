@@ -269,9 +269,10 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
             False,
             "not valid YAML; no notification is sent - fix it, then kraft admin restart",
         ),
-        ("enabled: true\n", False, "set a webhook URL"),
+        ("enabled: true\n", False, "set a webhook URL before enabling notifications; then kraft"),
+        ("url: 'http://[T0KEN'\n", False, "url must be an http or https URL"),
     ],
-    ids=["absent", "enabled", "unknown-event", "bad-yaml", "enabled-no-url"],
+    ids=["absent", "enabled", "unknown-event", "bad-yaml", "enabled-no-url", "unparseable-url"],
 )
 def test_doctor_reports_a_notify_yaml_that_turns_notifications_off(
     templates_dir, monkeypatch, notify, ok, says

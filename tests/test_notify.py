@@ -543,6 +543,7 @@ def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
     [
         ({"url": "file:///etc/passwd"}, "url must be an http or https URL"),
         ({"base_url": "file:///etc/passwd"}, "base_url must be an http or https URL"),
+        ({"url": "http://[x"}, "url must be an http or https URL"),
         ({"enabled": True}, "set a webhook URL before enabling notifications"),
         (
             {"events": ["gate_requsted"]},
@@ -550,7 +551,13 @@ def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
             "for the names",
         ),
     ],
-    ids=["non-http-url", "non-http-base-url", "enabling-without-a-url", "unknown-event"],
+    ids=[
+        "non-http-url",
+        "non-http-base-url",
+        "unparseable-url",
+        "enabling-without-a-url",
+        "unknown-event",
+    ],
 )
 def test_put_refuses_a_bad_setting_and_writes_nothing(client, body, detail):
     """A rejected PUT must not leave a half-applied config on disk -- for
