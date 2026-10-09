@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_b5a89f03f870f995_entry_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 01:05 +0000
+            created at 2026-10-09 02:07 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -239,7 +239,7 @@
     <p class="run run2"><span class="n"><a id="t157" href="#t157">157</a></span><span class="t">        <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">sessions_for_round</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">,</span> <span class="nam">node_id</span><span class="op">,</span> <span class="nam">round</span> <span class="op">-</span> <span class="num">1</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t158" href="#t158">158</a></span><span class="t">        <span class="key">if</span> <span class="nam">r</span><span class="op">[</span><span class="str">&quot;hook_point&quot;</span><span class="op">]</span> <span class="op">==</span> <span class="nam">task_hook</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t159" href="#t159">159</a></span><span class="t">    <span class="op">]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t160" href="#t160">160</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">rows</span> <span class="key">or</span> <span class="nam">any</span><span class="op">(</span><span class="nam">r</span><span class="op">[</span><span class="str">&quot;status&quot;</span><span class="op">]</span> <span class="op">!=</span> <span class="str">&quot;done&quot;</span> <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">rows</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t160" href="#t160">160</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">rows</span> <span class="key">or</span> <span class="nam">any</span><span class="op">(</span><span class="nam">r</span><span class="op">[</span><span class="str">&quot;status&quot;</span><span class="op">]</span> <span class="op">!=</span> <span class="nam">SessionStatus</span><span class="op">.</span><span class="nam">DONE</span> <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">rows</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t161" href="#t161">161</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t162" href="#t162">162</a></span><span class="t">    <span class="nam">heads</span> <span class="op">=</span> <span class="op">{</span><span class="nam">r</span><span class="op">[</span><span class="str">&quot;head_sha&quot;</span><span class="op">]</span> <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">rows</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t163" href="#t163">163</a></span><span class="t">    <span class="key">return</span> <span class="nam">heads</span><span class="op">.</span><span class="nam">pop</span><span class="op">(</span><span class="op">)</span> <span class="key">if</span> <span class="nam">len</span><span class="op">(</span><span class="nam">heads</span><span class="op">)</span> <span class="op">==</span> <span class="num">1</span> <span class="key">else</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
@@ -2752,7 +2752,7 @@
             <a class="nav" href="z_b5a89f03f870f995_entry_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 01:05 +0000
+            created at 2026-10-09 02:07 +0000
         </p>
     </div>
 </footer>

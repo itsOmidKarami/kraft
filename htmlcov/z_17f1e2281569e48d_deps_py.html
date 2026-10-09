@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_17f1e2281569e48d_perimeter_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 01:05 +0000
+            created at 2026-10-09 02:07 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -124,7 +124,7 @@
     <p class="run run2"><span class="n"><a id="t42" href="#t42">42</a></span><span class="t">    <span class="nam">branch_name_problem</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t43" href="#t43">43</a></span><span class="t"><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t44" href="#t44">44</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">templates</span><span class="op">.</span><span class="nam">library</span> <span class="key">import</span> <span class="nam">LIBRARY_FILE</span><span class="op">,</span> <span class="nam">TemplateLibrary</span><span class="op">,</span> <span class="nam">TemplateLibraryError</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t45" href="#t45">45</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">ENDED</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t45" href="#t45">45</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">ENDED</span><span class="op">,</span> <span class="nam">StopKind</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t46" href="#t46">46</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">worker</span> <span class="key">import</span> <span class="nam">steering</span> <span class="key">as</span> <span class="nam">steering_mod</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t47" href="#t47">47</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t48" href="#t48">48</a></span><span class="t"><span class="nam">logger</span> <span class="op">=</span> <span class="nam">logging</span><span class="op">.</span><span class="nam">getLogger</span><span class="op">(</span><span class="nam">__name__</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -164,7 +164,7 @@
     <p class="run"><span class="n"><a id="t82" href="#t82">82</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t83" href="#t83">83</a></span><span class="t">            <span class="key">await</span> <span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t84" href="#t84">84</a></span><span class="t">                <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">mark_needs_human</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t85" href="#t85">85</a></span><span class="t">                    <span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">,</span> <span class="key">None</span><span class="op">,</span> <span class="nam">reason</span><span class="op">,</span> <span class="nam">kind</span><span class="op">=</span><span class="str">&quot;infra&quot;</span><span class="op">,</span> <span class="nam">facts</span><span class="op">=</span><span class="op">{</span><span class="str">&quot;cause&quot;</span><span class="op">:</span> <span class="str">&quot;crash&quot;</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t85" href="#t85">85</a></span><span class="t">                    <span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">,</span> <span class="key">None</span><span class="op">,</span> <span class="nam">reason</span><span class="op">,</span> <span class="nam">kind</span><span class="op">=</span><span class="nam">StopKind</span><span class="op">.</span><span class="nam">INFRA</span><span class="op">,</span> <span class="nam">facts</span><span class="op">=</span><span class="op">{</span><span class="str">&quot;cause&quot;</span><span class="op">:</span> <span class="str">&quot;crash&quot;</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t86" href="#t86">86</a></span><span class="t">                <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t87" href="#t87">87</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t88" href="#t88">88</a></span><span class="t">        <span class="key">except</span> <span class="nam">Exception</span><span class="op">:</span>  <span class="com"># noqa: BLE001</span>&nbsp;</span><span class="r"></span></p>
@@ -888,7 +888,7 @@
             <a class="nav" href="z_17f1e2281569e48d_perimeter_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 01:05 +0000
+            created at 2026-10-09 02:07 +0000
         </p>
     </div>
 </footer>
