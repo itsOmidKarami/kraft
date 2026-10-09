@@ -807,7 +807,7 @@ async def _resolve_conflict(
         reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
         kind = StopKind.CONFLICT
     facts = None
-    if kind == "conflict":
+    if kind == StopKind.CONFLICT:
         after_conflicted = _conflicted_paths(worktree)
         if before_conflicted is not None and after_conflicted is not None:
             facts = {
@@ -2033,7 +2033,7 @@ async def run_once(
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
         reason = str(exc)
-        kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else "infra"
+        kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
         await node_runs.entered(db, run_dirs.worktrees / work_item_id, work_item_id, failing_node)
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
