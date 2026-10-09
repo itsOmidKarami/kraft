@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 00:04 +0000
+            created at 2026-10-09 01:05 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -91,7 +91,7 @@
     <p class="pln"><span class="n"><a id="t9" href="#t9">9</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t10" href="#t10">10</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span> <span class="key">import</span> <span class="nam">client</span><span class="op">,</span> <span class="nam">render</span><span class="op">,</span> <span class="nam">usage</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t11" href="#t11">11</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">cli</span> <span class="key">import</span> <span class="nam">common</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t12" href="#t12">12</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">WorkItemStatus</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t12" href="#t12">12</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">StopKind</span><span class="op">,</span> <span class="nam">WorkItemStatus</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t13" href="#t13">13</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t14" href="#t14">14</a></span><span class="t"><span class="com">#: argparse choices; a typo answers an error, not an empty board. Plain strings,</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t15" href="#t15">15</a></span><span class="t"><span class="com">#: not members: argparse prints `repr(choice)` in its error.</span>&nbsp;</span><span class="r"></span></p>
@@ -192,7 +192,7 @@
     <p class="pln"><span class="n"><a id="t110" href="#t110">110</a></span><span class="t"><span class="str">    reader was never pointed at (R10a-10). A node&#x27;s, a token or the daily cap</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t111" href="#t111">111</a></span><span class="t"><span class="str">    is not one `raise-budget` takes (`item/status.ts`&#x27;s `budgetRaise`).&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t112" href="#t112">112</a></span><span class="t">    <span class="nam">stop</span> <span class="op">=</span> <span class="nam">item</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;stop&quot;</span><span class="op">)</span> <span class="key">or</span> <span class="op">{</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t113" href="#t113">113</a></span><span class="t">    <span class="key">if</span> <span class="nam">item</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;status&quot;</span><span class="op">)</span> <span class="op">!=</span> <span class="nam">WorkItemStatus</span><span class="op">.</span><span class="nam">NEEDS_HUMAN</span> <span class="key">or</span> <span class="nam">stop</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;kind&quot;</span><span class="op">)</span> <span class="op">!=</span> <span class="str">&quot;budget&quot;</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t113" href="#t113">113</a></span><span class="t">    <span class="key">if</span> <span class="nam">item</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;status&quot;</span><span class="op">)</span> <span class="op">!=</span> <span class="nam">WorkItemStatus</span><span class="op">.</span><span class="nam">NEEDS_HUMAN</span> <span class="key">or</span> <span class="nam">stop</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;kind&quot;</span><span class="op">)</span> <span class="op">!=</span> <span class="nam">StopKind</span><span class="op">.</span><span class="nam">BUDGET</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t114" href="#t114">114</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t115" href="#t115">115</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="op">(</span><span class="nam">stop</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;limit&quot;</span><span class="op">)</span> <span class="key">or</span> <span class="nam">stop</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;scope&quot;</span><span class="op">)</span> <span class="op">==</span> <span class="str">&quot;work_item&quot;</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
@@ -618,7 +618,7 @@
             <a class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 00:04 +0000
+            created at 2026-10-09 01:05 +0000
         </p>
     </div>
 </footer>
