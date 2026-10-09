@@ -2125,12 +2125,19 @@ def collect_findings(
     *,
     steps: tuple[ResolvedStep, ...] | None = None,
     dropped: dict[str, int] | None = None,
+    has_session: dict[str, bool] | None = None,
 ):
     """(findings, task paths that reported at least one) for one cycle.
 
     `dropped`, when given, is filled with `{task path: entries the parser threw
     away as malformed}`, so a caller can record that a reviewer wrote its
     findings wrong instead of letting that read as a clean review.
+
+    `has_session`, when given, is filled with `{task path: whether it has a
+    session at this round}` for every measuring task, so a caller can record
+    which tasks this measurement read. A step that fails stops the steps after
+    it, and without this a round the later task never ran in reads the same as
+    one where it ran and found nothing.
 
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
@@ -2186,6 +2193,8 @@ def collect_findings(
     for row in rows:
         if row["hook_point"] in tasks:
             by_hook.setdefault(row["hook_point"], []).append(row)  # ordered by created_at
+    if has_session is not None:
+        has_session.update({path: path in by_hook for path in tasks})
     found: list[_findings.Finding] = []
     reported: set[str] = set()
     for hook, hook_rows in by_hook.items():

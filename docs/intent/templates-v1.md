@@ -1003,6 +1003,20 @@ stop for a human when the loop is exhausted or detects that it is not making
 progress.
 enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry
 
+## REQ findings-measured-lists-the-tasks-with-a-session
+
+WHEN the system records `findings_measured`, the event SHALL list the node's
+measuring tasks that have a session at that round and those that have none.
+enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without
+origin: src/kraft/executor/walk.py
+
+## REQ fix-cycle-started-carries-the-attempt-cap
+
+WHEN a fix loop starts an attempt, the `fix_cycle_started` event SHALL carry
+the loop's attempt cap.
+enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[review-red]
+origin: src/kraft/executor/walk.py
+
 ## REQ fix-loop-judge-is-optional
 
 A fix loop MAY declare a judge. Without a judge, the system SHALL repeat

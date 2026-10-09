@@ -38,13 +38,19 @@ def _reviewer():
     }
 
 
-def _loop_node(node_id, measure: dict) -> dict:
+def _loop_node(node_id, measure: dict, then: dict | None = None) -> dict:
     """`node_id` measured by `measure`, with the fix loop and judge the legacy
-    `verify_fix_loop` bound to the fake agent."""
+    `verify_fix_loop` bound to the fake agent. `then` is a second measuring
+    task in a step of its own, after `measure`'s."""
+    measuring = (
+        {"tasks": [measure]}
+        if then is None
+        else {"steps": [{"id": "first", "tasks": [measure]}, {"id": "second", "tasks": [then]}]}
+    )
     return {
         "id": node_id,
         "kind": "exec",
-        "tasks": [measure],
+        **measuring,
         "fix_loop": {"tasks": [_agent("fix")], "judge": _agent("judge")},
     }
 
@@ -68,7 +74,7 @@ def _finding(message, severity="critical", *, file="a.py", line=3):
     }
 
 
-def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure=None):
+def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure=None, then=None):
     """Drive one work item through the review node. Returns `run_chain`'s dict.
 
     Each call gets its own scratch subdirectory rather than writing straight into
@@ -89,7 +95,7 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure
         call_dir,
         v1_seeded_chain(
             call_dir / "templates",
-            [_loop_node("review", measure or _reviewer())],
+            [_loop_node("review", measure or _reviewer(), then)],
             agent_command=_FAKE,
         ),
         policy=_policy(call_dir, attempts=attempts, severities=severities),
@@ -469,6 +475,33 @@ def test_findings_measured_has_no_dropped_key_for_a_clean_review(tmp_path, monke
     assert "dropped" not in _measured(out)[0]["payload"]
 
 
+def test_findings_measured_lists_the_tasks_with_a_session_and_those_without(tmp_path, monkeypatch):
+    """A step that fails stops the steps after it, so the red round measured the
+    first task only. The event has to say so, or that round reads the same as
+    one where the second task ran and found nothing."""
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "failed", "findings": [_finding("real")]},
+            {"status": "done", "findings": []},
+            {"status": "done", "findings": []},
+        ],
+        then={**_reviewer(), "id": "reader"},
+    )
+    red, green = (m["payload"] for m in _measured(out))
+    assert (red["measured_tasks"], red["unmeasured_tasks"]) == (
+        ["review.first.review"],
+        ["review.second.reader"],
+    )
+    assert (green["measured_tasks"], green["unmeasured_tasks"]) == (
+        ["review.first.review", "review.second.reader"],
+        [],
+    )
+    # Ahead of `findings`: the plain event view cuts a payload short.
+    assert list(red)[:5] == ["node_id", "cycle", "head_sha", "measured_tasks", "unmeasured_tasks"]
+
+
 def test_the_fix_prompt_names_findings_and_marks_repeats(tmp_path, monkeypatch):
     """Cycle 1's prompt must mark the finding it already tried and failed to fix.
 
@@ -659,6 +692,9 @@ def test_blind_subprocess_failure_becomes_a_synthetic_finding(tmp_path, monkeypa
     out = _run_template(tmp_path, monkeypatch, _blind_failure_node(), attempts=2)
     measured = _measured(out)
     assert measured, "no findings_measured event was written"
+    # It failed without a result file, but it ran: it has a session at this round.
+    assert measured[0]["payload"]["measured_tasks"] == ["verify.main.check"]
+    assert measured[0]["payload"]["unmeasured_tasks"] == []
     findings = measured[0]["payload"]["findings"]
     assert len(findings) == 1
     f = findings[0]

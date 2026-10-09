@@ -1327,8 +1327,9 @@ async def _walk_node_once(
         # failing task into a blind failure and put the loop beyond the reach of
         # the stuck detector.
         dropped_findings: dict[str, int] = {}
+        has_session: dict[str, bool] = {}
         found, reported_hooks = dispatch.collect_findings(
-            db, work_item_id, node, round, dropped=dropped_findings
+            db, work_item_id, node, round, dropped=dropped_findings, has_session=has_session
         )
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
@@ -1367,6 +1368,10 @@ async def _walk_node_once(
             # The commit this measurement is about, so the next round can tell a
             # re-rating of an untouched tree from a real change.
             "head_sha": head_sha,
+            # Which measuring tasks have a session at this round and which have
+            # none. Ahead of `findings`: the plain event view cuts a payload short.
+            "measured_tasks": sorted(p for p, ran in has_session.items() if ran),
+            "unmeasured_tasks": sorted(p for p, ran in has_session.items() if not ran),
             "findings": [
                 {**asdict(f), **({"reported_severity": s} if s != f.severity else {})}
                 for f, s in zip(found, as_reported, strict=True)
@@ -1587,6 +1592,8 @@ async def _walk_node_once(
         payload = {
             "node_id": node.id,
             "cycle": count,
+            # The cap `bump_counter` snapshotted, the one the breach check above used.
+            "max_attempts": cap.attempts,
             "failed_tasks": [t.path for t in failed],
         }
         await db.write(
