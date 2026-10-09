@@ -6,7 +6,7 @@ from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
-from kraft.vocab import GateEvent
+from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
@@ -66,7 +66,7 @@ def _since_requested(conn: sqlite3.Connection, work_item_id, gate, type: str) ->
     for e in reversed(events.read_after(conn, 0, work_item_id)):
         if e["payload"].get("gate") != gate:
             continue
-        if e["type"] == "gate_requested":
+        if e["type"] == GateEvent.REQUESTED:
             break
         if e["type"] == type:
             found.insert(0, e["payload"])
@@ -76,7 +76,7 @@ def _since_requested(conn: sqlite3.Connection, work_item_id, gate, type: str) ->
 def shown_revision(conn: sqlite3.Connection, work_item_id, gate) -> str | None:
     """The digest of the chain revision `gate` last showed a person since it
     was requested (`revision.digest`), or None if nobody has looked."""
-    shown = _since_requested(conn, work_item_id, gate, "chain_revision_shown")
+    shown = _since_requested(conn, work_item_id, gate, GateEvent.CHAIN_REVISION_SHOWN)
     return shown[-1]["digest"] if shown else None
 
 
@@ -145,7 +145,12 @@ def reject_gate(
 #: is spent. Newest-wins, the same shape of boundary `kraft.api.routes.board._stop_reason` uses:
 #: without one, an old addressed rejection would steer an unrelated retry many
 #: nodes later.
-_REJECTION_SPENT = ("node_started", "work_item_retried", "gate_requested", "gate_approved")
+_REJECTION_SPENT = (
+    ChainEvent.NODE_STARTED,
+    WorkItemEvent.RETRIED,
+    GateEvent.REQUESTED,
+    GateEvent.APPROVED,
+)
 
 
 def last_rejection(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
@@ -156,7 +161,7 @@ def last_rejection(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
     (Kraft-ko7j).
     """
     for e in reversed(events.read_after(conn, 0, work_item_id)):
-        if e["type"] == "gate_rejected":
+        if e["type"] == GateEvent.REJECTED:
             return e["payload"]
         if e["type"] in _REJECTION_SPENT:
             return None

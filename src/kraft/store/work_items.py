@@ -879,10 +879,10 @@ def recent_auto_pickups(conn: sqlite3.Connection, limit: int = 10) -> list[dict]
     rows = conn.execute(
         "SELECT e.work_item_id, e.payload, e.created_at, w.status "
         "FROM events e JOIN work_items w ON w.id = e.work_item_id "
-        "WHERE e.type = 'work_item_created' "
+        "WHERE e.type = ? "
         "AND json_extract(e.payload, '$.source') = 'auto_intake' "
         "ORDER BY e.created_at DESC LIMIT ?",
-        (limit,),
+        (WorkItemEvent.CREATED, limit),
     ).fetchall()
     out = []
     for r in rows:
@@ -905,9 +905,10 @@ def last_auto_pickup_at(conn: sqlite3.Connection) -> dict[str, str]:
     """Repo path -> ISO timestamp of its most recent auto-intake start."""
     rows = conn.execute(
         "SELECT json_extract(e.payload, '$.repo') AS repo, MAX(e.created_at) AS at "
-        "FROM events e WHERE e.type = 'work_item_created' "
+        "FROM events e WHERE e.type = ? "
         "AND json_extract(e.payload, '$.source') = 'auto_intake' "
-        "GROUP BY repo"
+        "GROUP BY repo",
+        (WorkItemEvent.CREATED,),
     ).fetchall()
     return {r["repo"]: r["at"] for r in rows if r["repo"]}
 

@@ -36,6 +36,7 @@ from kraft.vocab import (
     ENDED,
     HOLDS_SLOT,
     LIVE,
+    EscalationEvent,
     LimitEvent,
     SandboxEvent,
     SessionStatus,
@@ -246,7 +247,8 @@ async def _resume_adopted_escalation(
         (
             e
             for e in evts
-            if e["type"] == "escalation_message" and e["payload"].get("session_id") == session_id
+            if e["type"] == EscalationEvent.ESCALATION_MESSAGE
+            and e["payload"].get("session_id") == session_id
         ),
         None,
     )

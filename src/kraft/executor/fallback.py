@@ -85,10 +85,10 @@ def known_limited(conn, harness: str, model: str | None) -> str | None:
     (`known-limited-candidate-is-skipped-until-reset`). An event written
     before the hit carried a harness never matches."""
     row = conn.execute(
-        "SELECT payload FROM events WHERE type = 'rate_limit_hit' "
+        "SELECT payload FROM events WHERE type = ? "
         "AND json_extract(payload, '$.harness') = ? AND json_extract(payload, '$.model') IS ? "
         "ORDER BY seq DESC LIMIT 1",
-        (harness, model),
+        (LimitEvent.RATE_LIMIT_HIT, harness, model),
     ).fetchone()
     if row is None:
         return None

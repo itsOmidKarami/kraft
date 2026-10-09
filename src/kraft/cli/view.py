@@ -9,7 +9,7 @@ import sys
 
 from kraft import client, render, usage
 from kraft.cli import common
-from kraft.vocab import StopKind, WorkItemStatus
+from kraft.vocab import StopKind, WorkItemEvent, WorkItemStatus
 
 #: argparse choices; a typo answers an error, not an empty board. Plain strings,
 #: not members: argparse prints `repr(choice)` in its error.
@@ -224,7 +224,7 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
 #: The events after which a chain produces no more of them. A follow that
 #: outlives the item is worse than no follow -- it is a monitor that stays
 #: armed forever on work that finished.
-_CHAIN_ENDED = ("work_item_completed", "work_item_abandoned")
+_CHAIN_ENDED = (WorkItemEvent.COMPLETED, WorkItemEvent.ABANDONED)
 
 
 def _cmd_events(ns: argparse.Namespace) -> None:

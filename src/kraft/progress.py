@@ -19,7 +19,7 @@ from kraft import events
 from kraft import store as _store
 from kraft.adapters.agent import artifact_path
 from kraft.config import git_read
-from kraft.vocab import HOLDS_SLOT
+from kraft.vocab import HOLDS_SLOT, ChainEvent, GateEvent, WorkItemEvent
 
 logger = logging.getLogger(__name__)
 
@@ -220,12 +220,16 @@ def run_state(evs: list[dict], node_id: str) -> int:
         (
             i
             for i, e in enumerate(evs)
-            if e["type"] == "node_started" and e["payload"].get("node_id") == node_id
+            if e["type"] == ChainEvent.NODE_STARTED and e["payload"].get("node_id") == node_id
         ),
         default=-1,
     )
     return next(
-        (e["payload"]["task"] for e in reversed(evs[start + 1 :]) if e["type"] == "plan_progress"),
+        (
+            e["payload"]["task"]
+            for e in reversed(evs[start + 1 :])
+            if e["type"] == WorkItemEvent.PLAN_PROGRESS
+        ),
         0,
     )
 
@@ -241,19 +245,23 @@ def is_rework(evs: list[dict], node_id: str) -> bool:
         (
             i
             for i, e in enumerate(evs)
-            if e["type"] == "node_completed" and e["payload"].get("node_id") == node_id
+            if e["type"] == ChainEvent.NODE_COMPLETED and e["payload"].get("node_id") == node_id
         ),
         default=None,
     )
     if done is None:
         return False
     rejected = max(
-        (i for i in range(done + 1, len(evs)) if evs[i]["type"] == "gate_rejected"), default=None
+        (i for i in range(done + 1, len(evs)) if evs[i]["type"] == GateEvent.REJECTED), default=None
     )
     if rejected is None:
         return False
     first = next(
-        (e["payload"].get("node_id") for e in evs[rejected + 1 :] if e["type"] == "node_started"),
+        (
+            e["payload"].get("node_id")
+            for e in evs[rejected + 1 :]
+            if e["type"] == ChainEvent.NODE_STARTED
+        ),
         None,
     )
     return first == node_id
@@ -326,14 +334,14 @@ def for_detail(db, row, worktree: Path) -> ProgressReport | None:
             default=-1,
         )
 
-    started = last("node_started")
+    started = last(ChainEvent.NODE_STARTED)
     if started < 0:
         return None
     tasks = tasks_for(row, worktree)
     if not tasks:
         return None
     log = branch_log(row, worktree)
-    if last("node_completed") > started or is_rework(evs, node_id):
+    if last(ChainEvent.NODE_COMPLETED) > started or is_rework(evs, node_id):
         report = ProgressReport(
             current=len(tasks),
             total=len(tasks),

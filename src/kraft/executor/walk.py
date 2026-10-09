@@ -49,6 +49,7 @@ from kraft.vocab import (
     ChainEvent,
     EscalationEvent,
     GateEvent,
+    SessionEvent,
     StopKind,
     WorkItemEvent,
 )
@@ -173,7 +174,7 @@ async def _diagnosis_bundle(
         (
             e["payload"].get("concerns")
             for e in reversed(evts)
-            if e["type"] == "worker_session_exited"
+            if e["type"] == SessionEvent.WORKER_SESSION_EXITED
             and e["payload"].get("concerns")
             and e["payload"].get("session_id") not in judge_session_ids
         ),

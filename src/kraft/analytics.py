@@ -31,13 +31,13 @@ from datetime import UTC, datetime, timedelta
 from kraft import caps as _caps
 from kraft.store._common import session_wall_ms, wait_sessions, wait_timed_out_sessions
 from kraft.usage import KINDS, spent
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import RUN_BOUNDARY, ChainEvent, GateEvent, WorkItemEvent, WorkItemStatus
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
 #: Events that stop an item on a person, and the ones that start it again.
-_BLOCKS = ("gate_requested", "work_item_needs_human")
-_UNBLOCKS = ("gate_approved", "gate_rejected", "work_item_retried", "node_started")
+_BLOCKS = (GateEvent.REQUESTED, WorkItemEvent.NEEDS_HUMAN)
+_UNBLOCKS = (GateEvent.APPROVED, GateEvent.REJECTED, WorkItemEvent.RETRIED, ChainEvent.NODE_STARTED)
 
 
 def cutoff(range_: str, now: datetime | None = None) -> str | None:
@@ -125,23 +125,6 @@ def _completed_count_between(
     return row["n"]
 
 
-#: Duplicated from `kraft.executor.gates._RUN_BOUNDARY` -- edit both
-#: together. See that module's own docstring for the full account of why
-#: each of these, and only these, counts as a human closing out a run of
-#: stuck-ness; not imported here to keep this module free of the
-#: executor/agent import stack for the sake of nine strings.
-_RUN_BOUNDARY = (
-    "work_item_retried",
-    "work_item_resumed",
-    "work_item_created",
-    "pause_requested",
-    "gate_approved",
-    "gate_rejected",
-    "work_item_completed",
-    "work_item_abandoned",
-    "work_item_restored",
-)
-
 #: Kraft-s15p0's own words -- the first (so far only) known orchestrator
 #: defect signature, kept next to the classifier that reads it so a future
 #: fixed defect's signature is added in the same place. `startswith`, not
@@ -184,9 +167,9 @@ def _episode_bucket(e: sqlite3.Row) -> str | None:
     so a budget stop never falls through to `task failure`'s catch-all.
     """
     payload = json.loads(e["payload"])
-    if e["type"] == "gate_requested":
+    if e["type"] == GateEvent.REQUESTED:
         return f"gate · {payload.get('gate', 'unknown')}"
-    if e["type"] != "work_item_needs_human":
+    if e["type"] != WorkItemEvent.NEEDS_HUMAN:
         return None
     reason = payload.get("reason") or ""
     if payload.get("budget") is not None:
@@ -218,7 +201,7 @@ def _resolved_without_human(item_events: list[sqlite3.Row], stop_index: int) -> 
     """True iff the stop at `item_events[stop_index]` was cleared by the
     auto-escalate machinery alone -- nobody paged.
 
-    Forward scan to the first `_RUN_BOUNDARY`-shaped event after the stop:
+    Forward scan to the first `RUN_BOUNDARY`-shaped event after the stop:
     the same idiom `kraft.executor.gates._auto_dispatch_count` walks in
     reverse from "now" to answer "has this still-open run already been
     escalated" -- here walked forward once per already-closed historical
@@ -228,17 +211,17 @@ def _resolved_without_human(item_events: list[sqlite3.Row], stop_index: int) -> 
     """
     for e in item_events[stop_index + 1 :]:
         t = e["type"]
-        if t not in _RUN_BOUNDARY:
+        if t not in RUN_BOUNDARY:
             continue
         payload = json.loads(e["payload"])
-        if t == "work_item_retried" and payload.get("escalated"):
+        if t == WorkItemEvent.RETRIED and payload.get("escalated"):
             return True
         # `== "agent"` and deliberately not `in ("agent", "assistant")`
         # (Kraft-s7c04.43). `agent` is Kraft's own gate auto-review -- the
         # machinery unblocking itself, nobody paged. An `assistant` cleared the
         # gate because a person told it to, so a person was paged and this is
         # the touch the metric exists to count.
-        if t in ("gate_approved", "gate_rejected") and payload.get("by") == "agent":
+        if t in (GateEvent.APPROVED, GateEvent.REJECTED) and payload.get("by") == "agent":
             return True
         return False
     return False
@@ -521,7 +504,7 @@ def compute(
     per_item: dict[str, list[sqlite3.Row]] = {}
     for e in events:
         per_item.setdefault(e["work_item_id"], []).append(e)
-        if e["type"] != "node_completed":
+        if e["type"] != ChainEvent.NODE_COMPLETED:
             continue
         node_id = json.loads(e["payload"]).get("node_id")
         if node_id in merge_nodes.get(e["work_item_id"], ()):
@@ -544,7 +527,7 @@ def compute(
             (
                 _parse(e["created_at"])
                 for e in per_item.get(r["id"], [])
-                if e["type"] == "work_item_completed"
+                if e["type"] == WorkItemEvent.COMPLETED
             ),
             None,
         )
@@ -571,7 +554,7 @@ def compute(
             (
                 _parse(e["created_at"])
                 for e in evts
-                if e["type"] == "node_started"
+                if e["type"] == ChainEvent.NODE_STARTED
                 and json.loads(e["payload"]).get("node_id") in open_nodes
             ),
             None,
@@ -580,7 +563,7 @@ def compute(
             (
                 _parse(e["created_at"])
                 for e in evts
-                if e["type"] == "node_completed"
+                if e["type"] == ChainEvent.NODE_COMPLETED
                 and json.loads(e["payload"]).get("node_id") in ci_nodes
             ),
             None,
@@ -592,7 +575,7 @@ def compute(
 
     rejected_by_gate: dict[str, int] = {}
     for e in events:
-        if e["type"] == "gate_rejected":
+        if e["type"] == GateEvent.REJECTED:
             gate = json.loads(e["payload"]).get("gate", "unknown")
             rejected_by_gate[gate] = rejected_by_gate.get(gate, 0) + 1
     totals["rejected_gates"] = sum(rejected_by_gate.values())

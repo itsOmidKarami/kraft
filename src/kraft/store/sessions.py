@@ -10,7 +10,16 @@ from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
 from kraft.usage import Usage
-from kraft.vocab import LIVE, LimitEvent, SessionEvent, SessionStatus
+from kraft.vocab import (
+    LIVE,
+    RESTARTS_RUN,
+    ChainEvent,
+    GateEvent,
+    LimitEvent,
+    SessionEvent,
+    SessionStatus,
+    WorkItemEvent,
+)
 from kraft.vocab.sql import in_list
 
 
@@ -325,25 +334,26 @@ def reusable_session(
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events restarted "
         "  WHERE restarted.work_item_id = worker_sessions.work_item_id "
-        "  AND restarted.type IN ('work_item_retried', 'base_change_restart') "
+        "  AND restarted.type IN "
+        f"({in_list((WorkItemEvent.RETRIED, ChainEvent.BASE_CHANGE_RESTART))}) "
         "  AND restarted.created_at > worker_sessions.created_at"
         ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events WHERE events.work_item_id = worker_sessions.work_item_id "
-        "  AND events.type = 'node_completed' "
+        "  AND events.type = ? "
         "  AND json_extract(events.payload, '$.node_id') = worker_sessions.node_id "
         "  AND events.created_at > worker_sessions.created_at"
         ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events reentry "
         "  WHERE reentry.work_item_id = worker_sessions.work_item_id "
-        "  AND reentry.type = 'node_started' "
+        "  AND reentry.type = ? "
         "  AND json_extract(reentry.payload, '$.node_id') = worker_sessions.node_id "
         "  AND reentry.created_at > worker_sessions.created_at "
         "  AND EXISTS ("
         "    SELECT 1 FROM events departed "
         "    WHERE departed.work_item_id = worker_sessions.work_item_id "
-        "    AND departed.type = 'node_started' "
+        "    AND departed.type = ? "
         "    AND json_extract(departed.payload, '$.node_id') != worker_sessions.node_id "
         "    AND departed.created_at > worker_sessions.created_at "
         "    AND departed.created_at < reentry.created_at"
@@ -352,7 +362,7 @@ def reusable_session(
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events rejected "
         "  WHERE rejected.work_item_id = worker_sessions.work_item_id "
-        "  AND rejected.type = 'gate_rejected' "
+        "  AND rejected.type = ? "
         "  AND rejected.created_at > worker_sessions.created_at"
         ") "
         "AND NOT EXISTS ("
@@ -365,7 +375,17 @@ def reusable_session(
         "  AND sibling.status != 'done'"
         ") "
         "ORDER BY created_at DESC LIMIT 1",
-        (work_item_id, node_id, hook_point, round, head_sha),
+        (
+            work_item_id,
+            node_id,
+            hook_point,
+            round,
+            head_sha,
+            ChainEvent.NODE_COMPLETED,
+            ChainEvent.NODE_STARTED,
+            ChainEvent.NODE_STARTED,
+            GateEvent.REJECTED,
+        ),
     ).fetchone()
 
 
@@ -911,7 +931,7 @@ def resumable_agent_session(
         return None
     newer_pass = conn.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? "
-        "AND type IN ('work_item_retried', 'run_forked', 'base_change_restart') "
+        f"AND type IN ({in_list(RESTARTS_RUN)}) "
         "AND created_at > ? LIMIT 1",
         (work_item_id, latest["created_at"]),
     ).fetchone()

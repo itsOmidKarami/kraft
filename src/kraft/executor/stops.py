@@ -19,7 +19,7 @@ from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.usage import cap_usd as _cap_usd
 from kraft.usage import usd as _usd
-from kraft.vocab import HOLDS_SLOT, StopKind
+from kraft.vocab import HOLDS_SLOT, ForgeEvent, LimitEvent, StopKind
 from kraft.worker import sandbox as _sandbox
 
 #: Parses a raw event payload (the DB's dict, read back from JSON) into the
@@ -186,7 +186,7 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
         (
             e["payload"]
             for e in reversed(db.read(lambda c: events.read_after(c, 0, work_item_id)))
-            if e["type"] in ("token_budget_reached", "scope_budget_reached")
+            if e["type"] in ("token_budget_reached", LimitEvent.SCOPE_BUDGET_REACHED)
             # `token_budget_reached` was its name before Ruling 195.
         ),
         None,
@@ -230,7 +230,7 @@ def latest_rate_limit(db, work_item_id: str) -> dict | None:
     """
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] in ("rate_limit_hit", "launch_fallback_exhausted"):
+        if e["type"] in (LimitEvent.RATE_LIMIT_HIT, LimitEvent.LAUNCH_FALLBACK_EXHAUSTED):
             return e["payload"]
     return None
 
@@ -298,7 +298,12 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
         (
             e["payload"]["reason"]
             for e in reversed(info)
-            if e["type"] in ("ci_infra_exhausted", "automated_review_errored", "ci_run_abandoned")
+            if e["type"]
+            in (
+                ForgeEvent.CI_INFRA_EXHAUSTED,
+                ForgeEvent.AUTOMATED_REVIEW_ERRORED,
+                ForgeEvent.CI_RUN_ABANDONED,
+            )
         ),
         "CI infrastructure failed and retrying it did not recover",
     )

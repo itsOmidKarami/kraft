@@ -13,7 +13,7 @@ import uuid
 
 from kraft import events, render
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.vocab import GateEvent
+from kraft.vocab import ChainEvent, GateEvent
 
 __all__ = [
     "CLAIMS",
@@ -477,15 +477,19 @@ def pending_rewind(conn, wid) -> dict | None:
     next `node_started`, void once cancelled (review threads anywhere §1)."""
     evs = events.read_after(conn, 0, wid)
     last = next(
-        (i for i in range(len(evs) - 1, -1, -1) if evs[i]["type"] == "rewind_requested"), None
+        (i for i in range(len(evs) - 1, -1, -1) if evs[i]["type"] == GateEvent.REWIND_REQUESTED),
+        None,
     )
     if last is None:
         return None
     p = evs[last]["payload"]
     for e in evs[last + 1 :]:
-        if e["type"] == "node_started" and e["payload"].get("node_id") == p["target"]:
+        if e["type"] == ChainEvent.NODE_STARTED and e["payload"].get("node_id") == p["target"]:
             return None
-        if e["type"] == "rewind_cancelled" and e["payload"].get("review_id") == p["review_id"]:
+        if (
+            e["type"] == GateEvent.REWIND_CANCELLED
+            and e["payload"].get("review_id") == p["review_id"]
+        ):
             return None
     return {"seq": evs[last]["seq"], **p}
 

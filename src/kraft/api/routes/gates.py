@@ -10,7 +10,7 @@ from kraft.api.routes.lifecycle import _stop_live_sessions, queued_refusal
 from kraft.executor import stops
 from kraft.templates import revision
 from kraft.templates.models import GateNode
-from kraft.vocab import StopKind, WorkItemStatus
+from kraft.vocab import GateEvent, StopKind, WorkItemStatus
 
 
 def gate_nodes(st, row) -> tuple:
@@ -110,8 +110,11 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
     chain it already revised.
     """
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, row["id"]))):
-        if e["type"] in ("chain_revised", "gate_requested") and e["payload"].get("gate") == gate:
-            if e["type"] == "chain_revised":
+        if (
+            e["type"] in (GateEvent.CHAIN_REVISED, GateEvent.REQUESTED)
+            and e["payload"].get("gate") == gate
+        ):
+            if e["type"] == GateEvent.CHAIN_REVISED:
                 return None
             break
     rel = executor.gate_artifact(st.run_dirs, row, gate)

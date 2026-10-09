@@ -385,9 +385,9 @@ async def record_kit(db, work_item_id: str, fetched: _kit.Fetched, lowered: _kit
 
     def write(conn) -> None:
         if conn.execute(
-            "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'sandbox_kit_resolved' "
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
             "AND json_extract(payload, '$.kit') = ?",
-            (work_item_id, lowered.kit),
+            (work_item_id, SandboxEvent.KIT_RESOLVED, lowered.kit),
         ).fetchone():
             return
         events.append(
@@ -659,12 +659,20 @@ def scope_results(
         lambda c: c.execute(
             "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.result_path "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
-            "AND e.type = 'worker_session_created' "
+            "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
             "WHERE ws.work_item_id = ? AND ws.node_id = ? AND ws.hook_point = ? "
             "AND e.seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ? "
-            "AND type = 'node_started' AND node_id = ?) ORDER BY e.seq",
-            (work_item_id, node_id, task_hook, work_item_id, node_id),
+            "AND type = ? AND node_id = ?) ORDER BY e.seq",
+            (
+                SessionEvent.WORKER_SESSION_CREATED,
+                work_item_id,
+                node_id,
+                task_hook,
+                work_item_id,
+                ChainEvent.NODE_STARTED,
+                node_id,
+            ),
         ).fetchall()
     )
     if not rows:
@@ -776,11 +784,11 @@ def scope_runs(
         lambda c: c.execute(
             "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.result_path, e.seq "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
-            "AND e.type = 'worker_session_created' "
+            "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
             "WHERE ws.work_item_id = ? AND ws.node_id = ? AND ws.hook_point = ? "
             "AND ws.command IS NOT NULL ORDER BY e.seq",
-            (work_item_id, node_id, task_hook),
+            (SessionEvent.WORKER_SESSION_CREATED, work_item_id, node_id, task_hook),
         ).fetchall()
     )
     selections = [
@@ -788,8 +796,8 @@ def scope_runs(
         for seq, payload in db.read(
             lambda c: c.execute(
                 "SELECT seq, payload FROM events WHERE work_item_id = ? "
-                "AND type = 'test_scopes_selected' AND node_id = ? ORDER BY seq",
-                (work_item_id, node_id),
+                "AND type = ? AND node_id = ? ORDER BY seq",
+                (work_item_id, ChainEvent.TEST_SCOPES_SELECTED, node_id),
             ).fetchall()
         )
     ]
@@ -1532,9 +1540,9 @@ def _last_left_out(db, work_item_id: str) -> list[str] | None:
     """The paths the item's newest `sweep_left_out` named, if any."""
     row = db.read(
         lambda c: c.execute(
-            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'sweep_left_out' "
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
             "ORDER BY seq DESC LIMIT 1",
-            (work_item_id,),
+            (work_item_id, ChainEvent.SWEEP_LEFT_OUT),
         ).fetchone()
     )
     return json.loads(row["payload"]).get("paths") if row is not None else None
@@ -2375,11 +2383,13 @@ def last_measurement(
     for e in reversed(evts):
         if e["payload"].get("node_id") != node_id:
             continue
-        if e["type"] == "fix_cycle_refunded":
+        if e["type"] == ChainEvent.FIX_CYCLE_REFUNDED:
             refunded.add(e["payload"].get("cycle"))
-        elif e["type"] == "fix_cycle_started" and e["payload"].get("cycle") not in refunded:
+        elif (
+            e["type"] == ChainEvent.FIX_CYCLE_STARTED and e["payload"].get("cycle") not in refunded
+        ):
             fix_seen = True
-        elif e["type"] == "findings_measured":
+        elif e["type"] == ChainEvent.FINDINGS_MEASURED:
             return (
                 [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
                 fix_seen,
@@ -2450,7 +2460,7 @@ def judge_history(
     #: which is every existing caller including the judge's own.
     measured: list[tuple[int, list[_findings.Finding]]] = []
     for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
-        if e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
+        if e["type"] == ChainEvent.FINDINGS_MEASURED and e["payload"].get("node_id") == node_id:
             cycle = e["payload"]["cycle"]
             if cycle < 0:
                 continue
@@ -2527,7 +2537,7 @@ def deferred_findings(db, work_item_id: str, loop_severities: frozenset[str]) ->
     """
     seen: dict[str, dict] = {}
     for e in db.read(lambda c: events.read_after(c, 0, work_item_id)):
-        if e["type"] != "findings_measured":
+        if e["type"] != ChainEvent.FINDINGS_MEASURED:
             continue
         for raw in e["payload"].get("findings", []):
             if raw.get("severity") in loop_severities:

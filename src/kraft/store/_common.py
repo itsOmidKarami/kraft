@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from kraft.vocab import ENDED  # the statuses an item never leaves (Kraft-dncfg)
+from kraft.vocab import ENDED, ForgeEvent  # ENDED: an item never leaves these (Kraft-dncfg)
 from kraft.vocab.sql import marks
 
 
@@ -79,8 +79,8 @@ def wait_sessions(conn, work_item_ids) -> set[str]:
     rows = conn.execute(
         "SELECT DISTINCT json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) "
-        "AND type = 'external_wait_observed'",
-        ids,
+        "AND type = ?",
+        (*ids, ForgeEvent.EXTERNAL_WAIT_OBSERVED),
     ).fetchall()
     return {r["sid"] for r in rows if r["sid"]}
 
@@ -96,7 +96,7 @@ def wait_timed_out_sessions(conn, work_item_ids) -> set[str]:
     rows = conn.execute(
         "SELECT json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) "
-        "AND type = 'external_wait_ended' AND json_extract(payload, '$.outcome') = 'timed_out'",
-        ids,
+        "AND type = ? AND json_extract(payload, '$.outcome') = 'timed_out'",
+        (*ids, ForgeEvent.EXTERNAL_WAIT_ENDED),
     ).fetchall()
     return {r["sid"] for r in rows if r["sid"]}

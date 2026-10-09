@@ -126,11 +126,11 @@ def _approved(conn: sqlite3.Connection, work_item_id: str, gate: str) -> bool:
     reopened since."""
     row = conn.execute(
         "SELECT type FROM events WHERE work_item_id = ? "
-        "AND type IN ('gate_approved', 'gate_reopened') "
+        "AND type IN (?, ?) "
         "AND json_extract(payload, '$.gate') = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, gate),
+        (work_item_id, GateEvent.APPROVED, GateEvent.REOPENED, gate),
     ).fetchone()
-    return row is not None and row["type"] == "gate_approved"
+    return row is not None and row["type"] == GateEvent.APPROVED
 
 
 def fork_boundary(conn: sqlite3.Connection, work_item_id: str) -> int:

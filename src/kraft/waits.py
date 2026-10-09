@@ -26,7 +26,7 @@ own cursor, the waiting step (Kraft-c3dab) -- and that re-entry makes the next
 observation.
 
 A wait instance is one task path's run of observations from its start to its
-outcome, or to a restart of the item under it (`_RESTARTS`: a retry, a run
+outcome, or to a restart of the item under it (`RESTARTS_RUN`: a retry, a run
 fork, a base-change restart): its clock belongs to it alone, so a second pass over
 the same node starts fresh (Kraft-3r9fe).
 """
@@ -43,7 +43,7 @@ from typing import Literal
 from kraft import events, store
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates.models import WaitBounds
-from kraft.vocab import ForgeEvent, WorkItemStatus
+from kraft.vocab import RESTARTS_RUN, ForgeEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +51,10 @@ logger = logging.getLogger(__name__)
 #: more finely than this; the smallest seeded interval is 30s.
 _INTERVAL_S = 10
 
-#: Events that end every open wait on the item: a restart is a fresh budget.
-#: The same set `store.sessions` reads as "this item started over". A `/retry`
-#: writes both `work_item_retried` and `run_forked` (`executor.retry`); the
-#: rate-limit relaunch writes only the first, a base-change restart the last.
-_RESTARTS = ("work_item_retried", "run_forked", "base_change_restart")
+# `RESTARTS_RUN` ends every open wait on the item: a restart is a fresh budget.
+# The same set `store.sessions` reads as "this item started over". A `/retry`
+# writes both `work_item_retried` and `run_forked` (`executor.retry`); the
+# rate-limit relaunch writes only the first, a base-change restart the last.
 
 State = Literal["pending", "settled", "error"]
 
@@ -90,8 +89,8 @@ def open_wait(conn, work_item_id: str, task: str) -> OpenWait | None:
         f"'{ForgeEvent.EXTERNAL_WAIT_OBSERVED}', '{ForgeEvent.EXTERNAL_WAIT_REBOUNDED}', "
         f"'{ForgeEvent.EXTERNAL_WAIT_ENDED}') "
         "AND json_extract(payload, '$.task') = ?)"
-        f" OR type IN ({', '.join('?' * len(_RESTARTS))})) ORDER BY seq DESC",
-        (work_item_id, task, *_RESTARTS),
+        f" OR type IN ({', '.join('?' * len(RESTARTS_RUN))})) ORDER BY seq DESC",
+        (work_item_id, task, *RESTARTS_RUN),
     ).fetchall()
     last = rebound = None
     for row in rows:

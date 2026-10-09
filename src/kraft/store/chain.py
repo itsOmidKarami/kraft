@@ -57,11 +57,11 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # retry reruns completed work (`retry-can-target-completed-work`), and the
     # rerun's completion is its own.
     done = conn.execute(
-        "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'node_completed' "
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
         "AND json_extract(payload, '$.node_id') = ? AND seq > ("
         "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
         ") LIMIT 1",
-        (work_item_id, node_id, work_item_id),
+        (work_item_id, ChainEvent.NODE_COMPLETED, node_id, work_item_id),
     ).fetchone()
     if done:
         return
@@ -251,10 +251,10 @@ def skipped_paths(conn: sqlite3.Connection, work_item_id: str) -> frozenset[str]
     starts with none: it reruns what it covers, a skipped task included."""
     rows = conn.execute(
         "SELECT json_extract(payload, '$.path') FROM events WHERE work_item_id = ? "
-        "AND type = 'scope_skipped' AND seq > ("
+        "AND type = ? AND seq > ("
         "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
         ")",
-        (work_item_id, work_item_id),
+        (work_item_id, ChainEvent.SCOPE_SKIPPED, work_item_id),
     ).fetchall()
     return frozenset(r[0] for r in rows)
 
@@ -708,9 +708,9 @@ def node_started(conn: sqlite3.Connection, work_item_id: str, node_id: str) -> b
     check for overrides and reset-to-template (UI v2 · 04, point 1/2).
     """
     row = conn.execute(
-        "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'node_started' "
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
         "AND json_extract(payload, '$.node_id') = ? LIMIT 1",
-        (work_item_id, node_id),
+        (work_item_id, ChainEvent.NODE_STARTED, node_id),
     ).fetchone()
     return row is not None
 
