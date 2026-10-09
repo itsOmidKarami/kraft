@@ -10,7 +10,7 @@ import { hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } fro
  */
 export const NG_SCENARIOS = [
   "running", "needs-you", "needs-gate", "escalated", "capped", "done", "cancelled", "archived",
-  "failed", "waiting", "conflict", "mr-closed", "worker-lost", "paused",
+  "failed", "waiting", "conflict", "mr-closed", "waiting-ci", "paused",
 ] as const;
 export type NgScenario = (typeof NG_SCENARIOS)[number];
 /** T0 + 130 minutes, as a literal: this module loads before fixtures.ts finishes (they import each other). */
@@ -63,7 +63,7 @@ const FROZEN = JSON.stringify({
 /** Where each scenario stands: the current node (index), and the step it is on there. */
 const AT: Record<NgScenario, number> = {
   running: 7, "needs-you": 7, "needs-gate": 13, escalated: 7, capped: 7, done: 15, cancelled: 7, archived: 15,
-  failed: 10, waiting: 7, conflict: 10, "mr-closed": 11, "worker-lost": 7, paused: 7,
+  failed: 10, waiting: 7, conflict: 10, "mr-closed": 11, "waiting-ci": 7, paused: 7,
 };
 
 export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): ItemBundle {
@@ -157,7 +157,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   };
 
   switch (sc) {
-    case "running": case "escalated": case "paused": case "cancelled": case "worker-lost": {
+    case "running": case "escalated": case "paused": case "cancelled": case "waiting-ci": {
       verificationAt(sc === "paused" ? "paused" : "running");
       if (sc === "escalated") {
         const e = sess("implementation.escalation.escalation", "done", { node_id: "implementation", hook_point: "escalation" });
@@ -174,10 +174,9 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
         ev("work_item_cancelled", { reason: long ? "Superseded by kraft-cb61, which moves the cache into the index service; this item's branch stays for reference." : "", node_id: currentNode }, 1);
         item.status = "abandoned"; item.display_status = "cancelled";
       }
-      if (sc === "worker-lost") {
+      if (sc === "waiting-ci") {
         item.status = "waiting"; item.display_status = "waiting";
-        // B5 (R2): the shape the worker capability is expected to send; the product hides the card without it.
-        item.stop = stop("worker_lost", "verification.review.code_review", { attempt: 2, facts: { worker: "ci-runner-3", last_seen_at: t(128), reassign_at: t(133), workers_online: ["ci-runner-1", "ci-runner-2"] } });
+        item.stop = stop("wait", "verification.review.code_review", { attempt: 2, resume_at: t(133), reason: "waiting for CI" });
       }
       break;
     }

@@ -89,13 +89,6 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         return { tone: "info", title: "Waiting on the provider", where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
       }
       if (stop?.kind === "wait") return { tone: "info", title: "Waiting on CI", where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
-      if (stop && (stop.kind as string) === "worker_lost" && str(facts.last_seen_at) && str(facts.reassign_at)) {
-        return {
-          tone: "info", title: "Worker lost", where,
-          text: `The worker running this item stopped answering ${ago(str(facts.last_seen_at))}. If it does not return, Kraft hands the item to another worker.`,
-          facts: [["last seen", ago(str(facts.last_seen_at))], ["reassigns", until(str(facts.reassign_at))]],
-        };
-      }
       return null;
     }
     case "needs_you": {

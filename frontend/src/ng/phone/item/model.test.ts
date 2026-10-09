@@ -101,10 +101,6 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged" });
   });
-  it("draws a worker-lost card only with the B5 fields (R2)", () => {
-    expect(cardOf(mk("waiting", stop("worker_lost" as never)))).toBeNull();
-    expect(cardOf(mk("waiting", stop("worker_lost" as never, { facts: { last_seen_at: "2026-09-13T08:00:00Z", reassign_at: "2026-09-13T09:00:00Z" } })))?.title).toBe("Worker lost");
-  });
   it("names the closer of a closed MR and the reason of a cancel from the events", () => {
     const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
     expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
