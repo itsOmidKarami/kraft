@@ -25,6 +25,7 @@ describe("headerState: every display status, from the server's fields only", () 
     ["running", undefined, "RUNNING", "neutral", "pause", NO_ESC],
     ["waiting", "rate_limit", "WAITING", "info", "pause", NO_ESC],
     ["queued", undefined, "QUEUED", "info", "pause", NO_ESC],
+    ["blocked", undefined, "BLOCKED", "info", "pause", NO_ESC],
     // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main is its way on, as the phone's bar has it.
     ["needs_you", "gate", "NEEDS YOU", "warn", "gate", FULL],
     ["needs_you", "question", "NEEDS YOU", "warn", "answer", FULL],
@@ -92,6 +93,7 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
   ["waiting on CI", { display_status: "waiting", status: "waiting", stop: S("wait"), worker_sessions: session("running") }, "waiting_ci"],
   ["rate limited", { display_status: "waiting", status: "rate_limited", stop: S("rate_limit"), worker_sessions: session("failed") }, "rate_limited"],
   ["queued", { display_status: "queued", status: "queued" }, "queued"],
+  ["blocked", { display_status: "blocked", status: "blocked" }, "blocked"],
   ["paused", { display_status: "paused", status: "paused", worker_sessions: session("paused") }, "paused"],
   ["not started", { display_status: "paused", status: "paused", current_node_id: null }, "not_started"],
   ["gate", GATE, "gate"],

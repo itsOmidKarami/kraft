@@ -48,6 +48,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
         return at ? `${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting at ${node}`;
       }
       case "queued": return "waiting for a free slot";
+      case "blocked": return "waiting on another item";
       case "escalated": return "escalation running";
       case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
       case "cancelled": return "cancelled";

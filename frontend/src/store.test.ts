@@ -250,6 +250,8 @@ describe("applyEvent", () => {
 
   it.each<[EventType, Record<string, unknown>, string]>([
     ["work_item_queued", { verb: "resume", from: "paused" }, "queued"],
+    ["work_item_blocked", { verb: "resume", from: "paused", on: ["a1"] }, "blocked"],
+    ["work_item_unblocked", {}, "queued"],
     ["work_item_dequeued", { why: "paused", detail: null, to: "needs_human" }, "needs_human"],
   ])("%s moves the row's status", (type, payload, status) => {
     useStore.getState().applyEvent(ev({ type, payload }));
