@@ -21,6 +21,7 @@ const TONE: Record<DisplayStatus, Tone> = {
   running: "neutral",
   waiting: "info",
   queued: "info",
+  blocked: "info",
   needs_you: "warn",
   escalated: "warn",
   failed: "bad",

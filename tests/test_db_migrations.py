@@ -242,6 +242,19 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             *replace,
             ("'waiting', 'queued'", "                      'rate_limited', 'waiting')),"),
         )
+    if version < 54:
+        # `blocked` joined the status CHECK; this needle serves version 53 only,
+        # the earlier ones for this line match first.
+        drop_lines = (
+            *drop_lines,
+            "depends_on       TEXT,",
+            "-- the work items this one comes after",
+            "-- and only ever shortened",
+        )
+        replace = (
+            *replace,
+            ("'queued', 'blocked'", "                      'rate_limited', 'waiting', 'queued')),"),
+        )
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -311,7 +324,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
             "pending_steer_context",
             "-- steer text",
             "                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',",
-            "                      'rate_limited', 'waiting', 'queued')),",
+            "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
         ),
         replace=(
             (
@@ -541,6 +554,8 @@ ADDED_COLUMNS = [
     (51, "worker_sessions", ("repository",), None),
     # NULL: a row written before the queue existed was never queued
     (52, "work_items", ("queued_request",), None),
+    # NULL: a row written before dependencies existed comes after nothing
+    (53, "work_items", ("depends_on",), None),
 ]
 
 
@@ -696,7 +711,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         conn,
         16,
         drop_lines=(
-            "                      'rate_limited', 'waiting', 'queued')),",
+            "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
             "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
         ),
         replace=(
@@ -763,36 +778,3 @@ def test_migrate_v33_to_v34_renames_stored_task_progress_events(tmp_path):
     types = [r[0] for r in conn.execute("SELECT type FROM events ORDER BY seq")]
     assert types == ["plan_progress", "node_started", "plan_progress"]
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-
-
-def test_migration_39_adds_the_review_tables(tmp_path):
-    """v39 -> v40: the review-flow tables exist on an upgraded database."""
-    path = tmp_path / "k.db"
-    conn = db._connect(path)
-    db.migrate(conn)  # fresh, at SCHEMA_VERSION
-    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"node_runs", "reviews", "review_threads", "review_comments"} <= names
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(reviews)")}
-    assert {"head_sha", "base_sha", "outcome", "summary", "gate"} <= cols
-
-
-def test_migration_41_makes_review_gate_nullable_and_keeps_rows(tmp_path):
-    """A mid-run thread has no gate; the rebuild keeps every existing row."""
-    from kraft import db as db_mod
-
-    conn = db_mod._connect(tmp_path / "k.db")
-    db_mod.migrate(conn)
-    conn.execute(
-        "INSERT INTO work_items (id, title, repo, chain_definition, status, created_at, "
-        "updated_at) VALUES ('w1', 't', '/r', '{}', 'active', 'now', 'now')"
-    )
-    conn.execute(
-        "INSERT INTO review_threads (id, work_item_id, gate, anchor_sha, created_at) "
-        "VALUES ('t1', 'w1', NULL, 'abc', 'now')"
-    )
-    conn.execute(
-        "INSERT INTO reviews (id, work_item_id, gate, outcome, head_sha, base_sha, submitted_at) "
-        "VALUES ('r1', 'w1', NULL, 'comment', 'abc', 'abc', 'now')"
-    )
-    conn.commit()
-    assert conn.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()[0] is None

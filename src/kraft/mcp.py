@@ -71,7 +71,7 @@ def build() -> MCPServer:
     @server.tool()
     async def list_work_items(status: WorkItemStatus | None = None) -> list[dict]:
         """List Kraft work items — the board. Optionally filter by one exact
-        status: "paused", "active", "queued", "waiting", "rate_limited",
+        status: "paused", "active", "queued", "blocked", "waiting", "rate_limited",
         "needs_human", "completed" or "abandoned". Abandoned items, cancelled ones included,
         are listed only when you ask for "abandoned". Returns id, title, repo,
         status, current node, and any gate waiting on a human."""
@@ -112,6 +112,7 @@ def build() -> MCPServer:
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
         implements_beads: list[str] | None = None,
+        depends_on: list[str] | None = None,
         policy: dict | None = None,
         base_branch: str | None = None,
         skip_nodes: list[str] | None = None,
@@ -143,6 +144,10 @@ def build() -> MCPServer:
         when it completes. Ids mentioned in the description are not parsed —
         naming a bead in prose promises nothing.
 
+        `depends_on` are work item ids this item comes after. A human still
+        starts it; started while one of them is unfinished it is blocked, and
+        Kraft starts it when they complete. They cannot be added later.
+
         `policy` is the item's own policy override, as `set_work_item_policy`
         takes it. Leave it out unless a human asked for one.
 
@@ -164,6 +169,7 @@ def build() -> MCPServer:
             attachments=attachments,
             auto_gate=auto_gate,
             implements_beads=implements_beads,
+            depends_on=depends_on,
             policy=policy,
             base_branch=base_branch,
             skip_nodes=skip_nodes,
@@ -232,6 +238,15 @@ def build() -> MCPServer:
         return await client.pause(work_item_id)
 
     @server.tool()
+    async def unblock_work_item(
+        work_item_id: str | None = None, dependency: str | None = None
+    ) -> dict:
+        """Drop what a blocked or paused Kraft work item still comes after, or
+        only `dependency`. A blocked item with nothing left to wait for then
+        starts on its own. Only a human should decide this — ask first."""
+        return await client.unblock(work_item_id, dependency)
+
+    @server.tool()
     async def report_progress(task: int, work_item_id: str | None = None) -> dict:
         """Say which task of the plan you are starting while implementing a
         Kraft work item. `task` is the N of the plan's `## Task N` heading.
@@ -256,7 +271,8 @@ def build() -> MCPServer:
         own, keyed by canonical task path (`node.step.task`). This is also how a
         work item created by create_work_item is started for the first time. With
         every slot busy the item is queued (status "queued") and starts on its
-        own when one frees."""
+        own when one frees. An item that comes after an unfinished one is blocked
+        (status "blocked") and starts when they complete."""
         return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
@@ -272,7 +288,8 @@ def build() -> MCPServer:
         reruns the whole chain. This is the only way back onto an item that
         stopped for a human: resume only takes a paused item. With every slot busy
         the item is queued (status "queued") and starts on its own when one
-        frees."""
+        frees. An item that comes after an unfinished one is blocked (status
+        "blocked") and starts when they complete."""
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()

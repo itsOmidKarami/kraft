@@ -2,11 +2,17 @@ stateDiagram-v2
   direction LR
   [*] --> paused: filed
   [*] --> queued: autostart, no free slot
+  [*] --> blocked: autostart, comes after an unfinished item
   [*] --> active: autostart, auto-intake
   paused --> active: resume
   paused --> queued: resume, no free slot
   queued --> active: a slot frees
   queued --> paused: pause
+  paused --> blocked: resume, comes after an unfinished item
+  needs_human --> blocked: retry, comes after an unfinished item
+  blocked --> queued: what it comes after completes
+  blocked --> paused: pause
+  blocked --> needs_human: pause
   needs_human --> queued: retry, no free slot
   queued --> needs_human: pause
   active --> paused: pause, bead blocker, broken base

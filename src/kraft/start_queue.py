@@ -4,6 +4,11 @@ A door that would start a walk and finds every `max_concurrent` slot busy
 queues the item instead of refusing (`routes.lifecycle.queued_answer`). The
 item keeps the request it was asked: the verb, its body and who asked.
 
+An item started while something it comes after is unfinished is `blocked`
+(`routes.lifecycle.blocked_answer`) and holds the same saved request. Each
+pass first moves every blocked item whose dependencies have all completed
+into the queue (`store.release_blocked`), so there is one path to `active`.
+
 `tick` takes the earliest queued item while a slot is free, puts it back in
 the status it came from, and makes that request again through the same route
 function, with a `Request` rebuilt from the saved caller. So a queued start
@@ -53,6 +58,9 @@ async def tick(app) -> list[str]:
     """One pass. Returns the work item ids started, which is usually none."""
     st = app.state
     limit = st.policy.max_concurrent if st.policy else 1
+    # Before the queue: an item whose dependencies have all completed joins
+    # it, and is started in this same pass when a slot is free.
+    await st.db.write(store.release_blocked)
     started: list[str] = []
     for wid in st.db.read(store.queued_ids):
         if st.db.read(store.active_count) >= limit:

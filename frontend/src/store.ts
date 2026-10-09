@@ -297,6 +297,11 @@ export const useStore = create<State>((set, get) => ({
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "paused" })) };
         case "work_item_queued":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "queued" })) };
+        case "work_item_blocked":
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "blocked" })) };
+        case "work_item_unblocked":
+          // Released to the queue, which starts it: the server's row is queued.
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "queued" })) };
         case "work_item_dequeued":
           // Back to where it was queued from: the server's row says which.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: p.to as WorkItem["status"] })) };
@@ -416,6 +421,8 @@ const REREAD = new Set<EventType>([
   "worker_session_paused",
   "session_unknown",
   "worker_session_exited",
+  "work_item_blocked",
+  "work_item_unblocked",
 ]);
 
 /**

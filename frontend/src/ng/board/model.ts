@@ -21,7 +21,7 @@ export const STATUS_GROUPS: { key: GroupKey; label: string; empty: string }[] = 
 const GROUP: Record<DisplayStatus, GroupKey | null> = {
   needs_you: "needs", failed: "needs", paused: null /* needs, or not_started without a node */,
   done: "done", cancelled: "done", archived: "done",
-  running: "running", waiting: "running", escalated: "running", queued: "running",
+  running: "running", waiting: "running", escalated: "running", queued: "running", blocked: "running",
 };
 
 export function groupOf(i: Pick<WorkItem, "display_status" | "current_node_id">): GroupKey {

@@ -35,6 +35,7 @@ class WorkItemStatus(StrEnum):
     RATE_LIMITED = "rate_limited"
     WAITING = "waiting"
     QUEUED = "queued"
+    BLOCKED = "blocked"
 
 
 class Verb(StrEnum):
@@ -49,6 +50,7 @@ class Verb(StrEnum):
     ESCALATE = "escalate"
     ABANDON = "abandon"
     ARCHIVE = "archive"
+    UNBLOCK = "unblock"
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,7 @@ TRAITS = total(
         S.PAUSED: StatusTraits(
             DisplayStatus.PAUSED,
             commands_may_start=True,
-            admits_status=frozenset({V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON}),
+            admits_status=frozenset({V.RESUME, V.STEER, V.SKIP, V.ESCALATE, V.ABANDON, V.UNBLOCK}),
         ),
         S.ABANDONED: StatusTraits(
             DisplayStatus.CANCELLED, ended=True, admits_status=frozenset({V.ARCHIVE, V.ABANDON})
@@ -128,6 +130,12 @@ TRAITS = total(
         S.QUEUED: StatusTraits(
             DisplayStatus.QUEUED,
             admits_status=frozenset({V.PAUSE, V.ABANDON}),
+        ),
+        # Started while an item it comes after is unfinished. Nothing of it
+        # runs; `kraft.start_queue` moves it to `queued` when they complete.
+        S.BLOCKED: StatusTraits(
+            DisplayStatus.BLOCKED,
+            admits_status=frozenset({V.PAUSE, V.ABANDON, V.UNBLOCK}),
         ),
     },
     name="TRAITS",

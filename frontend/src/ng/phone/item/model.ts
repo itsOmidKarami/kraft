@@ -167,6 +167,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
     // Queued for a slot: Kraft starts it; Pause takes it out of the queue.
     case "queued": return { secondary: null, primary: a("pause", "Pause") };
+    // Blocked behind another item: Kraft starts it; Pause takes it out.
+    case "blocked": return { secondary: null, primary: a("pause", "Pause") };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {

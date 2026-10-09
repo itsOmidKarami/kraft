@@ -134,6 +134,62 @@ def test_a_start_on_a_full_board_says_it_is_queued(monkeypatch, capsys, argv):
     assert "started" not in out and "retried at" not in out
 
 
+def test_create_after_sends_what_the_item_comes_after(tmp_path, monkeypatch):
+    from kraft.client import transport
+
+    sent = {}
+
+    async def post(path, payload=None, **kw):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "paused"}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "create", "t", "--repo", str(tmp_path), "--after", "a1", "--after", "b2"])
+    assert sent["depends_on"] == ["a1", "b2"]
+
+
+def test_unblock_names_the_dependency_it_drops(monkeypatch, capsys):
+    from kraft.client import transport
+
+    seen = {}
+
+    async def post(path, payload=None, **kw):
+        seen.update(path=path, payload=payload)
+        return 200, {"id": "w1", "dropped": ["a1"], "waiting_on": []}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "unblock", "w1", "--dependency", "a1"])
+    assert seen["path"].endswith("/work-items/w1/unblock")
+    assert seen["payload"] == {"dependency": "a1"}
+    assert "w1 no longer comes after a1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["item", "resume", "w1"],
+        ["item", "retry", "w1"],
+        ["item", "raise-budget", "w1", "--usd", "5"],
+    ],
+    ids=["resume", "retry", "raise-budget"],
+)
+def test_a_start_behind_an_unfinished_item_says_it_is_blocked(monkeypatch, capsys, argv):
+    from kraft.client import transport
+
+    async def post(path, payload=None, **kw):
+        return 200, {
+            "id": "w1",
+            "status": "blocked",
+            "waiting_on": [{"id": "a1", "title": "first", "status": "active"}],
+        }
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(argv)
+    out = capsys.readouterr().out
+    assert "blocked w1: it comes after a1 (active). It starts when they complete" in out
+    assert "started" not in out and "retried at" not in out
+
+
 @pytest.mark.parametrize(
     ("flag", "auto_gate"),
     [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],

@@ -80,6 +80,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 attachments or None,
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
+                depends_on=ns.after or None,
                 policy=_policy(ns.policy),
                 base_branch=ns.base_branch,
                 skip_nodes=[n for v in ns.skip_nodes for n in v.split(",") if n] or None,
@@ -100,7 +101,7 @@ def _render_created(result: dict) -> str:
     shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
     if not slots:
         return shown
-    if queued := _queued(result):
+    if queued := _held(result):
         return f"{shown}\n{queued}"
     return (
         f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
@@ -149,6 +150,20 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.pause(ns.id)), common.item_action("paused {id}", small=_paused), ns.json
     )
+
+
+def _unblocked(result: dict) -> str:
+    dropped = result.get("dropped") or []
+    if not dropped:
+        return f"{result['id']} comes after nothing unfinished: nothing was dropped"
+    line = f"{result['id']} no longer comes after {', '.join(dropped)}"
+    if left := result.get("waiting_on"):
+        line += f"; it still waits on {', '.join(d['id'] for d in left)}"
+    return line
+
+
+def _cmd_unblock(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), _unblocked, ns.json)
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -203,10 +218,26 @@ def _queued(result: dict) -> str | None:
     )
 
 
+def _blocked(result: dict) -> str | None:
+    """A start held behind unfinished items, or None for any other answer."""
+    if result.get("status") != WorkItemStatus.BLOCKED:
+        return None
+    on = ", ".join(f"{d['id']} ({d['status']})" for d in result.get("waiting_on") or [])
+    return (
+        f"blocked {result['id']}: it comes after {on}. It starts when they complete; "
+        f"kraft item unblock {result['id']} drops them"
+    )
+
+
+def _held(result: dict) -> str | None:
+    """A start that did not start: queued for a slot, or blocked."""
+    return _queued(result) or _blocked(result)
+
+
 def _resumed(result: dict) -> str:
     """resume's usual answer: the node it went on from, and the agent tasks
     a steer reached. No node is an item that had never started."""
-    if queued := _queued(result):
+    if queued := _held(result):
         return queued
     node = result.get("node_id")
     line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
@@ -227,7 +258,7 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
         common.item_action(
             "retried {id}",
-            small=lambda r: _queued(r) or f"retried {r['id']} at {_rerun_at(r)}",
+            small=lambda r: _held(r) or f"retried {r['id']} at {_rerun_at(r)}",
         ),
         ns.json,
     )
@@ -241,7 +272,7 @@ def _cmd_raise_budget(ns: argparse.Namespace) -> None:
             f"raised the cap on {{id}} to {cap} and retried it",
             small=lambda r: (
                 f"raised the cap on {r['id']} to {cap}; "
-                + (_queued(r) or f"retried at {_rerun_at(r)}")
+                + (_held(r) or f"retried at {_rerun_at(r)}")
             ),
         ),
         ns.json,
@@ -522,6 +553,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "ids in --description are not parsed",
     )
     create.add_argument(
+        "--after",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="a work item this one comes after (repeatable): started while it is "
+        "unfinished, this item is blocked and starts when it completes",
+    )
+    create.add_argument(
         "--policy", action="append", default=[], metavar="KEY=VALUE", help=_POLICY_HELP
     )
     create.add_argument(
@@ -572,6 +611,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     pause = subs.add_parser("pause", parents=[common], help="stop the running attempt")
     pause.add_argument("id", nargs="?")
     pause.set_defaults(func=_cmd_pause)
+
+    unblock = subs.add_parser(
+        "unblock", parents=[common], help="drop what a blocked or paused item still comes after"
+    )
+    unblock.add_argument("id", nargs="?")
+    unblock.add_argument("--dependency", metavar="ID", help="drop only this one")
+    unblock.set_defaults(func=_cmd_unblock)
 
     resume = subs.add_parser("resume", parents=[common], help="start or restart a paused item")
     resume.add_argument("id", nargs="?")

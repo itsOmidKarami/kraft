@@ -17,6 +17,9 @@ class WorkItemEvent(StrEnum):
     PAUSE_REQUESTED = "pause_requested"
     QUEUED = "work_item_queued"
     DEQUEUED = "work_item_dequeued"
+    BLOCKED = "work_item_blocked"
+    UNBLOCKED = "work_item_unblocked"
+    DEPENDENCIES_DROPPED = "work_item_dependencies_dropped"
     BLOCKED_BY_DEPENDENCY = "work_item_blocked_by_dependency"
     PAUSED_BY_BROKEN_BASE = "paused_by_broken_base"
     NEEDS_HUMAN = "work_item_needs_human"
@@ -47,6 +50,9 @@ WORK_ITEM_EVENT_TRAITS = total(
         WorkItemEvent.PAUSE_REQUESTED: EventTraits(run_boundary=True),
         WorkItemEvent.QUEUED: _PLAIN,
         WorkItemEvent.DEQUEUED: _PLAIN,
+        WorkItemEvent.BLOCKED: _PLAIN,
+        WorkItemEvent.UNBLOCKED: _PLAIN,
+        WorkItemEvent.DEPENDENCIES_DROPPED: _PLAIN,
         WorkItemEvent.BLOCKED_BY_DEPENDENCY: _PLAIN,
         WorkItemEvent.PAUSED_BY_BROKEN_BASE: _PLAIN,
         WorkItemEvent.NEEDS_HUMAN: _PLAIN,

@@ -141,6 +141,7 @@ def trim_work_item(item: dict) -> dict:
         # why it is stopped, and what the chain suggests doing about it (Kraft-s7c04.27)
         "stop_reason",
         "queued",
+        "dependencies",
         "suggested_action",
     )
     return {

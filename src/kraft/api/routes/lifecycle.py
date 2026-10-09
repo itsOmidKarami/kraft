@@ -82,6 +82,11 @@ class Steer(BaseModel):
     text: str
 
 
+class Unblock(BaseModel):
+    #: Drop only this dependency. Absent, every one the item still waits on.
+    dependency: str | None = None
+
+
 class Resume(BaseModel):
     #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
@@ -614,7 +619,7 @@ async def pause_work_item(wid: str, request: Request):
     # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
     if row["status"] not in admitting(Verb.PAUSE):
         raise HTTPException(409, f"work item is {row['status']}, not running")
-    if row["status"] == WorkItemStatus.QUEUED:
+    if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         # Nothing of it runs: pausing withdraws the start it asked for.
         await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused"))
         return {"id": wid, "paused_sessions": []}
@@ -631,6 +636,31 @@ async def pause_work_item(wid: str, request: Request):
     # either way.
     await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
     return {"id": wid, "paused_sessions": ids}
+
+
+@api_router.post("/work-items/{wid}/unblock")
+async def unblock_work_item(wid: str, request: Request, body: Unblock | None = None):
+    """Stop the item coming after what it still waits on, or after the one
+    dependency named. It starts nothing: a blocked item with nothing left to
+    wait for is released by the scheduler's next pass (`kraft.start_queue`)."""
+    st = request.app.state
+    deps.forbid_self_action(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    if row["status"] not in admitting(Verb.UNBLOCK):
+        raise HTTPException(
+            409,
+            f"work item is {row['status']}: only a blocked or paused item's "
+            "dependencies can be dropped",
+        )
+    only = body.dependency if body else None
+    dropped = await st.db.write(lambda c: store.drop_dependencies(c, wid, only))
+    if only and not dropped:
+        raise HTTPException(409, f"{only} is not one of this work item's dependencies")
+    return {
+        "id": wid,
+        "dropped": dropped,
+        "waiting_on": st.db.read(lambda c: store.unmet_dependencies(c, wid)),
+    }
 
 
 @api_router.post("/work-items/{wid}/progress")
@@ -758,11 +788,58 @@ async def queued_answer(request: Request, wid: str, verb: str, body, from_status
     }
 
 
+def blocked_refusal(row) -> str:
+    """The 409 every door but pause, cancel, abandon and unblock gives a
+    blocked item."""
+    return (
+        "work item is blocked until the items it comes after complete, and starts "
+        f"on its own: pause it to hold it (kraft item pause {row['id']}), or drop "
+        f"them (kraft item unblock {row['id']})"
+    )
+
+
+async def blocked_answer(request: Request, wid: str, verb: str, body, from_statuses) -> dict | None:
+    """Hold a start whose item comes after something unfinished, and answer for
+    it. None when nothing is unmet: the door goes on to its capacity check.
+
+    An abandoned dependency will never be met, so that start is refused: Kraft
+    does not guess whether the work still makes sense without it."""
+    st = request.app.state
+    unmet = st.db.read(lambda c: store.unmet_dependencies(c, wid))
+    if not unmet:
+        return None
+    dead = [d for d in unmet if d["status"] == WorkItemStatus.ABANDONED]
+    if dead:
+        names = ", ".join(f"{d['id']} ({d['title']})" for d in dead)
+        raise HTTPException(
+            409,
+            f"work item comes after {names}, which was abandoned and will never complete: "
+            f"drop it (kraft item unblock {wid}) or abandon this item",
+        )
+    blocked = await st.db.write(
+        lambda c: store.block_work_item(
+            c,
+            wid,
+            verb=verb,
+            body=body.model_dump(mode="json", exclude_defaults=True),
+            headers=deps.caller_headers(request),
+            from_statuses=from_statuses,
+        )
+    )
+    if not blocked:
+        raise HTTPException(
+            409, "work item is not stopped" if verb == "retry" else "work item is not paused"
+        )
+    return {"id": wid, "status": WorkItemStatus.BLOCKED, "waiting_on": unmet}
+
+
 def _not_stopped(row) -> str:
     """The 409 a retry on an item that is not stopped gets. A paused one is
     told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
     if row["status"] == WorkItemStatus.QUEUED:
         return queued_refusal(row)
+    if row["status"] == WorkItemStatus.BLOCKED:
+        return blocked_refusal(row)
     if row["status"] == WorkItemStatus.PAUSED:
         return "work item is paused, not stopped: resume it instead, or skip what it would run"
     return "work item is not stopped"
@@ -775,6 +852,8 @@ def not_paused(row, gate: str | None = None) -> str:
     stopped anywhere else, retry it, which takes a steer too (R11a)."""
     if row["status"] == WorkItemStatus.QUEUED:
         return queued_refusal(row)
+    if row["status"] == WorkItemStatus.BLOCKED:
+        return blocked_refusal(row)
     if row["status"] in RUNNING:
         return f"work item is {row['status']}: it is running, so pause it first"
     if row["status"] == WorkItemStatus.NEEDS_HUMAN and gate is not None:
@@ -919,6 +998,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
     # is a refusal path that now moves the status. The comment this replaces said it
     # could not.
+    if (held := await blocked_answer(request, wid, "resume", body, from_statuses)) is not None:
+        return held
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -1152,6 +1233,10 @@ async def _retry(wid: str, body: Retry, request: Request):
                 f"node {node_id!r} has no agent task downstream to steer; "
                 "this text would be dropped",
             )
+        if (
+            held := await blocked_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
+        ) is not None:
+            return held
         limit = st.policy.max_concurrent if st.policy else 1
         if st.db.read(store.active_count) >= limit:
             # Queued with the turn left running: the kill below belongs to the
@@ -1267,6 +1352,10 @@ async def _retry(wid: str, body: Retry, request: Request):
     # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
     # is a refusal path that now moves the status. The comment this replaces said it
     # could not.
+    if (
+        held := await blocked_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
+    ) is not None:
+        return held
     async with stops.claimed_or_stopped(
         st.db,
         wid,

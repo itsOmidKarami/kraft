@@ -20,6 +20,7 @@ async def create_work_item(
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
     implements_beads: list[str] | None = None,
+    depends_on: list[str] | None = None,
     policy: dict | None = None,
     base_branch: str | None = None,
     skip_nodes: list[str] | None = None,
@@ -77,6 +78,7 @@ async def create_work_item(
             "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
+            **({"depends_on": depends_on} if depends_on else {}),
             **({"policy": policy} if policy else {}),
             **({"base_branch": base_branch} if base_branch else {}),
             **({"skip_nodes": skip_nodes} if skip_nodes else {}),
@@ -90,7 +92,7 @@ async def create_work_item(
         raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
     # `slots`: an --autostart filed paused because every slot was busy says so.
-    for told in ("slots", "repo_warning", "bead_warning", "duplicate_warning"):
+    for told in ("slots", "waiting_on", "repo_warning", "bead_warning", "duplicate_warning"):
         if body.get(told):
             result[told] = body[told]
     return result
@@ -276,6 +278,16 @@ async def pause(work_item_id: str | None = None) -> dict:
     """Stop the running node's sessions. Only an active item can be paused."""
     target = context._forbid_self_action(work_item_id)
     return await transport._act(f"/work-items/{transport.segment(target)}/pause")
+
+
+async def unblock(work_item_id: str | None = None, dependency: str | None = None) -> dict:
+    """Drop what a blocked or paused item still comes after, or the one
+    dependency named, so it no longer waits for it."""
+    target = context._forbid_self_action(work_item_id)
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/unblock",
+        {"dependency": dependency} if dependency else {},
+    )
 
 
 async def abandon(work_item_id: str | None = None) -> dict:

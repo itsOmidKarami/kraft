@@ -141,6 +141,12 @@
       "node": "spec_approval",
       "gate": "spec_approval",
       "queued_from": "needs_human"
+    },
+    "blocked": {
+      "status": "blocked",
+      "node": null,
+      "queued_from": "paused",
+      "depends_on": true
     }
   },
   "doors": {
@@ -152,7 +158,8 @@
         "waiting_ci",
         "rate_limited",
         "queued",
-        "queued_at_gate"
+        "queued_at_gate",
+        "blocked"
       ]
     },
     "resume": {
@@ -260,7 +267,8 @@
         "mr_closed",
         "escalated",
         "queued",
-        "queued_at_gate"
+        "queued_at_gate",
+        "blocked"
       ]
     },
     "archive": {
@@ -324,7 +332,18 @@
         "abandoned",
         "archived",
         "queued",
-        "queued_at_gate"
+        "queued_at_gate",
+        "blocked"
+      ]
+    },
+    "unblock": {
+      "path": "unblock",
+      "body": {},
+      "takes": [
+        "paused",
+        "paused_walk_live",
+        "not_started",
+        "blocked"
       ]
     }
   }

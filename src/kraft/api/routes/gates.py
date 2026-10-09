@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from kraft import events, executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
-from kraft.api.routes.lifecycle import _stop_live_sessions, queued_refusal
+from kraft.api.routes.lifecycle import _stop_live_sessions, blocked_refusal, queued_refusal
 from kraft.executor import stops
 from kraft.templates import revision
 from kraft.templates.models import GateNode
@@ -209,8 +209,11 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
     _gate_or_404(gate_nodes(st, row), gate)
-    if row["status"] == WorkItemStatus.QUEUED:
-        raise HTTPException(409, queued_refusal(row))
+    if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
+        raise HTTPException(
+            409,
+            queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row),
+        )
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
@@ -315,8 +318,11 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     row = deps._live_work_item_row(st, wid)
     nodes = gate_nodes(st, row)
     _gate_or_404(nodes, gate)
-    if row["status"] == WorkItemStatus.QUEUED:
-        raise HTTPException(409, queued_refusal(row))
+    if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
+        raise HTTPException(
+            409,
+            queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row),
+        )
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     if st.invalid_policy:

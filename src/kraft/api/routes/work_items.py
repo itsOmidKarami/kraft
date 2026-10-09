@@ -106,6 +106,10 @@ class NewWorkItem(_OneChain):
     #: Bead ids this item implements, closed on completion. The description is
     #: no longer parsed for them: naming a bead in prose promises nothing.
     implements_beads: list[str] = []
+    #: Work item ids this one comes after. Started while one is unfinished it
+    #: is `blocked`, and Kraft starts it when they complete. Set here only:
+    #: afterwards they can be dropped (`/unblock`), never added.
+    depends_on: list[str] = []
     #: Node ids to drop from the materialized chain at intake (UI v2 · 04
     #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
     #: is not a node of the resolved template. A gated node may be named --
@@ -395,6 +399,13 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.
+    depends_on = list(dict.fromkeys(body.depends_on))
+    if problem := st.db.read(lambda c: store.dependency_problem(c, depends_on)):
+        raise HTTPException(422, problem)
+    # An autostart behind an unfinished item is filed and then blocked: it
+    # must not take a slot, so it is not handed to `intake` as active.
+    waits = st.db.read(lambda c: store.any_unfinished(c, depends_on))
+    start_now = body.autostart and not waits
     duplicates = st.db.read(
         lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
     )
@@ -418,13 +429,13 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             repository_policies=per_repository,
             repository_steering=repo_steering,
             attachments=attachments,
-            status=WorkItemStatus.ACTIVE if body.autostart else WorkItemStatus.PAUSED,
+            status=WorkItemStatus.ACTIVE if start_now else WorkItemStatus.PAUSED,
             # Folded into intake's own INSERT transaction, not a separate
             # `active_count` read here: two autostart creates racing a few
             # milliseconds apart must not both see a free slot and both win
             # one (Kraft-m43g, Kraft-nxht). `None` when not autostarting --
             # `status` is already "paused" and needs no capacity decision.
-            limit=(st.policy.max_concurrent if st.policy else 1) if body.autostart else None,
+            limit=(st.policy.max_concurrent if st.policy else 1) if start_now else None,
             auto_gate=body.auto_gate,
             implements_beads=body.implements_beads,
             skip_nodes=frozenset(body.skip_nodes),
@@ -446,6 +457,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # instead (Kraft-7gy). A 502 here is now a template or a DB problem.
         raise HTTPException(502, f"intake failed: {exc}") from exc
 
+    if depends_on:
+        await st.db.write(lambda c: store.set_dependencies(c, wid, depends_on))
+
     # Present only when there is one: a null field on every successful create is
     # noise in `kraft item create`'s kv block and in the API.
     warning = deps._bead_warning(st, wid)
@@ -459,6 +473,20 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         )
     if cannot_run := repo_warning(repo_entry):
         extra["repo_warning"] = cannot_run
+
+    if body.autostart and waits:
+        await st.db.write(
+            lambda c: store.block_work_item(
+                c,
+                wid,
+                verb="resume",
+                body={},
+                headers=deps.caller_headers(request),
+                from_statuses=[WorkItemStatus.PAUSED],
+            )
+        )
+        waiting_on = st.db.read(lambda c: store.unmet_dependencies(c, wid))
+        return {"id": wid, "status": WorkItemStatus.BLOCKED, "waiting_on": waiting_on, **extra}
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL

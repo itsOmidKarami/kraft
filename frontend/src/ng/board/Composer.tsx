@@ -26,12 +26,16 @@ export function createBody(d: Draft, autostart: boolean) {
 }
 
 /** What `POST /work-items` answers. `slots` comes with an autostart the server queued because every slot was busy. */
-export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number } };
+export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number }; waiting_on?: { id: string; title: string; status: string }[] };
 
 /** Create and start that found every slot busy says so, rather than leaving a
  *  row to explain itself: the server queues the item and Kraft starts it when
  *  a slot frees. An answer still filed paused keeps its older wording. */
 export function sayIfFiledPaused(autostart: boolean, body: Created): void {
+  if (autostart && body.status === "blocked") {
+    showToast(`Blocked: it comes after ${(body.waiting_on ?? []).map((d) => d.title).join(", ")}. It starts when they complete.`, 8000);
+    return;
+  }
   if (!autostart || (body.status !== "paused" && body.status !== "queued")) return;
   const s = body.slots;
   const busy = `${s ? `${s.busy} of ${s.limit} slots are` : "every slot is"} busy`;

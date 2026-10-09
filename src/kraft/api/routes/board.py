@@ -1109,6 +1109,8 @@ async def get_work_item(wid: str, request: Request):
             if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
             else None
         ),
+        # What the item comes after, declared at intake: id, title, status, met.
+        "dependencies": st.db.read(lambda c: store.dependencies_of(c, wid)),
         # What the chain or a repair concluded a person should do about that
         # stop -- `{action: skip|retry|abandon, reason}` -- or None
         # (Kraft-s7c04.27). Each action is one existing verb.

@@ -8,6 +8,10 @@ const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {})
 const row = (display_status: DisplayStatus, over: Partial<WorkItem> = {}) => detail({ display_status, ...over });
 
 describe("reasonTail", () => {
+  it("says a blocked item is waiting on another item", () => {
+    expect(reasonTail(row("blocked"), NOW)).toBe("waiting on another item");
+  });
+
   it("says a queued item is waiting for a slot", () => {
     expect(reasonTail(row("queued"), NOW)).toBe("waiting for a free slot");
   });

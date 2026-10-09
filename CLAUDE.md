@@ -51,10 +51,11 @@ no tool. `--json` prints the raw API payload on every verb except `view watch`,
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
+kraft item unblock [ID] [--dependency ID]   # drop what a blocked or paused item still comes after
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
 kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped it (its own or its policy's), and retry
 kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
