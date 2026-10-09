@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useStore } from "./store";
+import { resetHydrateState, useStore } from "./store";
 import { item } from "./testFixtures";
 import type { KraftEvent, WorkItem } from "./types";
 import type { EventType } from "./types/vocab.generated";
@@ -28,6 +28,7 @@ const ev = (over: Partial<KraftEvent>): KraftEvent => ({
 });
 
 beforeEach(() => {
+  resetHydrateState();
   useStore.setState({
     workItems: { w1: baseItem() },
     sessionsByItem: {},
@@ -334,6 +335,88 @@ describe("hydrateItem", () => {
       expect.arrayContaining(["env_setup", "verify"]),
     );
     expect(w.fixCycle).toBe(2);
+  });
+});
+
+describe("hydrateItem races", () => {
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => ((resolve = res), (reject = rej)));
+    return { promise, resolve, reject };
+  };
+  const flush = () => new Promise((r) => setTimeout(r));
+  const full = (over: Partial<WorkItem> = {}) => ({ ...baseItem(over), worker_sessions: [] }) as never;
+
+  it("does not apply a response older than the store's newest event", async () => {
+    const api = await import("./api");
+    const items = [deferred<never>(), deferred<never>()];
+    const events = [deferred<KraftEvent[]>(), deferred<KraftEvent[]>()];
+    let round = 0;
+    const getItem = vi.spyOn(api, "getWorkItem").mockImplementation(() => items[round].promise);
+    vi.spyOn(api, "getEvents").mockImplementation(() => events[round++].promise);
+    const done = useStore.getState().hydrateItem("w1");
+    useStore.getState().applyEvent(ev({ seq: 5, type: "node_started", payload: { node_id: "verify" } }));
+    items[0].resolve(full({ current_node_id: "env_setup" }));
+    events[0].resolve([ev({ seq: 4, type: "node_completed", payload: { node_id: "env_setup" } })]);
+    await flush();
+    expect(useStore.getState().eventsByItem.w1.map((e) => e.seq)).toEqual([5]);
+    expect(useStore.getState().workItems.w1.current_node_id).toBe("verify");
+    expect(getItem).toHaveBeenCalledTimes(2);
+    items[1].resolve(full({ current_node_id: "verify" }));
+    events[1].resolve([ev({ seq: 4, type: "node_completed", payload: { node_id: "env_setup" } }), ev({ seq: 5 })]);
+    await done;
+    expect(useStore.getState().eventsByItem.w1.map((e) => e.seq)).toEqual([4, 5]);
+  });
+
+  it("coalesces calls made while a round is in flight into one more round", async () => {
+    const api = await import("./api");
+    const gates: ReturnType<typeof deferred<never>>[] = [];
+    const getItem = vi.spyOn(api, "getWorkItem").mockImplementation(() => {
+      const d = deferred<never>();
+      gates.push(d);
+      return d.promise;
+    });
+    vi.spyOn(api, "getEvents").mockResolvedValue([]);
+    const st = useStore.getState();
+    const first = st.hydrateItem("w1");
+    const rest = [st.hydrateItem("w1"), st.hydrateItem("w1"), st.hydrateItem("w1")];
+    await flush();
+    expect(getItem).toHaveBeenCalledTimes(1);
+    const other = st.hydrateItem("w2");
+    await flush();
+    expect(getItem).toHaveBeenCalledTimes(2); // w2 is independent
+    gates[0].resolve(full());
+    await first;
+    await flush();
+    expect(getItem).toHaveBeenCalledTimes(3); // one trailing round for w1
+    gates[2].resolve(full());
+    gates[1].resolve(full({ id: "w2" }));
+    await Promise.all([...rest, other]);
+    expect(getItem).toHaveBeenCalledTimes(3);
+  });
+
+  it("a rejected fetch does not wedge the item", async () => {
+    const api = await import("./api");
+    const getItem = vi
+      .spyOn(api, "getWorkItem")
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue(full());
+    vi.spyOn(api, "getEvents").mockResolvedValue([]);
+    await expect(useStore.getState().hydrateItem("w1")).rejects.toThrow("boom");
+    await useStore.getState().hydrateItem("w1");
+    expect(getItem).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops after three stale rounds and applies nothing", async () => {
+    const api = await import("./api");
+    const getItem = vi.spyOn(api, "getWorkItem").mockResolvedValue(full({ current_node_id: "env_setup" }));
+    vi.spyOn(api, "getEvents").mockResolvedValue([ev({ seq: 1 })]);
+    useStore.getState().applyEvent(ev({ seq: 5, type: "node_started", payload: { node_id: "verify" } }));
+    await useStore.getState().hydrateItem("w1");
+    expect(getItem).toHaveBeenCalledTimes(3);
+    expect(useStore.getState().eventsByItem.w1.map((e) => e.seq)).toEqual([5]);
+    expect(useStore.getState().workItems.w1.current_node_id).toBe("verify");
   });
 });
 
