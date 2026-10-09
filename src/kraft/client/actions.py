@@ -20,6 +20,7 @@ async def create_work_item(
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
     implements_beads: list[str] | None = None,
+    depends_on: list[str] | None = None,
     policy: dict | None = None,
     base_branch: str | None = None,
     skip_nodes: list[str] | None = None,
@@ -77,6 +78,7 @@ async def create_work_item(
             "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
+            **({"depends_on": depends_on} if depends_on else {}),
             **({"policy": policy} if policy else {}),
             **({"base_branch": base_branch} if base_branch else {}),
             **({"skip_nodes": skip_nodes} if skip_nodes else {}),
@@ -90,7 +92,7 @@ async def create_work_item(
         raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
     # `slots`: an --autostart filed paused because every slot was busy says so.
-    for told in ("slots", "repo_warning", "bead_warning", "duplicate_warning"):
+    for told in ("slots", "waiting_on", "repo_warning", "bead_warning", "duplicate_warning"):
         if body.get(told):
             result[told] = body[told]
     return result

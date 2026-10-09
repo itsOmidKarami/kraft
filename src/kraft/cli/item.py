@@ -80,6 +80,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 attachments or None,
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
+                depends_on=ns.after or None,
                 policy=_policy(ns.policy),
                 base_branch=ns.base_branch,
                 skip_nodes=[n for v in ns.skip_nodes for n in v.split(",") if n] or None,
@@ -520,6 +521,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         metavar="BEAD",
         help="a bead this item implements, closed on completion (repeatable); "
         "ids in --description are not parsed",
+    )
+    create.add_argument(
+        "--after",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="a work item this one comes after (repeatable): started while it is "
+        "unfinished, this item is blocked and starts when it completes",
     )
     create.add_argument(
         "--policy", action="append", default=[], metavar="KEY=VALUE", help=_POLICY_HELP

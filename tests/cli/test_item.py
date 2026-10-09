@@ -134,6 +134,20 @@ def test_a_start_on_a_full_board_says_it_is_queued(monkeypatch, capsys, argv):
     assert "started" not in out and "retried at" not in out
 
 
+def test_create_after_sends_what_the_item_comes_after(tmp_path, monkeypatch):
+    from kraft.client import transport
+
+    sent = {}
+
+    async def post(path, payload=None, **kw):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "paused"}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "create", "t", "--repo", str(tmp_path), "--after", "a1", "--after", "b2"])
+    assert sent["depends_on"] == ["a1", "b2"]
+
+
 @pytest.mark.parametrize(
     ("flag", "auto_gate"),
     [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],

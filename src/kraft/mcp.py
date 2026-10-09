@@ -112,6 +112,7 @@ def build() -> MCPServer:
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
         implements_beads: list[str] | None = None,
+        depends_on: list[str] | None = None,
         policy: dict | None = None,
         base_branch: str | None = None,
         skip_nodes: list[str] | None = None,
@@ -143,6 +144,10 @@ def build() -> MCPServer:
         when it completes. Ids mentioned in the description are not parsed —
         naming a bead in prose promises nothing.
 
+        `depends_on` are work item ids this item comes after. A human still
+        starts it; started while one of them is unfinished it is blocked, and
+        Kraft starts it when they complete. They cannot be added later.
+
         `policy` is the item's own policy override, as `set_work_item_policy`
         takes it. Leave it out unless a human asked for one.
 
@@ -164,6 +169,7 @@ def build() -> MCPServer:
             attachments=attachments,
             auto_gate=auto_gate,
             implements_beads=implements_beads,
+            depends_on=depends_on,
             policy=policy,
             base_branch=base_branch,
             skip_nodes=skip_nodes,
