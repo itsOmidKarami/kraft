@@ -302,6 +302,17 @@ describe("applyEvent", () => {
     ["chain_loaded for an unknown id", "w2", "chain_loaded", {}],
     ["gate_requested", "w1", "gate_requested", { gate: "human_review_approval" }],
     ["node_skipped", "w1", "node_skipped", { node_id: "spec_approval", gate: "spec_approval" }],
+    ["work_item_abandoned", "w1", "work_item_abandoned", {}],
+    ["gate_approved", "w1", "gate_approved", { gate: "spec_approval" }],
+    ["gate_rejected", "w1", "gate_rejected", { gate: "spec_approval", note: "no" }],
+    ["work_item_blocked_by_dependency", "w1", "work_item_blocked_by_dependency", { node_id: "verify", blocked_by: ["B-2"] }],
+    ["paused_by_broken_base", "w1", "paused_by_broken_base", { broken_by: "abc", follow_up_bead: null }],
+    ["work_item_archived", "w1", "work_item_archived", { by: "you" }],
+    ["work_item_restored", "w1", "work_item_restored", {}],
+    ["escalation_message", "w1", "escalation_message", { session_id: "s1" }],
+    ["worker_session_paused", "w1", "worker_session_paused", { session_id: "s1" }],
+    ["session_unknown", "w1", "session_unknown", { session_id: "s1" }],
+    ["worker_session_exited", "w1", "worker_session_exited", { session_id: "s1", status: "done" }],
   ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
     useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));

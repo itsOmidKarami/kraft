@@ -399,6 +399,18 @@ const REREAD = new Set<EventType>([
   "node_skipped",
   "work_item_queued",
   "work_item_dequeued",
+  "work_item_abandoned",
+  "gate_approved",
+  "gate_rejected",
+  "work_item_blocked_by_dependency",
+  "paused_by_broken_base",
+  "work_item_archived",
+  "work_item_restored",
+  // An escalation turn going live or ending flips escalated, which the reducer never patches.
+  "escalation_message",
+  "worker_session_paused",
+  "session_unknown",
+  "worker_session_exited",
 ]);
 
 /**
