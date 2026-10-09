@@ -47,6 +47,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
         // A CI wait checks again; only a rate limit retries (R11b-05).
         return at ? `${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting at ${node}`;
       }
+      case "queued": return "waiting for a free slot";
       case "escalated": return "escalation running";
       case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
       case "cancelled": return "cancelled";

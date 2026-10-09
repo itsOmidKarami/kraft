@@ -28,6 +28,8 @@ export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { se
   const none = { secondary: null, primary: null };
   const status = item.display_status ?? "running";
   if (status === "done" || status === "cancelled" || status === "archived") return none;
+  // Queued: /skip and /retry refuse it until it is out of the queue.
+  if (status === "queued") return none;
   if (node.kind === "gate") return item.pending_gate === node.id ? { secondary: null, primary: a("review", "Review and decide") } : none;
   if (graph.state === "done") return retryable(item) ? { secondary: null, primary: a("retry-from", "Retry from here") } : none;
   if (graph.state !== "current" && graph.state !== "failed") return none;
