@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from kraft.vocab import ENDED, ForgeEvent  # ENDED: an item never leaves these (Kraft-dncfg)
+from kraft import events
+
+# ENDED: an item never leaves these (Kraft-dncfg)
+from kraft.vocab import ENDED, ForgeEvent, WorkItemEvent, WorkItemStatus
 from kraft.vocab.sql import marks
 
 
@@ -16,9 +19,35 @@ def write_status(conn, sql: str, params: tuple) -> bool:
     each claim. The ending writes (`mark_completed`, `MANUAL_ENDS`,
     `abandon_work_item`) do not: ending is the one move an item may always make.
     """
-    return (
+    wrote = (
         conn.execute(f"{sql} AND status NOT IN ({marks(ENDED)})", (*params, *ENDED)).rowcount == 1
     )
+    if wrote:
+        _end_overtaken_holds(conn)
+    return wrote
+
+
+def _end_overtaken_holds(conn) -> None:
+    """A row that carries a start request and is not `queued` or `blocked` was
+    held, and something other than the start queue has just moved it: a stop,
+    a gate review's verdict, a skip. The start it held is over, so the request
+    goes and its timeline says so, ahead of the mover's own event.
+
+    Here, not at each write: every non-ending status write passes through
+    `write_status`, the next one written included. The queue's own moves clear
+    the request in the same `UPDATE` (`work_items._PUT_BACK`), so they never
+    match. An ended row is left alone: its ending event already says what
+    happened. One scan of `work_items`, a row per work item, per status write."""
+    apart = (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED, *ENDED)
+    for wid, status in conn.execute(
+        "SELECT id, status FROM work_items "
+        f"WHERE queued_request IS NOT NULL AND status NOT IN ({marks(apart)})",
+        apart,
+    ).fetchall():
+        conn.execute("UPDATE work_items SET queued_request = NULL WHERE id = ?", (wid,))
+        events.append(
+            conn, wid, WorkItemEvent.DEQUEUED, {"why": "superseded", "detail": None, "to": status}
+        )
 
 
 def _now() -> str:
