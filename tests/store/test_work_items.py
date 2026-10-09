@@ -2,6 +2,7 @@ import json
 import subprocess
 
 import pytest
+from support import schema
 from support.store_fixtures import CHAIN, mk_item
 
 from kraft import db, events, store
@@ -467,3 +468,85 @@ async def test_current_step_round_trips_and_resets_when_the_node_moves(database)
     assert step() == 3, "re-entering the same node keeps the cursor"
     await database.write(lambda c: store.enter_node(c, "w1", "b"))
     assert step() == 0
+
+
+def _status(conn, wid="w1"):
+    return tuple(
+        conn.execute("SELECT status, stop_kind FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+
+
+@pytest.mark.parametrize(
+    ("came_from", "stop_kind"),
+    [("paused", None), ("needs_human", "failed")],
+    ids=["from-paused", "from-a-stop"],
+)
+async def test_a_queued_item_is_put_back_exactly_where_it_was(database, came_from, stop_kind):
+    """The stop_kind trigger clears the kind the moment a row leaves the stop
+    set, so the kind is saved with the request and written back."""
+
+    def seed(c):
+        schema.insert_item(c, status=came_from)
+        c.execute("UPDATE work_items SET stop_kind = ?", (stop_kind,))
+
+    await database.write(seed)
+
+    queued = await database.write(
+        lambda c: store.queue_work_item(
+            c, "w1", verb="retry", body={"steer": "s"}, headers={}, from_statuses=[came_from]
+        )
+    )
+    assert queued
+    assert database.read(_status) == ("queued", None)
+    request = database.read(
+        lambda c: store.queued_request_of(c.execute("SELECT * FROM work_items").fetchone())
+    )
+    assert (request["verb"], request["body"], request["from"]) == (
+        "retry",
+        {"steer": "s"},
+        came_from,
+    )
+
+    assert await database.write(lambda c: store.dequeue_work_item(c, "w1", why="paused"))
+    assert database.read(_status) == (came_from, stop_kind)
+    assert (
+        database.read(lambda c: c.execute("SELECT queued_request FROM work_items").fetchone()[0])
+        is None
+    )
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert types[-2:] == ["work_item_queued", "work_item_dequeued"]
+
+
+async def test_queueing_refuses_a_status_the_door_does_not_start_from(database):
+    await database.write(lambda c: schema.insert_item(c, status="active"))
+    assert not await database.write(
+        lambda c: store.queue_work_item(
+            c, "w1", verb="resume", body={}, headers={}, from_statuses=["paused"]
+        )
+    )
+    assert database.read(_status) == ("active", None)
+
+
+async def test_the_queue_is_read_earliest_first_and_a_kept_place_survives(database):
+    def seed(c):
+        for wid in ("a", "b"):
+            schema.insert_item(c, wid=wid, status="paused")
+            store.queue_work_item(
+                c, wid, verb="resume", body={}, headers={}, from_statuses=["paused"]
+            )
+
+    await database.write(seed)
+    assert database.read(store.queued_ids) == ["a", "b"]
+
+    taken = await database.write(lambda c: store.take_queued(c, "a"))
+    assert database.read(lambda c: _status(c, "a")) == ("paused", None)
+    assert database.read(store.queued_ids) == ["b"]
+    # `a` lost its slot and was queued again: later than `b`, until its place is kept.
+    await database.write(
+        lambda c: store.queue_work_item(
+            c, "a", verb="resume", body={}, headers={}, from_statuses=["paused"]
+        )
+    )
+    assert database.read(store.queued_ids) == ["b", "a"]
+    await database.write(lambda c: store.keep_place(c, "a", taken["at"]))
+    assert database.read(store.queued_ids) == ["a", "b"]
