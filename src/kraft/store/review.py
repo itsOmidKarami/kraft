@@ -13,12 +13,9 @@ import uuid
 
 from kraft import events, render
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.vocab import ChainEvent, GateEvent
+from kraft.vocab import ChainEvent, GateEvent, ThreadLabel, ThreadState
 
 __all__ = [
-    "CLAIMS",
-    "LABELS",
-    "OUTCOMES",
     "YOU",
     "add_draft_reply",
     "agent_reply",
@@ -133,9 +130,6 @@ def gate_attempts(conn, wid, gate) -> list[dict]:
 
 
 YOU = "you"
-LABELS = frozenset({"must_fix", "question", "nit"})
-CLAIMS = frozenset({"fixed", "answered", "should_fix"})
-OUTCOMES = frozenset({"approve", "request_changes", "comment"})
 _KEEP = object()
 
 
@@ -255,7 +249,7 @@ def delete_draft_comment(conn, cid) -> None:
 def set_thread_state(conn, tid, state: str) -> None:
     conn.execute(
         "UPDATE review_threads SET state = ?, resolved_at = ? WHERE id = ?",
-        (state, _now() if state == "resolved" else None, tid),
+        (state, _now() if state == ThreadState.RESOLVED else None, tid),
     )
     t = thread_row(conn, tid)
     events.append(
@@ -275,8 +269,8 @@ def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
         (cid, tid, author, attempt, body, claim, _now()),
     )
     t = thread_row(conn, tid)
-    if claim is not None and t["state"] == "open":
-        set_thread_state(conn, tid, "claimed")
+    if claim is not None and t["state"] == ThreadState.OPEN:
+        set_thread_state(conn, tid, ThreadState.CLAIMED)
     else:
         # An agent claim never reopens a `claimed` or `resolved` thread: report
         # the state the thread is actually in instead.
@@ -325,8 +319,8 @@ def open_must_fix(conn, wid) -> list[str]:
         r["id"]
         for r in conn.execute(
             "SELECT id FROM review_threads WHERE work_item_id = ? "
-            "AND label = 'must_fix' AND state != 'resolved' ORDER BY created_at, rowid",
-            (wid,),
+            "AND label = ? AND state != ? ORDER BY created_at, rowid",
+            (wid, ThreadLabel.MUST_FIX, ThreadState.RESOLVED),
         ).fetchall()
     ]
 
@@ -335,7 +329,9 @@ def unanswered(conn, wid) -> list[dict]:
     return [
         t
         for t in threads_for(conn, wid)
-        if not t["draft"] and t["state"] != "resolved" and t["comments"][-1]["author"] == YOU
+        if not t["draft"]
+        and t["state"] != ThreadState.RESOLVED
+        and t["comments"][-1]["author"] == YOU
     ]
 
 
@@ -441,7 +437,7 @@ _NOTE_HEAD = (
 def render_threads(threads: list[dict]) -> str:
     blocks = []
     for t in threads:
-        if t["state"] == "resolved":
+        if t["state"] == ThreadState.RESOLVED:
             continue
         head = f"[{t['id']}] {render.thread_where(t)}" + (f" ({t['label']})" if t["label"] else "")
         first, *replies = t["comments"]

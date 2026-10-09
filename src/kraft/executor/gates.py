@@ -20,6 +20,7 @@ from kraft.vocab import (
     EscalationEvent,
     GateEvent,
     StopKind,
+    ThreadLabel,
     Verb,
     WorkItemEvent,
     admitting,
@@ -217,7 +218,7 @@ async def bounce_on_feedback(
     if not isinstance(node.node, GateNode) or gate_cleared(db, work_item_id, node.id):
         return None
     threads = db.read(lambda c: store.unanswered(c, work_item_id))
-    if not any(t["label"] == "must_fix" for t in threads):
+    if not any(t["label"] == ThreadLabel.MUST_FIX for t in threads):
         return None
     if policy is None:
         return None

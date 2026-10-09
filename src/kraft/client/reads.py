@@ -13,7 +13,7 @@ import httpx
 from kraft import auth
 from kraft.client import context, transport
 from kraft.paths import RunDirs, default_run_dir
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import ThreadState, WorkItemStatus
 
 
 async def board(
@@ -360,7 +360,7 @@ async def threads(work_item_id: str | None = None, open_only: bool = False) -> l
     """Review threads on a work item, drafts included, oldest first."""
     wid = await context.resolve_work_item(work_item_id)
     out = await transport._get(f"/work-items/{transport.segment(wid)}/threads")
-    return [t for t in out if t["state"] != "resolved"] if open_only else out
+    return [t for t in out if t["state"] != ThreadState.RESOLVED] if open_only else out
 
 
 async def compare(

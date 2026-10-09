@@ -28,6 +28,7 @@ from kraft.vocab import (
     LimitEvent,
     SessionEvent,
     StopKind,
+    ThreadState,
     WorkItemEvent,
     WorkItemStatus,
 )
@@ -603,7 +604,7 @@ def _running_session(st, wid: str) -> dict | None:
 
 def _open_thread_count(st, wid: str) -> int:
     threads = st.db.read(lambda c: store.threads_for(c, wid))
-    return sum(1 for t in threads if t["state"] != "resolved")
+    return sum(1 for t in threads if t["state"] != ThreadState.RESOLVED)
 
 
 # B4.

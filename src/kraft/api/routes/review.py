@@ -8,7 +8,6 @@ Human routes refuse a worker session outright: agents speak only through
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
@@ -20,7 +19,15 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board, lifecycle
 from kraft.api.routes import gates as gate_routes
 from kraft.executor import stops
-from kraft.vocab import RUNNING, WorkItemStatus
+from kraft.vocab import (
+    RUNNING,
+    DiffSide,
+    ReplyClaim,
+    ReviewOutcome,
+    ThreadLabel,
+    ThreadState,
+    WorkItemStatus,
+)
 
 
 class Suggestion(BaseModel):
@@ -43,16 +50,16 @@ class ThreadIn(BaseModel):
     body: str
     node_id: str | None = None
     file_path: str | None = None
-    side: Literal["old", "new"] | None = None
+    side: DiffSide | None = None
     start_line: int | None = None
     end_line: int | None = None
     # `start_line`'s side when it differs from `side` (`end_line`'s): a range
     # across sides, such as a removed line through its replacement. Omitted, `side`.
-    start_side: Literal["old", "new"] | None = None
+    start_side: DiffSide | None = None
     # The range's lines as the diff showed them, each led by its diff mark.
     # Clipped, never refused: a quote is context, and must not block a comment.
     quote: str | None = None
-    label: Literal["must_fix", "question", "nit"] | None = None
+    label: ThreadLabel | None = None
     suggestion: Suggestion | None = None
     anchor_sha: str | None = None
 
@@ -115,7 +122,7 @@ def _check_suggestion(
         raise ValueError("a suggestion needs a range on one side")
     # Nor are old-side lines, which the change already removed or kept: replacing
     # "lines 2-3" would edit the new file's lines 2-3, which are other lines.
-    if side == "old":
+    if side == DiffSide.OLD:
         raise ValueError("a suggestion replaces new-side lines, not a range on the old side")
     if not (start <= s.start_line <= s.end_line <= end):
         raise ValueError(f"the suggestion's lines must sit inside {start}-{end}")
@@ -137,7 +144,7 @@ def _check_row_suggestion(s: Suggestion | None, row) -> None:
 
 class ThreadPatch(BaseModel):
     body: str | None = None
-    label: Literal["must_fix", "question", "nit"] | None = None
+    label: ThreadLabel | None = None
     suggestion: Suggestion | None = None
 
 
@@ -330,16 +337,16 @@ async def _set_state(tid: str, request: Request, state: str):
 
 @api_router.post("/threads/{tid}/resolve")
 async def resolve_thread(tid: str, request: Request):
-    return await _set_state(tid, request, "resolved")
+    return await _set_state(tid, request, ThreadState.RESOLVED)
 
 
 @api_router.post("/threads/{tid}/reopen")
 async def reopen_thread(tid: str, request: Request):
-    return await _set_state(tid, request, "open")
+    return await _set_state(tid, request, ThreadState.OPEN)
 
 
 class ReviewIn(BaseModel):
-    outcome: Literal["approve", "request_changes", "comment"]
+    outcome: ReviewOutcome
     summary: str | None = None
     node: str | None = None
     #: A chain revision's digest, passed to the gate approval as `POST .../approve` takes it.
@@ -350,20 +357,24 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     wid = row["id"]
     nodes = gate_routes.gate_nodes(st, row) if gate is not None else None
     # Every refusal before the review is written: a refused review records nothing.
-    if gate is None and body.outcome == "approve":
+    if gate is None and body.outcome == ReviewOutcome.APPROVE:
         raise HTTPException(409, "nothing to approve: no gate is pending")
-    if body.outcome == "approve":
+    if body.outcome == ReviewOutcome.APPROVE:
         blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
         if blocking:
             raise HTTPException(
                 409, f"must-fix review threads are not resolved: {', '.join(blocking)}"
             )
-    if gate is not None and body.outcome == "request_changes":
+    if gate is not None and body.outcome == ReviewOutcome.REQUEST_CHANGES:
         try:
             executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-    if gate is None and body.outcome == "comment" and not lifecycle.review_reachable(row):
+    if (
+        gate is None
+        and body.outcome == ReviewOutcome.COMMENT
+        and not lifecycle.review_reachable(row)
+    ):
         raise HTTPException(
             409,
             "nothing ahead in this chain will read these threads; use `kraft item retry --steer`",
@@ -377,10 +388,10 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
         base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
     else:
         base = row["base_ref"] or head
-    if gate is None and body.outcome == "request_changes":
+    if gate is None and body.outcome == ReviewOutcome.REQUEST_CHANGES:
         return await _request_changes_now(st, request, row, body, head, base)
     note = None
-    if body.outcome == "request_changes":
+    if body.outcome == ReviewOutcome.REQUEST_CHANGES:
         threads = st.db.read(lambda c: store.threads_for(c, wid))
         note = store.render_note(threads, body.summary) or "Changes requested."
     # Recorded *before* the gate call (Kraft-dl5fl): a reject starts the walk,
@@ -400,9 +411,9 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
             base_sha=base or head,
         )
     )
-    if body.outcome != "comment":
+    if body.outcome != ReviewOutcome.COMMENT:
         try:
-            if body.outcome == "approve":
+            if body.outcome == ReviewOutcome.APPROVE:
                 result = await gate_routes.approve_gate(
                     wid, gate, request, gate_routes.GateApprove(digest=body.digest)
                 )
@@ -418,10 +429,20 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     await st.db.write(lambda c: store.publish_review(c, rid))
     if gate is None:
         # Nothing pending to reply for: no gate, no reply agent to launch.
-        return {"review_id": rid, "outcome": "comment", "gate": None, "reply_agent": False}
+        return {
+            "review_id": rid,
+            "outcome": ReviewOutcome.COMMENT,
+            "gate": None,
+            "reply_agent": False,
+        }
     launch = deps.launch(st, row["repo"])
     if await review_reply.refused_without_channel(st.db, row, launch, gate):
-        return {"review_id": rid, "outcome": "comment", "gate": gate, "reply_agent": False}
+        return {
+            "review_id": rid,
+            "outcome": ReviewOutcome.COMMENT,
+            "gate": gate,
+            "reply_agent": False,
+        }
     try:
         deps.spawn(
             request.app,
@@ -438,7 +459,12 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
         spawned = True
     except deps.AlreadyRunning:
         spawned = False  # an auto-review is still running; the threads wait for the next comment
-    return {"review_id": rid, "outcome": "comment", "gate": gate, "reply_agent": spawned}
+    return {
+        "review_id": rid,
+        "outcome": ReviewOutcome.COMMENT,
+        "gate": gate,
+        "reply_agent": spawned,
+    }
 
 
 async def _request_changes_now(st, request, row, body, head, base):
@@ -491,7 +517,7 @@ async def _request_changes_now(st, request, row, body, head, base):
             c,
             wid=wid,
             gate=None,
-            outcome="request_changes",
+            outcome=ReviewOutcome.REQUEST_CHANGES,
             summary=body.summary,
             head_sha=head,
             base_sha=base or head,
@@ -526,7 +552,7 @@ async def _request_changes_now(st, request, row, body, head, base):
     await st.db.write(lambda c: store.publish_review(c, rid))
     return {
         "review_id": rid,
-        "outcome": "request_changes",
+        "outcome": ReviewOutcome.REQUEST_CHANGES,
         "gate": None,
         "target": target,
         "target_reason": why,
@@ -559,7 +585,7 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
 
 class ReplyIn(BaseModel):
     body: str
-    claim: Literal["fixed", "answered", "should_fix"] | None = None
+    claim: ReplyClaim | None = None
 
 
 @api_router.post("/threads/{tid}/replies", status_code=201)

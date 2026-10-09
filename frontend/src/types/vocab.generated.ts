@@ -84,6 +84,21 @@ export const SESSION_TRAITS: Record<SessionStatus, { live: boolean; unfinished: 
   "infra_stop": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
 };
 
+export const REVIEW_OUTCOMES = ["approve", "request_changes", "comment"] as const;
+export type ReviewOutcome = (typeof REVIEW_OUTCOMES)[number];
+
+export const THREAD_LABELS = ["must_fix", "question", "nit"] as const;
+export type ThreadLabel = (typeof THREAD_LABELS)[number];
+
+export const THREAD_STATES = ["open", "claimed", "resolved"] as const;
+export type ThreadState = (typeof THREAD_STATES)[number];
+
+export const REPLY_CLAIMS = ["fixed", "answered", "should_fix"] as const;
+export type ReplyClaim = (typeof REPLY_CLAIMS)[number];
+
+export const DIFF_SIDES = ["old", "new"] as const;
+export type DiffSide = (typeof DIFF_SIDES)[number];
+
 export const WORK_ITEM_EVENTS = ["work_item_created", "work_item_attachments", "work_item_resumed", "pause_requested", "work_item_queued", "work_item_dequeued", "work_item_blocked_by_dependency", "paused_by_broken_base", "work_item_needs_human", "work_item_waiting", "work_item_rate_limited", "work_item_retried", "work_item_completed", "work_item_manually_completed", "work_item_cancelled", "work_item_abandoned", "work_item_archived", "work_item_restored", "work_item_title_edited", "work_item_description_edited", "plan_progress", "steer_context_set", "steer_undelivered"] as const;
 export type WorkItemEvent = (typeof WORK_ITEM_EVENTS)[number];
 

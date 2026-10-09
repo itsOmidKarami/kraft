@@ -2,6 +2,16 @@
  *  routes (`api/routes/review.py`, `store.threads_for`) and review submission.
  *  Only the new UI reads these today (Kraft-3spjr). */
 
+import type {
+  DiffSide,
+  ReplyClaim,
+  ReviewOutcome,
+  ThreadLabel,
+  ThreadState,
+} from "./vocab.generated";
+
+export type { ReviewOutcome, ThreadLabel, ThreadState };
+
 /** What `/compare` resolves: the base commit, a gate attempt, the last
  *  submitted review, or the working tree. */
 export type CompareTarget = "base" | "latest" | "last_review" | `attempt:${number}`;
@@ -34,9 +44,6 @@ export interface Compare {
   diff_max_bytes: number;
 }
 
-export type ThreadLabel = "must_fix" | "question" | "nit";
-export type ThreadState = "open" | "claimed" | "resolved";
-
 export interface Suggestion {
   start_line: number;
   end_line: number;
@@ -53,7 +60,7 @@ export interface ReviewComment {
   attempt: number | null;
   body: string;
   suggestion: Suggestion | null;
-  claim: "fixed" | "answered" | "should_fix" | null;
+  claim: ReplyClaim | null;
   created_at: string;
   draft: boolean;
 }
@@ -65,9 +72,9 @@ export interface ReviewThread {
   node_id: string | null;
   file_path: string | null;
   /** The side of `end_line`. */
-  side: "old" | "new" | null;
+  side: DiffSide | null;
   /** The side of `start_line`: `side`, unless the range runs across sides. */
-  start_side?: "old" | "new" | null;
+  start_side?: DiffSide | null;
   start_line: number | null;
   end_line: number | null;
   /** The range's lines when it was commented on, each led by its diff mark. */
@@ -82,8 +89,6 @@ export interface ReviewThread {
   /** Not yet part of a submitted review. */
   draft: boolean;
 }
-
-export type ReviewOutcome = "approve" | "request_changes" | "comment";
 
 /** A gateless `request_changes`: where it sent the work and what it did. */
 export interface GatelessChanges {

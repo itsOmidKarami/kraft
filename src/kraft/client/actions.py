@@ -9,6 +9,7 @@ from types import EllipsisType
 
 from kraft import config
 from kraft.client import context, reads, transport
+from kraft.vocab import DiffSide
 
 
 async def create_work_item(
@@ -609,7 +610,7 @@ async def add_review_comment(
     if start_line is not None:
         end = end_line or start_line
         payload.update(
-            side=side or "new",
+            side=side or DiffSide.NEW,
             start_line=start_line,
             end_line=end,
             start_side=start_side,
