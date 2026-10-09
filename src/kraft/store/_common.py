@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
-from kraft.vocab import ENDED, ForgeEvent  # ENDED: an item never leaves these (Kraft-dncfg)
+from kraft import events
+
+# ENDED: an item never leaves these (Kraft-dncfg)
+from kraft.vocab import ENDED, ForgeEvent, WorkItemEvent, WorkItemStatus
 from kraft.vocab.sql import marks
 
 
@@ -15,10 +19,54 @@ def write_status(conn, sql: str, params: tuple) -> bool:
     whole literal at its call site, so `dev/check_claim_handoff.py` still sees
     each claim. The ending writes (`mark_completed`, `MANUAL_ENDS`,
     `abandon_work_item`) do not: ending is the one move an item may always make.
+
+    A write that took also ends every hold it finds overtaken
+    (`_end_overtaken_holds`): normally the one item this write just moved out
+    of `queued` or `blocked` without the start queue, whose `work_item_dequeued`
+    then comes before the caller's own event. It looks at the whole table, so a
+    row left that way by anything else is ended here too.
     """
-    return (
+    wrote = (
         conn.execute(f"{sql} AND status NOT IN ({marks(ENDED)})", (*params, *ENDED)).rowcount == 1
     )
+    if wrote:
+        _end_overtaken_holds(conn)
+    return wrote
+
+
+def _end_overtaken_holds(conn) -> None:
+    """A row that carries a start request and is not `queued` or `blocked` was
+    held, and something other than the start queue has just moved it: a stop,
+    a gate review's verdict, a skip. The start it held is over, so the request
+    goes and its timeline says so, ahead of the mover's own event.
+
+    Here, not at each write: every non-ending status write passes through
+    `write_status`, the next one written included. The queue's own moves clear
+    the request in the same `UPDATE` (`work_items._PUT_BACK`), so they never
+    match. An ended row is left alone: its ending event already says what
+    happened. One scan of `work_items`, a row per work item, per status write."""
+    apart = (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED, *ENDED)
+    for wid, status, saved in conn.execute(
+        "SELECT id, status, queued_request FROM work_items "
+        f"WHERE queued_request IS NOT NULL AND status NOT IN ({marks(apart)})",
+        apart,
+    ).fetchall():
+        conn.execute("UPDATE work_items SET queued_request = NULL WHERE id = ?", (wid,))
+        events.append(
+            conn,
+            wid,
+            WorkItemEvent.DEQUEUED,
+            {"why": "superseded", "detail": _dropped(saved), "to": status},
+        )
+
+
+def _dropped(saved: str) -> str:
+    """What an overtaken hold was holding, for its timeline: the verb, and the
+    steer a person attached to it, which reaches no agent now."""
+    request = json.loads(saved)
+    steer = (request.get("body") or {}).get("steer")
+    said = f"the queued {request.get('verb', 'start')} was dropped"
+    return f"{said}, with its steer: {steer}" if steer else said
 
 
 def _now() -> str:
