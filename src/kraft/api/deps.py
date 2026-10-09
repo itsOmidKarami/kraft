@@ -191,7 +191,12 @@ async def cancel(app: FastAPI, wid: str, timeout: float | None = None) -> None:
         else:
             await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
     except asyncio.CancelledError:
-        pass
+        # The walk's own, unless this caller was cancelled as well
+        # (Kraft-1zhnj): a `Task.cancel()` on a caller waiting here reaches
+        # the walk instead and comes back looking the same, and swallowing it
+        # leaves a shutdown waiting on a task that never ends.
+        if asyncio.current_task().cancelling():
+            raise
     except TimeoutError:
         logger.warning(
             "cancel: task for %s did not unwind within %.1fs; proceeding anyway", wid, timeout

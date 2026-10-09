@@ -1,5 +1,6 @@
 """The start queue: queued items start, earliest first, as slots free."""
 
+import asyncio
 import dataclasses
 import json
 import os
@@ -190,6 +191,48 @@ def test_an_item_that_loses_the_slot_keeps_its_place(client, repo, board):
             )
         ]
     assert order == [first, second]
+
+
+@pytest.mark.parametrize(
+    ("claimed", "left"),
+    [
+        pytest.param(False, "queued", id="before the door's claim"),
+        pytest.param(True, "active", id="after it: the restart resumes the item"),
+    ],
+)
+def test_a_start_cancelled_by_a_shutdown_goes_back_in_the_queue_in_its_place(
+    client, repo, board, monkeypatch, claimed, left
+):
+    """Kraft-1zhnj: the scheduler is cancelled inside the door. The request it
+    took is not lost with it, and the cancellation still ends the scheduler."""
+    from kraft.api.routes import lifecycle
+
+    first = _paused(client, repo, chain_template="default")
+    second = _paused(client, repo, chain_template="default")
+    for wid in (first, second):
+        client.post(f"/api/work-items/{wid}/resume", json={"steer": "go left"})
+
+    async def shut_down(wid, *_):
+        if claimed:
+            _set_status(wid, "active")
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(lifecycle, "resume_work_item", shut_down)
+
+    async def start():
+        try:
+            return await start_queue._start_one(client.app, first)
+        except asyncio.CancelledError:
+            return "cancelled"
+
+    assert client.portal.call(start) == "cancelled"
+    assert _status_of(client, first) == left
+    with _db() as c:
+        held = c.execute(
+            "SELECT id, json_extract(queued_request, '$.body.steer') FROM work_items "
+            "WHERE status = 'queued' ORDER BY json_extract(queued_request, '$.at'), id"
+        ).fetchall()
+    assert held == ([] if claimed else [(first, "go left")]) + [(second, "go left")]
 
 
 def test_the_rebuilt_request_names_the_app_and_the_caller(client):
