@@ -215,7 +215,7 @@ def sessions_for_round(
     return list(
         conn.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND round = ? ORDER BY created_at",
+            "AND round = ? ORDER BY created_at, rowid",
             (work_item_id, node_id, round),
         )
     )

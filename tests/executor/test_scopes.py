@@ -3,6 +3,7 @@ a repo's test scopes a round runs, how they run, and how their per-scope
 sessions read back as findings."""
 
 import ast
+import json
 import sys
 from pathlib import Path
 
@@ -457,6 +458,76 @@ async def test_collect_findings_ignores_a_stale_needs_context_row_from_a_reviewe
         await it.session(sid, "verify.main.review", status, head_sha="sha-a")
 
     assert dispatch.collect_findings(it.database, it.id, it.chain.chain.nodes[0], 0) == ([], set())
+
+
+# -- a step that did not run this pass (Kraft-0ko3s) ---------------------------
+
+_CHECK = {"id": "t", "kind": "agent", "harness": "fake", "prompt": "Do it."}
+_REVIEW = {"id": "review", "kind": "agent", "harness": "fake", "prompt": "Do it."}
+_REVIEW_FINDING = {
+    "severity": "important",
+    "message": "review finding",
+    "file": "a.py",
+    "line": 3,
+    "source_plugin": "fake",
+}
+_RED_THEN_GREEN = [("e", "done"), ("l", "done"), ("e", "failed"), ("e", "done")]
+
+
+@pytest.mark.parametrize(
+    ("earlier", "together", "rows", "kept"),
+    [
+        # Fails with no barrier at all.
+        pytest.param(
+            _CHECK, False, [("e", "done"), ("l", "done"), ("e", "failed")], False, id="stale"
+        ),
+        # A scope loop mints one row per scope: fails if it is judged by its last row.
+        pytest.param(_BUILTIN, False, _RED_THEN_GREEN, False, id="stale-behind-a-red-scope"),
+        # The same rows on an agent task are a failure and its recovery: fails if the
+        # barrier is the task's newest failing row instead of its latest row.
+        pytest.param(_CHECK, False, _RED_THEN_GREEN, True, id="kept-earlier-recovered"),
+        # Fails against "an earlier failure cuts everything after it".
+        pytest.param(
+            _CHECK, False, [("e", "failed"), ("l", "done")], True, id="kept-fresh-after-old-failure"
+        ),
+        # Fails if only `done` counts as advancing.
+        pytest.param(
+            _CHECK,
+            False,
+            [("l", "done"), ("e", "done_with_concerns")],
+            True,
+            id="kept-under-concerns",
+        ),
+        # Fails if a task cuts its own step's siblings.
+        pytest.param(
+            _CHECK, True, [("l", "done"), ("e", "failed")], True, id="kept-sibling-in-the-same-step"
+        ),
+    ],
+)
+async def test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it(
+    item_on, earlier, together, rows, kept
+):
+    """A round number repeats when a node is entered again, and a step that fails
+    stops the steps after it. So a later step's row can be from a pass before the
+    one that just stopped: it is not this measurement's result."""
+    groups = [[earlier, _REVIEW]] if together else [[earlier], [_REVIEW]]
+    steps = [{"id": f"s{i}", "tasks": tasks} for i, tasks in enumerate(groups)]
+    it = await item_on([{"id": "verify", "kind": "exec", "steps": steps}], repo="/r")
+    node = it.chain.chain.nodes[0]
+    path = {t.task.id: t.path for step in node.steps for t in step.tasks}
+    path = {"e": path["t"], "l": path["review"]}
+    for i, (who, status) in enumerate(rows):
+        if who == "l":
+            (it.run_dirs.results / f"s{i}.json").write_text(
+                json.dumps({"findings": [_REVIEW_FINDING]})
+            )
+        await it.session(f"s{i}", path[who], status, head_sha="sha-0", command=f"cmd-{i}")
+
+    has_session: dict[str, bool] = {}
+    found, _ = dispatch.collect_findings(it.database, it.id, node, 0, has_session=has_session)
+
+    assert ("review finding" in [f.message for f in found]) is kept
+    assert has_session[path["l"]] is kept
 
 
 # -- what a red scope's stop says (R12a-03) -------------------------------------

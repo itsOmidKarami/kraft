@@ -1010,6 +1010,13 @@ measuring tasks that have a session at that round and those that have none.
 enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without
 origin: src/kraft/executor/walk.py
 
+## REQ a-step-that-did-not-run-contributes-nothing
+
+WHEN a node is measured and an earlier step's latest result did not advance,
+the system SHALL NOT read a later step's result recorded before it.
+enforced-by: tests/executor/test_scopes.py::test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it[stale], tests/executor/test_measurement.py::test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it[earlier-step-stopped-after-it]
+origin: src/kraft/executor/dispatch.py
+
 ## REQ fix-cycle-started-carries-the-attempt-cap
 
 WHEN a fix loop starts an attempt, the `fix_cycle_started` event SHALL carry
