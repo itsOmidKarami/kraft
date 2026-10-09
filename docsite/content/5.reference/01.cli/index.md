@@ -123,7 +123,7 @@ These verbs do not print the payload:
 
 | Verbs | What they print |
 |---|---|
-| `kraft item approve`, `reject`, `pause`, `resume`, `retry`, `raise-budget`, `skip`, `complete`, `cancel`, `escalate` | One line saying what they did, most of them with where the item stands now, such as `approved spec_approval on 4f2c…; the item is now running`. |
+| `kraft item approve`, `reject`, `pause`, `unblock`, `resume`, `retry`, `raise-budget`, `skip`, `complete`, `cancel`, `escalate` | One line saying what they did, most of them with where the item stands now, such as `approved spec_approval on 4f2c…; the item is now running`. |
 | `kraft item review approve` or `request-changes` at a pending gate | The same one line. |
 | `kraft item review request-changes` or `comment`, with no gate pending | The review's fields as `key  value` lines. |
 | `kraft item abandon`, and every `set-*` verb except `set-chain` | The same `key  value` lines. |
@@ -146,7 +146,7 @@ in any shell `argcomplete` supports. Register it by adding
 
 ## In this section
 
-- [Item verbs](/reference/cli/item): file, approve, reject, pause, resume, retry, skip, escalate, and set policy on a work item.
+- [Item verbs](/reference/cli/item): file, approve, reject, pause, unblock, resume, retry, skip, escalate, and set policy on a work item.
 - [View verbs](/reference/cli/view): read the board, follow a running item, and review its diff and documents.
 - [Repo verbs](/reference/cli/repo): connect repositories and reach their worktrees.
 - [Admin verbs](/reference/cli/admin): run, check, update, and configure this machine's server.
