@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_17f1e2281569e48d_perimeter_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 11:03 +0000
+            created at 2026-10-09 12:09 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -124,7 +124,7 @@
     <p class="run run2"><span class="n"><a id="t42" href="#t42">42</a></span><span class="t">    <span class="nam">branch_name_problem</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t43" href="#t43">43</a></span><span class="t"><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t44" href="#t44">44</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">templates</span><span class="op">.</span><span class="nam">library</span> <span class="key">import</span> <span class="nam">LIBRARY_FILE</span><span class="op">,</span> <span class="nam">TemplateLibrary</span><span class="op">,</span> <span class="nam">TemplateLibraryError</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t45" href="#t45">45</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">ENDED</span><span class="op">,</span> <span class="nam">StopKind</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t45" href="#t45">45</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">vocab</span> <span class="key">import</span> <span class="nam">ENDED</span><span class="op">,</span> <span class="nam">ChainEvent</span><span class="op">,</span> <span class="nam">StopKind</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t46" href="#t46">46</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">worker</span> <span class="key">import</span> <span class="nam">steering</span> <span class="key">as</span> <span class="nam">steering_mod</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t47" href="#t47">47</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t48" href="#t48">48</a></span><span class="t"><span class="nam">logger</span> <span class="op">=</span> <span class="nam">logging</span><span class="op">.</span><span class="nam">getLogger</span><span class="op">(</span><span class="nam">__name__</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -180,8 +180,8 @@
     <p class="pln"><span class="n"><a id="t98" href="#t98">98</a></span><span class="t"><span class="str">    `executor.intake` wrote in the same transaction as the row (Kraft-7gy).&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t99" href="#t99">99</a></span><span class="t">    <span class="nam">row</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t100" href="#t100">100</a></span><span class="t">        <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">c</span><span class="op">.</span><span class="nam">execute</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t101" href="#t101">101</a></span><span class="t">            <span class="str">&quot;SELECT payload FROM events WHERE work_item_id = ? AND type = &#x27;bead_not_filed&#x27;&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t102" href="#t102">102</a></span><span class="t">            <span class="op">(</span><span class="nam">wid</span><span class="op">,</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t101" href="#t101">101</a></span><span class="t">            <span class="str">&quot;SELECT payload FROM events WHERE work_item_id = ? AND type = ?&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t102" href="#t102">102</a></span><span class="t">            <span class="op">(</span><span class="nam">wid</span><span class="op">,</span> <span class="nam">ChainEvent</span><span class="op">.</span><span class="nam">BEAD_NOT_FILED</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t103" href="#t103">103</a></span><span class="t">        <span class="op">)</span><span class="op">.</span><span class="nam">fetchone</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t104" href="#t104">104</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t105" href="#t105">105</a></span><span class="t">    <span class="key">return</span> <span class="nam">json</span><span class="op">.</span><span class="nam">loads</span><span class="op">(</span><span class="nam">row</span><span class="op">[</span><span class="str">&quot;payload&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">[</span><span class="str">&quot;reason&quot;</span><span class="op">]</span> <span class="key">if</span> <span class="nam">row</span> <span class="key">else</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
@@ -898,7 +898,7 @@
             <a class="nav" href="z_17f1e2281569e48d_perimeter_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 11:03 +0000
+            created at 2026-10-09 12:09 +0000
         </p>
     </div>
 </footer>
