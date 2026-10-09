@@ -83,6 +83,8 @@ async def test_a_verification_failure_reruns_the_tests_and_review_not_the_implem
     assert gates.pending_gate(it.database, it.id) == "local_review"
     [cycle] = it.events("fix_cycle_started")
     assert cycle["payload"]["node_id"] == "verification"
+    # The library's own cap for this loop, not the policy default of 3 above.
+    assert cycle["payload"]["max_attempts"] == 2
 
 
 async def test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote(

@@ -17,14 +17,26 @@ Read these first:
 
 - The work item's title and description, and the spec and plan if it has them.
   They are in your instructions above, or named there by path.
-- What the chain did: `kraft view events` (the worktree you are in names the
-  work item). The ones that matter are `findings_measured` (what the tests and
-  the review found, each round), `fix_cycle_started` and `judge_verdict` (the
-  repair attempts, and what the fix-loop judge said about them), and
-  `node_recovery_started`. If `kraft` refuses the verb or cannot be run (a
-  sandboxed worker with no network cannot reach Kraft at all), work from what
-  your instructions carry and say in the brief which events you could not
-  read; do not reconstruct them from memory.
+- What the chain did: `kraft view events --json` (the worktree you are in names
+  the work item). Ask for JSON: the plain view cuts every payload short, and
+  the facts you need are past the cut. These events matter:
+
+  | Event | What it tells you |
+  |---|---|
+  | `findings_measured` | One round of the tests and the review. `measured_tasks` are the checks that ran in it and `unmeasured_tasks` the ones that did not: a step that fails stops the steps after it, so a round of red tests has no review in it. A test command that failed is named in a finding, so a round with no test finding passed every command it selected. `dropped` is there only when a reviewer wrote findings wrongly, and that review is not a clean one. |
+  | `test_scopes_selected` | The test commands the round ran. None selected means nothing was tested. |
+  | `fix_cycle_started` | A repair attempt. `max_attempts` is how many the loop allows. If `cycle` starts again at 1, a retry restarted the loop: count each run on its own. |
+  | `fix_cycle_refunded` | The attempt with that `cycle` did not count. |
+  | `judge_verdict` | What the fix-loop judge said about going on. It rules only when a repair left something to fix, so most runs have none. |
+  | `scope_skipped`, `node_skipped` | A person skipped a check, whatever the lists above say. A skip from before the last `run_forked` no longer holds, and a `node_skipped` with `gate` set skipped a gate. |
+  | `node_recovery_started` | Kraft reran a node's failed tasks. |
+  | `worker_session_exited` | With `concerns`, what a task flagged about its own work when it finished. |
+
+  You may not be able to read all of this: `kraft` refuses the verb or cannot
+  be run (a sandboxed worker with no network cannot reach Kraft at all), an
+  older item's events lack a field named here, or the verification node has no
+  `findings_measured`. Then work from what you have and say in the brief what
+  you could not read; do not reconstruct it from memory.
 - The size of the change: `git diff --stat origin/<base>...HEAD`, where
   `<base>` is the branch the work goes into (the repository's default unless
   the work item names another). Read files where you need to, but do not
@@ -32,26 +44,43 @@ Read these first:
 
 ## What the brief contains
 
-Use these sections, in this order. A section with nothing in it says so in one
-line; do not drop it.
+Every brief has these four sections, in this order:
 
 1. **What was asked.** The title, plus the spec and plan by path. Do not
    restate them.
 2. **What changed.** The files and the scale (files touched, lines added and
-   removed), and in a sentence or two what the change does.
-3. **What was verified.** Which test scopes ran and what they reported on the
-   last round. If a round was red and a repair turned it green, say so.
-4. **What the review found, and what was done about it.** Each finding the
-   local review raised, and whether a repair fixed it or it was left open. A
-   minor finding that never opened a fix cycle still goes here: a finding
-   nobody is shown has been silently discarded.
-5. **What is unresolved.** How many repair attempts were spent out of how
-   many, what the judge said, and anything knowingly skipped or left for
-   later. A doubt you have is information for the human, not an admission.
-6. **What approving does.** Say it plainly: approving **opens a draft merge
+   removed), and in a sentence or two what the change does. You did not write
+   the change, so check the plan's tasks against the diff, and say in one
+   sentence whether all of them have a change behind them.
+3. **What was verified.** From the last round: each check that ran and what it
+   reported, and the test commands it ran. If a check did not run in it, name
+   that check as not run. Then what it took to get there: the rounds that
+   were red before a repair turned them green, and how many repair attempts
+   were spent out of how many. If the judge ruled, say what it said.
+4. **What approving does.** Say it plainly: approving **opens a draft merge
    request on the forge and starts CI**. The work is then published, even
    though it is still a draft. A human who does not know that may approve
    casually.
+
+Between the third and the last, add a section for each of these that you
+found. The human reads a section's presence as "there is something here for
+you", so one that reports nothing costs them a read to learn that. When you
+found none of them, the brief is the four sections above. A line works the
+same way: write what happened, and give no line to what you looked for and
+did not find (a judge verdict, a skip, a refund, a concern). The human takes
+a brief without one as a run without one.
+
+- If the review raised a finding in any round, add **What the review found,
+  and what was done about it.** Each finding, and whether a repair fixed it or
+  it was left open. A minor finding that never opened a fix cycle still goes
+  here: a finding nobody is shown has been silently discarded.
+- If a plan task, or something the spec asks for, has no change behind it,
+  add **What was deliberately left out.** Name it, and say why if the work
+  says why.
+- If there is something you could not read or check, or a task raised a
+  concern about its own work, add **What you are unsure about.** Say what,
+  and where the human should look themselves. A doubt you have is information
+  for the human, not an admission.
 
 If your instructions name an intent tree, **What changed** also lists each
 requirement this diff adds, changes or removes, by id, and any requirement it

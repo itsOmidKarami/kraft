@@ -1003,6 +1003,20 @@ stop for a human when the loop is exhausted or detects that it is not making
 progress.
 enforced-by: tests/test_fix_loop.py::test_fix_loop_cap_breach, tests/test_fix_loop.py::test_fix_loop_wall_clock_breach, tests/test_fix_loop_memory.py::test_a_reworded_repeat_is_recognised_as_the_same_finding, tests/skills/test_fix_loop_judge.py::test_stuck_fingerprint_found_once_it_survives_enough_fixes, tests/executor/test_seeded_failure_walk.py::test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation, tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[rate_limited-rate_limited-rate_limited], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[waiting-waiting-waiting], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[infra_stop-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[config_error-needs_human-needs_human], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause[paused-paused-active], tests/executor/test_fix_loop_outcomes.py::test_a_repair_that_ran_and_failed_is_a_spent_attempt, tests/executor/test_fix_loop_outcomes.py::test_a_refunded_cycle_does_not_read_as_no_progress_on_re_entry
 
+## REQ findings-measured-lists-the-tasks-with-a-session
+
+WHEN the system records `findings_measured`, the event SHALL list the node's
+measuring tasks that have a session at that round and those that have none.
+enforced-by: tests/test_findings_loop.py::test_findings_measured_lists_the_tasks_with_a_session_and_those_without
+origin: src/kraft/executor/walk.py
+
+## REQ fix-cycle-started-carries-the-attempt-cap
+
+WHEN a fix loop starts an attempt, the `fix_cycle_started` event SHALL carry
+the loop's attempt cap.
+enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[review-red]
+origin: src/kraft/executor/walk.py
+
 ## REQ fix-loop-judge-is-optional
 
 A fix loop MAY declare a judge. Without a judge, the system SHALL repeat
@@ -1473,11 +1487,26 @@ origin: config/library.yaml -- the review is the verification node's second step
 
 The default chain's pre-draft gate SHALL show a work brief written by the
 execution node before it. The brief SHALL say what was asked, what changed,
-what was verified, what the review found and what was done about it, what is
-unresolved, and that approving opens a draft merge request and starts CI. It
-SHALL NOT contain the diff.
-enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unresolved], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
+what was verified, and that approving opens a draft merge request and starts
+CI. It SHALL say what the review found and what was done about it, what was
+deliberately left out, and what its author is unsure about, each only when
+there is something to say. It SHALL NOT contain the diff.
+enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[left-out], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unsure], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
 origin: src/kraft/skills/work-brief/SKILL.md -- Omid's decision. The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
+
+## REQ work-brief-method-omits-what-was-not-found
+
+The work-brief method SHALL instruct its author to give no section and no line
+to something it looked for and did not find.
+enforced-by: tests/skills/test_work_brief.py::test_the_skill_carries_the_wording_its_briefs_were_tested_with[omits-what-was-not-found]
+origin: src/kraft/skills/work-brief/SKILL.md
+
+## REQ work-brief-method-names-a-check-that-did-not-run
+
+The work-brief method SHALL instruct its author to name, under what was
+verified, each check that did not run in the last round.
+enforced-by: tests/skills/test_work_brief.py::test_the_skill_carries_the_wording_its_briefs_were_tested_with[names-a-check-not-run]
+origin: src/kraft/skills/work-brief/SKILL.md
 
 ## REQ default-chain-describes-the-merge-request-before-opening-it
 
