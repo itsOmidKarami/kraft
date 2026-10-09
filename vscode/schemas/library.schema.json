@@ -129,7 +129,7 @@
         "profile": {
           "anyOf": [
             {
-              "pattern": "^[a-z][a-z0-9_-]*$",
+              "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
               "type": "string"
             },
             {
@@ -167,7 +167,7 @@
         },
         "steering": {
           "items": {
-            "pattern": "^[a-z][a-z0-9_-]*$",
+            "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
             "type": "string"
           },
           "title": "Steering",
@@ -280,7 +280,7 @@
         },
         "steering": {
           "items": {
-            "pattern": "^[a-z][a-z0-9_-]*$",
+            "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
             "type": "string"
           },
           "title": "Steering",
@@ -528,7 +528,7 @@
         "profile": {
           "anyOf": [
             {
-              "pattern": "^[a-z][a-z0-9_-]*$",
+              "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
               "type": "string"
             },
             {
@@ -708,7 +708,7 @@
         },
         "steering": {
           "items": {
-            "pattern": "^[a-z][a-z0-9_-]*$",
+            "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
             "type": "string"
           },
           "title": "Steering",
@@ -1354,7 +1354,7 @@
         },
         "steering": {
           "items": {
-            "pattern": "^[a-z][a-z0-9_-]*$",
+            "pattern": "^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
             "type": "string"
           },
           "title": "Steering",

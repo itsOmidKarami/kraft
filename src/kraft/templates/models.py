@@ -58,7 +58,12 @@ from kraft.policy import (
     WorkItemPolicy,
     deprecated,
 )
-from kraft.templates.environment import FallbackEntry, Identifier, WorkItemTarget
+from kraft.templates.environment import (
+    FallbackEntry,
+    Identifier,
+    QualifiedIdentifier,
+    WorkItemTarget,
+)
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
@@ -419,7 +424,7 @@ class TaskBase(BaseModel):
 
     id: Identifier
     scope: Annotated[TaskScope, _LOOSE] = TaskScope.ONCE
-    steering: list[Identifier] = Field(default_factory=list)
+    steering: list[QualifiedIdentifier] = Field(default_factory=list)
     #: Task-level recovery: the nearest handler for this task's own failure
     #: (`nearest-recovery-handler-wins`). Only a task in one of an execution
     #: node's own steps may declare one; every other position refuses it
@@ -497,7 +502,7 @@ class AgentTask(TaskBase):
     #: The two routes to a model, one per task: `profile:` (an agent profile
     #: in `harnesses.yaml`, read live at launch -- Kraft-ps1ao), or its own
     #: `model:`/`effort:`. `extends` keeps them apart (`displaced_route`).
-    profile: Identifier | None = None
+    profile: QualifiedIdentifier | None = None
     model: StrictStr | None = None
     effort: StrictStr | None = None
     #: Inputs Kraft delivers to this task (`AgentInput`), e.g.
@@ -925,7 +930,7 @@ class Chain(BaseModel):
 
     model_config = _CONFIG
 
-    id: Identifier | None = None
+    id: QualifiedIdentifier | None = None
     description: StrictStr | None = None
     nodes: list[AnyNode] = Field(min_length=1)
     policy: TemplatePolicyOverride | None = None
