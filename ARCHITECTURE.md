@@ -42,3 +42,13 @@ To add a status, add the member and its row; each piece you miss fails a named g
 | a case in a TS table | `tsc -b` |
 | a door-table state | `tests/vocab/test_work_item.py` (and each door's `takes` must agree with `admits_status`) |
 | the exact-line old-schema fixtures | adding a member re-wraps the generated CHECK, so update the lines matched in `tests/test_db_migrations.py` in the same change |
+
+Event types are defined the same way in `src/kraft/vocab/events/`: one `StrEnum` per family, and the families are the sections of the docs' events page. `EventType` is their union. A set of types more than one module reads (`RUN_BOUNDARY`, `GATE_CLOSED`, `RESTARTS_RUN`) is a trait in the family's table; a set one module reads stays in that module as a tuple of members. A stored type string never changes.
+
+To add an event type, add the member to its family and then:
+
+| Missing piece | Guard that trips |
+|---|---|
+| a row in the family's traits table | importing `kraft.vocab` raises, naming the member |
+| a row in `docsite/content/5.reference/10.events.md` | `tests/vocab/test_events.py` |
+| the regenerated TS | `tests/test_vocab_generated.py` |

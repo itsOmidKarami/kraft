@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import sys
 from enum import Enum
 from pathlib import Path
@@ -36,6 +37,11 @@ def _enum(const: str, type_name: str, enum: type[Enum]) -> str:
         f"export const {const} = [{items}] as const;\n"
         f"export type {type_name} = (typeof {const})[number];\n"
     )
+
+
+def _const(family) -> str:
+    """`WorkItemEvent` -> `WORK_ITEM_EVENTS`."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", family.__name__).upper() + "S"
 
 
 def _group(const: str, type_name: str, members) -> str:
@@ -84,6 +90,10 @@ def render() -> str:
         _group("COMMAND_FINISHED_SESSION_STATUSES", "SessionStatus", vocab.COMMAND_FINISHED),
         _group("UNREADABLE_EXIT_SESSION_STATUSES", "SessionStatus", vocab.UNREADABLE_EXIT),
         _traits("SESSION_TRAITS", "SessionStatus", vocab.SESSION_TRAITS, {}),
+        *(_enum(_const(f), f.__name__, f) for f in vocab.FAMILIES),
+        "export const EVENT_TYPES = ["
+        + ", ".join(f"...{_const(f)}" for f in vocab.FAMILIES)
+        + "] as const;\nexport type EventType = (typeof EVENT_TYPES)[number];\n",
     ]
     return "\n".join(parts)
 
