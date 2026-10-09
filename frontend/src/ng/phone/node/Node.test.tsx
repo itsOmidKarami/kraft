@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -121,6 +121,14 @@ describe("the node screen (D)", () => {
     mount(item("running"), "/work-items/w1/nodes/verification?tab=log", { "GET /worker-sessions/s1/log": [200, { lines }] });
     await screen.findByText(/loaded review_package|\ba\b/);
     expect(document.querySelector(".ph-count")!.textContent).toBe(count);
+  });
+
+  it("opens the node for a link to a fix loop's own step, which only the desktop canvas draws", async () => {
+    const V = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n));
+    // LOOPED's loop is written as tasks, so its one step is `main`.
+    mount(item("running", null, { materialized_chain: LOOPED, chain_definition: { template_id: "default", nodes: V } }), "/work-items/w1/nodes/verification?sel=verification.fix_loop.main");
+    await screen.findByRole("heading", { level: 1, name: "verification" });
+    expect(where()).toBe("/work-items/w1/nodes/verification");
   });
 
   it("reads a looping node in words: the round of its attempts, the wall clock, and named recovery", async () => {

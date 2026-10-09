@@ -20,7 +20,7 @@ import { PathFooter } from "./PathFooter";
 import { AttemptMenu, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
-import { materialized, notStarted, planTaskPath, taskAt, taskKindAt } from "../chainValues";
+import { loopStepPaths, materialized, notStarted, planTaskPath, taskAt, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 import { scopePane, ScopeOverview } from "./ScopePane";
 import { isScopeTask, scopesView } from "../scopeView";
@@ -112,7 +112,13 @@ export function paneContent(a: PaneArgs): PaneContent {
   }
   const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
   if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
-  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || sel.step === FIX_LOOP || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
+  // A fix loop's own step, selected as its id where a loop task is `<step>.<task>`: the canvas draws one of several tasks as one box.
+  const loopStep = sel.kind === "task" && sel.step === FIX_LOOP ? loopStepPane(a, node, sel.task, [toChain, toNode, { label: FIX_LOOP }]) : null;
+  if (loopStep) return loopStep;
+  // A task of a loop step of several leads back to that step, which the canvas draws as its frame.
+  const up = sel.kind === "task" && sel.step === FIX_LOOP ? sel.task.split(".")[0] : "";
+  const toLoopStep = up && loopStepPaths(materialized(item), node.id, up).length > 1 ? [{ label: up, onClick: () => a.pick({ kind: "task", node: node.id, step: FIX_LOOP, task: up }) }] : [];
+  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || sel.step === FIX_LOOP || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }, ...toLoopStep]);
   const drawn = a.graph.find((g) => g.id === sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
@@ -157,7 +163,7 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const step = steps[k];
   if (!step) return { crumbs, title: stepId, body: <p className="item-muted">This step is not in the item's chain.</p> };
   const latest = step.tasks.map((p) => sessionsOf(item, p).at(-1));
-  const status = latest.every((x) => x?.status.startsWith("done")) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started";
+  const status = stepStatus(latest);
   const sessions = step.tasks.flatMap((p) => sessionsOf(item, p));
   return {
     crumbs,
@@ -180,25 +186,63 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
           <div><dt>status</dt><dd>{status}</dd></div>
           {node.on_failure?.length ? <div><dt>on failure</dt><dd>uses the node's</dd></div> : null}
         </dl>
-        <h3 className="ip-h">Tasks{step.tasks.length > 1 ? " · run in parallel" : ""}</h3>
-        <ul className="ip-list">
-          {step.tasks.map((p, i) => {
-            const look = sessionLook(latest[i], a.now);
-            return (
-              <li key={p}>
-                <button type="button" className="ip-row" onClick={() => a.pick({ kind: "task", node: node.id, step: stepId, task: taskName(p) })}>
-                  <span className={`ip-mark${look.running ? " is-live" : ""}`} aria-hidden>{look.state === "done" ? "✓" : look.running ? "●" : "○"}</span>
-                  <span className="is-mono">{taskName(p)}</span>
-                  <span className="ip-row-meta">{latest[i]?.model ? "agent" : stateWord(look.state)}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <StepTasks paths={step.tasks} latest={latest} now={a.now} onTask={(p) => a.pick({ kind: "task", node: node.id, step: stepId, task: taskName(p) })} />
       </>
     ),
     // A legacy node's steps have no path of their own: retry and skip it at node level.
     footer: legacy ? undefined : footerOf(item, `${node.id}.${stepId}`, "step", footerState(item, sessions), a.reload),
+  };
+}
+
+type Latest = ReturnType<typeof sessionsOf>[number] | undefined;
+/** What a step's tasks came to, from the newest session of each. */
+const stepStatus = (latest: Latest[]) => (latest.every((x) => x?.status.startsWith("done")) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started");
+
+/** A step's tasks as rows, each opening its task. */
+function StepTasks({ paths, latest, now, onTask }: { paths: string[]; latest: Latest[]; now: number; onTask: (path: string) => void }) {
+  return (
+    <>
+      <h3 className="ip-h">Tasks{paths.length > 1 ? " · run in parallel" : ""}</h3>
+      <ul className="ip-list">
+        {paths.map((p, i) => {
+          const look = sessionLook(latest[i], now);
+          return (
+            <li key={p}>
+              <button type="button" className="ip-row" onClick={() => onTask(p)}>
+                <span className={`ip-mark${look.running ? " is-live" : ""}`} aria-hidden>{look.state === "done" ? "✓" : look.running ? "●" : "○"}</span>
+                <span className="is-mono">{taskName(p)}</span>
+                <span className="ip-row-meta">{latest[i]?.model ? "agent" : stateWord(look.state)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+/** A fix loop's own step: its tasks, which run in parallel, as the round shown ran them (a repair goes between that
+ *  round and the next). It has no Config and no footer: the server addresses nothing under a fix loop (`actionPath`).
+ *  Null when the loop has no step of that id, so a loop task's own id falls through to its pane. */
+function loopStepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, crumbs: Crumbs): PaneContent | null {
+  const { item } = a;
+  const paths = loopStepPaths(materialized(item), node.id, stepId);
+  if (!paths.length) return null;
+  const r = loopRounds(item, node) && a.round;
+  const latest = paths.map((p) => sessionsOf(item, p).filter((s) => !r || s.round === r).at(-1));
+  return {
+    crumbs,
+    icon: "layers",
+    title: stepId,
+    sub: `fix-loop step${r ? ` · between rounds ${r} and ${r + 1}` : ""} · ${stepStatus(latest)}`,
+    body: (
+      <>
+        <dl className="item-facts ip-facts">
+          <div><dt>tasks</dt><dd>{paths.length === 1 ? "1 task" : `${paths.length}, dispatched together`}</dd></div>
+        </dl>
+        <StepTasks paths={paths} latest={latest} now={a.now} onTask={(p) => a.pick({ kind: "task", node: node.id, step: FIX_LOOP, task: p.split(".").slice(2).join(".") })} />
+      </>
+    ),
   };
 }
 

@@ -3,6 +3,8 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import { useDocuments } from "../../item/useDocuments";
 import { useEvents } from "../../item/useEvents";
 import { runVersion, useItem } from "../../item/useItem";
+import { loopStepPaths, materialized } from "../../item/chainValues";
+import { FIX_LOOP } from "../../item/nodeGraph";
 import { placeUrl, readPlace, type Place } from "../../item/url";
 import { Doc } from "../doc/Doc";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -43,6 +45,9 @@ export function NodeRoute() {
       </>
     );
   if (!place.node) return <Navigate to={`/work-items/${encodeURIComponent(id)}`} replace />;
+  // A fix loop's own step is the desktop canvas's frame of its tasks: the phone has no screen for it, so its address opens the node.
+  if (place.sel.kind === "task" && place.sel.step === FIX_LOOP && loopStepPaths(materialized(loaded.item), place.node, place.sel.task).length)
+    return <Navigate to={placeUrl(id, { node: place.node, sel: { kind: "node", node: place.node } })} replace />;
   const props = { item: loaded.item, version, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
   if (place.sel.kind === "task") return <TaskScreen {...props} place={place as Place & { sel: { kind: "task"; node: string; step: string; task: string } }} />;
   return <NodeScreen {...props} />;

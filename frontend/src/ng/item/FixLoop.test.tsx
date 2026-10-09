@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,6 +55,39 @@ describe("a fix-loop node", () => {
     expect(within(pane("repair")).getByText("fix_loop").closest("button")).toBeNull();
     await userEvent.click(within(canvas()).getByRole("button", { name: /^judge/ }));
     expect(sub("judge")).toBe("fix-loop judge · after round 2 · done 31s");
+  });
+
+  it("gives a loop step of several tasks its own pane: selected from the canvas, it opens there and lists its tasks", async () => {
+    // One loop step, `mend`, whose two tasks run together: both repaired after round 1, and one is at it again after round 2.
+    const frozen = JSON.parse(LOOPED);
+    frozen.chain.nodes[2].fix_loop = { max_attempts: 2, steps: [{ id: "mend", tasks: [{ id: "fmt", kind: "agent" }, { id: "deps", kind: "agent" }] }], judge: { id: "judge", kind: "agent" } };
+    const sessions = [
+      sess("verification.checks.lint", { status: "failed" }), sess("verification.review.code_review"),
+      sess("verification.fix_loop.mend.fmt", { round: 1 }), sess("verification.fix_loop.mend.deps", { round: 1 }),
+      sess("verification.checks.lint", { round: 1, status: "failed", attempt: 2 }), sess("verification.review.code_review", { round: 1, attempt: 2 }),
+      sess("verification.fix_loop.mend.fmt", { round: 2, status: "running", wall_ms: null, attempt: 2 }),
+    ];
+    mount("/work-items/w1/nodes/verification", detail({ chain_definition: { template_id: "default", nodes }, materialized_chain: JSON.stringify(frozen), worker_sessions: sessions }));
+    const open = () => within(canvas()).queryByRole("group", { name: "mend, tasks in parallel" });
+    await userEvent.click(within(canvas()).getByRole("button", { name: /^mend, fix-loop step of 2 parallel tasks/ }));
+    expect(sub("mend")).toBe("fix-loop step · between rounds 2 and 3 · running");
+    expect(within(pane("mend")).getByText("2, dispatched together")).toBeInTheDocument();
+    // Nothing under a fix loop is configured or retried by its own path: no Config tab and no footer.
+    expect(within(pane("mend")).queryByRole("tab")).toBeNull();
+    expect(within(pane("mend")).queryByRole("button", { name: /^(Retry|Skip|Pause)/ })).toBeNull();
+    await waitFor(() => expect(open()).not.toBeNull());
+    // Folded by its own close it stays the selection; a row of the pane then opens that task, and the step with it.
+    await userEvent.click(within(canvas()).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(open()).toBeNull());
+    expect(sub("mend")).toMatch(/^fix-loop step/);
+    await userEvent.click(within(pane("mend")).getByRole("button", { name: /deps/ }));
+    expect(sub("deps")).toMatch(/^fix-loop repair · between rounds 2 and 3/);
+    expect(await within(canvas()).findByRole("button", { name: /^deps/ })).toHaveAttribute("aria-pressed", "true");
+    // The task's crumbs lead back to its step, whose pane is one round's, as its tasks' are: round 1's repair is over.
+    await pickRound(1);
+    await userEvent.click(within(pane("deps")).getByRole("button", { name: "mend" }));
+    expect(sub("mend")).toBe("fix-loop step · between rounds 1 and 2 · done");
+    expect(within(canvas()).getByRole("button", { name: /^mend,/, expanded: true })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("follows the round picked: round 1's tasks, its repair, and a judge that skipped it", async () => {

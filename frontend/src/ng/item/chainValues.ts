@@ -112,6 +112,10 @@ export function loopPaths(m: Materialized | null, node: string): { repair: strin
   };
 }
 
+/** The repair tasks of one step of a node's fix loop, by path; none when the loop has no step of that id (the
+ *  judge, or a task's own `<step>.<task>`). */
+export const loopStepPaths = (m: Materialized | null, node: string, step: string) => loopPaths(m, node).repair.filter((p) => p.split(".")[2] === step);
+
 /** A task's kind by its path, from the frozen chain. */
 export const taskKindAt = (m: Materialized | null, path: string) => glyphKind(m ? taskAt(m, path)?.kind : undefined);
 export const nodeAt = (m: Materialized, id: string) => m.chain.nodes.find((n) => n.id === id);
