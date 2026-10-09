@@ -61,26 +61,24 @@ export const AGENT_REPORTABLE_SESSION_STATUSES: readonly SessionStatus[] = ["don
 
 export const CAP_SWEEP_LEAVES_SESSION_STATUSES: readonly SessionStatus[] = ["done", "capped_out", "done_with_concerns", "waiting"];
 
-export const GATE_REVIEW_UNTRUSTED_SESSION_STATUSES: readonly SessionStatus[] = ["failed", "needs_context", "rate_limited"];
-
 export const COMMAND_FINISHED_SESSION_STATUSES: readonly SessionStatus[] = ["done", "failed"];
 
 export const UNREADABLE_EXIT_SESSION_STATUSES: readonly SessionStatus[] = ["failed", "unknown"];
 
-export const SESSION_TRAITS: Record<SessionStatus, { live: boolean; unfinished: boolean; advancing: boolean; agent_reportable: boolean; cap_sweep_leaves: boolean; gate_review_untrusted: boolean; command_finished: boolean; unreadable_exit: boolean }> = {
-  "pending": { live: true, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "running": { live: true, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "done": { live: false, unfinished: false, advancing: true, agent_reportable: true, cap_sweep_leaves: true, gate_review_untrusted: false, command_finished: true, unreadable_exit: false },
-  "failed": { live: false, unfinished: false, advancing: false, agent_reportable: true, cap_sweep_leaves: false, gate_review_untrusted: true, command_finished: true, unreadable_exit: true },
-  "capped_out": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: true, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "paused": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "unknown": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: true },
-  "done_with_concerns": { live: false, unfinished: false, advancing: true, agent_reportable: true, cap_sweep_leaves: true, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "needs_context": { live: false, unfinished: true, advancing: false, agent_reportable: true, cap_sweep_leaves: false, gate_review_untrusted: true, command_finished: false, unreadable_exit: false },
-  "rate_limited": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: true, command_finished: false, unreadable_exit: false },
-  "config_error": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "waiting": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: true, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "conflict": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "infra": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
-  "infra_stop": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, gate_review_untrusted: false, command_finished: false, unreadable_exit: false },
+export const SESSION_TRAITS: Record<SessionStatus, { live: boolean; unfinished: boolean; advancing: boolean; agent_reportable: boolean; cap_sweep_leaves: boolean; command_finished: boolean; unreadable_exit: boolean }> = {
+  "pending": { live: true, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "running": { live: true, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "done": { live: false, unfinished: false, advancing: true, agent_reportable: true, cap_sweep_leaves: true, command_finished: true, unreadable_exit: false },
+  "failed": { live: false, unfinished: false, advancing: false, agent_reportable: true, cap_sweep_leaves: false, command_finished: true, unreadable_exit: true },
+  "capped_out": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: true, command_finished: false, unreadable_exit: false },
+  "paused": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "unknown": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: true },
+  "done_with_concerns": { live: false, unfinished: false, advancing: true, agent_reportable: true, cap_sweep_leaves: true, command_finished: false, unreadable_exit: false },
+  "needs_context": { live: false, unfinished: true, advancing: false, agent_reportable: true, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "rate_limited": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "config_error": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "waiting": { live: false, unfinished: true, advancing: false, agent_reportable: false, cap_sweep_leaves: true, command_finished: false, unreadable_exit: false },
+  "conflict": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "infra": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
+  "infra_stop": { live: false, unfinished: false, advancing: false, agent_reportable: false, cap_sweep_leaves: false, command_finished: false, unreadable_exit: false },
 };

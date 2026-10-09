@@ -14,7 +14,6 @@ __all__ = [
     "ADVANCING",
     "AGENT_REPORTABLE",
     "CAP_SWEEP_LEAVES",
-    "GATE_REVIEW_UNTRUSTED",
     "COMMAND_FINISHED",
     "UNREADABLE_EXIT",
 ]
@@ -52,9 +51,6 @@ class SessionTraits:
     agent_reportable: bool = False
     #: The cap sweep leaves the row alone.
     cap_sweep_leaves: bool = False
-    #: Gate review distrusts a verdict from such a session (a deny-list; the
-    #: judge's `advancing` is an allow-list. Kraft-hrz5c unifies them.)
-    gate_review_untrusted: bool = False
     #: A scope command's recorded result.
     command_finished: bool = False
     #: An exit the log could not explain; reads as config_error when launch failed.
@@ -72,18 +68,13 @@ SESSION_TRAITS = total(
         S.DONE: _T(
             advancing=True, agent_reportable=True, cap_sweep_leaves=True, command_finished=True
         ),
-        S.FAILED: _T(
-            agent_reportable=True,
-            gate_review_untrusted=True,
-            command_finished=True,
-            unreadable_exit=True,
-        ),
+        S.FAILED: _T(agent_reportable=True, command_finished=True, unreadable_exit=True),
         S.CAPPED_OUT: _T(cap_sweep_leaves=True),
         S.PAUSED: _T(unfinished=True),
         S.UNKNOWN: _T(unreadable_exit=True),
         S.DONE_WITH_CONCERNS: _T(advancing=True, agent_reportable=True, cap_sweep_leaves=True),
-        S.NEEDS_CONTEXT: _T(unfinished=True, agent_reportable=True, gate_review_untrusted=True),
-        S.RATE_LIMITED: _T(unfinished=True, gate_review_untrusted=True),
+        S.NEEDS_CONTEXT: _T(unfinished=True, agent_reportable=True),
+        S.RATE_LIMITED: _T(unfinished=True),
         S.CONFIG_ERROR: _T(),
         S.WAITING: _T(unfinished=True, cap_sweep_leaves=True),
         S.CONFLICT: _T(),
@@ -103,6 +94,5 @@ UNFINISHED = _group("unfinished")
 ADVANCING = _group("advancing")
 AGENT_REPORTABLE = _group("agent_reportable")
 CAP_SWEEP_LEAVES = _group("cap_sweep_leaves")
-GATE_REVIEW_UNTRUSTED = _group("gate_review_untrusted")
 COMMAND_FINISHED = _group("command_finished")
 UNREADABLE_EXIT = _group("unreadable_exit")
