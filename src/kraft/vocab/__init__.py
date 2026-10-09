@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from kraft.vocab.display import DisplayStatus as DisplayStatus
 from kraft.vocab.events import *  # noqa: F403
+from kraft.vocab.review import *  # noqa: F403
 from kraft.vocab.session import *  # noqa: F403
 from kraft.vocab.stop import *  # noqa: F403
 from kraft.vocab.work_item import *  # noqa: F403

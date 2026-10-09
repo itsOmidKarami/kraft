@@ -30,7 +30,7 @@ The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to SVG with
 
 ## Closed sets
 
-Work item status, session status, stop kind and display status are defined once in `src/kraft/vocab/`. Each has a `StrEnum`; the two statuses also have a traits table built with `total()`, and the groups other code reads (`ENDED`, `STOPPED`, `LIVE`, ...) are computed from it. The SQLite CHECK text, the stop-kind trigger and `frontend/src/types/vocab.generated.ts` (`just vocab`) are produced from the same definition.
+Work item status, session status, stop kind and display status are defined once in `src/kraft/vocab/`. Each has a `StrEnum`; the two statuses also have a traits table built with `total()`, and the groups other code reads (`ENDED`, `STOPPED`, `LIVE`, ...) are computed from it. The five review sets (review outcome, thread label, thread state, reply claim, diff side) are plain enums beside them, with no traits. The SQLite CHECK text, the stop-kind trigger and `frontend/src/types/vocab.generated.ts` (`just vocab`) are produced from the same definition.
 
 To add a status, add the member and its row; each piece you miss fails a named guard:
 

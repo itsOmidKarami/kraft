@@ -11,7 +11,7 @@ import yaml
 
 from kraft import client, render
 from kraft.cli import common
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import DiffSide, ReplyClaim, ReviewOutcome, ThreadLabel, WorkItemStatus
 
 _POLICY_HELP = (
     "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
@@ -385,7 +385,8 @@ def _lines(raw: str) -> tuple[int, int]:
 
 
 #: The CLI spells a label with a dash; the API takes it with an underscore.
-_LABELS = {"must-fix": "must_fix", "question": "question", "nit": "nit"}
+_LABELS = {m.value.replace("_", "-"): m for m in ThreadLabel}
+_SIDES = [m.value for m in DiffSide]
 
 
 def _cmd_comment(ns: argparse.Namespace) -> None:
@@ -393,7 +394,7 @@ def _cmd_comment(ns: argparse.Namespace) -> None:
         ns._parser.error("--suggest needs --lines")
     if ns.start_side is not None and ns.lines is None:
         ns._parser.error("--start-side needs --lines")
-    if ns.suggest is not None and "old" in (ns.side, ns.start_side):
+    if ns.suggest is not None and DiffSide.OLD in (ns.side, ns.start_side):
         ns._parser.error("--suggest replaces new-side lines, so it takes no old-side range")
     start, end = ns.lines if ns.lines else (None, None)
     common.emit(
@@ -448,7 +449,7 @@ def _cmd_reopen(ns: argparse.Namespace) -> None:
 
 
 def _cmd_review(ns: argparse.Namespace) -> None:
-    outcome = "request_changes" if ns.outcome == "request-changes" else ns.outcome
+    outcome = ReviewOutcome(ns.outcome.replace("-", "_"))
     result = asyncio.run(client.submit_review(outcome, ns.id, ns.summary, ns.node))
     if not ns.json and "target" in result:
         print(
@@ -648,7 +649,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     reply.add_argument("thread", help="the thread id from the review note")
     reply.add_argument("--body", required=True)
-    reply.add_argument("--claim", choices=["fixed", "answered", "should_fix"])
+    reply.add_argument("--claim", choices=[m.value for m in ReplyClaim])
     reply.set_defaults(func=_cmd_reply)
 
     comment = subs.add_parser(
@@ -661,16 +662,16 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     comment.add_argument("--lines", type=_lines, metavar="A[-B]", help="a line range in --file")
     comment.add_argument(
         "--side",
-        choices=["old", "new"],
+        choices=_SIDES,
         help="the side B is on (and A, unless --start-side); default: new",
     )
     comment.add_argument(
         "--start-side",
-        choices=["old", "new"],
+        choices=_SIDES,
         help="the side A is on, for a range across sides: --lines 3-2 --start-side old "
         "--side new is old line 3 through new line 2",
     )
-    comment.add_argument("--label", choices=["must-fix", "question", "nit"])
+    comment.add_argument("--label", choices=list(_LABELS))
     comment.add_argument("--suggest", metavar="TEXT", help="a suggested replacement for --lines")
     comment.set_defaults(func=_cmd_comment, _parser=comment)
 
@@ -684,7 +685,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
 
     review = subs.add_parser("review", parents=[common], help="send your drafted review comments")
     review.add_argument("id", nargs="?")
-    review.add_argument("outcome", choices=["comment", "approve", "request-changes"])
+    review.add_argument(
+        "outcome",
+        choices=[
+            o.value.replace("_", "-")
+            for o in (ReviewOutcome.COMMENT, ReviewOutcome.APPROVE, ReviewOutcome.REQUEST_CHANGES)
+        ],
+    )
     review.add_argument("--summary")
     review.add_argument(
         "--node", help="where request-changes re-runs; default: derived from threads"

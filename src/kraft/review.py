@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import config as _config
+from kraft.vocab import DiffSide
 from kraft.worker import sandbox as _sandbox
 
 #: Wider than git's default 3. A reviewer holding ten lines of context per hunk
@@ -384,7 +385,7 @@ def quote_range(
         at = {
             (side_, n): i
             for i, d in enumerate(lines)
-            for side_, n in (("old", d.old), ("new", d.new))
+            for side_, n in ((DiffSide.OLD, d.old), (DiffSide.NEW, d.new))
             if n is not None
         }
         lo, hi = at.get((start_side, start)), at.get((side, end))
@@ -396,7 +397,7 @@ def quote_range(
                 out.append("…")
             out.append(lines[i].kind + lines[i].text)
         return _clip_quote(out)
-    rev, at = (base, old_path) if side == "old" else (head, path)
+    rev, at = (base, old_path) if side == DiffSide.OLD else (head, path)
     # `cat-file blob` answers with the file or fails: `git show rev:<path>`
     # printed the commit itself for `rev:*` on a newer git.
     content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{at}", strip=False)
@@ -406,8 +407,8 @@ def quote_range(
     text = content.splitlines()
     if not 1 <= start <= end <= len(text):
         return None
-    changed = {d.old if side == "old" else d.new for d in lines if d.kind != " "} - {None}
-    mark = "-" if side == "old" else "+"
+    changed = {d.old if side == DiffSide.OLD else d.new for d in lines if d.kind != " "} - {None}
+    mark = "-" if side == DiffSide.OLD else "+"
     return _clip_quote(
         [(mark if n in changed else " ") + text[n - 1] for n in range(start, end + 1)]
     )

@@ -90,6 +90,11 @@ def render() -> str:
         _group("COMMAND_FINISHED_SESSION_STATUSES", "SessionStatus", vocab.COMMAND_FINISHED),
         _group("UNREADABLE_EXIT_SESSION_STATUSES", "SessionStatus", vocab.UNREADABLE_EXIT),
         _traits("SESSION_TRAITS", "SessionStatus", vocab.SESSION_TRAITS, {}),
+        _enum("REVIEW_OUTCOMES", "ReviewOutcome", vocab.ReviewOutcome),
+        _enum("THREAD_LABELS", "ThreadLabel", vocab.ThreadLabel),
+        _enum("THREAD_STATES", "ThreadState", vocab.ThreadState),
+        _enum("REPLY_CLAIMS", "ReplyClaim", vocab.ReplyClaim),
+        _enum("DIFF_SIDES", "DiffSide", vocab.DiffSide),
         *(_enum(_const(f), f.__name__, f) for f in vocab.FAMILIES),
         "export const EVENT_TYPES = ["
         + ", ".join(f"...{_const(f)}" for f in vocab.FAMILIES)

@@ -8,7 +8,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
 
-from kraft.vocab import STOPPED, SessionStatus, WorkItemStatus
+from kraft.vocab import (
+    STOPPED,
+    DiffSide,
+    ReplyClaim,
+    ReviewOutcome,
+    SessionStatus,
+    ThreadLabel,
+    ThreadState,
+    WorkItemStatus,
+)
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -301,7 +310,7 @@ CREATE TABLE reviews (
   id           TEXT PRIMARY KEY,
   work_item_id TEXT NOT NULL REFERENCES work_items(id),
   gate         TEXT,
-  outcome      TEXT NOT NULL CHECK (outcome IN ('approve', 'request_changes', 'comment')),
+  outcome      TEXT NOT NULL CHECK (outcome IN (__REVIEW_OUTCOMES__)),
   summary      TEXT,
   head_sha     TEXT NOT NULL,
   base_sha     TEXT NOT NULL,
@@ -316,16 +325,16 @@ CREATE TABLE review_threads (
   gate         TEXT,
   node_id      TEXT,
   file_path    TEXT,
-  side         TEXT CHECK (side IN ('old', 'new')),
+  side         TEXT CHECK (side IN (__DIFF_SIDES__)),
   -- start_side: `start_line`'s, when not `side` (a range across sides). NULL: `side`
-  start_side   TEXT CHECK (start_side IN ('old', 'new')),
+  start_side   TEXT CHECK (start_side IN (__DIFF_SIDES__)),
   start_line   INTEGER,
   end_line     INTEGER,
   -- quote: the range's lines as the diff showed them, each led by its diff mark
   quote        TEXT,
   anchor_sha   TEXT NOT NULL,
-  label        TEXT CHECK (label IN ('must_fix', 'question', 'nit')),
-  state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'claimed', 'resolved')),
+  label        TEXT CHECK (label IN (__THREAD_LABELS__)),
+  state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN (__THREAD_STATES__)),
   resolved_at  TEXT,
   created_at   TEXT NOT NULL
 );
@@ -340,7 +349,7 @@ CREATE TABLE review_comments (
   attempt     INTEGER,
   body        TEXT NOT NULL,
   suggestion  TEXT,
-  claim       TEXT CHECK (claim IN ('fixed', 'answered', 'should_fix')),
+  claim       TEXT CHECK (claim IN (__REPLY_CLAIMS__)),
   created_at  TEXT NOT NULL
 );
 
@@ -391,6 +400,14 @@ CREATE TABLE intake_checks (
 SCHEMA_SQL = _SCHEMA_TEMPLATE.replace(
     "__WORK_ITEM_STATUSES__", in_list(WorkItemStatus, start=22, hang=22, width=96)
 ).replace("__SESSION_STATUSES__", in_list(SessionStatus, start=20, hang=20, width=96))
+for _token, _set in (
+    ("__REVIEW_OUTCOMES__", ReviewOutcome),
+    ("__DIFF_SIDES__", DiffSide),
+    ("__THREAD_LABELS__", ThreadLabel),
+    ("__THREAD_STATES__", ThreadState),
+    ("__REPLY_CLAIMS__", ReplyClaim),
+):
+    SCHEMA_SQL = SCHEMA_SQL.replace(_token, in_list(_set))
 
 #: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
 #: the two statements that make a fork immutable live here and run after it.
