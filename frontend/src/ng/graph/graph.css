@@ -76,6 +76,12 @@
 .arc.tone-idle path { stroke: var(--stroke); }
 .arc.tone-active path { stroke: var(--warn); }
 .arc.tone-red path, .arc.tone-reject path { stroke: var(--bad); }
+/* An open loop step's fork off the arc: its join dots take the arc's tone, and it comes in with the frame's tasks. */
+.arc.tone-idle circle { fill: var(--stroke); }
+.arc.tone-active circle { fill: var(--warn); }
+.arc.tone-red circle { fill: var(--bad); }
+.arc-fork { animation: scope-in .24s ease .2s both; }
+.is-calm .arc-fork { animation: scope-in .12s linear; }
 .arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-sub); pointer-events: none; }
 .arc-label.tone-active { color: var(--warn); }
 .arc-label.tone-red, .arc-label.tone-reject { color: var(--bad); }
@@ -117,6 +123,12 @@
 /* NodeGraph */
 .step-frame { position: absolute; box-sizing: border-box; border-radius: 12px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 25%, transparent); cursor: pointer; transition: border-color .12s, background .12s; }
 .step-frame:hover { border-color: var(--border); }
+/* A fix loop's step of several tasks, open on the arc. It opens and closes as the scope frame does, and looks as a
+   parallel step's own frame does: the same soft box, under the tasks it holds, the arc showing through it. */
+.scope-frame.loop-frame { z-index: 0; border-color: var(--line); background: color-mix(in srgb, var(--surface-2) 25%, transparent); box-shadow: none; }
+.loop-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.graph-node.is-framed { animation: scope-in .24s ease .2s both; }
+.is-calm .graph-node.is-framed { animation: scope-in .12s linear; }
 .step-frame.is-sel { border-color: var(--text-muted); background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
 .step-frame.mark-add { border: 1px dashed var(--ok); }
 .step-frame.mark-change { border-color: var(--warn); }

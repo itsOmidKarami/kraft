@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NodeGraph } from "./NodeGraph";
@@ -149,6 +149,83 @@ describe("NodeGraph", () => {
       expect(screen.queryByRole("menu")).toBeNull();
       expect(onEscape).not.toHaveBeenCalled();
       expect(btn(/round 2 of 3/)).toHaveFocus();
+    });
+
+    // `<step>.<task>`: fmt and deps are one loop step's, so they run together.
+    const parallel = { label: "round 1", tasks: [{ id: "mend.fmt", label: "fmt", state: "done" as const }, { id: "mend.deps", label: "deps", state: "current" as const, running: true }, { id: "judge" }] };
+
+    it("draws a loop step of several tasks as one box that opens into a frame of them, and closes back to it", async () => {
+      const user = userEvent.setup();
+      const onSelect = vi.fn(), onEscape = vi.fn();
+      const { container } = render(<NodeGraph name="v" steps={steps} loop={parallel} onSelect={onSelect} onEscape={onEscape} />);
+      const frame = () => screen.queryByRole("group", { name: "mend, tasks in parallel" });
+      // Closed: one stop for the step, in the worst state of its tasks, which are not drawn. The loop is a lane, not an arc.
+      expect(btn(/^mend,/)).toHaveAccessibleName("mend, fix-loop step of 2 parallel tasks, running");
+      expect(btn(/^mend,/)).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("button", { name: /^fmt/ })).toBeNull();
+      expect(container.querySelector(".arc path.is-dashed")!.getAttribute("d")).not.toContain("C");
+      expect(container.querySelector(".arc-fork")).toBeNull();
+      await user.click(btn(/^mend,/));
+      expect(onSelect).not.toHaveBeenCalled();
+      // Open: a frame named for the step, its tasks a row apart in one column, the focus on the first, and the
+      // lane forked: a branch in and one out for each task, its own line cut between the joins.
+      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
+      expect(frame()).toHaveClass("is-on");
+      expect(screen.queryByRole("button", { name: /^mend,/ })).toBeNull();
+      expect(btn(/^fmt/).style.left).toBe(btn(/^deps/).style.left);
+      expect(parseFloat(btn(/^deps/).style.top) - parseFloat(btn(/^fmt/).style.top)).toBeCloseTo(92);
+      expect(container.querySelectorAll(".arc-fork path")).toHaveLength(4);
+      expect(container.querySelector(".arc path.is-dashed")!.getAttribute("clip-path")).toMatch(/^url\(#/);
+      // ↑/↓ within it, ←/→ to the next stop on the loop.
+      await user.keyboard("{ArrowDown}");
+      expect(btn(/^deps/)).toHaveFocus();
+      await user.keyboard("{ArrowRight}");
+      expect(btn(/^judge/)).toHaveFocus();
+      // Esc from outside the step is the page's own, and leaves it open.
+      await user.keyboard("{Escape}");
+      expect(onEscape).toHaveBeenCalledTimes(1);
+      expect(frame()).not.toBeNull();
+      await user.keyboard("{ArrowLeft}");
+      expect(btn(/^fmt/)).toHaveFocus();
+      // Esc from inside closes it, and the box takes the focus back.
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(btn(/^mend,/)).toHaveFocus());
+      await waitFor(() => expect(frame()).toBeNull());
+      expect(onEscape).toHaveBeenCalledTimes(1);
+      // Enter opens it from the keys, and its own close shuts it.
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(frame()).toBeNull());
+    });
+
+    it("moves the focus into a second step opened over an open one", async () => {
+      const user = userEvent.setup();
+      const tasks = [{ id: "mend.fmt", label: "fmt" }, { id: "mend.deps", label: "deps" }, { id: "push.sync", label: "sync" }, { id: "push.tell", label: "tell" }];
+      render(<NodeGraph name="v" steps={steps} loop={{ label: "round 1", tasks }} />);
+      await user.click(btn(/^mend,/));
+      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
+      await user.click(btn(/^push,/));
+      await waitFor(() => expect(btn(/^sync/)).toHaveFocus());
+      // The first is its box again.
+      expect(btn(/^mend,/)).toBeInTheDocument();
+    });
+
+    it.each([
+      ["a task waiting on a person is not read as running", [{ state: "done" as const }, { state: "current" as const, meta: "needs you" }], "needs you", false],
+      ["a paused one says so and wears the pause badge", [{ state: "done" as const }, { state: "current" as const, paused: true, meta: "paused" }], "paused", true],
+      ["one done and one not begun says how far", [{ state: "done" as const }, { state: "todo" as const }], "1 of 2 done", false],
+      ["a failed one outranks a running one", [{ state: "current" as const, running: true }, { state: "failed" as const }], "failed", false],
+    ])("names a closed loop step by its tasks: %s", (_, looks, word, paused) => {
+      render(<NodeGraph name="v" steps={steps} loop={{ label: "round 1", tasks: looks.map((l, i) => ({ id: `mend.t${i}`, ...l })) }} />);
+      expect(btn(/^mend,/)).toHaveAccessibleName(`mend, fix-loop step of 2 parallel tasks, ${word}`);
+      expect(btn(/^mend,/).querySelector(".glyph-paused") !== null).toBe(paused);
+    });
+
+    it("opens the step at once when one of its tasks is the selection", () => {
+      render(<NodeGraph name="v" steps={steps} loop={parallel} selected={{ step: "fix_loop", task: "mend.deps" }} />);
+      expect(btn(/^deps/)).toHaveAttribute("aria-pressed", "true");
+      expect(screen.queryByRole("button", { name: /^mend,/ })).toBeNull();
     });
 
     it("draws no picker without rounds", () => {
