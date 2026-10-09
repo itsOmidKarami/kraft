@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from support.api import (
-    _come_after,
+    _blocked_after,
     _force_node,
     _paused,
     _poll_events,
@@ -147,15 +147,6 @@ def test_the_rebuilt_request_names_the_app_and_the_caller(client):
 def quiet(client):
     """The app's own poller stopped, so only a test's ticks move anything."""
     client.portal.call(client.app.state.queue_task.cancel)
-
-
-def _blocked_after(client, repo):
-    """(dep, wid): `wid` started while `dep` is unfinished, so it is blocked."""
-    dep = _paused(client, repo, chain_template="default")
-    wid = _paused(client, repo, chain_template="default")
-    _come_after(wid, [dep])
-    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
-    return dep, wid
 
 
 def test_a_blocked_item_starts_once_what_it_comes_after_completes(client, repo, quiet):

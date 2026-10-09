@@ -211,7 +211,8 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     _gate_or_404(gate_nodes(st, row), gate)
     if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         raise HTTPException(
-            409, queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row)
+            409,
+            queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row),
         )
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -319,7 +320,8 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     _gate_or_404(nodes, gate)
     if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         raise HTTPException(
-            409, queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row)
+            409,
+            queued_refusal(row) if row["status"] == WorkItemStatus.QUEUED else blocked_refusal(row),
         )
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")

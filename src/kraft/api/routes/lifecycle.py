@@ -1352,7 +1352,9 @@ async def _retry(wid: str, body: Retry, request: Request):
     # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
     # is a refusal path that now moves the status. The comment this replaces said it
     # could not.
-    if (held := await blocked_answer(request, wid, "retry", asked, admitting(Verb.RETRY))) is not None:
+    if (
+        held := await blocked_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
+    ) is not None:
         return held
     async with stops.claimed_or_stopped(
         st.db,

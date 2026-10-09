@@ -6,7 +6,8 @@ from support.api import _paused, _set_status
 
 def _create(client, repo, **body):
     return client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "chain_template": "default", **body}
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", **body},
     )
 
 

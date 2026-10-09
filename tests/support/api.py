@@ -294,6 +294,15 @@ def _come_after(wid: str, deps: list[str]) -> None:
         c.execute("UPDATE work_items SET depends_on = ? WHERE id = ?", (json.dumps(deps), wid))
 
 
+def _blocked_after(client, repo) -> tuple[str, str]:
+    """(dep, wid): `wid` started while `dep` is unfinished, so it is blocked."""
+    dep = _paused(client, repo, chain_template="default")
+    wid = _paused(client, repo, chain_template="default")
+    _come_after(wid, [dep])
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
+    return dep, wid
+
+
 def _status_of(client, wid: str) -> str:
     return client.get(f"/api/work-items/{wid}").json()["status"]
 

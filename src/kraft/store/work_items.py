@@ -475,7 +475,9 @@ def dependency_problem(conn: sqlite3.Connection, ids: list[str]) -> str | None:
         if row is None:
             return f"no work item {dep!r} to come after"
         if row["status"] == WorkItemStatus.ABANDONED:
-            return f"work item {dep} was abandoned and will never complete: nothing can come after it"
+            return (
+                f"work item {dep} was abandoned and will never complete: nothing can come after it"
+            )
     return None
 
 
@@ -492,9 +494,7 @@ def any_unfinished(conn: sqlite3.Connection, ids: list[str]) -> bool:
 def dependencies_of(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
     """What the item comes after, in the order it was declared. `met` is true
     only for a `completed` one: its whole chain ran, post-merge nodes included."""
-    row = conn.execute(
-        "SELECT depends_on FROM work_items WHERE id = ?", (work_item_id,)
-    ).fetchone()
+    row = conn.execute("SELECT depends_on FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     ids = json.loads(row["depends_on"]) if row is not None and row["depends_on"] else []
     out = []
     for dep in ids:

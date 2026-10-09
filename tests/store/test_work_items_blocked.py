@@ -21,9 +21,7 @@ def _item_status(c, wid="w1"):
 
 
 @pytest.mark.parametrize("status", ["paused", "active", "waiting", "rate_limited", "needs_human"])
-async def test_a_blocked_item_is_released_only_when_what_it_comes_after_completed(
-    database, status
-):
+async def test_a_blocked_item_is_released_only_when_what_it_comes_after_completed(database, status):
     """`waiting` is where a merged item sits while a post-merge node runs: a
     merge alone releases nothing."""
     await database.write(lambda c: _blocked_on(c, status))
