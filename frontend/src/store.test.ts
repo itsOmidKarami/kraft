@@ -316,6 +316,9 @@ describe("applyEvent", () => {
     ["worker_session_paused", "w1", "worker_session_paused", { session_id: "s1" }],
     ["session_unknown", "w1", "session_unknown", { session_id: "s1" }],
     ["worker_session_exited", "w1", "worker_session_exited", { session_id: "s1", status: "done" }],
+    ["work_item_blocked", "w1", "work_item_blocked", { verb: "start", from: "paused", on: ["a1"] }],
+    ["work_item_unblocked", "w1", "work_item_unblocked", {}],
+    ["work_item_dequeued for a blocked item", "w1", "work_item_dequeued", { why: "paused", detail: null, to: "blocked" }],
   ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
     useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));
