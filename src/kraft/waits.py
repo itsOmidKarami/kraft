@@ -44,6 +44,7 @@ from kraft import events, store
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.templates.models import WaitBounds
 from kraft.vocab import RESTARTS_RUN, ForgeEvent, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +84,17 @@ class OpenWait:
 
 def open_wait(conn, work_item_id: str, task: str) -> OpenWait | None:
     """`task`'s open wait instance, or None when its last one ended."""
+    wait_events = in_list(
+        (
+            ForgeEvent.EXTERNAL_WAIT_STARTED,
+            ForgeEvent.EXTERNAL_WAIT_OBSERVED,
+            ForgeEvent.EXTERNAL_WAIT_REBOUNDED,
+            ForgeEvent.EXTERNAL_WAIT_ENDED,
+        )
+    )
     rows = conn.execute(
         "SELECT type, payload FROM events WHERE work_item_id = ? AND ("
-        f"(type IN ('{ForgeEvent.EXTERNAL_WAIT_STARTED}', "
-        f"'{ForgeEvent.EXTERNAL_WAIT_OBSERVED}', '{ForgeEvent.EXTERNAL_WAIT_REBOUNDED}', "
-        f"'{ForgeEvent.EXTERNAL_WAIT_ENDED}') "
+        f"(type IN ({wait_events}) "
         "AND json_extract(payload, '$.task') = ?)"
         f" OR type IN ({', '.join('?' * len(RESTARTS_RUN))})) ORDER BY seq DESC",
         (work_item_id, task, *RESTARTS_RUN),
