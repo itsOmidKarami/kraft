@@ -51,8 +51,8 @@ type Props = {
 };
 
 const taskKey = (s: string, t: string) => `t:${s}/${t}`;
-/** A fix-loop step of several tasks, closed: one stop, which selects nothing and opens. */
-const loopStepKey = (s: string) => `g:${s}`;
+/** A fix-loop step of several tasks: one stop, selected as `fix_loop` and the step's own id, where its tasks are `<step>.<task>`. */
+const loopStepKey = (s: string) => taskKey("fix_loop", s);
 /** That box's look: the worst of its tasks, running while any runs, with that task's own word for why it waits
  *  ("needs you", "paused") so the box is not read as running when nothing runs. Some done and the rest not begun
  *  is under way too, and says how far. */
@@ -74,21 +74,25 @@ const parse = (key: string): NodeSel => {
 /** A node's inside: steps in order, parallel tasks as rows (NodeGraph.dc.html). */
 export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, expand, onScope, onCollapse, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
   const calm = useReducedMotion();
-  // What the arc carries: a loop step's tasks run together, so a step of several is one box, open as a frame of them
-  // while one of them is the selection or it was opened here.
+  // What the arc carries: a loop step's tasks run together, so a step of several is one box. It is open as a frame
+  // of them while it, or one of them, is the selection, as a changed-test-scope task is; `shut` folds it where it
+  // stands, until the selection moves or it is picked again.
   const arcCols = loopCols(loop?.tasks ?? []);
   const several = (step: string | undefined) => (step === undefined ? undefined : arcCols.find((c) => c.step === step && c.tasks.length > 1));
-  const selStep = selected?.step === "fix_loop" ? arcCols.find((c) => c.tasks.length > 1 && c.tasks.some((t) => t.id === selected.task))?.step : undefined;
-  const [loopOpen, setLoopOpen] = useState(selStep);
-  useEffect(() => { if (selStep) setLoopOpen(selStep); }, [selStep]);
+  const selStep = selected?.step === "fix_loop" ? arcCols.find((c) => c.tasks.length > 1 && (c.step === selected.task || c.tasks.some((t) => t.id === selected.task)))?.step : undefined;
+  const [shut, setShut] = useState<string>();
+  useEffect(() => setShut(undefined), [selected?.step, selected?.task]);
+  const loopOpen = selStep !== shut ? selStep : undefined;
   const loopKept = useRef(loopOpen);
-  if (several(loopOpen)) loopKept.current = loopOpen;
-  const loopPhase = useExpand(!!several(loopOpen), calm);
+  if (loopOpen) loopKept.current = loopOpen;
+  const loopPhase = useExpand(!!loopOpen, calm);
   // Its tasks show while the canvas is laid out for it; closing, the frame shrinks back onto the box first.
   const openCol = loopPhase.layout ? several(loopKept.current) : undefined;
-  // The focus follows the box into its tasks and back when the keys or a click moved it, not when a selection did.
+  // The focus follows the step between its box and its frame's head when the keys or a click moved it, not when a selection elsewhere did.
   const follow = useRef(false);
-  const toggleLoop = (step: string | undefined) => { follow.current = step !== loopOpen; setLoopOpen(step); };
+  const shutLoop = () => { follow.current = true; setShut(selStep); };
+  // Picking a step that is already open moves nothing, so it arms nothing; a second click of a double-click must not disarm the first.
+  const pickLoop = (step: string, how = onSelect) => { follow.current ||= loopOpen !== step; setShut(undefined); how?.({ step: "fix_loop", task: step }); };
   // The frame stays in the page while it closes, which takes the view it was drawn from with it.
   const kept = useRef(expand);
   if (expand) kept.current = expand;
@@ -135,18 +139,20 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (!phase.mounted && inside.current && document.activeElement === document.body && was) roving.go(taskKey(was.step, was.task));
   }, [phase.mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A loop step's box gives way to its tasks, and they to it: the focus goes with them, without panning a camera that is still settling.
+  // A loop step's box gives way to its frame, and the frame to it: the focus stays on the step, the box or the
+  // frame's head, without panning a camera that is still settling.
   useEffect(() => {
     if (!follow.current) return;
     follow.current = false;
     quiet.current = true;
-    roving.go(openCol ? taskKey("fix_loop", openCol.tasks[0].id) : loopKept.current && loopStepKey(loopKept.current));
+    roving.go(loopKept.current && loopStepKey(loopKept.current));
     quiet.current = false;
     // The step too: another opened over an open one changes no phase.
   }, [loopPhase.layout, openCol?.step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ←/→ to the neighbouring step at the same row (clamped), ↑/↓ within a step, ↑ from the top task to the step's label.
-  const loopKeys = arcCols.map((col) => (col.tasks.length > 1 && col !== openCol ? [loopStepKey(col.step!)] : col.tasks.map((t) => taskKey("fix_loop", t.id))));
+  // A step of several is its own stop, with its tasks under it while it is open.
+  const loopKeys = arcCols.map((col) => [...(col.tasks.length > 1 ? [loopStepKey(col.step!)] : []), ...(col.tasks.length === 1 || col === openCol ? col.tasks.map((t) => taskKey("fix_loop", t.id)) : [])]);
   const chipRows = shown ? shown.view.rows.map((r) => r.chips.map((c) => chipKey(shown.step, shown.task, c.key))).filter((r) => r.length) : [];
   const move = (key: string, dir: string): string | undefined => {
     const { step, task } = parse(key);
@@ -191,16 +197,16 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   };
   const onKeyDown = (e: KeyboardEvent) => {
     // Esc steps back one: from inside an open loop step, to its box; anywhere else it is the page's own.
-    if (e.key === "Escape") { e.preventDefault(); if (several(loopOpen) && (e.target as Element).closest(".loop-frame, .is-framed")) toggleLoop(undefined); else onEscape?.(); return; }
+    if (e.key === "Escape") { e.preventDefault(); if (loopOpen && (e.target as Element).closest(".loop-frame, .is-framed")) shutLoop(); else onEscape?.(); return; }
     const key = roving.active;
     if (!key || !(e.target as Element).closest(".graph-node, .step-label, .scope-chip, .scope-task")) return;
     if (e.key.startsWith("Arrow")) { e.preventDefault(); roving.go(move(key, e.key)); }
-    else if (e.key === "Enter" && key.startsWith("g:")) { e.preventDefault(); toggleLoop(key.slice(2)); }
     else if (e.key === "Enter") {
       e.preventDefault();
-      // A scope chip opens its scope, as Space and a click do.
+      // A scope chip opens its scope, as Space and a click do; a loop step of several unfolds too.
       const at = parse(key);
       if (at.scope && !(e.metaKey || e.ctrlKey)) onScope?.(at.scope);
+      else if (at.step === "fix_loop" && several(at.task)) pickLoop(at.task!, e.metaKey || e.ctrlKey ? onExpand : onOpen);
       else (e.metaKey || e.ctrlKey ? onExpand : onOpen)?.(at);
     }
   };
@@ -319,15 +325,18 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         })}
         {loopPhase.mounted && several(loopKept.current) && (() => {
           // The frame grows from the step's box and shrinks back onto it, as an open task's does.
-          const col = several(loopKept.current)!, at = slots[arcCols.indexOf(col)];
+          const col = several(loopKept.current)!, at = slots[arcCols.indexOf(col)], key = loopStepKey(col.step!);
           const f = openFrame?.frame ?? { x: at.x - G.BOX / 2, y: at.y - G.BOX / 2, w: G.BOX, h: G.BOX };
+          // The head is the step's box, expanded: it selects the step and says what the box says. It is the step's
+          // stop only while the box is away: the two share a key.
+          const head = col === openCol, look = stepLook(col.tasks);
           return (
-            <div role="group" aria-label={`${col.step}, tasks in parallel`} className={`scope-frame loop-frame${loopPhase.content ? " is-on" : ""}${!several(loopOpen) && !loopPhase.layout ? " is-out" : ""}`} style={{ left: f.x, top: f.y, width: f.w, height: f.h }}>
+            <div role="group" aria-label={`${col.step}, tasks in parallel`} className={`scope-frame loop-frame${loopPhase.content ? " is-on" : ""}${!loopOpen && !loopPhase.layout ? " is-out" : ""}`} style={{ left: f.x, top: f.y, width: f.w, height: f.h }}>
               <div className="scope-head" style={{ width: LOOP_FRAME.w }}>
-                <span className="loop-step">{col.step}</span>
+                <button ref={head ? roving.ref(key) : undefined} type="button" tabIndex={head ? roving.tabIndex(key) : -1} className="scope-task loop-step" aria-expanded aria-pressed={isSel({ step: "fix_loop", task: col.step })} aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${col.tasks.length} parallel tasks`)} onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); }} onClick={() => pickLoop(col.step!)}>{col.step}</button>
                 <span className="scope-sub">in parallel</span>
                 {/* Out of the Tab order, as the scope frame's: Esc closes it from the keys. */}
-                <button type="button" tabIndex={-1} className="scope-close" {...tip("Close")} onClick={() => toggleLoop(undefined)}>✕</button>
+                <button type="button" tabIndex={-1} className="scope-close" {...tip("Close")} onClick={shutLoop}>✕</button>
               </div>
             </div>
           );
@@ -336,8 +345,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           const kind = (t: GraphItem) => `fix-loop ${t.id === "judge" ? "judge" : "repair"} ${t.taskKind ?? "agent"} task`;
           if (col === openCol) return col.tasks.map((t, j) => taskButton({ step: "fix_loop", task: t.id }, t, slots[c].x, openFrame!.ys[j], kind(t), " is-framed"));
           if (col.tasks.length === 1) return taskButton({ step: "fix_loop", task: col.tasks[0].id }, col.tasks[0], slots[c].x, slots[c].y, kind(col.tasks[0]), col.tasks[0].faded ? " is-faded" : "");
-          // A step of several, closed: one box that opens into them. It selects nothing itself.
-          const key = loopStepKey(col.step!), look = stepLook(col.tasks), { x, y } = slots[c], n = col.tasks.length;
+          // A step of several, closed: one box. Selecting it opens it into them.
+          const key = loopStepKey(col.step!), look = stepLook(col.tasks), { x, y } = slots[c], n = col.tasks.length, sel = isSel({ step: "fix_loop", task: col.step });
           return (
             <button
               key={key}
@@ -345,11 +354,13 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               type="button"
               tabIndex={roving.tabIndex(key)}
               aria-expanded={false}
+              aria-pressed={sel}
               aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${n} parallel tasks`)}
-              className={`graph-node is-task${look.state === "current" ? " is-bold" : ""}${look.state === "todo" ? " is-todo" : ""}${look.state === "amber" ? " is-warn" : ""}${look.faded ? " is-faded" : ""}`}
+              className={`graph-node is-task${sel || look.state === "current" ? " is-bold" : ""}${look.state === "todo" ? " is-todo" : ""}${look.state === "amber" ? " is-warn" : ""}${look.faded ? " is-faded" : ""}`}
               style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
               onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
-              onClick={() => toggleLoop(col.step)}
+              onClick={() => pickLoop(col.step!)}
+              onDoubleClick={() => onExpand?.({ step: "fix_loop", task: col.step })}
             >
               <NodeGlyph icon="layers" state={look.state} running={look.running} paused={look.paused} size="md" sel={selStep === col.step} />
               <span className="graph-label" style={{ maxWidth: G.COL - 6 }}>{breakable(col.step!)}</span>

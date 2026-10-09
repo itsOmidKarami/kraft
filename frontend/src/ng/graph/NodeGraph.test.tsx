@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { NodeGraph } from "./NodeGraph";
+import { NodeGraph, type NodeSel } from "./NodeGraph";
 import { fitCam } from "./camera";
 import { nodeLayout } from "./nodeLayout";
 import type { Rounds } from "../item/nodeGraph";
@@ -153,30 +154,44 @@ describe("NodeGraph", () => {
 
     // `<step>.<task>`: fmt and deps are one loop step's, so they run together.
     const parallel = { label: "round 1", tasks: [{ id: "mend.fmt", label: "fmt", state: "done" as const }, { id: "mend.deps", label: "deps", state: "current" as const, running: true }, { id: "judge" }] };
+    /** The canvas with its selection held, as a page holds it: a loop step is open while it, or a task of it, is selected. */
+    function Held({ onSelect, ...props }: Omit<ComponentProps<typeof NodeGraph>, "name" | "steps" | "selected" | "onOpen">) {
+      const [sel, setSel] = useState<NodeSel>();
+      const pick = (s: NodeSel) => { onSelect?.(s); setSel(s); };
+      return <NodeGraph name="v" steps={steps} {...props} selected={sel} onSelect={pick} onOpen={pick} />;
+    }
+    const frame = (step = "mend") => screen.queryByRole("group", { name: `${step}, tasks in parallel` });
+    // The step is one control in two places: its box, collapsed, and its frame's head, expanded.
+    const box = (step = "mend") => screen.getByRole("button", { name: new RegExp(`^${step},`), expanded: false });
+    const head = (step = "mend") => screen.getByRole("button", { name: new RegExp(`^${step},`), expanded: true });
+    const noBox = () => expect(screen.queryByRole("button", { name: /^mend,/, expanded: false })).toBeNull();
 
-    it("draws a loop step of several tasks as one box that opens into a frame of them, and closes back to it", async () => {
+    it("draws a loop step of several tasks as one box; selecting it opens it into a frame of them, and it folds back", async () => {
       const user = userEvent.setup();
       const onSelect = vi.fn(), onEscape = vi.fn();
-      const { container } = render(<NodeGraph name="v" steps={steps} loop={parallel} onSelect={onSelect} onEscape={onEscape} />);
-      const frame = () => screen.queryByRole("group", { name: "mend, tasks in parallel" });
+      const { container } = render(<Held loop={parallel} onSelect={onSelect} onEscape={onEscape} />);
       // Closed: one stop for the step, in the worst state of its tasks, which are not drawn. The loop is a lane, not an arc.
-      expect(btn(/^mend,/)).toHaveAccessibleName("mend, fix-loop step of 2 parallel tasks, running");
-      expect(btn(/^mend,/)).toHaveAttribute("aria-expanded", "false");
+      expect(box()).toHaveAccessibleName("mend, fix-loop step of 2 parallel tasks, running");
       expect(screen.queryByRole("button", { name: /^fmt/ })).toBeNull();
       expect(container.querySelector(".arc path.is-dashed")!.getAttribute("d")).not.toContain("C");
       expect(container.querySelector(".arc-fork")).toBeNull();
-      await user.click(btn(/^mend,/));
-      expect(onSelect).not.toHaveBeenCalled();
-      // Open: a frame named for the step, its tasks a row apart in one column, the focus on the first, and the
-      // lane forked: a branch in and one out for each task, its own line cut between the joins.
-      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
+      // A click selects the step, by its own id where its tasks are `mend.<task>`.
+      await user.click(box());
+      expect(onSelect).toHaveBeenLastCalledWith({ step: "fix_loop", task: "mend" });
+      // Open: a frame whose head is the step, named as its box was, selected and focused; its tasks a row apart in
+      // one column; and the lane forked: a branch in and one out for each task, its own line cut between the joins.
+      await waitFor(() => expect(head()).toHaveFocus());
+      expect(head()).toHaveAccessibleName("mend, fix-loop step of 2 parallel tasks, running");
+      expect(head()).toHaveAttribute("aria-pressed", "true");
       expect(frame()).toHaveClass("is-on");
-      expect(screen.queryByRole("button", { name: /^mend,/ })).toBeNull();
+      noBox();
       expect(btn(/^fmt/).style.left).toBe(btn(/^deps/).style.left);
       expect(parseFloat(btn(/^deps/).style.top) - parseFloat(btn(/^fmt/).style.top)).toBeCloseTo(92);
       expect(container.querySelectorAll(".arc-fork path")).toHaveLength(4);
       expect(container.querySelector(".arc path.is-dashed")!.getAttribute("clip-path")).toMatch(/^url\(#/);
-      // ↑/↓ within it, ←/→ to the next stop on the loop.
+      // ↓ from the head through its tasks, ←/→ to the next stop on the loop and back to the head.
+      await user.keyboard("{ArrowDown}");
+      expect(btn(/^fmt/)).toHaveFocus();
       await user.keyboard("{ArrowDown}");
       expect(btn(/^deps/)).toHaveFocus();
       await user.keyboard("{ArrowRight}");
@@ -186,29 +201,47 @@ describe("NodeGraph", () => {
       expect(onEscape).toHaveBeenCalledTimes(1);
       expect(frame()).not.toBeNull();
       await user.keyboard("{ArrowLeft}");
-      expect(btn(/^fmt/)).toHaveFocus();
-      // Esc from inside closes it, and the box takes the focus back.
+      expect(head()).toHaveFocus();
+      // Esc from inside folds it where it stands: the box takes the focus back, still the selection.
       await user.keyboard("{Escape}");
-      await waitFor(() => expect(btn(/^mend,/)).toHaveFocus());
+      await waitFor(() => expect(box()).toHaveFocus());
       await waitFor(() => expect(frame()).toBeNull());
       expect(onEscape).toHaveBeenCalledTimes(1);
-      // Enter opens it from the keys, and its own close shuts it.
+      expect(box()).toHaveAttribute("aria-pressed", "true");
+      // Enter unfolds it from the keys, and its own close folds it.
       await user.keyboard("{Enter}");
-      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
+      await waitFor(() => expect(head()).toHaveFocus());
       await user.click(screen.getByRole("button", { name: "Close" }));
       await waitFor(() => expect(frame()).toBeNull());
+      // A task of it selected keeps it open; its head picked again moves nothing; and picking anything else folds
+      // it, leaving the focus where that pick put it.
+      await user.click(box());
+      await user.click(await screen.findByRole("button", { name: /^deps/ }));
+      expect(onSelect).toHaveBeenLastCalledWith({ step: "fix_loop", task: "mend.deps" });
+      expect(frame()).not.toBeNull();
+      await user.click(head());
+      await user.click(btn(/^judge/));
+      await waitFor(() => expect(frame()).toBeNull());
+      expect(btn(/^judge/)).toHaveFocus();
     });
 
-    it("moves the focus into a second step opened over an open one", async () => {
+    it("opens a second step in place of an open one, and moves the focus to it", async () => {
       const user = userEvent.setup();
+      const onExpand = vi.fn();
       const tasks = [{ id: "mend.fmt", label: "fmt" }, { id: "mend.deps", label: "deps" }, { id: "push.sync", label: "sync" }, { id: "push.tell", label: "tell" }];
-      render(<NodeGraph name="v" steps={steps} loop={{ label: "round 1", tasks }} />);
-      await user.click(btn(/^mend,/));
-      await waitFor(() => expect(btn(/^fmt/)).toHaveFocus());
-      await user.click(btn(/^push,/));
-      await waitFor(() => expect(btn(/^sync/)).toHaveFocus());
+      render(<Held loop={{ label: "round 1", tasks }} onExpand={onExpand} />);
+      // A double-click on a box selects it and expands the pane on the step, as it does on a task.
+      await user.dblClick(box());
+      expect(onExpand).toHaveBeenLastCalledWith({ step: "fix_loop", task: "mend" });
+      await waitFor(() => expect(head()).toHaveFocus());
+      await user.click(box("push"));
+      await waitFor(() => expect(head("push")).toHaveFocus());
       // The first is its box again.
-      expect(btn(/^mend,/)).toBeInTheDocument();
+      await waitFor(() => expect(frame("mend")).toBeNull());
+      expect(box()).toBeInTheDocument();
+      // So does ⌘Enter on a head.
+      await user.keyboard("{Meta>}{Enter}{/Meta}");
+      expect(onExpand).toHaveBeenLastCalledWith({ step: "fix_loop", task: "push" });
     });
 
     it.each([
@@ -218,14 +251,14 @@ describe("NodeGraph", () => {
       ["a failed one outranks a running one", [{ state: "current" as const, running: true }, { state: "failed" as const }], "failed", false],
     ])("names a closed loop step by its tasks: %s", (_, looks, word, paused) => {
       render(<NodeGraph name="v" steps={steps} loop={{ label: "round 1", tasks: looks.map((l, i) => ({ id: `mend.t${i}`, ...l })) }} />);
-      expect(btn(/^mend,/)).toHaveAccessibleName(`mend, fix-loop step of 2 parallel tasks, ${word}`);
-      expect(btn(/^mend,/).querySelector(".glyph-paused") !== null).toBe(paused);
+      expect(box()).toHaveAccessibleName(`mend, fix-loop step of 2 parallel tasks, ${word}`);
+      expect(box().querySelector(".glyph-paused") !== null).toBe(paused);
     });
 
-    it("opens the step at once when one of its tasks is the selection", () => {
-      render(<NodeGraph name="v" steps={steps} loop={parallel} selected={{ step: "fix_loop", task: "mend.deps" }} />);
-      expect(btn(/^deps/)).toHaveAttribute("aria-pressed", "true");
-      expect(screen.queryByRole("button", { name: /^mend,/ })).toBeNull();
+    it.each([["the step itself", "mend", /^mend,/], ["one of its tasks", "mend.deps", /^deps/]])("is open at once when the selection is %s", (_, task, pressed) => {
+      render(<NodeGraph name="v" steps={steps} loop={parallel} selected={{ step: "fix_loop", task }} />);
+      expect(btn(pressed)).toHaveAttribute("aria-pressed", "true");
+      noBox();
     });
 
     it("draws no picker without rounds", () => {
