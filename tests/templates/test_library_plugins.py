@@ -151,3 +151,20 @@ def test_a_plugin_error_names_the_store_file(tmp_path, file, text, why):
     with pytest.raises(TemplateLibraryError, match=why) as exc:
         TemplateLibrary.from_yaml_dir(home(tmp_path), plugins=[plugin])
     assert str(plugin.root / file) in str(exc.value)
+
+
+def test_lint_dir_skips_plugin_layers(tmp_path):
+    """Offline (`plugins=None`) a chain that reaches into a plugin namespace is
+    reported as not checked, not as broken. With the instance's plugins given,
+    even none, the same reference is an error."""
+    root = home(tmp_path, chains={"local": chain("release:implementer"), "plain": chain("base")})
+
+    offline = TemplateLibrary.lint_dir(root, plugins=None)
+    assert (offline.chains, offline.issues) == (("plain",), ())
+    assert [(i.chain, i.message.endswith("not checked (plugin)")) for i in offline.unchecked] == [
+        ("local", True)
+    ]
+
+    online = TemplateLibrary.lint_dir(root, plugins=())
+    assert [i.chain for i in online.issues] == ["local"]
+    assert online.unchecked == ()

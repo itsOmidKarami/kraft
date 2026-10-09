@@ -85,11 +85,14 @@ class TemplateLibraryError(Exception):
         loc: tuple[object, ...] | None = None,
         related: tuple[Path, tuple[object, ...]] | None = None,
         errors: tuple[tuple[tuple[object, ...], str], ...] = (),
+        plugin_ref: bool = False,
     ) -> None:
         super().__init__(message)
         self.loc = loc
         self.related = related
         self.errors = errors
+        #: The failure is a reference into a plugin namespace that is not loaded.
+        self.plugin_ref = plugin_ref
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,8 @@ class TemplateIssue:
     mark: Position | None = None
     #: `TemplateLibraryError.errors`: every schema failure, when there were several.
     errors: tuple[tuple[tuple[object, ...], str], ...] = ()
+    #: `TemplateLibraryError.plugin_ref`.
+    plugin_ref: bool = False
 
     def __str__(self) -> str:
         return f"{self.chain or self.file}: {self.message}"
@@ -123,6 +128,7 @@ class TemplateIssue:
             related=getattr(exc, "related", None),
             mark=positions.yaml_mark(exc),
             errors=getattr(exc, "errors", ()),
+            plugin_ref=getattr(exc, "plugin_ref", False),
         )
 
 
@@ -133,6 +139,8 @@ class LintReport:
 
     chains: tuple[str, ...]
     issues: tuple[TemplateIssue, ...]
+    #: Offline only: chains left unjudged because they reference a plugin.
+    unchecked: tuple[TemplateIssue, ...] = ()
 
     @property
     def valid(self) -> bool:
@@ -479,23 +487,36 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         instance_policy: InstancePolicy | None = None,
+        plugins: Sequence[InstalledPlugin] | None = (),
     ) -> LintReport:
         """Everything wrong with the template directory at `path` -- every
         chain file that does not parse and every chain that does not resolve,
         or the one `library.yaml` failure that leaves nothing to resolve
-        against (`template-lint-reports-library-validity`). Reads; never writes."""
+        against (`template-lint-reports-library-validity`). Reads; never writes.
+        `plugins=None` is the offline lint: chains that reference a plugin
+        namespace are returned as `unchecked`."""
         root = Path(path)
         issues: list[TemplateIssue] = []
         try:
-            library = cls.from_yaml_dir(root, skills_dir=skills_dir, issues=issues)
+            library = cls.from_yaml_dir(
+                root, skills_dir=skills_dir, issues=issues, plugins=plugins or ()
+            )
         except TemplateLibraryError as exc:
             return LintReport(
                 chains=(), issues=(TemplateIssue.from_error(root / LIBRARY_FILE, None, exc),)
             )
         issues += library.lint(instance_policy)
-        failed = {issue.chain for issue in issues}
+        # `None` is the offline lint (`--dir`): no plugins are known, so a
+        # reference into a plugin namespace is unjudged, not wrong.
+        unchecked = [i for i in issues if i.plugin_ref] if plugins is None else []
+        issues = [i for i in issues if i not in unchecked]
+        failed = {issue.chain for issue in (*issues, *unchecked)}
         return LintReport(
-            chains=tuple(id for id in library.chain_ids if id not in failed), issues=tuple(issues)
+            chains=tuple(id for id in library.chain_ids if id not in failed),
+            issues=tuple(issues),
+            unchecked=tuple(
+                replace(i, message=f"{i.message}: not checked (plugin)") for i in unchecked
+            ),
         )
 
     def lint(self, instance_policy: InstancePolicy | None = None) -> list[TemplateIssue]:
@@ -576,6 +597,7 @@ class TemplateLibrary:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}",
                             **resolution.path_location(task.path),
+                            plugin_ref=":" in name,
                         )
                 # A skill that names no method is refused here, where lint and
                 # intake see it, never discovered by an agent at launch
@@ -907,6 +929,7 @@ class _Resolution:
         raise TemplateLibraryError(
             f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
             loc=(*loc, "extends"),
+            plugin_ref=":" in name,
         )
 
     def _reject_kind_change(
