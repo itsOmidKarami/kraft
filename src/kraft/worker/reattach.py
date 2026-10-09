@@ -32,7 +32,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
-from kraft.vocab import ENDED, HOLDS_SLOT, LIVE, WorkItemStatus
+from kraft.vocab import ENDED, HOLDS_SLOT, LIVE, SessionStatus, StopKind, WorkItemStatus
 from kraft.vocab.sql import in_list
 from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
@@ -296,7 +296,9 @@ async def _guarded_resume_adopted_escalation(
         reason = f"resume_after_escalation crashed: {exc!r}"
         try:
             await db.write(
-                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+                lambda c: store.mark_needs_human(
+                    c, work_item_id, node_id, reason, kind=StopKind.INFRA
+                )
             )
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after resume crash", work_item_id)
@@ -508,7 +510,7 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
             hit.payload(node_id=row["node_id"], task=row["hook_point"], session_id=session_id),
         )
         store.mark_needs_human(
-            c, row["work_item_id"], row["node_id"], hit.reason, kind="cap", limit=hit.limit
+            c, row["work_item_id"], row["node_id"], hit.reason, kind=StopKind.CAP, limit=hit.limit
         )
 
     await db.write(_capped)
@@ -561,7 +563,9 @@ async def _guarded_adopt(
         reason = f"reattach crashed: {exc!r}"
         try:
             await db.write(
-                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+                lambda c: store.mark_needs_human(
+                    c, work_item_id, node_id, reason, kind=StopKind.INFRA
+                )
             )
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
@@ -700,7 +704,7 @@ async def reattach(
     # be a single sleep for the whole scan.
     adopt = {
         r["id"]: (
-            r["status"] != "pending"
+            r["status"] != SessionStatus.PENDING
             and r["pid"] is not None
             and _identity_ok(r["pid"], r["pid_start_time"])
         )
@@ -729,7 +733,7 @@ async def reattach(
         r
         for r in rows
         if not adopt[r["id"]]
-        and r["status"] != "pending"
+        and r["status"] != SessionStatus.PENDING
         and r["pid"] is not None
         and _is_young(r["started_at"])
     ]
@@ -758,11 +762,11 @@ async def reattach(
         oom = None
         if not adopting:
             # Asked before the close below removes the evidence.
-            if r["status"] != "pending":
+            if r["status"] != SessionStatus.PENDING:
                 oom = await _oom_killed(r["sandbox"], sid)
             await _close_sandbox(r["sandbox"], sid, egress=r["egress"] is not None)
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
-        if r["status"] == "pending":
+        if r["status"] == SessionStatus.PENDING:
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
             await db.write(
                 lambda c, r=r: store.mark_needs_human(
@@ -770,7 +774,7 @@ async def reattach(
                     r["work_item_id"],
                     r["node_id"],
                     "reattach: session pending, spawn unconfirmed",
-                    kind="infra",
+                    kind=StopKind.INFRA,
                 )
             )
             summary.unknown.append(sid)
@@ -837,7 +841,7 @@ async def reattach(
                     r["work_item_id"],
                     r["node_id"],
                     f"reattach: running session, PID identity unconfirmed, no result ({reason})",
-                    kind="infra",
+                    kind=StopKind.INFRA,
                 )
             )
             summary.unknown.append(sid)

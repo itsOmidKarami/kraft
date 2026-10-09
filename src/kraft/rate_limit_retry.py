@@ -17,7 +17,7 @@ import logging
 from kraft import policy as policy_mod
 from kraft import store
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import StopKind, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ async def _retry_one(app, row) -> bool:
                 wid,
                 node_id,
                 f"rate_limit retries exhausted after {count - 1} attempt(s)",
-                kind="cap",
+                kind=StopKind.CAP,
             )
         )
         return False

@@ -19,7 +19,7 @@ from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.usage import cap_usd as _cap_usd
 from kraft.usage import usd as _usd
-from kraft.vocab import HOLDS_SLOT
+from kraft.vocab import HOLDS_SLOT, StopKind
 from kraft.worker import sandbox as _sandbox
 
 #: Parses a raw event payload (the DB's dict, read back from JSON) into the
@@ -97,7 +97,12 @@ async def claimed_or_stopped(
                 stop = reason + cause
                 await db.write(
                     lambda c: store.mark_needs_human(
-                        c, work_item_id, node_id, stop, kind="infra", facts={"cause": "stranded"}
+                        c,
+                        work_item_id,
+                        node_id,
+                        stop,
+                        kind=StopKind.INFRA,
+                        facts={"cause": "stranded"},
                     )
                 )
 
@@ -200,7 +205,14 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     dump = breach.model_dump()
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, None, dump, kind="budget", limit=budget_limit(breach)
+            c,
+            work_item_id,
+            node.id,
+            reason,
+            None,
+            dump,
+            kind=StopKind.BUDGET,
+            limit=budget_limit(breach),
         )
     )
     return "needs_human"
@@ -297,7 +309,7 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
             node.id,
             reason,
             suggested=RETRY_LATER,
-            kind="infra",
+            kind=StopKind.INFRA,
             facts={"cause": "ci_infra"},
         )
     )
@@ -312,7 +324,9 @@ async def stop_for_time_cap(db, work_item_id: str, node: ResolvedNode) -> str:
     reason = db.read(lambda c: _caps.reason_of(c, work_item_id))
     limit = db.read(lambda c: _caps.reached_limit(c, work_item_id))
     await db.write(
-        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap", limit=limit)
+        lambda c: store.mark_needs_human(
+            c, work_item_id, node.id, reason, kind=StopKind.CAP, limit=limit
+        )
     )
     return "needs_human"
 

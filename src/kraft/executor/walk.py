@@ -43,7 +43,7 @@ from kraft.templates.models import (
     ResolvedNode,
     ResolvedTask,
 )
-from kraft.vocab import ENDED, HOLDS_SLOT
+from kraft.vocab import ENDED, HOLDS_SLOT, StopKind
 
 
 def chain_of(row) -> MaterializedChain:
@@ -462,7 +462,7 @@ async def _stop_for_config_error(
     detail = "; ".join(causes) if causes else "see the session log"
     reason = f"could not start {named} in node {node.id}: {detail}"
     await db.write(
-        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="config")
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CONFIG)
     )
     return "needs_human"
 
@@ -477,7 +477,9 @@ async def _stop_for_wait_timeout(
     reason = f"{named} timed out waiting" + (f": {'; '.join(causes)}" if causes else "")
     # `cap`: a stop for a person naming the wait, never a failure -- NEEDS YOU,
     # not FAILED (`board.display_status`).
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap"))
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CAP)
+    )
     return "needs_human"
 
 
@@ -523,7 +525,7 @@ async def _sentinel_stop(
         # `stuck`, not `failed`: nothing failed, the repair doubts itself and a
         # person decides (`context.py`'s "a person decides").
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="stuck")
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.STUCK)
         )
         return "needs_human"
     return None
@@ -547,8 +549,8 @@ class _Stuck:
     goes straight to a human under its own cause."""
 
     reason: str
-    #: `store.StopKind` for the `needs_human` this becomes (Kraft UI v2 · B1).
-    kind: store.StopKind
+    #: `kraft.vocab.StopKind` for the `needs_human` this becomes (Kraft UI v2 · B1).
+    kind: StopKind
     capped: dict | None = None
     bundle: dict | None = None
     #: `stops.suggestion`: what the node's last session said to do next.
@@ -671,7 +673,9 @@ async def _escalate_stuck(
         ) or "(no question given)"
         reason = f"needs_context: {question}"
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="question")
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, reason, kind=StopKind.QUESTION
+            )
         )
         return "needs_human"
     cause = _task_cause(db, work_item_id, node, task, status)
@@ -742,7 +746,7 @@ async def _resolve_conflict(
         # No base to resolve onto: a person has to say where this item goes.
         reason = f"the conflict in node {node.id} cannot be resolved: {exc}"
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="config")
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CONFIG)
         )
         return "needs_human"
     note = prompts.rebase_resolve_note(
@@ -793,17 +797,17 @@ async def _resolve_conflict(
             f"the conflict handler in node {node.id} finished without rebasing onto "
             f"{new_base or 'the upstream tip'}: {detail}"
         )
-        kind = "conflict"
+        kind = StopKind.CONFLICT
     elif (question := dispatch.needs_context_question(db, work_item_id, node, round)) is not None:
         # The handler judged that what landed upstream changes what this item
         # is for, and asked: the question is the stop.
         reason = f"needs_context: {question}"
-        kind = "question"
+        kind = StopKind.QUESTION
     else:
         reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
-        kind = "conflict"
+        kind = StopKind.CONFLICT
     facts = None
-    if kind == "conflict":
+    if kind == StopKind.CONFLICT:
         after_conflicted = _conflicted_paths(worktree)
         if before_conflicted is not None and after_conflicted is not None:
             facts = {
@@ -1083,7 +1087,7 @@ async def _walk_node_once(
                     reason = f"needs_context: {question}"
                     await db.write(
                         lambda c: store.mark_needs_human(
-                            c, work_item_id, node.id, reason, kind="question"
+                            c, work_item_id, node.id, reason, kind=StopKind.QUESTION
                         )
                     )
                     return "needs_human"
@@ -1108,7 +1112,7 @@ async def _walk_node_once(
                     **(_scope_facts(scopes) or {}),
                     **(_forge_cause(db, work_item_id, node, failed) or {}),
                 }
-                return _Stuck(reason, kind="failed", facts=facts or None)
+                return _Stuck(reason, kind=StopKind.FAILED, facts=facts or None)
         await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
         return "ok"
 
@@ -1392,7 +1396,7 @@ async def _walk_node_once(
             reason = f"needs_context: {question}"
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(
-                    c, work_item_id, node.id, reason, kind="question"
+                    c, work_item_id, node.id, reason, kind=StopKind.QUESTION
                 )
             )
             return "needs_human"
@@ -1430,7 +1434,7 @@ async def _walk_node_once(
             )
             await db.write(
                 lambda c, reason=reason, cause=cause: store.mark_needs_human(
-                    c, work_item_id, node.id, reason, kind="infra", facts=cause
+                    c, work_item_id, node.id, reason, kind=StopKind.INFRA, facts=cause
                 )
             )
             return "needs_human"
@@ -1492,7 +1496,7 @@ async def _walk_node_once(
                 )
             )
             if verdict == "stop_needs_human":
-                return _Stuck(f"judge: {reasoning}", kind="stuck")
+                return _Stuck(f"judge: {reasoning}", kind=StopKind.STUCK)
             # "as if there were no eligible findings" (spec) -- a task that
             # failed outright (blind or not: a red pipeline reports findings
             # *and* fails) would still be in the loop once its eligible
@@ -1528,7 +1532,7 @@ async def _walk_node_once(
             )
             return _Stuck(
                 reason,
-                kind="cap",
+                kind=StopKind.CAP,
                 capped={"cycles": count - 1, "attempts": cap.attempts},
                 limit=_fix_loop_limit(
                     override_row, node.id, cap, attempts_ran_out=count > cap.attempts
@@ -1567,7 +1571,7 @@ async def _walk_node_once(
                 # not cap out, and only a real cap breach may claim they did.
                 return _Stuck(
                     reason,
-                    kind="stuck",
+                    kind=StopKind.STUCK,
                     bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch),
                 )
 
@@ -1662,7 +1666,7 @@ async def _walk_node_once(
             )
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(
-                    c, work_item_id, node.id, reason, kind="failed"
+                    c, work_item_id, node.id, reason, kind=StopKind.FAILED
                 )
             )
             return "needs_human"
@@ -1755,7 +1759,9 @@ async def _restart_for_base_change(
         reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
         capped = {"cycles": count - 1, "attempts": cap.attempts}
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, capped, kind="cap")
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, reason, capped, kind=StopKind.CAP
+            )
         )
         return None
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
@@ -1838,7 +1844,7 @@ async def _door_conflict(
         facts = {"resolved": [], "unresolved": unresolved} if unresolved is not None else None
         await db.write(
             lambda c: store.mark_needs_human(
-                c, work_item_id, node.id, conflict, kind="conflict", facts=facts
+                c, work_item_id, node.id, conflict, kind=StopKind.CONFLICT, facts=facts
             )
         )
         return "needs_human"
@@ -2027,7 +2033,7 @@ async def run_once(
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
         reason = str(exc)
-        kind = "config" if isinstance(exc, _config.ConfigError) else "infra"
+        kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
         await node_runs.entered(db, run_dirs.worktrees / work_item_id, work_item_id, failing_node)
         await db.write(
             lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
@@ -2110,7 +2116,7 @@ async def run_once(
                     await _report_if_undelivered(db, work_item_id, carried)
                     await db.write(
                         lambda c, node_id=anchor, why=reason: store.mark_needs_human(
-                            c, work_item_id, node_id, why, kind="config"
+                            c, work_item_id, node_id, why, kind=StopKind.CONFIG
                         )
                     )
                     return "needs_human"

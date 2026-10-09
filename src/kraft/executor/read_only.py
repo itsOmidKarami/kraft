@@ -33,6 +33,7 @@ from kraft import config as _config
 from kraft import events, store
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext
+from kraft.vocab import StopKind
 from kraft.worker import sandbox as _sandbox
 
 EVENT = "read_only_violated"
@@ -139,6 +140,6 @@ async def stop(db, work_item_id: str, node_id: str) -> str:
     named = ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
     reason = f"{payload['scope']} is read_only, but it changed the worktree: {named}"
     await db.write(
-        lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="failed")
+        lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind=StopKind.FAILED)
     )
     return "needs_human"

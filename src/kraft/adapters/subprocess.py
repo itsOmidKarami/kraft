@@ -23,7 +23,7 @@ from kraft import caps, events, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
-from kraft.vocab import AGENT_REPORTABLE, UNREADABLE_EXIT
+from kraft.vocab import AGENT_REPORTABLE, UNREADABLE_EXIT, SessionStatus
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
@@ -359,7 +359,7 @@ async def record_oom_kill(
     leave their callers before any of them asks. Such a session keeps
     `status`, and nothing is recorded."""
     if not oom.confirmed and await db.write(
-        lambda c: store.session_status(c, session_id) == "paused"
+        lambda c: store.session_status(c, session_id) == SessionStatus.PAUSED
     ):
         return status
     with open(log_path, "a") as fh:
@@ -839,7 +839,7 @@ async def run_task(
         # place that can actually refuse the launch, covers every caller that
         # marks a row stopped: no log file is opened and no process is started.
         current_status = await db.write(lambda c: store.session_status(c, session_id))
-        if current_status != "pending":
+        if current_status != SessionStatus.PENDING:
             return current_status
         if backend is None:
             # The root's commit identity, under everything the repository and
@@ -980,7 +980,9 @@ async def run_task(
         # write. `db.read` goes to the separate `_reader` connection, whose
         # snapshot may predate the pause -- which would skip the flush wait
         # and lose exactly the cost this fix exists to keep.
-        paused = await db.write(lambda c: store.session_status(c, session_id)) == "paused"
+        paused = (
+            await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED
+        )
         if paused and flush_grace:
             await _flush_sleep(flush_grace)
         # Same cancellation as above: without this inside `finally`, a pause
@@ -1087,7 +1089,7 @@ async def run_task(
         status = post_resolve(status, log_path, returncode)
     # A human pausing the item SIGTERMs this child, so a non-zero rc here may mean
     # "stopped on purpose" rather than "failed". The row is the authority.
-    if await db.write(lambda c: store.session_status(c, session_id)) == "paused":
+    if await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED:
         return "paused"
     if oom is not None:
         status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)

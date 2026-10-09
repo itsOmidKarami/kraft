@@ -42,7 +42,7 @@ from kraft.templates.environment import (
     branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
-from kraft.vocab import ENDED
+from kraft.vocab import ENDED, StopKind
 from kraft.worker import steering as steering_mod
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ async def guard(db, wid: str, coro) -> None:
         try:
             await db.write(
                 lambda c: store.mark_needs_human(
-                    c, wid, None, reason, kind="infra", facts={"cause": "crash"}
+                    c, wid, None, reason, kind=StopKind.INFRA, facts={"cause": "crash"}
                 )
             )
         except Exception:  # noqa: BLE001
