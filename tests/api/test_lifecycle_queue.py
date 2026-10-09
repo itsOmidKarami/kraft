@@ -68,15 +68,24 @@ def test_a_held_item_tells_a_door_it_refuses_how_to_take_it_out(client, repo, st
     assert f"kraft item pause {wid}" in r.json()["detail"]
 
 
-def test_pausing_an_item_the_scheduler_just_took_is_refused(client, repo, monkeypatch):
-    """The scheduler's take landed between pause's read and its write: the item
-    is starting, so pause does not answer that it left the queue."""
-    from kraft import store
+@pytest.mark.parametrize(
+    ("by_the_scheduler", "says"),
+    [(False, "try again"), (True, "being started from the queue")],
+    ids=["something-else", "the-scheduler"],
+)
+def test_pausing_an_item_the_scheduler_just_took_is_refused(
+    client, repo, monkeypatch, by_the_scheduler, says
+):
+    """The take landed between pause's read and its write. Taken by the
+    scheduler, the item is starting; taken by anything else, it only moved."""
+    from kraft import start_queue, store
 
     wid = _in_state(client, repo, DOORS["states"]["queued"])
     real = store.dequeue_work_item
 
     def taken_first(conn, work_item_id, **kw):
+        if by_the_scheduler:
+            start_queue.starting(client.app).add(work_item_id)
         store.take_queued(conn, work_item_id)
         return real(conn, work_item_id, **kw)
 
@@ -85,7 +94,7 @@ def test_pausing_an_item_the_scheduler_just_took_is_refused(client, repo, monkey
     r = client.post(f"/api/work-items/{wid}/pause", json={})
 
     assert r.status_code == 409, r.text
-    assert "try again" in r.json()["detail"]
+    assert says in r.json()["detail"]
 
 
 def test_pausing_an_item_while_the_queue_starts_it_says_so(client, repo, monkeypatch):

@@ -615,7 +615,6 @@ async def pause_work_item(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
-    being_started = wid in start_queue.starting(request.app)
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
     # is no session to signal in that state -- the wait is a row now -- so the
@@ -623,7 +622,10 @@ async def pause_work_item(wid: str, request: Request):
     # follow-up): the board offers Pause there, and nothing else stops the
     # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
     if row["status"] not in admitting(Verb.PAUSE):
-        if being_started and row["status"] in (WorkItemStatus.PAUSED, WorkItemStatus.NEEDS_HUMAN):
+        if wid in start_queue.starting(request.app) and row["status"] in (
+            WorkItemStatus.PAUSED,
+            WorkItemStatus.NEEDS_HUMAN,
+        ):
             # Taken by the start queue and not yet claimed: the row reads paused
             # or needs_human, but it is about to run.
             raise HTTPException(409, _STARTING)
@@ -634,7 +636,10 @@ async def pause_work_item(wid: str, request: Request):
             # Something took it first: the scheduler, which is starting it, or a
             # blocked item's abandoned dependency.
             raise HTTPException(
-                409, _STARTING if being_started else "work item status changed; try again"
+                409,
+                _STARTING
+                if wid in start_queue.starting(request.app)
+                else "work item status changed; try again",
             )
         return {"id": wid, "paused_sessions": []}
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
