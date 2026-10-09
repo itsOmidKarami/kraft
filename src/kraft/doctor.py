@@ -22,6 +22,7 @@ import yaml
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration
 from kraft import policy as policy_mod
 from kraft.adapters import forge
+from kraft.api import config_check
 from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
@@ -223,6 +224,7 @@ def _config_checks() -> list[dict]:
             # every capability and stamps the version.
             _check("capabilities", True, "skipped: no config dir", skipped=True),
             _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
+            _check("notify.yaml", True, "skipped: no config dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -257,6 +259,7 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
+    checks.append(_notify_check(templates))
     checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
@@ -354,6 +357,28 @@ def _detectors_check(templates: Path) -> dict:
     except config.ConfigError as exc:
         return _check("detectors.yaml", False, str(exc))
     return _check("detectors.yaml", True, f"parses ({count} detector(s) of your own)")
+
+
+def _notify_check(templates: Path) -> dict:
+    """`notify.yaml`: one that does not load turns every notification off, and
+    the only other record of that is a warning in the server log.
+
+    This reads the file, not the server: the notifier rereads it only at start
+    and on a save in Settings, so the rows say what the file holds and a
+    failure names the restart that applies the fix."""
+    try:
+        cfg = config.Notify.load(templates / config.Notify.FILE).model_dump()
+    except config.ConfigError as exc:
+        return _check(
+            "notify.yaml",
+            False,
+            f"{exc}; no notification is sent - fix it, then kraft admin restart",
+        )
+    if why := config_check.notify_problem(cfg):
+        return _check("notify.yaml", False, f"notify.yaml: {why}; then kraft admin restart")
+    if not cfg["enabled"]:
+        return _check("notify.yaml", True, "parses (enabled: false)")
+    return _check("notify.yaml", True, f"parses (enabled, {len(cfg['events'])} event type(s))")
 
 
 def _pidfile_check() -> dict:

@@ -41,6 +41,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "config",
         "access.yaml",
         "detectors.yaml",
+        "notify.yaml",
         "pidfile",
         "mcp token",
         "agent: claude",
@@ -253,6 +254,41 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
     assert code == (1 if any(not row["ok"] for row in rows) else 0)
 
 
+@pytest.mark.parametrize(
+    ("notify", "ok", "says"),
+    [
+        (None, True, "enabled: false"),
+        ("enabled: true\nurl: https://hooks.example/T0KEN\n", True, "enabled, 2 event type(s)"),
+        (
+            "url: https://hooks.example/T0KEN\nevents: [gate_requsted]\n",
+            False,
+            "unknown event type 'gate_requsted'",
+        ),
+        (
+            "url: [https://hooks.example/T0KEN\n",
+            False,
+            "not valid YAML; no notification is sent - fix it, then kraft admin restart",
+        ),
+        ("enabled: true\n", False, "set a webhook URL before enabling notifications; then kraft"),
+        ("url: 'http://[T0KEN'\n", False, "url must be an http or https URL"),
+    ],
+    ids=["absent", "enabled", "unknown-event", "bad-yaml", "enabled-no-url", "unparseable-url"],
+)
+def test_doctor_reports_a_notify_yaml_that_turns_notifications_off(
+    templates_dir, monkeypatch, notify, ok, says
+):
+    """A `notify.yaml` that does not load sends nothing, and the server only
+    logs it. The row never repeats the webhook URL, which is a secret."""
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
+    (templates_dir / "notify.yaml").unlink(missing_ok=True)
+    if notify is not None:
+        (templates_dir / "notify.yaml").write_text(notify)
+    row = _by_name(doctor._config_checks(), "notify.yaml")
+    assert row["ok"] is ok, row
+    assert says in row["detail"], row
+    assert "T0KEN" not in row["detail"], row
+
+
 def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeypatch):
     """CI has no `$KRAFT_HOME/config`, and `_config_checks` returns early
     there. Every row it can emit must still emit, or a caller reading the run by
@@ -271,6 +307,7 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     assert _by_name(rows, "chains")["skipped"] is True
     # Not the upgrade guide: a home never seeded has nothing to upgrade.
     assert _by_name(rows, "capabilities")["detail"] == "skipped: no config dir"
+    assert _by_name(rows, "notify.yaml")["detail"] == "skipped: no config dir"
 
 
 def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
