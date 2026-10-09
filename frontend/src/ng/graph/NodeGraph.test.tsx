@@ -212,12 +212,14 @@ describe("NodeGraph", () => {
     });
 
     it.each([
-      ["a task waiting on a person is not read as running", [{ state: "done" as const }, { state: "current" as const, meta: "needs you" }], "needs you"],
-      ["one done and one not begun says how far", [{ state: "done" as const }, { state: "todo" as const }], "1 of 2 done"],
-      ["a failed one outranks a running one", [{ state: "current" as const, running: true }, { state: "failed" as const }], "failed"],
-    ])("names a closed loop step by its tasks: %s", (_, looks, word) => {
+      ["a task waiting on a person is not read as running", [{ state: "done" as const }, { state: "current" as const, meta: "needs you" }], "needs you", false],
+      ["a paused one says so and wears the pause badge", [{ state: "done" as const }, { state: "current" as const, paused: true, meta: "paused" }], "paused", true],
+      ["one done and one not begun says how far", [{ state: "done" as const }, { state: "todo" as const }], "1 of 2 done", false],
+      ["a failed one outranks a running one", [{ state: "current" as const, running: true }, { state: "failed" as const }], "failed", false],
+    ])("names a closed loop step by its tasks: %s", (_, looks, word, paused) => {
       render(<NodeGraph name="v" steps={steps} loop={{ label: "round 1", tasks: looks.map((l, i) => ({ id: `mend.t${i}`, ...l })) }} />);
       expect(btn(/^mend,/)).toHaveAccessibleName(`mend, fix-loop step of 2 parallel tasks, ${word}`);
+      expect(btn(/^mend,/).querySelector(".glyph-paused") !== null).toBe(paused);
     });
 
     it("opens the step at once when one of its tasks is the selection", () => {
