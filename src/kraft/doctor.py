@@ -361,16 +361,24 @@ def _detectors_check(templates: Path) -> dict:
 
 def _notify_check(templates: Path) -> dict:
     """`notify.yaml`: one that does not load turns every notification off, and
-    the only other record of that is a warning in the server log."""
+    the only other record of that is a warning in the server log.
+
+    This reads the file, not the server: the notifier rereads it only at start
+    and on a save in Settings, so the rows say what the file holds and a
+    failure names the restart that applies the fix."""
     try:
         cfg = config.Notify.load(templates / config.Notify.FILE).model_dump()
     except config.ConfigError as exc:
-        return _check("notify.yaml", False, f"{exc}; notifications are off until it is fixed")
+        return _check(
+            "notify.yaml",
+            False,
+            f"{exc}; no notification is sent - fix it, then kraft admin restart",
+        )
     if why := config_check.notify_problem(cfg):
         return _check("notify.yaml", False, f"notify.yaml: {why}")
     if not cfg["enabled"]:
-        return _check("notify.yaml", True, "parses (notifications are off)")
-    return _check("notify.yaml", True, f"parses ({len(cfg['events'])} event type(s) notify)")
+        return _check("notify.yaml", True, "parses (enabled: false)")
+    return _check("notify.yaml", True, f"parses (enabled, {len(cfg['events'])} event type(s))")
 
 
 def _pidfile_check() -> dict:

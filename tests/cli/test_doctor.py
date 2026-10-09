@@ -257,14 +257,18 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
 @pytest.mark.parametrize(
     ("notify", "ok", "says"),
     [
-        (None, True, "notifications are off"),
-        ("enabled: true\nurl: https://hooks.example/T0KEN\n", True, "2 event type(s) notify"),
+        (None, True, "enabled: false"),
+        ("enabled: true\nurl: https://hooks.example/T0KEN\n", True, "enabled, 2 event type(s)"),
         (
             "url: https://hooks.example/T0KEN\nevents: [gate_requsted]\n",
             False,
             "unknown event type 'gate_requsted'",
         ),
-        ("url: [https://hooks.example/T0KEN\n", False, "not valid YAML"),
+        (
+            "url: [https://hooks.example/T0KEN\n",
+            False,
+            "not valid YAML; no notification is sent - fix it, then kraft admin restart",
+        ),
         ("enabled: true\n", False, "set a webhook URL"),
     ],
     ids=["absent", "enabled", "unknown-event", "bad-yaml", "enabled-no-url"],
