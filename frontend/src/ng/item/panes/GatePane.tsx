@@ -52,6 +52,12 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
           <ul className="ip-notes">{open.slice(0, 3).map((x) => <li key={x.id}>{x.comments?.[0]?.body ?? x.file_path ?? "a thread"}</li>)}</ul>
         </>
       )}
+      {pending && !!item.concerns?.length && (
+        <>
+          <h3 className="ip-h">Concerns · {item.concerns.length}</h3>
+          <ul className="ip-notes">{item.concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </>
+      )}
       <dl className="item-facts ip-facts ip-gap">
         {item.test_result && <div><dt>tests</dt><dd><TestsLine result={item.test_result} /></dd></div>}
         {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
