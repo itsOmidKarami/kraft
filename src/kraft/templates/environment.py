@@ -42,6 +42,12 @@ _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
 
+#: A reference that may name a plugin's declaration: `ship` or `release:ship`.
+#: What a file declares stays `Identifier`; only references take this.
+_QUALIFIED = re.compile(r"^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$")
+
+QualifiedIdentifier = Annotated[StrictStr, Field(pattern=_QUALIFIED.pattern)]
+
 
 class TemplateEnvironmentError(Exception):
     pass

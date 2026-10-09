@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft.plugins.load import InstalledPlugin
 from support.harness import write
 
 #: The smallest agent task the V1 schema accepts.
@@ -27,3 +28,31 @@ def home(tmp_path: Path, *, library: dict | None = None, chains: dict | None = N
     for name, body in (chains or {}).items():
         write(root, f"chains/{name}.yaml", yaml.safe_dump(body))
     return root
+
+
+def installed(
+    tmp_path: Path,
+    name: str,
+    *,
+    alias: str | None = None,
+    library: dict | None = None,
+    chains: dict | None = None,
+    skills: dict | None = None,
+    profiles: dict | None = None,
+) -> InstalledPlugin:
+    """One plugin's store directory at `tmp_path/store/<name>`, in the fixed
+    layout, and the `InstalledPlugin` that names it. `skills` is name to
+    `SKILL.md` text; `profiles` is the `profiles:` section of `profiles.yaml`."""
+    root = tmp_path / "store" / name
+    root.mkdir(parents=True)
+    if library is not None:
+        write(root, "library.yaml", yaml.safe_dump(library))
+    for chain_name, body in (chains or {}).items():
+        write(root, f"chains/{chain_name}.yaml", yaml.safe_dump(body))
+    for skill_name, text in (skills or {}).items():
+        write(root, f"skills/{skill_name}/SKILL.md", text)
+    if profiles is not None:
+        write(root, "profiles.yaml", yaml.safe_dump({"profiles": profiles}))
+    return InstalledPlugin(
+        id=f"{name}@acme", name=name, namespace=alias or name, version="1.0.0", root=root
+    )

@@ -17,7 +17,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +26,8 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
+from kraft.config import bounded_yaml
+from kraft.plugins.load import InstalledPlugin, qualify
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import positions
 from kraft.templates.models import (
@@ -47,6 +49,10 @@ LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
 #: Every pre-V1 home was seeded with one, and V1 has no reader for it.
 LEGACY_REGISTRY = "registry.yaml"
+
+#: How many YAML nodes one plugin file may expand to (`config.bounded_yaml`):
+#: the same budget a repository's own config gets.
+PLUGIN_YAML_NODES = 20_000
 
 
 def is_pre_v1(path: str | Path) -> bool:
@@ -191,9 +197,12 @@ def _merge(parent: object, child: object) -> object:
     return child
 
 
-def _read(path: Path) -> Mapping[str, object]:
+def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
+    """One YAML file as a mapping. `bounded` for a file a plugin's author
+    wrote: alias expansion is budgeted, where the operator's own file is not."""
     try:
-        data = yaml.safe_load(path.read_text())
+        text = path.read_text()
+        data = bounded_yaml(text, [PLUGIN_YAML_NODES]) if bounded else yaml.safe_load(text)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
     if data is None:
@@ -233,16 +242,27 @@ def _chain_id(chain_path: Path, body: Mapping[str, object]) -> str:
     return id
 
 
+def _steering_profile(body: object, source: ComponentSource) -> SteeringProfile:
+    try:
+        return SteeringProfile.model_validate(body)
+    except ValidationError as exc:
+        raise TemplateLibraryError(
+            f"{source}: {first_error(exc)}",
+            loc=(Namespace.STEERING.value, source.name, *exc.errors()[0]["loc"]),
+        ) from exc
+
+
 class TemplateLibrary:
     """One template directory's authored configuration: reusable components,
     named steering profiles, and the selectable chains."""
 
     def __init__(
         self,
-        components: Mapping[Namespace, Mapping[str, RawComponent]],
+        components: dict[Namespace, dict[str, RawComponent]],
         chains: Mapping[str, RawComponent],
-        steering: Mapping[str, SteeringProfile],
+        steering: dict[str, SteeringProfile],
         skills_dir: Path | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> None:
         self._components = components
         self._chains = dict(chains)
@@ -250,6 +270,9 @@ class TemplateLibrary:
         #: Where an operator may overlay a method file (`kraft.skill`); `None`
         #: means the bundled methods only.
         self.skills_dir = skills_dir
+        #: The installed plugins whose declarations sit in the maps above under
+        #: `<namespace>:<name>`.
+        self.plugins = tuple(plugins)
 
     @classmethod
     def from_yaml_dir(
@@ -258,6 +281,7 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         issues: list[TemplateIssue] | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
@@ -280,7 +304,11 @@ class TemplateLibrary:
         if not library_path.is_file():
             raise TemplateLibraryError(f"{library_path}: no {LIBRARY_FILE} to read")
         library = cls.from_mappings(
-            _read(library_path), (), library_path=library_path, skills_dir=skills_dir
+            _read(library_path),
+            (),
+            library_path=library_path,
+            skills_dir=skills_dir,
+            plugins=plugins,
         )
         for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
             try:
@@ -299,6 +327,7 @@ class TemplateLibrary:
         *,
         library_path: Path,
         skills_dir: Path | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> TemplateLibrary:
         """A library from already-parsed mappings: `library` is `library.yaml`'s
         content and each chain is paired with the file it is named after --
@@ -312,21 +341,41 @@ class TemplateLibrary:
             for namespace in _EXTENDABLE
         }
 
-        steering: dict[str, SteeringProfile] = {}
-        for name, body in _section(library_path, library, Namespace.STEERING).items():
-            source = ComponentSource(library_path, Namespace.STEERING, name)
-            try:
-                steering[name] = SteeringProfile.model_validate(body)
-            except ValidationError as exc:
-                raise TemplateLibraryError(
-                    f"{source}: {first_error(exc)}",
-                    loc=(Namespace.STEERING.value, name, *exc.errors()[0]["loc"]),
-                ) from exc
+        steering = {
+            name: _steering_profile(body, ComponentSource(library_path, Namespace.STEERING, name))
+            for name, body in _section(library_path, library, Namespace.STEERING).items()
+        }
 
-        built = cls(components, {}, steering, skills_dir)
+        built = cls(components, {}, steering, skills_dir, plugins)
+        for plugin in plugins:
+            built._add_plugin(plugin)
         for chain_path, body in chains:
             built._add_chain(chain_path, body)
         return built
+
+    def _add_plugin(self, plugin: InstalledPlugin) -> None:
+        """One plugin's `library.yaml` and `chains/`, under its namespace. Its
+        own references are qualified first (`plugins.load.qualify`), so the
+        resolver only ever sees qualified names. Every `ComponentSource` is the
+        file in the plugin's store: that is the file an error names."""
+        library_path = plugin.root / LIBRARY_FILE
+        library = (
+            qualify(_read(library_path, bounded=True), plugin) if library_path.is_file() else {}
+        )
+        assert isinstance(library, Mapping)
+        for namespace in _EXTENDABLE:
+            for name, body in _section(library_path, library, namespace).items():
+                self._components[namespace][f"{plugin.namespace}:{name}"] = RawComponent(
+                    body, ComponentSource(library_path, namespace, name)
+                )
+        for name, body in _section(library_path, library, Namespace.STEERING).items():
+            self.steering[f"{plugin.namespace}:{name}"] = _steering_profile(
+                body, ComponentSource(library_path, Namespace.STEERING, name)
+            )
+        for chain_path in sorted((plugin.root / CHAINS_DIR).glob("*.yaml")):
+            body = qualify(_read(chain_path, bounded=True), plugin)
+            assert isinstance(body, Mapping)
+            self._add_chain(chain_path, body, plugin=plugin)
 
     def with_library(self, library: Mapping[str, object], library_path: Path) -> TemplateLibrary:
         """This library's chains against a replacement `library.yaml` content:
@@ -334,9 +383,11 @@ class TemplateLibrary:
         changed."""
         return TemplateLibrary.from_mappings(
             library,
-            [(raw.source.file, raw.data) for raw in self._chains.values()],
+            # A plugin's chains come back with its layer, not as local chains.
+            [(raw.source.file, raw.data) for id, raw in self._chains.items() if ":" not in id],
             library_path=library_path,
             skills_dir=self.skills_dir,
+            plugins=self.plugins,
         )
 
     def with_chain(
@@ -345,13 +396,23 @@ class TemplateLibrary:
         """This library plus one unsaved chain, and the chain's id. A chain of
         the same id is shadowed, which is how a saved chain's edit is checked
         before it is saved. `self` is not changed."""
-        candidate = TemplateLibrary(self._components, self._chains, self.steering, self.skills_dir)
+        candidate = TemplateLibrary(
+            self._components, self._chains, self.steering, self.skills_dir, self.plugins
+        )
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
-    def _add_chain(self, chain_path: Path, body: Mapping[str, object]) -> str:
+    def _add_chain(
+        self,
+        chain_path: Path,
+        body: Mapping[str, object],
+        *,
+        plugin: InstalledPlugin | None = None,
+    ) -> str:
         id = _chain_id(chain_path, body)
         _refuse_qualified(chain_path, "chain id", id)
+        if plugin is not None:
+            id = f"{plugin.namespace}:{id}"
         if id in self._chains:
             # One selectable chain per file: two files claiming one id would
             # otherwise make the loser's chain vanish from `chain_ids`.
