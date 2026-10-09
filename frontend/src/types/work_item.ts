@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { DisplayStatus, SessionStatus, StopKind as GeneratedStopKind, WorkItemStatus } from "./vocab.generated";
+import type { DisplayStatus, EventType, SessionStatus, StopKind as GeneratedStopKind, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -457,7 +457,9 @@ export interface WorkerSession {
 export interface KraftEvent {
   seq: number;
   work_item_id: string;
-  type: string;
+  /** One of the server's event types. A compile-time aid only: an SPA older
+   *  than its server still receives types it does not know. */
+  type: EventType;
   payload: Record<string, unknown>;
   /** The node this event is about, or `null` for an item-level event (Kraft
    *  UI v2 · B13). Defaulted server-side from the payload's own `node_id`/

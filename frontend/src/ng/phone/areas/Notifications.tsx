@@ -82,7 +82,7 @@ export function NotificationChannel() {
 const lastSend = (n: Notify) => (n.last_test ? (n.last_test.error ? `failed ${ago(n.last_test.at)}: ${n.last_test.error}` : `delivered ${ago(n.last_test.at)} · ${n.last_test.status} · ${n.last_test.ms} ms`) : "never sent");
 
 function Preview({ link }: { link: string }) {
-  const [id, setId] = useState(NOTIFY_EVENTS[0].id);
+  const [id, setId] = useState<string>(NOTIFY_EVENTS[0].id);
   const { edit, node } = useEditor();
   const event = NOTIFY_EVENTS.find((e) => e.id === id) ?? NOTIFY_EVENTS[0];
   const sample = notificationText(event, "Add retry budget to the intake poller");

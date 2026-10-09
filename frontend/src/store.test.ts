@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "./store";
 import { item } from "./testFixtures";
 import type { KraftEvent, WorkItem } from "./types";
+import type { EventType } from "./types/vocab.generated";
 
 const baseItem = (over: Partial<WorkItem> = {}): WorkItem =>
   item({
@@ -152,7 +153,7 @@ describe("applyEvent", () => {
   });
 
   // The server's `executor.GATE_CLOSED`: each of these closes a pending gate.
-  it.each([
+  it.each<[EventType, Record<string, unknown>, string]>([
     ["node_skipped", { node_id: "spec_approval", gate: "spec_approval", note: null }, "active"],
     ["work_item_completed", {}, "completed"],
     ["work_item_abandoned", {}, "abandoned"],
@@ -215,7 +216,7 @@ describe("applyEvent", () => {
 
   // abandoned: a live board holding a row for an item abandoned elsewhere
   // would keep offering actions on a worktree that no longer exists.
-  it.each<[string, Record<string, unknown>, Partial<WorkItem>]>([
+  it.each<[EventType, Record<string, unknown>, Partial<WorkItem>]>([
     ["work_item_completed", {}, { status: "completed" }],
     ["work_item_needs_human", { node_id: "verify", reason: "x" }, { status: "needs_human" }],
     ["work_item_abandoned", {}, { status: "abandoned" }],
@@ -254,7 +255,7 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.status).toBe(status);
   });
 
-  it.each(["work_item_resumed", "work_item_retried", "node_started"])(
+  it.each<EventType>(["work_item_resumed", "work_item_retried", "node_started"])(
     "%s clears a stale question",
     (type) => {
       // The field is sticky otherwise: a later, unrelated stop re-renders the
@@ -287,14 +288,15 @@ describe("applyEvent", () => {
   });
 
   it("unknown type is stored in the timeline, no throw", () => {
+    // The cast stands in for an SPA older than its server: it can receive a type it does not know.
     expect(() =>
-      useStore.getState().applyEvent(ev({ type: "some_future_event", payload: {} })),
+      useStore.getState().applyEvent(ev({ type: "some_future_event" as EventType, payload: {} })),
     ).not.toThrow();
     expect(useStore.getState().eventsByItem.w1).toHaveLength(1);
   });
 
   // gate_requested: so a stale deferred_findings roll-up isn't left showing.
-  it.each([
+  it.each<[string, string, EventType, Record<string, unknown>]>([
     ["work_item_created for an unknown id", "w2", "work_item_created", {}],
     ["chain_loaded for an unknown id", "w2", "chain_loaded", {}],
     ["gate_requested", "w1", "gate_requested", { gate: "human_review_approval" }],

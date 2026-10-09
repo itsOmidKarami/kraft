@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
+import type { EventType } from "../../../types/vocab.generated";
 import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { ItemDraftProvider } from "../draft/context";
 import { answer, ov } from "../draft/testkit";
@@ -20,7 +21,7 @@ const posts = (calls: { method: string }[]) => calls.filter((c) => c.method !== 
 describe("ChainOverview", () => {
   it("lists recent events newest first; a line about a node selects it", async () => {
     const onSelect = vi.fn();
-    const ev = (seq: number, type: string, node_id: string | null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: {}, node_id, created_at: "2026-09-13T10:04:00Z" });
+    const ev = (seq: number, type: EventType, node_id: string | null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: {}, node_id, created_at: "2026-09-13T10:04:00Z" });
     render(<ChainOverview item={detail({ summary: { nodes_done: 7, nodes_total: 15, gates_passed: 3, step: null } })} events={[ev(1, "work_item_created", null), ev(2, "node_completed", "plan"), ev(3, "worker_session_exited", "plan")]} now={NOW} onSelect={onSelect} />);
     expect(screen.getByText("7 of 15 nodes · 3 gates passed")).toBeInTheDocument();
     const lines = screen.getAllByRole("listitem").map((li) => li.textContent);

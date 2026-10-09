@@ -2,11 +2,12 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { CompareTarget, KraftEvent } from "../../types";
+import type { EventType } from "../../types/vocab.generated";
 import * as http from "../http";
 import { COALESCE_MS } from "../item/useItem";
 import { THREADS_POLL_MS, useCompare, useThreads } from "./useReview";
 
-const ev = (work_item_id: string, seq: number, type: string): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
+const ev = (work_item_id: string, seq: number, type: EventType): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
 const calls = (part: string) => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes(part)).map(([p]) => String(p));
 
 beforeEach(() => {

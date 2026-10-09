@@ -24,6 +24,7 @@ export const STATES: DisplayState[] = [
 ];
 
 import { buildNgBoard } from "./ngBoard";
+import type { EventType } from "../../../src/types/vocab.generated";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
@@ -165,7 +166,7 @@ Related: \`.engineering/specs/2026-09-12-reuse-what-we-measured.md\`, session \`
 
 /* ── builders ────────────────────────────────────────────────────────────── */
 
-type Ev = { seq: number; work_item_id: string; type: string; payload: Record<string, unknown>; node_id?: string | null; created_at: string };
+type Ev = { seq: number; work_item_id: string; type: EventType; payload: Record<string, unknown>; node_id?: string | null; created_at: string };
 
 export interface ItemBundle {
   item: any;
@@ -219,7 +220,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
   const logs: Record<string, any[]> = {};
   let seq = 0;
   let m = 0;
-  const ev = (type: string, payload: Record<string, unknown> = {}, dm = 1) => {
+  const ev = (type: EventType, payload: Record<string, unknown> = {}, dm = 1) => {
     m += dm;
     // Mirrors the server's own default (`events.append`, Kraft UI v2 · B13):
     // whichever of the payload's `node_id`/`node` keys is a string.
@@ -386,7 +387,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
     }
     case "paused": {
       startCurrent("paused");
-      ev("work_item_paused", { node_id: currentNode }, 4);
+      ev("pause_requested", { node_id: currentNode }, 4);
       item.status = "paused"; item.pending_steer_context = long ? "Look at the CI-only environment first: the failure never reproduces locally." : null;
       item.display_status = "paused"; item.stop = null;
       break;

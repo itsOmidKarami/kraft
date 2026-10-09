@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "./types";
+import type { EventType } from "./types/vocab.generated";
 import { enabledEvents, isEnabled, maybeNotify, requestPermission, setEnabled, setEvents } from "./browserNotify";
 
-const ev = (type: string, over: Partial<KraftEvent> = {}): KraftEvent =>
+const ev = (type: EventType, over: Partial<KraftEvent> = {}): KraftEvent =>
   ({ seq: 1, work_item_id: "w1", type, payload: {}, created_at: "2026-09-14T00:00:00Z", ...over }) as KraftEvent;
 
 class FakeNotification {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
+import type { EventType } from "./types/vocab.generated";
 
 type Connection = "connecting" | "open" | "reconnecting";
 
@@ -349,7 +350,7 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 /** Status-moving events after which display_status and stop are re-read. */
-const REREAD = new Set([
+const REREAD = new Set<EventType>([
   "work_item_needs_human",
   "work_item_resumed",
   "work_item_retried",

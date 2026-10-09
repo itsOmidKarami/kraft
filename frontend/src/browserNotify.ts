@@ -1,9 +1,10 @@
 import type { KraftEvent } from "./types";
+import type { EventType } from "./types/vocab.generated";
 
 /** The two states Kraft is blocked on a person. Anything else gets muted
  *  within a week, and a muted channel is the same as no channel. Shared
  *  between here and NotifyPage.tsx's webhook "what notifies" section. */
-export const NOTIFY_EVENTS: { id: string; label: string }[] = [
+export const NOTIFY_EVENTS: { id: EventType; label: string }[] = [
   { id: "gate_requested", label: "a decision is waiting" },
   { id: "work_item_needs_human", label: "stopped — gate wait or cap breach" },
 ];

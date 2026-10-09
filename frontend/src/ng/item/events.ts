@@ -1,4 +1,5 @@
 import type { KraftEvent } from "../../types";
+import type { EventType } from "../../types/vocab.generated";
 import { elapsed } from "../../format";
 import { taskName } from "./paths";
 
@@ -6,7 +7,7 @@ const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Bookkeeping that would drown the run's story in the chain pane's Recent. */
-const QUIET = new Set(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured"]);
+const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exited", "chain_loaded", "plan_progress", "worktree_prepared", "steer_context_set", "permission_decision", "external_wait_observed", "findings_measured"]);
 
 /** One line of the chain pane's Recent (Decisions §5 Chain pane), or null for
  *  bookkeeping. An event type not listed here shows its own name. */
@@ -104,7 +105,7 @@ export function recent(events: KraftEvent[]): RecentLine[] {
 
 /** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
 export function gateSkipped(events: KraftEvent[], gate: string): boolean {
-  const at = (type: string) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
+  const at = (type: EventType) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
   return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
 }
 

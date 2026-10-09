@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { KraftEvent } from "../../types";
+import type { EventType } from "../../types/vocab.generated";
 import { useResizable } from "../graph/useResizable";
 import { acceptWrites, detail, stubFetch } from "../item/testkit";
 import type { ItemDetail } from "../item/useItem";
@@ -24,7 +25,7 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
   return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={size} onClose={() => {}} onRepo={() => {}} />;
 }
 
-const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
+const ev = (seq: number, type: EventType, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
 const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[]; answers?: Record<string, [number, unknown]> } = {}) => {
   const calls = stubFetch({ ...WRITES, ...opts.answers, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
