@@ -301,9 +301,9 @@ async def test_auto_escalate_stuck_consumes_a_self_retry_after_the_session_exits
 )
 def test_auto_dispatch_count_resets_only_when_a_human_acts(between, expected):
     """The cap counter counts auto-dispatched turns since the current run of
-    stuckness began, and only a *human* acting ends that run (
-    `kraft.vocab.RUN_BOUNDARY`). The machinery acting on itself -- the escalated agent's
-    own `{"escalated": true}` retry, the `node_started` that retry's `walk.run`
+    stuckness began, and only a *human* acting ends that run (`kraft.vocab.RUN_BOUNDARY`). The
+    machinery acting on itself -- the escalated agent's own
+    `{"escalated": true}` retry, the `node_started` that retry's `walk.run`
     writes, chain movement, a gate re-reached or decided `by: agent` -- is the
     same run, or a stop a retry cannot clear (a budget breach) escalates
     forever."""

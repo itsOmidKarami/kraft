@@ -53,8 +53,6 @@ _AGENT_STATUSES = AGENT_REPORTABLE
 _flush_sleep = asyncio.sleep
 
 
-#: The event naming the background jobs a worker's turn left running.
-
 #: How much of one job's command a reason quotes.
 _JOB_NAME_MAX = 200
 
@@ -334,7 +332,6 @@ async def _record_unsynced(
         )
 
 
-#: What a sandboxed session its memory limit killed is recorded as.
 #: How the log line `record_oom_kill` appends starts: the stop's cause.
 OOM_LINE = "kraft: a process in the sandbox was killed"
 

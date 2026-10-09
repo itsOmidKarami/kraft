@@ -245,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
         case "node_skipped":
           // store.skip_node sets the row active in the same transaction, and a
           // skip closes a pending gate as approve and reject do (the server's
-          // `executor.GATE_CLOSED`). Without this an open board keeps offering
+          // `kraft.vocab.GATE_CLOSED`). Without this an open board keeps offering
           // Approve on a gate that was skipped.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, status: "active" })) };
         case "pause_requested":
@@ -320,7 +320,7 @@ export const useStore = create<State>((set, get) => ({
             })),
           };
         case "work_item_completed":
-          // An ended item has no gate left to answer (`executor.GATE_CLOSED`).
+          // An ended item has no gate left to answer (`kraft.vocab.GATE_CLOSED`).
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed", pending_gate: null })) };
         case "work_item_abandoned":
           // A live board would otherwise keep offering actions on a worktree

@@ -739,62 +739,6 @@ _AUTO_ESCALATE_MESSAGE = (
     "so instead of guessing.)"
 )
 
-#: `RUN_BOUNDARY` (`EventTraits.run_boundary`, declared per type in
-#: `kraft/vocab/events/`): the event types that close out the current run of
-#: needs_human/escalation activity for `_auto_dispatch_count`'s cap counter,
-#: and for `analytics`' forward scan of the same question. Newest-wins reverse
-#: scan, the same shape `kraft.api.routes.board._STOP_BOUNDARY` already
-#: uses for a sibling question ("what stop is the item currently sitting
-#: on"): each of these means a *human* acted since the last
-#: `work_item_needs_human`, so any escalation attempt dispatched before it
-#: belongs to a run that is already over and must not keep counting
-#: against today's cap.
-#:
-#: Only human-attributable events are boundaries. Chain movement --
-#: `node_started`, `gate_requested`, `work_item_rate_limited` -- is
-#: deliberately *not* a boundary: an escalated self-retry moves the chain
-#: by design, and a stop re-reached after that movement is the same run of
-#: unattended stuckness, not a new one. Counting it as a boundary reads
-#: the count as 0 on every cycle and the escalate -> self-retry -> re-stop
-#: loop never hits the cap (Kraft code-review finding 2). The same reason
-#: the scan skips a `work_item_retried` tagged `{"escalated": true}` and a
-#: `gate_approved`/`gate_rejected` decided `by: "agent"`: those are the
-#: machinery unblocking itself, not a person looking at the item. `by:
-#: "assistant"` (Kraft-s7c04.43) is deliberately NOT skipped alongside
-#: "agent": a person told the assistant to clear the gate, so a person was
-#: paged and the run really did end.
-#:
-#: The boundaries themselves:
-#:
-#:   - work_item_retried / work_item_resumed -- a human answered
-#:     `kraft item retry` / `kraft item resume` (an `{"escalated": true}`
-#:     retry is skipped, see above).
-#:   - work_item_created -- defensive: a freshly created item has no prior
-#:     run to inherit a count from.
-#:   - pause_requested -- a human paused the item.
-#:   - gate_approved / gate_rejected -- a human decided a gate (an agent's
-#:     own gate-review decision is skipped, see above).
-#:   - work_item_completed -- the chain finished.
-#:   - work_item_abandoned / work_item_restored -- a human abandoned or
-#:     restored the item.
-#:
-#: Everything without the trait -- including `work_item_needs_human`
-#: itself, every `escalation_message` (counted, not boundary-checked,
-#: below), and every session-lifecycle/progress event
-#: (`worker_session_created`/`_started`/`_exited`/`_paused`,
-#: `session_unknown`, `session_reattached`, `plan_progress`,
-#: `budget_changed`, ...) -- is ignored by the scan rather than treated as
-#: a boundary. That distinction is load-bearing: `store.create_session`
-#: appends `worker_session_created` unconditionally for *every* dispatched
-#: session, including the escalation session this very function just
-#: spawned, and the run then appends `worker_session_started` and
-#: `worker_session_exited` around it too. A scan that broke on "any event
-#: type other than needs_human/escalation_message" (the shape this
-#: replaces) hit one of those three on the very next call and read the
-#: count as 0 forever -- the cap never engaged, and every later
-#: `run()`/`resume()` landing on the same stop dispatched another
-#: escalation turn indefinitely.
-
 
 def stuck_stop(evts) -> bool:
     """Whether the item's newest `work_item_needs_human` stop is in the stuck
@@ -806,6 +750,61 @@ def stuck_stop(evts) -> bool:
     return False
 
 
+# The set is `kraft.vocab.RUN_BOUNDARY` (`EventTraits.run_boundary`): the event
+# types that close out the current run of
+# needs_human/escalation activity for `_auto_dispatch_count`'s cap counter,
+# and for `analytics`' forward scan of the same question. Newest-wins reverse
+# scan, the same shape `kraft.api.routes.board._STOP_BOUNDARY` already
+# uses for a sibling question ("what stop is the item currently sitting
+# on"): each of these means a *human* acted since the last
+# `work_item_needs_human`, so any escalation attempt dispatched before it
+# belongs to a run that is already over and must not keep counting
+# against today's cap.
+#
+# Only human-attributable events are boundaries. Chain movement --
+# `node_started`, `gate_requested`, `work_item_rate_limited` -- is
+# deliberately *not* a boundary: an escalated self-retry moves the chain
+# by design, and a stop re-reached after that movement is the same run of
+# unattended stuckness, not a new one. Counting it as a boundary reads
+# the count as 0 on every cycle and the escalate -> self-retry -> re-stop
+# loop never hits the cap (Kraft code-review finding 2). The same reason
+# the scan skips a `work_item_retried` tagged `{"escalated": true}` and a
+# `gate_approved`/`gate_rejected` decided `by: "agent"`: those are the
+# machinery unblocking itself, not a person looking at the item. `by:
+# "assistant"` (Kraft-s7c04.43) is deliberately NOT skipped alongside
+# "agent": a person told the assistant to clear the gate, so a person was
+# paged and the run really did end.
+#
+# The boundaries themselves:
+#
+#   - work_item_retried / work_item_resumed -- a human answered
+#     `kraft item retry` / `kraft item resume` (an `{"escalated": true}`
+#     retry is skipped, see above).
+#   - work_item_created -- defensive: a freshly created item has no prior
+#     run to inherit a count from.
+#   - pause_requested -- a human paused the item.
+#   - gate_approved / gate_rejected -- a human decided a gate (an agent's
+#     own gate-review decision is skipped, see above).
+#   - work_item_completed -- the chain finished.
+#   - work_item_abandoned / work_item_restored -- a human abandoned or
+#     restored the item.
+#
+# Everything without the trait -- including `work_item_needs_human`
+# itself, every `escalation_message` (counted, not boundary-checked,
+# below), and every session-lifecycle/progress event
+# (`worker_session_created`/`_started`/`_exited`/`_paused`,
+# `session_unknown`, `session_reattached`, `plan_progress`,
+# `budget_changed`, ...) -- is ignored by the scan rather than treated as
+# a boundary. That distinction is load-bearing: `store.create_session`
+# appends `worker_session_created` unconditionally for *every* dispatched
+# session, including the escalation session this very function just
+# spawned, and the run then appends `worker_session_started` and
+# `worker_session_exited` around it too. A scan that broke on "any event
+# type other than needs_human/escalation_message" (the shape this
+# replaces) hit one of those three on the very next call and read the
+# count as 0 forever -- the cap never engaged, and every later
+# `run()`/`resume()` landing on the same stop dispatched another
+# escalation turn indefinitely.
 def _auto_dispatch_count(evts) -> int:
     """How many auto-dispatched escalation turns (`escalation_message`
     events tagged `{"auto": true}`) have fired since the item's current
@@ -818,8 +817,8 @@ def _auto_dispatch_count(evts) -> int:
     chain movement, and any non-auto `escalation_message` -- is ignored
     and the scan continues past it; only an `escalation_message` tagged
     `{"auto": true}` increments the count. Two `RUN_BOUNDARY` types are
-    skipped rather than treated as a boundary -- see the tuple's docstring
-    -- because they are the machinery acting, not a human: a
+    skipped rather than treated as a boundary -- see the comment above this
+    function -- because they are the machinery acting, not a human: a
     `work_item_retried` tagged `{"escalated": true}` (the escalated agent
     retrying itself) and a `gate_approved`/`gate_rejected` decided
     `by: "agent"` (gate auto-review).

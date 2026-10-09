@@ -152,7 +152,7 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.status).toBe("active");
   });
 
-  // The server's `executor.GATE_CLOSED`: each of these closes a pending gate.
+  // The server's `kraft.vocab.GATE_CLOSED`: each of these closes a pending gate.
   it.each<[EventType, Record<string, unknown>, string]>([
     ["node_skipped", { node_id: "spec_approval", gate: "spec_approval", note: null }, "active"],
     ["work_item_completed", {}, "completed"],
