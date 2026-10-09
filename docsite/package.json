@@ -14,6 +14,7 @@
   "overrides": {
     "fontless": {
       "esbuild": "^0.28.1"
-    }
+    },
+    "simple-git": "^4.0.1"
   }
 }

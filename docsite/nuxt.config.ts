@@ -68,6 +68,10 @@ const breakableLinks = (links: TocLink[] = []) => links.forEach((link) => {
 
 export default defineNuxtConfig({
   extends: ['docus'],
+  // Off until Nuxt ships @nuxt/devtools 4: devtools 3 default-imports
+  // simple-git, and the patched simple-git 4 (package.json overrides) has no
+  // default export, so loading the module fails `nuxt dev` and `generate`.
+  devtools: { enabled: false },
   hooks: {
     'content:file:afterParse'({ content }) {
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
