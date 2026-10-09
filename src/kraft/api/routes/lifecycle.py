@@ -1186,6 +1186,9 @@ async def _retry(wid: str, body: Retry, request: Request):
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     asked = body  # as the caller sent it: a queued retry is made again from this
+    if held := held_refusal(row):
+        # Ahead of the node check: an item held before it ever started has none.
+        raise HTTPException(409, held)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] not in admitting(Verb.RETRY):
@@ -2017,7 +2020,9 @@ async def reopen_mr(wid: str, request: Request):
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["stop_kind"] != StopKind.MR_CLOSED:
-        raise HTTPException(409, "work item is not stopped on a closed merge request")
+        raise HTTPException(
+            409, held_refusal(row) or "work item is not stopped on a closed merge request"
+        )
     ref = board._mr_ref(st, wid)
     if ref is None:
         raise HTTPException(409, "work item has no merge request to reopen")

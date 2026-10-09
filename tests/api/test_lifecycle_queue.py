@@ -54,7 +54,7 @@ def test_a_queued_item_refuses_a_gate_decision(client, repo, decision, body):
 
 
 @pytest.mark.parametrize("state", ["queued", "blocked"])
-@pytest.mark.parametrize("door", ["budget_raise", "skip", "escalate"])
+@pytest.mark.parametrize("door", ["budget_raise", "skip", "escalate", "retry", "reopen_mr"])
 def test_a_held_item_tells_a_door_it_refuses_how_to_take_it_out(client, repo, state, door):
     """Not only a 409: the item is queued or blocked, and pausing takes it out."""
     spec = DOORS["doors"][door]
