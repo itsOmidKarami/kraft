@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">455 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">424<span class="text"> run</span></button>
+            <span class="text">459 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">428<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">31<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_work_items_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 13:37 +0000
+            created at 2026-10-09 18:00 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -860,18 +860,22 @@
     <p class="pln"><span class="n"><a id="t778" href="#t778">778</a></span><span class="t">    <span class="com"># URL ever set&quot; (body.url is None and cfg[&quot;url&quot;] was already empty).</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t779" href="#t779">779</a></span><span class="t">    <span class="key">if</span> <span class="nam">why</span> <span class="op">:=</span> <span class="nam">config_check</span><span class="op">.</span><span class="nam">notify_problem</span><span class="op">(</span><span class="nam">cfg</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t780" href="#t780">780</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="nam">why</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t781" href="#t781">781</a></span><span class="t">    <span class="nam">config_mod</span><span class="op">.</span><span class="nam">Notify</span><span class="op">.</span><span class="nam">model_validate</span><span class="op">(</span><span class="nam">cfg</span><span class="op">)</span><span class="op">.</span><span class="nam">save</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t782" href="#t782">782</a></span><span class="t">    <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">reload</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t783" href="#t783">783</a></span><span class="t">    <span class="key">return</span> <span class="nam">_notify_view</span><span class="op">(</span><span class="nam">cfg</span><span class="op">,</span> <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">last_test</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t784" href="#t784">784</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t785" href="#t785">785</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t786" href="#t786">786</a></span><span class="t"><span class="op">@</span><span class="nam">api_router</span><span class="op">.</span><span class="nam">post</span><span class="op">(</span><span class="str">&quot;/notify/test&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t787" href="#t787">787</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">notify_test</span><span class="op">(</span><span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t788" href="#t788">788</a></span><span class="t">    <span class="nam">st</span> <span class="op">=</span> <span class="nam">request</span><span class="op">.</span><span class="nam">app</span><span class="op">.</span><span class="nam">state</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t789" href="#t789">789</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t790" href="#t790">790</a></span><span class="t">        <span class="key">return</span> <span class="key">await</span> <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">send_test</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t791" href="#t791">791</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValueError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t792" href="#t792">792</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="nam">str</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t781" href="#t781">781</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t782" href="#t782">782</a></span><span class="t">        <span class="nam">notify</span> <span class="op">=</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">Notify</span><span class="op">.</span><span class="nam">model_validate</span><span class="op">(</span><span class="nam">cfg</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t783" href="#t783">783</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValidationError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t784" href="#t784">784</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">Notify</span><span class="op">.</span><span class="nam">refusal</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span><span class="op">)</span> <span class="key">from</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t785" href="#t785">785</a></span><span class="t">    <span class="nam">notify</span><span class="op">.</span><span class="nam">save</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t786" href="#t786">786</a></span><span class="t">    <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">reload</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t787" href="#t787">787</a></span><span class="t">    <span class="key">return</span> <span class="nam">_notify_view</span><span class="op">(</span><span class="nam">cfg</span><span class="op">,</span> <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">last_test</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t788" href="#t788">788</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t789" href="#t789">789</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t790" href="#t790">790</a></span><span class="t"><span class="op">@</span><span class="nam">api_router</span><span class="op">.</span><span class="nam">post</span><span class="op">(</span><span class="str">&quot;/notify/test&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t791" href="#t791">791</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">notify_test</span><span class="op">(</span><span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t792" href="#t792">792</a></span><span class="t">    <span class="nam">st</span> <span class="op">=</span> <span class="nam">request</span><span class="op">.</span><span class="nam">app</span><span class="op">.</span><span class="nam">state</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t793" href="#t793">793</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t794" href="#t794">794</a></span><span class="t">        <span class="key">return</span> <span class="key">await</span> <span class="nam">st</span><span class="op">.</span><span class="nam">notifier</span><span class="op">.</span><span class="nam">send_test</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t795" href="#t795">795</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValueError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t796" href="#t796">796</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="nam">str</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -881,7 +885,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_work_items_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-09 13:37 +0000
+            created at 2026-10-09 18:00 +0000
         </p>
     </div>
 </footer>
