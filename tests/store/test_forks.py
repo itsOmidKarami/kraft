@@ -181,7 +181,7 @@ async def test_the_fork_boundary_is_where_the_current_run_starts(item_on, databa
     assert database.read(lambda c: store.fork_boundary(c, it.id)) == 0
 
     fork = await _fork(database, it, "a")
-    await database.write(lambda c: events.append(c, it.id, "later", {}))
+    await database.write(lambda c: events.append(c, it.id, "node_started", {}))
 
     assert database.read(lambda c: store.fork_boundary(c, it.id)) == fork.after_seq > 0
 

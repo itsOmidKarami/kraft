@@ -402,7 +402,7 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
 
 @pytest.mark.parametrize("restart", ["work_item_retried", "run_forked", "base_change_restart"])
 async def test_each_restart_on_its_own_ends_an_open_wait(walk, item_on, restart):
-    """Every member of `waits._RESTARTS` ends an open wait alone. A `/retry`
+    """Every member of `kraft.vocab.RESTARTS_RUN` ends an open wait alone. A `/retry`
     writes `work_item_retried` and `run_forked` together, so a walk through it
     cannot tell whether `run_forked` is honoured (final review 2 D): a fork
     written by any other path must still start a fresh wait."""

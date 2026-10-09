@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
+import type { EventType } from "./types/vocab.generated";
 
 type Connection = "connecting" | "open" | "reconnecting";
 
@@ -244,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
         case "node_skipped":
           // store.skip_node sets the row active in the same transaction, and a
           // skip closes a pending gate as approve and reject do (the server's
-          // `executor.GATE_CLOSED`). Without this an open board keeps offering
+          // `kraft.vocab.GATE_CLOSED`). Without this an open board keeps offering
           // Approve on a gate that was skipped.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, status: "active" })) };
         case "pause_requested":
@@ -319,7 +320,7 @@ export const useStore = create<State>((set, get) => ({
             })),
           };
         case "work_item_completed":
-          // An ended item has no gate left to answer (`executor.GATE_CLOSED`).
+          // An ended item has no gate left to answer (`kraft.vocab.GATE_CLOSED`).
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed", pending_gate: null })) };
         case "work_item_abandoned":
           // A live board would otherwise keep offering actions on a worktree
@@ -349,7 +350,7 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 /** Status-moving events after which display_status and stop are re-read. */
-const REREAD = new Set([
+const REREAD = new Set<EventType>([
   "work_item_needs_human",
   "work_item_resumed",
   "work_item_retried",

@@ -33,10 +33,8 @@ from kraft import config as _config
 from kraft import events, store
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext
-from kraft.vocab import StopKind
+from kraft.vocab import ChainEvent, StopKind
 from kraft.worker import sandbox as _sandbox
-
-EVENT = "read_only_violated"
 
 #: `(HEAD, status, diff hash)` per repository, `""` for the root.
 Snapshot = dict[str, tuple[str | None, str | None, str | None]]
@@ -121,7 +119,9 @@ async def violation(db, row, launch, worktree, before: Snapshot | None, *, node_
     files = changed(db, row, launch, worktree, before)
     if files:
         payload = {"node_id": node_id, "scope": scope, "files": files}
-        await db.write(lambda c: events.append(c, row["id"], EVENT, payload))
+        await db.write(
+            lambda c: events.append(c, row["id"], ChainEvent.READ_ONLY_VIOLATED, payload)
+        )
     return bool(files)
 
 
@@ -131,7 +131,7 @@ async def stop(db, work_item_id: str, node_id: str) -> str:
         lambda c: c.execute(
             "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
             "ORDER BY seq DESC LIMIT 1",
-            (work_item_id, EVENT),
+            (work_item_id, ChainEvent.READ_ONLY_VIOLATED),
         ).fetchone()
     )
     payload = json.loads(raw["payload"]) if raw else {"scope": node_id, "files": []}

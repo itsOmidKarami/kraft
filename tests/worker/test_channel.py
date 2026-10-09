@@ -20,6 +20,7 @@ from starlette.routing import Route
 
 from kraft import events, store
 from kraft.paths import RunDirs
+from kraft.vocab import SandboxEvent
 from kraft.worker import ca, channel, egress
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -85,7 +86,7 @@ async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
 
     assert answer.startswith(b"HTTP/1.1 403 ")
     rows = database.read(lambda c: events.read_after(c, 0, "w1"))
-    refused = [r for r in rows if r["type"] == egress.SANDBOX_EGRESS_REFUSED]
+    refused = [r for r in rows if r["type"] == SandboxEvent.EGRESS_REFUSED]
     assert [r["payload"]["session_id"] for r in refused] == ["0123456789abcdef0123"]
 
 
@@ -195,7 +196,7 @@ async def test_a_session_certificate_reaches_its_own_session_over_tls(
 
     assert answer.startswith(b"HTTP/1.1 403 ")
     rows = database.read(lambda c: events.read_after(c, 0, "w1"))
-    refused = [r for r in rows if r["type"] == egress.SANDBOX_EGRESS_REFUSED]
+    refused = [r for r in rows if r["type"] == SandboxEvent.EGRESS_REFUSED]
     assert [r["payload"]["session_id"] for r in refused] == ["01JSESSION0000000000000002"]
 
 

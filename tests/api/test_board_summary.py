@@ -122,7 +122,7 @@ def test_events_paging_before_seq_and_limit(client, repo):
     """`before_seq` + `limit`: the last `limit` events with `seq < before_seq`,
     oldest first (H.3)."""
     wid = _paused_item(client, repo)
-    seqs = [_append(wid, "x", {"i": i}) for i in range(5)]
+    seqs = [_append(wid, "plan_progress", {"i": i}) for i in range(5)]
 
     page = client.get(f"/api/work-items/{wid}/events", params={"before_seq": seqs[4], "limit": 2})
     assert page.status_code == 200

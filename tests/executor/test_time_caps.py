@@ -26,6 +26,7 @@ from kraft.executor import gates, walk
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
+from kraft.vocab import LimitEvent
 from kraft.worker.backends import docker as docker_backend
 
 LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
@@ -117,7 +118,7 @@ async def test_each_levels_cap_stops_its_own_scope_and_names_it(item_on, fast, l
     assert it.row()["stop_kind"] == "cap"
     (session,) = it.sessions()
     assert session["status"] == "capped_out"
-    (reached,) = it.events(caps.REACHED)
+    (reached,) = it.events(LimitEvent.TIME_CAP_REACHED)
     assert reached["payload"]["session_id"] == session["id"]
     assert reached["payload"]["field"] == field
 
@@ -181,7 +182,7 @@ async def test_a_launch_under_a_spent_cap_is_refused_and_nothing_runs(item_on, t
     assert _reason(it) == "`build.run` hit its time cap of 1 minutes"
     refused = it.sessions()[-1]
     assert refused["status"] == "capped_out"
-    assert it.events(caps.REACHED)[0]["payload"]["session_id"] == refused["id"]
+    assert it.events(LimitEvent.TIME_CAP_REACHED)[0]["payload"]["session_id"] == refused["id"]
 
 
 async def test_a_cap_stop_spends_no_attempt_and_is_not_escalated(item_on, monkeypatch):
@@ -422,4 +423,6 @@ async def test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerabl
     assert it.row()["stop_kind"] == "cap"
     assert gates.pending_gate(it.database, it.id) == "review"
     assert "stuck" not in it.events("work_item_needs_human")[-1]["payload"]
-    assert [e["type"] for e in it.events() if e["type"] == caps.REACHED] == [caps.REACHED]
+    assert [e["type"] for e in it.events() if e["type"] == LimitEvent.TIME_CAP_REACHED] == [
+        LimitEvent.TIME_CAP_REACHED
+    ]

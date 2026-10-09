@@ -16,11 +16,19 @@ from kraft.cap_levels import SCOPE_CAP_FIELDS
 from kraft.vocab import (
     COMMANDS_MAY_START,
     FAILURE_KINDS,
+    GATE_CLOSED,
     LIVE,
     STOPPED,
     TRAITS,
+    ChainEvent,
     DisplayStatus,
+    EscalationEvent,
+    ForgeEvent,
+    GateEvent,
+    LimitEvent,
+    SessionEvent,
     StopKind,
+    WorkItemEvent,
     WorkItemStatus,
 )
 from kraft.vocab.sql import in_list
@@ -74,13 +82,13 @@ def _reject_default(st, row, gate: str | None) -> str | None:
 #: `work_item_needs_human`: without this set a first-match scan reads an
 #: answered-and-resumed stop, or a pending gate, as a live one forever.
 _STOP_BOUNDARY = (
-    "work_item_needs_human",
-    "gate_requested",
-    "gate_rejected",
-    "work_item_resumed",
-    "work_item_retried",
-    "work_item_completed",
-    "work_item_rate_limited",
+    WorkItemEvent.NEEDS_HUMAN,
+    GateEvent.REQUESTED,
+    GateEvent.REJECTED,
+    WorkItemEvent.RESUMED,
+    WorkItemEvent.RETRIED,
+    WorkItemEvent.COMPLETED,
+    WorkItemEvent.RATE_LIMITED,
 )
 
 
@@ -117,10 +125,10 @@ def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
             break
     stop = (
         boundary["payload"]
-        if boundary is not None and boundary["type"] == "work_item_needs_human"
+        if boundary is not None and boundary["type"] == WorkItemEvent.NEEDS_HUMAN
         else None
     )
-    last = next((e for e in reversed(evs) if e["type"] == "escalation_message"), None)
+    last = next((e for e in reversed(evs) if e["type"] == EscalationEvent.ESCALATION_MESSAGE), None)
     escalated = False
     if boundary is not None and last is not None and last["seq"] > boundary["seq"]:
         session = st.db.read(
@@ -234,7 +242,7 @@ async def list_work_items(request: Request):
         # rejected gate. The closers are `executor.pending_gate`'s, so a gate
         # `kraft item skip` passed, or one left by an item that ended, reads
         # as closed here too, as it does on the item's own page.
-        gate_types = ("gate_requested", *executor.GATE_CLOSED)
+        gate_types = (GateEvent.REQUESTED, *GATE_CLOSED)
         gates = c.execute(
             "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
             "  SELECT MAX(seq) FROM events"
@@ -247,8 +255,9 @@ async def list_work_items(request: Request):
         launches = c.execute(
             "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
             "  SELECT MAX(seq) FROM events"
-            "  WHERE type IN ('launch_fallback', 'worker_session_started')"
-            "  GROUP BY work_item_id, type)"
+            "  WHERE type IN (?, ?)"
+            "  GROUP BY work_item_id, type)",
+            (LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED),
         ).fetchall()
         # The latest `_STOP_BOUNDARY` event per item, and the latest
         # `escalation_message` per item -- `display_status`/`stop` (B.4) need
@@ -263,14 +272,16 @@ async def list_work_items(request: Request):
         escalations = c.execute(
             "SELECT e.work_item_id, e.seq, e.created_at, s.status AS session_status FROM events e "
             "LEFT JOIN worker_sessions s ON s.id = json_extract(e.payload, '$.session_id') "
-            "WHERE e.seq IN (SELECT MAX(seq) FROM events WHERE type = 'escalation_message' "
-            "GROUP BY work_item_id)"
+            "WHERE e.seq IN (SELECT MAX(seq) FROM events WHERE type = ? "
+            "GROUP BY work_item_id)",
+            (EscalationEvent.ESCALATION_MESSAGE,),
         ).fetchall()
         # `mr_ref` and the step's task: the same grouped-query trade as the
         # rest, so the list stays one pass instead of `_mr_ref`'s per-item scan.
         mr_events = c.execute(
             "SELECT work_item_id, payload FROM events WHERE seq IN ("
-            "  SELECT MAX(seq) FROM events WHERE type = 'mr_opened' GROUP BY work_item_id)"
+            "  SELECT MAX(seq) FROM events WHERE type = ? GROUP BY work_item_id)",
+            (ForgeEvent.MR_OPENED,),
         ).fetchall()
         roots = c.execute(
             "SELECT work_item_id, mr_ref FROM work_item_repos WHERE role = 'root'"
@@ -299,7 +310,7 @@ async def list_work_items(request: Request):
     pending = {
         g["work_item_id"]: json.loads(g["payload"])["gate"]
         for g in gate_rows
-        if g["type"] == "gate_requested"
+        if g["type"] == GateEvent.REQUESTED
     }
     boundary_by_item = {b["work_item_id"]: b for b in boundary_rows}
     escalation_by_item = {e["work_item_id"]: e for e in escalation_rows}
@@ -367,7 +378,7 @@ async def list_work_items(request: Request):
 def _boundary_payload(boundary) -> dict | None:
     """The `work_item_needs_human` payload of a list row's latest stop-boundary
     event, or None when that event is not a stop."""
-    if boundary is not None and boundary["type"] == "work_item_needs_human":
+    if boundary is not None and boundary["type"] == WorkItemEvent.NEEDS_HUMAN:
         return json.loads(boundary["payload"])
     return None
 
@@ -393,8 +404,8 @@ def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
 def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
     """The `launch_fallback` payload whose launch is the item's latest session
     start, or None: the item's current or last launch ran on a fallback."""
-    switch = latest.get((wid, "launch_fallback"))
-    started = latest.get((wid, "worker_session_started"))
+    switch = latest.get((wid, LimitEvent.LAUNCH_FALLBACK))
+    started = latest.get((wid, SessionEvent.WORKER_SESSION_STARTED))
     if switch is None or started is None or switch.get("to") is None:
         return None
     return switch if started.get("session_id") == switch.get("session_id") else None
@@ -410,7 +421,7 @@ def _completed_nodes(st, wid: str) -> set[str]:
     return {
         e["payload"].get("node_id")
         for e in st.db.read(lambda c: events.read_after(c, 0, wid))
-        if e["type"] == "node_completed"
+        if e["type"] == ChainEvent.NODE_COMPLETED
     }
 
 
@@ -444,9 +455,12 @@ def _judge_stop_notes(st, wid: str) -> list[dict]:
     """
     out: list[dict] = []
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
-        if e["type"] in ("gate_approved", "gate_rejected"):
+        if e["type"] in (GateEvent.APPROVED, GateEvent.REJECTED):
             break
-        if e["type"] == "judge_verdict" and e["payload"].get("verdict") == "stop_downgrade":
+        if (
+            e["type"] == ChainEvent.JUDGE_VERDICT
+            and e["payload"].get("verdict") == "stop_downgrade"
+        ):
             out.append(
                 {
                     "node_id": e["payload"].get("node_id"),
@@ -496,10 +510,10 @@ def _concerns(st, wid: str) -> list[str]:
     )
     out: list[str] = []
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
-        if e["type"] in ("gate_approved", "gate_rejected"):
+        if e["type"] in (GateEvent.APPROVED, GateEvent.REJECTED):
             break
         if (
-            e["type"] == "worker_session_exited"
+            e["type"] == SessionEvent.WORKER_SESSION_EXITED
             and e["payload"].get("concerns")
             and e["payload"].get("session_id") not in judge_session_ids
         ):
@@ -533,7 +547,7 @@ def _mr_ref(st, wid: str) -> dict | None:
         (
             e["payload"]
             for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid)))
-            if e["type"] == "mr_opened"
+            if e["type"] == ForgeEvent.MR_OPENED
         ),
         None,
     )

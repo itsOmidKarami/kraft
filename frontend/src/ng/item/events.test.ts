@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { KraftEvent } from "../../types";
+import type { EventType } from "../../types/vocab.generated";
 import { age, eventLine, recent } from "./events";
 
-const ev = (type: string, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: 1, work_item_id: "w", type, payload, node_id, created_at: "t" });
+const ev = (type: EventType, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: 1, work_item_id: "w", type, payload, node_id, created_at: "t" });
 
 describe("eventLine", () => {
   it.each([
@@ -29,7 +30,7 @@ describe("eventLine", () => {
 
 describe("recent", () => {
   let seq = 0;
-  const at = (type: string, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: ++seq, work_item_id: "w", type, payload, node_id, created_at: "t" });
+  const at = (type: EventType, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: ++seq, work_item_id: "w", type, payload, node_id, created_at: "t" });
   const started = (id: string, hook: string) => at("worker_session_started", { session_id: id, hook_point: hook, node_id: hook === "escalation" ? "verification" : hook.split(".")[0] }, hook === "escalation" ? "verification" : hook.split(".")[0]);
   const exited = (id: string, status: string) => at("worker_session_exited", { session_id: id, status });
   const story = (events: KraftEvent[]) => recent(events).map((r) => r.line);

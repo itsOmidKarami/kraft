@@ -22,7 +22,7 @@ from kraft.api import api_router, deps, perimeter
 from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
 from kraft.grants import matching
 from kraft.templates.models import AgentTask
-from kraft.vocab import LIVE
+from kraft.vocab import LIVE, SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
         lambda c: events.append(
             c,
             row["work_item_id"],
-            "permission_decision",
+            SessionEvent.PERMISSION_DECISION,
             {
                 "session_id": sid,
                 "node_id": row["node_id"],

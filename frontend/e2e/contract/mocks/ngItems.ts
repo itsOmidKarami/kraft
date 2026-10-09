@@ -1,3 +1,4 @@
+import type { EventType } from "../../../src/types/vocab.generated";
 import { hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
 
 /**
@@ -75,7 +76,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   const logs: Record<string, any[]> = {};
   let seq = 0;
   let m = 0;
-  const ev = (type: string, payload: Record<string, unknown> = {}, dm = 1) => {
+  const ev = (type: EventType, payload: Record<string, unknown> = {}, dm = 1) => {
     m += dm;
     const node = payload.node_id ?? payload.node;
     events.push({ seq: ++seq, work_item_id: id, type, payload, node_id: typeof node === "string" ? node : null, created_at: t(m) });

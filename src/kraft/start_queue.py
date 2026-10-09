@@ -26,7 +26,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from kraft import events, store
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import WorkItemEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ async def _start_one(app, wid: str) -> bool:
             lambda c: events.append(
                 c,
                 wid,
-                "work_item_dequeued",
+                WorkItemEvent.DEQUEUED,
                 {"why": "refused", "detail": detail, "to": saved["from"]},
             )
         )

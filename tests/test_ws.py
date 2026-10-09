@@ -313,7 +313,7 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
     async def racing_accept(self, *a, **kw):
         if not fired["done"]:
             fired["done"] = True
-            for name in ("race_a", "race_b"):
+            for name in ("work_item_title_edited", "work_item_description_edited"):
                 await self.app.state.db.write(lambda c, name=name: events.append(c, wid, name, {}))
         return await real_accept(self, *a, **kw)
 
@@ -332,17 +332,20 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
         raise AssertionError(f"{want} never arrived; saw {seen_types}")
 
     with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
-        read_until("race_b")
+        read_until("work_item_description_edited")
         # A copy of a race event would come from the live queue, after the
         # catch-up read that may already have sent it. An event committed only
         # now lands behind any such copy, so reading up to it drains them all.
         client.portal.call(
-            client.app.state.db.write, lambda c: events.append(c, wid, "race_after", {})
+            client.app.state.db.write, lambda c: events.append(c, wid, "mr_labels_set", {})
         )
-        read_until("race_after")
+        read_until("mr_labels_set")
 
-    assert {"race_a", "race_b"} <= set(seen_types)
-    assert seen_types.count("race_a") == 1 and seen_types.count("race_b") == 1
+    assert {"work_item_title_edited", "work_item_description_edited"} <= set(seen_types)
+    assert (
+        seen_types.count("work_item_title_edited") == 1
+        and seen_types.count("work_item_description_edited") == 1
+    )
     # strictly increasing, contiguous from the first replayed seq (no gap, no dup)
     assert seqs == list(range(seqs[0], seqs[0] + len(seqs)))
 

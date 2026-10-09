@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
+import type { EventType } from "./types/vocab.generated";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
   n: 0,
@@ -47,7 +48,7 @@ describe("shortId", () => {
 });
 
 describe("elapsedBetween + nodeRunSpan (W0.4)", () => {
-  const ev = (seq: number, type: string, node_id: string, ms: number) =>
+  const ev = (seq: number, type: EventType, node_id: string, ms: number) =>
     ({ seq, work_item_id: "w", type, payload: { node_id }, created_at: at(ms) }) as KraftEvent;
   const ses = (over: Partial<WorkerSession>) =>
     ({

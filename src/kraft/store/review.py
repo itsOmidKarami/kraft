@@ -13,6 +13,7 @@ import uuid
 
 from kraft import events, render
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.vocab import ChainEvent, GateEvent
 
 __all__ = [
     "CLAIMS",
@@ -260,7 +261,7 @@ def set_thread_state(conn, tid, state: str) -> None:
     events.append(
         conn,
         t["work_item_id"],
-        "thread_updated",
+        GateEvent.THREAD_UPDATED,
         {"thread_id": tid, "state": state},
         node_id=t["node_id"],
     )
@@ -282,7 +283,7 @@ def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
         events.append(
             conn,
             t["work_item_id"],
-            "thread_updated",
+            GateEvent.THREAD_UPDATED,
             {"thread_id": tid, "state": t["state"]},
             node_id=t["node_id"],
         )
@@ -365,7 +366,7 @@ def publish_review(conn, rid: str) -> None:
     events.append(
         conn,
         r["work_item_id"],
-        "review_submitted",
+        GateEvent.REVIEW_SUBMITTED,
         {"review_id": rid, "gate": r["gate"], "outcome": r["outcome"]},
         node_id=r["gate"],
     )
@@ -461,14 +462,14 @@ def request_rewind(conn, wid, *, review_id, target, note) -> None:
     events.append(
         conn,
         wid,
-        "rewind_requested",
+        GateEvent.REWIND_REQUESTED,
         {"review_id": review_id, "target": target, "note": note},
         node_id=target,
     )
 
 
 def cancel_rewind(conn, wid, review_id) -> None:
-    events.append(conn, wid, "rewind_cancelled", {"review_id": review_id})
+    events.append(conn, wid, GateEvent.REWIND_CANCELLED, {"review_id": review_id})
 
 
 def pending_rewind(conn, wid) -> dict | None:
@@ -476,15 +477,19 @@ def pending_rewind(conn, wid) -> dict | None:
     next `node_started`, void once cancelled (review threads anywhere §1)."""
     evs = events.read_after(conn, 0, wid)
     last = next(
-        (i for i in range(len(evs) - 1, -1, -1) if evs[i]["type"] == "rewind_requested"), None
+        (i for i in range(len(evs) - 1, -1, -1) if evs[i]["type"] == GateEvent.REWIND_REQUESTED),
+        None,
     )
     if last is None:
         return None
     p = evs[last]["payload"]
     for e in evs[last + 1 :]:
-        if e["type"] == "node_started" and e["payload"].get("node_id") == p["target"]:
+        if e["type"] == ChainEvent.NODE_STARTED and e["payload"].get("node_id") == p["target"]:
             return None
-        if e["type"] == "rewind_cancelled" and e["payload"].get("review_id") == p["review_id"]:
+        if (
+            e["type"] == GateEvent.REWIND_CANCELLED
+            and e["payload"].get("review_id") == p["review_id"]
+        ):
             return None
     return {"seq": evs[last]["seq"], **p}
 

@@ -23,7 +23,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, GateNode, TaskKind
-from kraft.vocab import LIVE
+from kraft.vocab import LIVE, ChainEvent, EscalationEvent, GateEvent, LimitEvent, WorkItemEvent
 from kraft.vocab.sql import in_list
 from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
@@ -140,7 +140,7 @@ def _last_stop(db, work_item_id: str, evts: list | None = None) -> dict:
     every call from the manual `/escalate` route today."""
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] == "work_item_needs_human":
+        if e["type"] == WorkItemEvent.NEEDS_HUMAN:
             return e["payload"]
     return {}
 
@@ -169,7 +169,7 @@ def _reason_line(stop: dict, status: str) -> str:
 #: deliberately NOT on `_reason` above, which has no boundary at all.
 #: `node_started` stays out because `dispatch.measure_node` fires one per
 #: measurement round.
-_JUDGE_SPENT = ("work_item_retried", "gate_approved", "gate_rejected")
+_JUDGE_SPENT = (WorkItemEvent.RETRIED, GateEvent.APPROVED, GateEvent.REJECTED)
 
 
 def _judge_line(db, work_item_id: str, node_id: str | None, evts: list | None = None) -> str:
@@ -192,7 +192,7 @@ def _judge_line(db, work_item_id: str, node_id: str | None, evts: list | None = 
     for e in reversed(evts):
         if e["type"] in _JUDGE_SPENT:
             return ""
-        if e["type"] == "judge_verdict" and e["payload"].get("node_id") == node_id:
+        if e["type"] == ChainEvent.JUDGE_VERDICT and e["payload"].get("node_id") == node_id:
             reasoning = (e["payload"].get("reasoning") or "").strip()
             if not reasoning:
                 return ""
@@ -251,7 +251,7 @@ def session_status(db, session_id: str) -> str | None:
     """The status of a single `worker_sessions` row by its own id, or None if
     no such session exists. `gates._current_run_escalation_session_id`'s
     counterpart: that picks out *which* session id belongs to the current
-    run of `needs_human` stuckness (scoped by `_RUN_BOUNDARY`), this reads
+    run of `needs_human` stuckness (scoped by `RUN_BOUNDARY`), this reads
     that specific session's status rather than `last_escalation_status`'s
     unscoped "newest ever" (Kraft-b52cm)."""
     row = db.read(
@@ -311,7 +311,7 @@ def item_harness(db, row) -> str | None:
     switched = [
         e["payload"]["to"]["harness"]
         for e in db.read(lambda c: events.read_after(c, 0, wid))
-        if e["type"] == "launch_fallback"
+        if e["type"] == LimitEvent.LAUNCH_FALLBACK
         and e["payload"].get("session_id") == last["id"]
         and e["payload"].get("to")
     ]
@@ -358,7 +358,9 @@ async def _record_message(
     if runtime is not None:
         payload["runtime"] = runtime
     await db.write(
-        lambda c: events.append(c, work_item_id, "escalation_message", payload, node_id=node_id)
+        lambda c: events.append(
+            c, work_item_id, EscalationEvent.ESCALATION_MESSAGE, payload, node_id=node_id
+        )
     )
 
 
@@ -367,7 +369,7 @@ def _thread_runtime(db, work_item_id: str, thread: int) -> dict | None:
     `escalation_message`; None for a thread that predates the record."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in evts:
-        if e["type"] == "escalation_message" and e["payload"].get("thread") == thread:
+        if e["type"] == EscalationEvent.ESCALATION_MESSAGE and e["payload"].get("thread") == thread:
             runtime = e["payload"].get("runtime")
             return {k: runtime[k] for k in _RUNTIME if k in runtime} if runtime else None
     return None

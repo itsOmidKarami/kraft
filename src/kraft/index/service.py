@@ -13,6 +13,7 @@ from kraft import events
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
+from kraft.vocab import ChainEvent, SessionEvent, WorkItemEvent
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ class Indexer:
                     # node to piggyback on (its work is implicit runtime
                     # preparation now), and `store.load_chain` emits this at the
                     # top of the walk with the same meaning.
-                    rescan = ev["type"] in ("work_item_completed", "chain_loaded")
+                    rescan = ev["type"] in (WorkItemEvent.COMPLETED, ChainEvent.CHAIN_LOADED)
                     if rescan:
                         row = self._state.read(
                             lambda c, wid=ev["work_item_id"]: c.execute(
@@ -340,7 +341,7 @@ class Indexer:
                         )
                         if row is not None and row["repo"] not in repos:
                             repos.append(row["repo"])
-                    elif ev["type"] == "worker_session_exited":
+                    elif ev["type"] == SessionEvent.WORKER_SESSION_EXITED:
                         summaries.append(payload["session_id"])
                 for sid in summaries:
                     try:

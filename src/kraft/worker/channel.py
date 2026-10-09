@@ -31,8 +31,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kraft import events
+from kraft.vocab import SandboxEvent
 from kraft.worker import ca
-from kraft.worker.egress import SANDBOX_EGRESS_REFUSED, EgressProxy, EgressSession, PhaseLists
+from kraft.worker.egress import EgressProxy, EgressSession, PhaseLists
 from kraft.worker.inject import InjectRule
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -125,7 +126,7 @@ class ChannelRegistry:
 
         async def record(payload: dict) -> None:
             await self._db.write(
-                lambda c: events.append(c, work_item_id, SANDBOX_EGRESS_REFUSED, payload)
+                lambda c: events.append(c, work_item_id, SandboxEvent.EGRESS_REFUSED, payload)
             )
 
         session = EgressSession(

@@ -15,7 +15,7 @@ from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.render import plain_text
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import ResolvedChain
-from kraft.vocab import HOLDS_SLOT, WorkItemStatus
+from kraft.vocab import HOLDS_SLOT, ChainEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,9 @@ async def intake(
         if bead_warning:
             # Same transaction as the row: an item with no bead and no record of
             # why is the silent swallow this degrade is not.
-            events.append(c, work_item_id, "bead_not_filed", {"reason": bead_warning, "cwd": cwd})
+            events.append(
+                c, work_item_id, ChainEvent.BEAD_NOT_FILED, {"reason": bead_warning, "cwd": cwd}
+            )
 
     await db.write(_create)
     return work_item_id
@@ -412,7 +414,7 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = 
             logger.warning("beads left open for %s: %s", row["id"], reason)
             await db.write(
                 lambda c: events.append(
-                    c, row["id"], "beads_left_open", {"beads": ids, "reason": reason}
+                    c, row["id"], ChainEvent.BEADS_LEFT_OPEN, {"beads": ids, "reason": reason}
                 )
             )
         return

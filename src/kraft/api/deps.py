@@ -42,7 +42,7 @@ from kraft.templates.environment import (
     branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
-from kraft.vocab import ENDED, StopKind
+from kraft.vocab import ENDED, ChainEvent, StopKind
 from kraft.worker import steering as steering_mod
 
 logger = logging.getLogger(__name__)
@@ -98,8 +98,8 @@ def _bead_warning(st, wid: str) -> str | None:
     `executor.intake` wrote in the same transaction as the row (Kraft-7gy)."""
     row = st.db.read(
         lambda c: c.execute(
-            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'bead_not_filed'",
-            (wid,),
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ?",
+            (wid, ChainEvent.BEAD_NOT_FILED),
         ).fetchone()
     )
     return json.loads(row["payload"])["reason"] if row else None

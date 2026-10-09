@@ -14,6 +14,7 @@ from kraft.api.routes.search import OpenDocument, _launch_editor
 from kraft.executor import entry, stops
 from kraft.index import ingest as ingest_mod
 from kraft.templates import revision
+from kraft.vocab import GateEvent
 from kraft.worker.worktree_read import read_worktree_file, worktree_file_path
 
 logger = logging.getLogger(__name__)
@@ -281,7 +282,7 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
     one it found, which is the actual refusal this exists to explain.
     """
     payload = {"path": rel, "reason": reason}
-    await st.db.write(lambda c: events.append(c, wid, "artifact_refused", payload))
+    await st.db.write(lambda c: events.append(c, wid, GateEvent.ARTIFACT_REFUSED, payload))
 
 
 async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:

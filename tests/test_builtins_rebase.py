@@ -14,6 +14,7 @@ from support.harness import commit_all, git, make_repo, write
 from kraft import builtins as kraft_builtins
 from kraft import caps, events
 from kraft.config import git_read
+from kraft.vocab import LimitEvent
 
 
 def _porcelain(cwd):
@@ -481,7 +482,7 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     """Kraft-3llig review fix 1: a hanging pre-rebase hook must not hold the
     worker slot forever. `time_cap` bounds the `git rebase` subprocess
     itself; past it, the rebase is aborted and the stop is recorded the way
-    every other time-capped task's is -- `capped_out`, `caps.REACHED`,
+    every other time-capped task's is -- `capped_out`, `LimitEvent.TIME_CAP_REACHED`,
     `caps.TIME_CAPPED` -- not a new stop kind."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
@@ -515,7 +516,7 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     )
     assert session["status"] == "capped_out"
     evts = database.read(lambda c: events.read_after(c, 0, "w1"))
-    [reached] = [e for e in evts if e["type"] == caps.REACHED]
+    [reached] = [e for e in evts if e["type"] == LimitEvent.TIME_CAP_REACHED]
     assert reached["payload"]["node_id"] == "draft_merge_request"
     # The rebase was cleanly aborted, not left mid-operation.
     assert git_read(worktree, "status", "--porcelain") == ""

@@ -19,6 +19,7 @@ import time
 
 from kraft import events
 from kraft.templates.models import AgentTask
+from kraft.vocab import LimitEvent
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,10 @@ def known_limited(conn, harness: str, model: str | None) -> str | None:
     (`known-limited-candidate-is-skipped-until-reset`). An event written
     before the hit carried a harness never matches."""
     row = conn.execute(
-        "SELECT payload FROM events WHERE type = 'rate_limit_hit' "
+        "SELECT payload FROM events WHERE type = ? "
         "AND json_extract(payload, '$.harness') = ? AND json_extract(payload, '$.model') IS ? "
         "ORDER BY seq DESC LIMIT 1",
-        (harness, model),
+        (LimitEvent.RATE_LIMIT_HIT, harness, model),
     ).fetchone()
     if row is None:
         return None
@@ -174,4 +175,6 @@ class Attempts:
             payload["reason"],
             f", until {payload['resets_at_iso']}" if payload["resets_at_iso"] else "",
         )
-        await self.db.write(lambda c: events.append(c, self.wid, "launch_fallback", payload))
+        await self.db.write(
+            lambda c: events.append(c, self.wid, LimitEvent.LAUNCH_FALLBACK, payload)
+        )

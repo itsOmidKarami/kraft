@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, WorkItemStop } from "../../../types";
+import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
 import { FORGE_LOGIN_HINT } from "../../item/cause";
@@ -105,7 +106,7 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("waiting", stop("worker_lost" as never, { facts: { last_seen_at: "2026-09-13T08:00:00Z", reassign_at: "2026-09-13T09:00:00Z" } })))?.title).toBe("Worker lost");
   });
   it("names the closer of a closed MR and the reason of a cancel from the events", () => {
-    const ev = (type: string, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
+    const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
     expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
     expect(cardOf(mk("cancelled"), [ev("work_item_cancelled", { reason: "wrong repo" })])?.facts).toContainEqual(["reason", "wrong repo"]);
   });

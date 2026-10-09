@@ -1507,7 +1507,7 @@ stop kind. A caller that passes no time cap (`/retry`, `/resume`, gate
 self-retry, `mr_rebase_forced`'s conflict rebase) SHALL keep running
 unbounded, as before this requirement.
 enforced-by: tests/test_builtins_rebase.py::test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs, tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared]
-origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`caps.REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
+origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`LimitEvent.TIME_CAP_REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
 
 ## REQ workspace-members-are-rebased-before-the-draft
 

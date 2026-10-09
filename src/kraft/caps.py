@@ -56,7 +56,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
-from kraft.vocab import LIVE, STOPPED, StopKind, WorkItemStatus
+from kraft.vocab import (
+    GATE_CLOSED,
+    LIVE,
+    STOPPED,
+    ChainEvent,
+    EscalationEvent,
+    GateEvent,
+    LimitEvent,
+    StopKind,
+    WorkItemEvent,
+    WorkItemStatus,
+)
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -67,9 +78,9 @@ logger = logging.getLogger(__name__)
 _BREACH_CONFIG = ConfigDict(extra="forbid")
 
 #: A task's status when a time cap stopped it or refused its launch. The
-#: session row exits `capped_out` (no status migration); `REACHED` names it.
+#: session row exits `capped_out` (no status migration);
+#: `LimitEvent.TIME_CAP_REACHED` names it.
 TIME_CAPPED = "time_capped"
-REACHED = "time_cap_reached"
 #: How often `poller` looks at parked items.
 _INTERVAL_S = 30
 
@@ -124,7 +135,7 @@ def reached_limit(conn, work_item_id: str) -> dict | None:
     """The `limit` of the newest `time_cap_reached`, for the stop it caused."""
     row = conn.execute(
         "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, REACHED),
+        (work_item_id, LimitEvent.TIME_CAP_REACHED),
     ).fetchone()
     if row is None:
         return None
@@ -154,12 +165,22 @@ def _dt(value: str) -> datetime:
 class _Timeline:
     """One work item's clocks, read once."""
 
+    #: The events a timeline is built from.
+    _TIMELINE = (
+        ChainEvent.RUN_FORKED,
+        WorkItemEvent.RETRIED,
+        ChainEvent.NODE_STARTED,
+        ChainEvent.NODE_COMPLETED,
+        GateEvent.REJECTED,
+        WorkItemEvent.PAUSE_REQUESTED,
+        WorkItemEvent.RESUMED,
+    )
+
     def __init__(self, conn, work_item_id: str, snapshot, now: datetime) -> None:
         self.now = now
         rows = conn.execute(
             "SELECT seq, type, payload, created_at FROM events WHERE work_item_id = ? AND type IN "
-            "('run_forked', 'work_item_retried', 'node_started', 'node_completed', "
-            "'gate_rejected', 'pause_requested', 'work_item_resumed') ORDER BY seq",
+            f"({in_list(self._TIMELINE)}) ORDER BY seq",
             (work_item_id,),
         ).fetchall()
         evts = [(r["type"], json.loads(r["payload"]), r["created_at"]) for r in rows]
@@ -168,17 +189,17 @@ class _Timeline:
         self.since = ""
         escalated = False
         for kind, payload, at in evts:
-            if kind == "work_item_retried":
+            if kind == WorkItemEvent.RETRIED:
                 escalated = bool(payload.get("escalated"))
-            elif kind == "run_forked" and not escalated:
+            elif kind == ChainEvent.RUN_FORKED and not escalated:
                 self.since = at
         self.events = [(k, p, at) for k, p, at in evts if at >= self.since]
         self.pauses: list[tuple[datetime, datetime]] = []
         paused_at = None
         for kind, _, at in self.events:
-            if kind == "pause_requested" and paused_at is None:
+            if kind == WorkItemEvent.PAUSE_REQUESTED and paused_at is None:
                 paused_at = _dt(at)
-            elif kind in ("work_item_resumed", "work_item_retried") and paused_at is not None:
+            elif kind in (WorkItemEvent.RESUMED, WorkItemEvent.RETRIED) and paused_at is not None:
                 self.pauses.append((paused_at, _dt(at)))
                 paused_at = None
         if paused_at is not None:
@@ -187,9 +208,9 @@ class _Timeline:
         auto_turns = {
             json.loads(p).get("session_id")
             for (p,) in conn.execute(
-                "SELECT payload FROM events WHERE work_item_id = ? AND type = 'escalation_message' "
+                "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
                 "AND json_extract(payload, '$.auto') = 1",
-                (work_item_id,),
+                (work_item_id, EscalationEvent.ESCALATION_MESSAGE),
             ).fetchall()
         }
         skip = {
@@ -221,7 +242,8 @@ class _Timeline:
         ends = [
             at
             for kind, p, at in self.events
-            if (kind == "node_completed" and p.get("node_id") == node_id) or kind == "gate_rejected"
+            if (kind == ChainEvent.NODE_COMPLETED and p.get("node_id") == node_id)
+            or kind == GateEvent.REJECTED
         ]
         return max(ends, default=self.since)
 
@@ -259,7 +281,7 @@ class _Timeline:
                 (
                     at
                     for k, p, at in self.events
-                    if k == "node_started"
+                    if k == ChainEvent.NODE_STARTED
                     and at >= since
                     and (kind == "item" or p.get("node_id") == path)
                 ),
@@ -377,9 +399,9 @@ def for_session(conn, row, session, *, now: str | None = None) -> Hit | None:
     path = session["hook_point"]
     if path == "escalation":
         auto = conn.execute(
-            "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'escalation_message' "
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
             "AND json_extract(payload, '$.session_id') = ? AND json_extract(payload, '$.auto') = 1",
-            (row["id"], session["id"]),
+            (row["id"], EscalationEvent.ESCALATION_MESSAGE, session["id"]),
         ).fetchone()
         return for_turn(conn, row, session["node_id"], now=now) if auto else None
     try:
@@ -407,9 +429,9 @@ def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None
     timeout = getattr(node.node, "timeout", None) if node is not None else None
     if timeout is not None:
         requested = conn.execute(
-            "SELECT created_at FROM events WHERE work_item_id = ? AND type = 'gate_requested' "
+            "SELECT created_at FROM events WHERE work_item_id = ? AND type = ? "
             "ORDER BY seq DESC LIMIT 1",
-            (row["id"],),
+            (row["id"], GateEvent.REQUESTED),
         ).fetchone()
         if requested is not None:
             left = timeout.total_seconds() - line.wall(_dt(requested["created_at"]))
@@ -556,36 +578,30 @@ def reason_of(conn, work_item_id: str) -> str:
     """The newest `time_cap_reached` reason, for the stop it caused."""
     row = conn.execute(
         "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, REACHED),
+        (work_item_id, LimitEvent.TIME_CAP_REACHED),
     ).fetchone()
     return json.loads(row["payload"])["reason"] if row else "a time cap was reached"
 
 
 def time_capped_sessions(conn, work_item_ids) -> set[str]:
     """The sessions a time cap stopped or refused: they exit `capped_out`, the
-    status a fix loop's cap writes, and `REACHED` tells them apart."""
+    status a fix loop's cap writes, and `LimitEvent.TIME_CAP_REACHED` tells them
+    apart."""
     ids = list(work_item_ids)
     if not ids:
         return set()
     rows = conn.execute(
         "SELECT json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) AND type = ?",
-        (*ids, REACHED),
+        (*ids, LimitEvent.TIME_CAP_REACHED),
     ).fetchall()
     return {r["sid"] for r in rows if r["sid"]}
 
 
-#: What closes a pending gate (`executor.gates.GATE_CLOSED`), and a cap's own
+#: What closes a pending gate (`kraft.vocab.GATE_CLOSED`), and a cap's own
 #: stop: an item at a gate is measured only while its newest such event is the
 #: request.
-_GATE_SETTLED = (
-    "gate_approved",
-    "gate_rejected",
-    "node_skipped",
-    "work_item_completed",
-    "work_item_abandoned",
-    REACHED,
-)
+_GATE_SETTLED = (*GATE_CLOSED, LimitEvent.TIME_CAP_REACHED)
 
 
 async def tick(db, *, now: str | None = None) -> list[str]:
@@ -596,12 +612,12 @@ async def tick(db, *, now: str | None = None) -> list[str]:
     marks = ", ".join("?" * len(_GATE_SETTLED))
     rows = db.read(
         lambda c: c.execute(
-            "SELECT w.*, (SELECT CASE WHEN e.type = 'gate_requested' "
+            "SELECT w.*, (SELECT CASE WHEN e.type = ? "
             "THEN json_extract(e.payload, '$.gate') END FROM events e "
-            f"WHERE e.work_item_id = w.id AND e.type IN ('gate_requested', {marks}) "
+            f"WHERE e.work_item_id = w.id AND e.type IN (?, {marks}) "
             "ORDER BY e.seq DESC LIMIT 1) AS pending_gate "
             f"FROM work_items w WHERE w.status IN ({in_list(STOPPED)})",
-            _GATE_SETTLED,
+            (GateEvent.REQUESTED, GateEvent.REQUESTED, *_GATE_SETTLED),
         ).fetchall()
     )
     stopped = []
@@ -628,12 +644,12 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
     node, and the same pending gate (Kraft-l5fl2). A resume, an approval or
     a retry landing between the measurement and this write is left alone."""
     now = conn.execute(
-        "SELECT w.status, w.current_node_id, (SELECT CASE WHEN e.type = 'gate_requested' "
+        "SELECT w.status, w.current_node_id, (SELECT CASE WHEN e.type = ? "
         "THEN json_extract(e.payload, '$.gate') END FROM events e "
-        f"WHERE e.work_item_id = w.id AND e.type IN ('gate_requested', "
+        f"WHERE e.work_item_id = w.id AND e.type IN (?, "
         f"{', '.join('?' * len(_GATE_SETTLED))}) ORDER BY e.seq DESC LIMIT 1) AS pending_gate "
         "FROM work_items w WHERE w.id = ?",
-        (*_GATE_SETTLED, seen["id"]),
+        (GateEvent.REQUESTED, GateEvent.REQUESTED, *_GATE_SETTLED, seen["id"]),
     ).fetchone()
     if now is None or (now["status"], now["current_node_id"]) != (
         seen["status"],
@@ -642,7 +658,9 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
         return False
     if seen["status"] == WorkItemStatus.NEEDS_HUMAN and now["pending_gate"] != seen["pending_gate"]:
         return False
-    events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
+    events.append(
+        conn, seen["id"], LimitEvent.TIME_CAP_REACHED, hit.payload(node_id=seen["current_node_id"])
+    )
     store.mark_needs_human(
         conn, seen["id"], seen["current_node_id"], hit.reason, kind=StopKind.CAP, limit=hit.limit
     )

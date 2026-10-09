@@ -32,7 +32,17 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask, TaskScope
-from kraft.vocab import ENDED, HOLDS_SLOT, LIVE, SessionStatus, StopKind, WorkItemStatus
+from kraft.vocab import (
+    ENDED,
+    HOLDS_SLOT,
+    LIVE,
+    EscalationEvent,
+    LimitEvent,
+    SandboxEvent,
+    SessionStatus,
+    StopKind,
+    WorkItemStatus,
+)
 from kraft.vocab.sql import in_list
 from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
@@ -237,7 +247,8 @@ async def _resume_adopted_escalation(
         (
             e
             for e in evts
-            if e["type"] == "escalation_message" and e["payload"].get("session_id") == session_id
+            if e["type"] == EscalationEvent.ESCALATION_MESSAGE
+            and e["payload"].get("session_id") == session_id
         ),
         None,
     )
@@ -506,7 +517,7 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
         events.append(
             c,
             row["work_item_id"],
-            caps.REACHED,
+            LimitEvent.TIME_CAP_REACHED,
             hit.payload(node_id=row["node_id"], task=row["hook_point"], session_id=session_id),
         )
         store.mark_needs_human(
@@ -666,7 +677,7 @@ async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
         logger.warning("work item %s: %s", work_item_id, problem)
         await db.write(
             lambda c, p=problem: events.append(
-                c, work_item_id, "sandbox_branch_not_synced", {"reason": p}
+                c, work_item_id, SandboxEvent.BRANCH_NOT_SYNCED, {"reason": p}
             )
         )
 

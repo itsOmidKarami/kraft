@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { KraftEvent } from "../../../types";
+import type { EventType } from "../../../types/vocab.generated";
 import { appliedAt, appliedOverrides } from "./applied";
 
-const ev = (seq: number, payload: Record<string, unknown>, type = "chain_revised"): KraftEvent => ({ seq, work_item_id: "w1", type, payload, created_at: "2026-10-01T00:00:00Z" });
+const ev = (seq: number, payload: Record<string, unknown>, type: EventType = "chain_revised"): KraftEvent => ({ seq, work_item_id: "w1", type, payload, created_at: "2026-10-01T00:00:00Z" });
 const draft = (...changes: unknown[]) => ev(1, { source: "draft", gate: null, changes, diff: [] });
 
 describe("appliedOverrides", () => {
