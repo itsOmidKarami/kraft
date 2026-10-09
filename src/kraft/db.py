@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 53
+SCHEMA_VERSION = 54
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -134,6 +134,9 @@ CREATE TABLE work_items (
   -- {verb, body, headers, from, stop_kind, at}. NULL unless queued
   -- (`store.queue_work_item`).
   queued_request   TEXT,
+  -- the work items this one comes after, a JSON list of ids. Set at intake
+  -- and only ever shortened (`store.drop_dependencies`). NULL means none.
+  depends_on       TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -1207,6 +1210,68 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
        escalation_session_id, auto_gate, agent_overrides, budget_set, budget_usd,
        node_overrides, policy_override, archived_at, archived_by, ci_pipeline_ref,
        current_step, materialized_chain, run_chain, stop_kind, created_at, updated_at
+  FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
+        _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER,
+    ],
+    # `blocked` joins the status CHECK: the same rebuild as migration 52, from
+    # literal text, with the trigger the drop takes away recreated.
+    53: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited', 'waiting', 'queued', 'blocked')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  branch           TEXT,
+  implements_beads TEXT,
+  retry_at         TEXT,
+  escalation_session_id TEXT,
+  auto_gate        INTEGER NOT NULL DEFAULT 0,
+  agent_overrides  TEXT,
+  budget_set       INTEGER NOT NULL DEFAULT 0,
+  budget_usd       REAL,
+  node_overrides   TEXT,
+  policy_override  TEXT,
+  archived_at      TEXT,
+  archived_by      TEXT,
+  ci_pipeline_ref  TEXT,
+  current_step     INTEGER NOT NULL DEFAULT 0,
+  materialized_chain TEXT,
+  run_chain        TEXT,
+  stop_kind        TEXT,
+  queued_request   TEXT,
+  depends_on       TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, description, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, branch, implements_beads,
+  retry_at, escalation_session_id, auto_gate, agent_overrides, budget_set, budget_usd,
+  node_overrides, policy_override, archived_at, archived_by, ci_pipeline_ref,
+  current_step, materialized_chain, run_chain, stop_kind, queued_request, created_at,
+  updated_at)
+SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
+       current_node_id, status, pending_steer_context, submodules, root_merge_policy,
+       attachments, base_ref, bead_cwd, branch, implements_beads, retry_at,
+       escalation_session_id, auto_gate, agent_overrides, budget_set, budget_usd,
+       node_overrides, policy_override, archived_at, archived_by, ci_pipeline_ref,
+       current_step, materialized_chain, run_chain, stop_kind, queued_request, created_at,
+       updated_at
   FROM work_items""",
         "DROP TABLE work_items",
         "ALTER TABLE work_items_new RENAME TO work_items",

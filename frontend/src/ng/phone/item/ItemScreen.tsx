@@ -26,7 +26,7 @@ import { useDo } from "./useDo";
 import "./item.css";
 import { tip } from "../../ui/Tooltip";
 
-const TAG_TONE = { running: "info", waiting: "info", queued: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "warn", done: "ok", cancelled: "muted", archived: "muted" } as const;
+const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "warn", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
 /** The session whose log the screen previews: the latest work session on the node the item stands on. */
 export function currentSession(item: ItemDetail): WorkerSession | null {

@@ -71,7 +71,7 @@ def build() -> MCPServer:
     @server.tool()
     async def list_work_items(status: WorkItemStatus | None = None) -> list[dict]:
         """List Kraft work items — the board. Optionally filter by one exact
-        status: "paused", "active", "queued", "waiting", "rate_limited",
+        status: "paused", "active", "queued", "blocked", "waiting", "rate_limited",
         "needs_human", "completed" or "abandoned". Abandoned items, cancelled ones included,
         are listed only when you ask for "abandoned". Returns id, title, repo,
         status, current node, and any gate waiting on a human."""

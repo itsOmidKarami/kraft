@@ -66,6 +66,7 @@ _NOW = total(
         WorkItemStatus.WAITING: "waiting on something outside Kraft",
         WorkItemStatus.RATE_LIMITED: "waiting for the agent's rate limit to reset",
         WorkItemStatus.QUEUED: "queued for a free slot",
+        WorkItemStatus.BLOCKED: "blocked until the items it comes after complete",
         WorkItemStatus.NEEDS_HUMAN: None,  # item_now words it, with the id
     },
     name="_NOW",

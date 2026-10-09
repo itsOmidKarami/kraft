@@ -242,6 +242,19 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             *replace,
             ("'waiting', 'queued'", "                      'rate_limited', 'waiting')),"),
         )
+    if version < 54:
+        # `blocked` joined the status CHECK; this needle serves version 53 only,
+        # the earlier ones for this line match first.
+        drop_lines = (
+            *drop_lines,
+            "depends_on       TEXT,",
+            "-- the work items this one comes after",
+            "-- and only ever shortened",
+        )
+        replace = (
+            *replace,
+            ("'queued', 'blocked'", "                      'rate_limited', 'waiting', 'queued')),"),
+        )
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -311,7 +324,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
             "pending_steer_context",
             "-- steer text",
             "                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',",
-            "                      'rate_limited', 'waiting', 'queued')),",
+            "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
         ),
         replace=(
             (
@@ -541,6 +554,8 @@ ADDED_COLUMNS = [
     (51, "worker_sessions", ("repository",), None),
     # NULL: a row written before the queue existed was never queued
     (52, "work_items", ("queued_request",), None),
+    # NULL: a row written before dependencies existed comes after nothing
+    (53, "work_items", ("depends_on",), None),
 ]
 
 
@@ -696,7 +711,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         conn,
         16,
         drop_lines=(
-            "                      'rate_limited', 'waiting', 'queued')),",
+            "                      'rate_limited', 'waiting', 'queued', 'blocked')),",
             "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
         ),
         replace=(
