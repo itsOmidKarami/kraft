@@ -38,6 +38,8 @@ interface Slot {
 /** Per-item re-read bookkeeping: the round in flight and the one trailing it. */
 const slots = new Map<string, Slot>();
 export const resetHydrateState = () => slots.clear();
+/** Test-only: how many items have a re-read in flight or queued. */
+export const hydrateInFlight = () => slots.size;
 
 const MAX_ROUNDS = 3;
 const newestSeq = (evs: KraftEvent[] = []) => evs.reduce((m, e) => Math.max(m, e.seq), 0);
@@ -108,6 +110,7 @@ async function fetchRounds(id: string): Promise<void> {
     applyHydrated(id, full, evs);
     return;
   }
+  // Nothing applied: the store keeps its reducer-patched state, and the next event's re-read tries again.
 }
 
 export const useStore = create<State>((set, get) => ({
@@ -406,6 +409,8 @@ const REREAD = new Set<EventType>([
   "paused_by_broken_base",
   "work_item_archived",
   "work_item_restored",
+  // store.mark_reentered flips waiting/rate_limited to active and clears retry_at with no event of its own; the reducer leaves status alone here.
+  "node_started",
   // An escalation turn going live or ending flips escalated, which the reducer never patches.
   "escalation_message",
   "worker_session_paused",
