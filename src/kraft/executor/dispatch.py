@@ -2117,6 +2117,53 @@ def measured_tasks(
     return {t.path: t for step in (node.steps if steps is None else steps) for t in step.tasks}
 
 
+def _current_rows(
+    rows: list[sqlite3.Row], steps: tuple[ResolvedStep, ...]
+) -> dict[str, list[sqlite3.Row]]:
+    """The rows that are this measurement's result, by task path.
+
+    `rows` is one round's sessions in creation order. A round number repeats
+    whenever a node is entered again without its counter moving, so a step this
+    pass never reached still has its rows from the pass before. A later step
+    only runs once every task of the earlier one advanced (`measure_node`), so
+    an earlier task whose own result did not advance, and is newer than a later
+    step's row, proves that row is from before: it is dropped (Kraft-0ko3s).
+    An older row is otherwise often the intended result (a resume, a reused
+    session, a preserved sibling), which is why nothing here compares a row
+    against an event.
+
+    Per task, what is left is read the way `collect_findings` documents: the
+    last row, or for a builtin scope loop every row at its latest head. The
+    barrier is judged by those same rows, so it fires only where the collector
+    itself reads the earlier task as not passed.
+    """
+    current: dict[str, list[sqlite3.Row]] = {}
+    barrier = -1
+    for step in steps:
+        # Moved only once the step is done: its tasks ran together, so none of
+        # them is evidence about another.
+        stopped_at = barrier
+        for task in step.tasks:
+            mine = [
+                (i, row)
+                for i, row in enumerate(rows)
+                if i > barrier and row["hook_point"] == task.path
+            ]
+            if not mine:
+                continue
+            if isinstance(task.task, BuiltinTask):
+                latest_head = mine[-1][1]["head_sha"]
+                mine = [(i, row) for i, row in mine if row["head_sha"] == latest_head]
+            else:
+                mine = mine[-1:]
+            current[task.path] = [row for _, row in mine]
+            stopped_at = max(
+                [stopped_at, *(i for i, row in mine if row["status"] not in _ADVANCING)]
+            )
+        barrier = stopped_at
+    return current
+
+
 def collect_findings(
     db,
     work_item_id: str,
@@ -2147,6 +2194,9 @@ def collect_findings(
     counter, which a gate rejection or a wait re-entry does not clear, and a
     `/retry` deletes the counter row so the next pass restarts at 1 instead.
     Either way stale rows sit at the same number.
+
+    A later step's rows from before an earlier step stopped are not read at
+    all (`_current_rows`), and that task then has no session here.
 
     A task that failed without writing a findings file at all -- the
     changed-test-scope builtin is the common case, a subprocess with no findings
@@ -2189,22 +2239,12 @@ def collect_findings(
     """
     tasks = measured_tasks(node, steps)
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
-    by_hook: dict[str, list[sqlite3.Row]] = {}
-    for row in rows:
-        if row["hook_point"] in tasks:
-            by_hook.setdefault(row["hook_point"], []).append(row)  # ordered by created_at
+    by_hook = _current_rows(rows, node.steps if steps is None else steps)
     if has_session is not None:
         has_session.update({path: path in by_hook for path in tasks})
     found: list[_findings.Finding] = []
     reported: set[str] = set()
-    for hook, hook_rows in by_hook.items():
-        is_scope_loop = isinstance(tasks[hook].task, BuiltinTask)
-        latest_head = hook_rows[-1]["head_sha"]
-        rows_to_read = (
-            [row for row in hook_rows if row["head_sha"] == latest_head]
-            if is_scope_loop
-            else hook_rows[-1:]
-        )
+    for hook, rows_to_read in by_hook.items():
         blind_jobs: list[_findings.BlindJob] = []
         for row in rows_to_read:
             parsed, n_dropped = _findings.parse_counted(row["result_path"])
@@ -2281,11 +2321,17 @@ def needs_context_question(
     if first_iteration:
         skip |= {t.path for step in node.fix_loop for t in step.tasks}
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
+    # A measuring task's rows from before an earlier step stopped are not this
+    # pass's question. `_current_rows` drops a task's oldest rows first, so its
+    # latest row survives exactly when the task is still in the result.
+    measuring = measured_tasks(node)
+    current = _current_rows(rows, node.steps)
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
-        if row["hook_point"] in skip:
+        hook = row["hook_point"]
+        if hook in skip or (hook in measuring and hook not in current):
             continue
-        latest[row["hook_point"]] = row  # ordered by created_at, so last wins
+        latest[hook] = row  # ordered by created_at, so last wins
     for row in latest.values():
         if row["status"] == "needs_context":
             return _subprocess.read_question(Path(row["result_path"])) or "(no question given)"

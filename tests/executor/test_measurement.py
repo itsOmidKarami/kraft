@@ -247,6 +247,33 @@ async def test_measurement_needs_context_still_stops_the_node(item_on):
     assert dispatch.needs_context_question(it.database, it.id, node, 0) == "which python?"
 
 
+@pytest.mark.parametrize(
+    ("then", "asked"),
+    [
+        pytest.param([], "which python?", id="still-pending"),
+        pytest.param(["failed"], None, id="earlier-step-stopped-after-it"),
+    ],
+)
+async def test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it(
+    item_on, then, asked
+):
+    """A later step's `needs_context` from a pass before the one an earlier step
+    just stopped is a question already answered, not this pass's."""
+    steps = [
+        {"id": "s0", "tasks": [_agent("check")]},
+        {"id": "s1", "tasks": [_agent("review")]},
+    ]
+    it = await item_on([{"id": "verify", "kind": "exec", "steps": steps}], repo="/r")
+    node = it.chain.chain.nodes[0]
+    first, second = (step.tasks[0].path for step in node.steps)
+    await it.session("c0", first, "done")
+    await _asked(it, "r0", second, "which python?")
+    for i, status in enumerate(then):
+        await it.session(f"c{i + 1}", first, status)
+
+    assert dispatch.needs_context_question(it.database, it.id, node, 0) == asked
+
+
 async def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(item_on):
     """A gate rejection or ci_wait poll re-entering a fix_loop node must not
     inherit the last pass's fix-task needs_context (review finding 5).
