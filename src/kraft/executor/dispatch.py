@@ -157,7 +157,7 @@ def _last_own_round_head(
         for r in db.read(lambda c: store.sessions_for_round(c, work_item_id, node_id, round - 1))
         if r["hook_point"] == task_hook
     ]
-    if not rows or any(r["status"] != "done" for r in rows):
+    if not rows or any(r["status"] != SessionStatus.DONE for r in rows):
         return None
     heads = {r["head_sha"] for r in rows}
     return heads.pop() if len(heads) == 1 else None

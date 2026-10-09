@@ -67,9 +67,9 @@ def create_session(
     if reuse_if_waiting:
         existing = conn.execute(
             "SELECT id, log_path, result_path FROM worker_sessions WHERE work_item_id = ? "
-            "AND node_id = ? AND hook_point = ? AND round = ? AND status = 'waiting' "
+            "AND node_id = ? AND hook_point = ? AND round = ? AND status = ? "
             "ORDER BY created_at DESC LIMIT 1",
-            (work_item_id, node_id, hook_point, round),
+            (work_item_id, node_id, hook_point, round, SessionStatus.WAITING),
         ).fetchone()
         if existing is not None:
             return existing["id"], existing["log_path"], existing["result_path"]
@@ -426,8 +426,8 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     # pending must not be undone by the launch finishing.
     conn.execute(
         "UPDATE worker_sessions SET status = 'running', pid = ?, pid_start_time = ?, "
-        "started_at = ? WHERE id = ? AND status != 'paused'",
-        (pid, pid_start_time, _now(), session_id),
+        "started_at = ? WHERE id = ? AND status != ?",
+        (pid, pid_start_time, _now(), session_id, SessionStatus.PAUSED),
     )
     row = conn.execute(
         "SELECT work_item_id, node_id, hook_point, round, attempt, thread FROM worker_sessions "
@@ -675,8 +675,8 @@ def record_pause_usage(
         _warn_unpriced(conn, session_id, usage)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-        "cost_estimated = ? WHERE id = ? AND status = 'paused'",
-        (usage.model, *_tokens(usage), cost, estimated, session_id),
+        "cost_estimated = ? WHERE id = ? AND status = ?",
+        (usage.model, *_tokens(usage), cost, estimated, session_id, SessionStatus.PAUSED),
     )
 
 
@@ -708,7 +708,7 @@ def session_exited(
     # that dies after a restart — arrives here a moment later with 'failed'. A
     # human's interruption is not a task failure, and the row and the event have to
     # agree: return before either is written.
-    if row is None or row["status"] == "paused":
+    if row is None or row["status"] == SessionStatus.PAUSED:
         # Still no status move and still no event -- but the usage this caller
         # already read off disk is the only record that will ever exist of what
         # the interrupted session spent, and returning without it is how 71
@@ -908,7 +908,7 @@ def resumable_agent_session(
         "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (work_item_id, node_id, hook_point),
     ).fetchone()
-    if latest is None or latest["status"] != "paused":
+    if latest is None or latest["status"] != SessionStatus.PAUSED:
         return None
     newer_pass = conn.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? "

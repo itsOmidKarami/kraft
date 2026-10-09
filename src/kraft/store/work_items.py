@@ -10,7 +10,7 @@ from kraft.store._common import write_status
 
 # `StopKind` is defined in `kraft.vocab.stop`; `store.StopKind` stays importable
 # for `walk.py`.
-from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, WorkItemStatus
+from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, SessionStatus, WorkItemStatus
 from kraft.vocab import StopKind as StopKind
 from kraft.vocab.sql import in_list, marks
 
@@ -236,7 +236,7 @@ def mark_needs_human(
         "ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (work_item_id, node_id),
     ).fetchone()
-    if last is not None and last[1] in ("failed", "needs_context"):
+    if last is not None and last[1] in (SessionStatus.FAILED, SessionStatus.NEEDS_CONTEXT):
         payload["session_id"] = last[0]
     if capped is not None:
         payload["capped"] = capped

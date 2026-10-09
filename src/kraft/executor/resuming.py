@@ -7,7 +7,7 @@ from kraft import policy as _policy
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
 from kraft.templates.models import ExecNode, ResolvedNode
-from kraft.vocab import ENDED
+from kraft.vocab import ENDED, SessionStatus
 
 
 async def reconcile_current_node(
@@ -123,7 +123,7 @@ def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str,
     own = [t for s in node.steps for t in s.tasks] if node is not None else []
     agents = [t.path for t in own if isinstance(t.task, AgentTask)]
     latest = db.read(lambda c: store.latest_session_per_task(c, row["id"], node_id, agents))
-    paused = [r["hook_point"] for r in latest if r["status"] == "paused"]
+    paused = [r["hook_point"] for r in latest if r["status"] == SessionStatus.PAUSED]
     for path in steers:
         field = f"steers.{path}"
         try:
