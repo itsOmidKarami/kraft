@@ -16,8 +16,8 @@ runs every check, the rebase, the counter clearing and the steer delivery a
 fresh request would, against the item as it is now. Three ends:
 
 * it starts, and the door writes its own event;
-* the door now refuses it: the item stays where it came from, and
-  `work_item_dequeued` carries the refusal;
+* the door now refuses it, or fails: the item stays where it came from, and
+  `work_item_dequeued` carries the refusal or the error;
 * another request took the slot first: the door queues it again, and it is
   given back the place it had.
 """
@@ -84,15 +84,11 @@ async def _start_one(app, wid: str) -> bool:
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
     except HTTPException as exc:
-        detail = str(exc.detail)
-        await st.db.write(
-            lambda c: events.append(
-                c,
-                wid,
-                WorkItemEvent.DEQUEUED,
-                {"why": "refused", "detail": detail, "to": saved["from"]},
-            )
-        )
+        await _dequeued(st, wid, saved, "refused", str(exc.detail))
+        return False
+    except Exception as exc:  # noqa: BLE001 -- it has left the queue: say so, and let the pass go on
+        logger.exception("start queue: starting %s failed", wid)
+        await _dequeued(st, wid, saved, "failed", f"{type(exc).__name__}: {exc}")
         return False
     status = st.db.read(
         lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()[
@@ -105,6 +101,15 @@ async def _start_one(app, wid: str) -> bool:
         await st.db.write(lambda c: store.keep_place(c, wid, saved["at"]))
         return False
     return True
+
+
+async def _dequeued(st, wid: str, saved: dict, why: str, detail: str) -> None:
+    """The item was put back and did not start: its timeline says why."""
+    await st.db.write(
+        lambda c: events.append(
+            c, wid, WorkItemEvent.DEQUEUED, {"why": why, "detail": detail, "to": saved["from"]}
+        )
+    )
 
 
 async def poller(app) -> None:
