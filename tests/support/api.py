@@ -287,6 +287,13 @@ def _set_status(wid: str, status: str) -> None:
         conn.close()
 
 
+def _come_after(wid: str, deps: list[str]) -> None:
+    """Make `wid` come after `deps`, written directly: dependencies are set at
+    intake only, and these tests need them on an item already in some state."""
+    with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
+        c.execute("UPDATE work_items SET depends_on = ? WHERE id = ?", (json.dumps(deps), wid))
+
+
 def _status_of(client, wid: str) -> str:
     return client.get(f"/api/work-items/{wid}").json()["status"]
 
@@ -389,6 +396,7 @@ def _in_state(client, repo, state: dict) -> str:
     from kraft import events, store
 
     wid = _paused(client, repo, chain_template="default")
+    dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
         c.execute(
             "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
@@ -416,6 +424,8 @@ def _in_state(client, repo, state: dict) -> str:
                     wid,
                 ),
             )
+        if dep:
+            c.execute("UPDATE work_items SET depends_on = ? WHERE id = ?", (json.dumps([dep]), wid))
         if state.get("archived"):
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
