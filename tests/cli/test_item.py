@@ -112,7 +112,11 @@ def test_create_autostart_at_the_slot_limit_says_it_is_queued(tmp_path, monkeypa
 
 @pytest.mark.parametrize(
     "argv",
-    [["item", "resume", "w1"], ["item", "retry", "w1"], ["item", "raise-budget", "w1", "--usd", "5"]],
+    [
+        ["item", "resume", "w1"],
+        ["item", "retry", "w1"],
+        ["item", "raise-budget", "w1", "--usd", "5"],
+    ],
     ids=["resume", "retry", "raise-budget"],
 )
 def test_a_start_on_a_full_board_says_it_is_queued(monkeypatch, capsys, argv):

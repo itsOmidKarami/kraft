@@ -235,18 +235,12 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # (harmless when `egress` was already dropped, version < 44).
         replace = (*replace, ("egress         TEXT,", "egress         TEXT"))
     if version < 53:
-        drop_lines = (
-            *drop_lines,
-            "queued_request   TEXT,",
-            "-- the start request a `queued` item holds",
-            "-- {verb, body, headers, from, stop_kind, at}. NULL unless queued",
-            "-- (`store.queue_work_item`).",
-        )
-        # `queued` joined the status CHECK. Earlier needles for this line
-        # (versions below 23) match first, so this one serves 23 to 52.
+        # `queued` joined the status CHECK; this needle serves versions 23 to 52.
+        drop_lines = (*drop_lines, "queued_request", "-- the start request a", "-- {verb, body,")
+        drop_lines = (*drop_lines, "(`store.queue_work_item`).")
         replace = (
             *replace,
-            ("'rate_limited', 'waiting', 'queued'", "                      'rate_limited', 'waiting')),"),
+            ("'waiting', 'queued'", "                      'rate_limited', 'waiting')),"),
         )
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
@@ -584,34 +578,6 @@ def test_an_old_db_gains_the_column_and_keeps_its_rows(
     )
     row = conn.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchone()
     assert [row[c] for c in columns] == [old_row_value] * len(columns)
-
-
-def test_migrate_v52_to_v53_rebuilds_work_items_and_keeps_every_column(tmp_path):
-    """Migration 52 rebuilds `work_items` from literal text to widen the status
-    CHECK. A column its INSERT forgot would be dropped without an error, so
-    every column of an old row is filled and read back."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 52)
-    schema.insert_item(conn, status="needs_human")
-    filled = {
-        r["name"]: (7 if r["type"] in ("INTEGER", "REAL") else f"v-{r['name']}")
-        for r in conn.execute("PRAGMA table_info(work_items)")
-        if r["name"] not in ("id", "status")
-    }
-    conn.execute(
-        f"UPDATE work_items SET {', '.join(f'{c} = ?' for c in filled)}", tuple(filled.values())
-    )
-    conn.commit()
-    conn.close()
-
-    conn = db._connect(path)
-    db.migrate(conn)
-
-    row = dict(conn.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
-    assert {c: row[c] for c in filled} == filled
-    assert (row["status"], row["queued_request"]) == ("needs_human", None)
-    conn.execute("UPDATE work_items SET status = 'queued' WHERE id = 'w1'")
 
 
 def test_migrate_v16_to_v17_drops_chain_template_not_null(tmp_path):

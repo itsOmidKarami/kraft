@@ -9,7 +9,14 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from support.api import _force_node, _paused, _poll_events, _post_default, _set_status
+from support.api import (
+    _force_node,
+    _paused,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _status_of,
+)
 
 from kraft import start_queue
 
@@ -44,10 +51,6 @@ def _tick(client):
     return client.portal.call(partial(start_queue.tick, client.app))
 
 
-def _status(client, wid):
-    return client.get(f"/api/work-items/{wid}").json()["status"]
-
-
 def test_the_queue_starts_the_earliest_item_when_a_slot_frees(client, repo, board):
     first = _paused(client, repo, chain_template="default")
     second = _paused(client, repo, chain_template="default")
@@ -55,11 +58,11 @@ def test_the_queue_starts_the_earliest_item_when_a_slot_frees(client, repo, boar
         assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "queued"
 
     assert _tick(client) == []
-    assert (_status(client, first), _status(client, second)) == ("queued", "queued")
+    assert (_status_of(client, first), _status_of(client, second)) == ("queued", "queued")
 
     _set_status(board, "paused")
     assert _tick(client) == [first]
-    assert _status(client, second) == "queued"
+    assert _status_of(client, second) == "queued"
     _poll_events(client, first, "work_item_resumed")
 
 
@@ -101,7 +104,7 @@ def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(client, st
     _set_status(board, "paused")
     assert _tick(client) == []
 
-    assert _status(client, wid) == "needs_human"
+    assert _status_of(client, wid) == "needs_human"
     last = client.get(f"/api/work-items/{wid}/events").json()[-1]
     assert last["type"] == "work_item_dequeued"
     assert last["payload"]["why"] == "refused"
@@ -120,7 +123,7 @@ def test_an_item_that_loses_the_slot_keeps_its_place(client, repo, board):
     started = client.portal.call(partial(start_queue._start_one, client.app, first))
 
     assert started is False
-    assert _status(client, first) == "queued"
+    assert _status_of(client, first) == "queued"
     with _db() as c:
         order = [
             r[0]

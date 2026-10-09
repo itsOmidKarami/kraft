@@ -79,12 +79,17 @@ async def _start_one(app, wid: str) -> bool:
         detail = str(exc.detail)
         await st.db.write(
             lambda c: events.append(
-                c, wid, "work_item_dequeued", {"why": "refused", "detail": detail, "to": saved["from"]}
+                c,
+                wid,
+                "work_item_dequeued",
+                {"why": "refused", "detail": detail, "to": saved["from"]},
             )
         )
         return False
     status = st.db.read(
-        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()["status"]
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()[
+            "status"
+        ]
     )
     if status == WorkItemStatus.QUEUED:
         # Another request took the slot between `tick`'s look and the door's

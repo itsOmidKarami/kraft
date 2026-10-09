@@ -225,7 +225,9 @@ def _rerun_at(result: dict) -> str:
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action("retried {id}", small=lambda r: _queued(r) or f"retried {r['id']} at {_rerun_at(r)}",
+        common.item_action(
+            "retried {id}",
+            small=lambda r: _queued(r) or f"retried {r['id']} at {_rerun_at(r)}",
         ),
         ns.json,
     )
@@ -237,8 +239,10 @@ def _cmd_raise_budget(ns: argparse.Namespace) -> None:
         asyncio.run(client.raise_budget(ns.usd, ns.id)),
         common.item_action(
             f"raised the cap on {{id}} to {cap} and retried it",
-            small=lambda r: f"raised the cap on {r['id']} to {cap}; "
-            + (_queued(r) or f"retried at {_rerun_at(r)}"),
+            small=lambda r: (
+                f"raised the cap on {r['id']} to {cap}; "
+                + (_queued(r) or f"retried at {_rerun_at(r)}")
+            ),
         ),
         ns.json,
     )
@@ -466,7 +470,9 @@ def _cmd_set_policy(ns: argparse.Namespace) -> None:
 def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
     create = subs.add_parser(
-        "create", parents=[common], help="file a work item (paused unless --autostart; queued when --autostart finds every slot busy)"
+        "create",
+        parents=[common],
+        help="file a work item (paused unless --autostart; queued if every slot is busy)",
     )
     create.add_argument("title", help="the item's title: one line, as the board shows it")
     create.add_argument(
@@ -542,7 +548,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create.add_argument(
         "--autostart",
         action="store_true",
-        help="start it now instead of leaving it paused for a human (queued when every slot is busy); refused from a Kraft worker",
+        help="start it now instead of leaving it paused for a human; queued when every slot "
+        "is busy; refused from a Kraft worker",
     )
     create.set_defaults(func=_cmd_create, all=False)
 

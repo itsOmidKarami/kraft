@@ -287,6 +287,10 @@ def _set_status(wid: str, status: str) -> None:
         conn.close()
 
 
+def _status_of(client, wid: str) -> str:
+    return client.get(f"/api/work-items/{wid}").json()["status"]
+
+
 def _force_node(wid: str, node_id: str, status: str) -> None:
     """Force a work item onto a given node and status, without walking the
     chain to get there for real (Kraft-bz9b's repro needs a task failure at

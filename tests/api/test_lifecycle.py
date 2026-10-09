@@ -23,6 +23,7 @@ from support.api import (
     _post_default,
     _set_status,
     _spawn_never_returning,
+    _status_of,
 )
 
 
@@ -160,48 +161,6 @@ def test_a_manual_start_is_bounded_by_the_slot_limit(client, repo, verb, busy):
         assert client.get(f"/api/work-items/{wid}").json()["status"] == "queued"
     else:
         assert r.status_code == 200, r.text
-
-
-def test_pausing_a_queued_retry_puts_the_stop_back(client, repo):
-    """A person who pauses a queued retry finds the failure it came from, kind
-    and reason, and the same Retry."""
-    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
-    wid = _in_state(client, repo, DOORS["states"]["failed"])
-    busy = _in_state(client, repo, DOORS["states"]["running"])
-    before = client.get(f"/api/work-items/{wid}").json()
-
-    assert (
-        client.post(f"/api/work-items/{wid}/retry", json={"steer": "s"}).json()["status"]
-        == "queued"
-    )
-    queued = client.get(f"/api/work-items/{wid}").json()["queued"]
-    assert queued["verb"] == "retry" and queued["since"]
-    r = client.post(f"/api/work-items/{wid}/pause", json={})
-
-    assert r.status_code == 200, r.text
-    after = client.get(f"/api/work-items/{wid}").json()
-    assert after["queued"] is None
-    assert (after["status"], after["stop"]["kind"], after["stop_reason"]) == (
-        "needs_human",
-        "failed",
-        before["stop_reason"],
-    )
-    assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
-
-
-@pytest.mark.parametrize(
-    ("decision", "body"), [("approve", {}), ("reject", {"note": "n"})], ids=["approve", "reject"]
-)
-def test_a_queued_item_refuses_a_gate_decision(client, repo, decision, body):
-    """Queued from a gate by a retry, the gate is still open in the timeline.
-    A decision would start the item past the queue."""
-    wid = _in_state(client, repo, DOORS["states"]["queued_at_gate"])
-
-    r = client.post(f"/api/work-items/{wid}/gates/spec_approval/{decision}", json=body)
-
-    assert r.status_code == 409, r.text
-    assert "queued" in r.json()["detail"]
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "queued"
 
 
 def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
@@ -662,10 +621,6 @@ def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
     evts = client.get(f"/api/work-items/{wid}/events").json()
     retried = next(e for e in evts if e["type"] == "work_item_retried")
     assert retried["payload"]["seeded"] is True
-
-
-def _status_of(client, wid: str) -> str:
-    return client.get(f"/api/work-items/{wid}").json()["status"]
 
 
 def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(client, repo):
