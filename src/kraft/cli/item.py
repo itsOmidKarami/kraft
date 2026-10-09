@@ -152,6 +152,20 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
     )
 
 
+def _unblocked(result: dict) -> str:
+    dropped = result.get("dropped") or []
+    if not dropped:
+        return f"{result['id']} comes after nothing unfinished: nothing was dropped"
+    line = f"{result['id']} no longer comes after {', '.join(dropped)}"
+    if left := result.get("waiting_on"):
+        line += f"; it still waits on {', '.join(d['id'] for d in left)}"
+    return line
+
+
+def _cmd_unblock(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), _unblocked, ns.json)
+
+
 def _is_cancelled(item_id: str | None) -> bool:
     """Whether the item is already cancelled or abandoned: both store
     `abandoned`, and the server cannot tell them apart. A server that does not answer,
@@ -581,6 +595,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     pause = subs.add_parser("pause", parents=[common], help="stop the running attempt")
     pause.add_argument("id", nargs="?")
     pause.set_defaults(func=_cmd_pause)
+
+    unblock = subs.add_parser(
+        "unblock", parents=[common], help="drop what a blocked or paused item still comes after"
+    )
+    unblock.add_argument("id", nargs="?")
+    unblock.add_argument("--dependency", metavar="ID", help="drop only this one")
+    unblock.set_defaults(func=_cmd_unblock)
 
     resume = subs.add_parser("resume", parents=[common], help="start or restart a paused item")
     resume.add_argument("id", nargs="?")

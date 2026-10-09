@@ -238,6 +238,15 @@ def build() -> MCPServer:
         return await client.pause(work_item_id)
 
     @server.tool()
+    async def unblock_work_item(
+        work_item_id: str | None = None, dependency: str | None = None
+    ) -> dict:
+        """Drop what a blocked or paused Kraft work item still comes after, or
+        only `dependency`. A blocked item with nothing left to wait for then
+        starts on its own. Only a human should decide this — ask first."""
+        return await client.unblock(work_item_id, dependency)
+
+    @server.tool()
     async def report_progress(task: int, work_item_id: str | None = None) -> dict:
         """Say which task of the plan you are starting while implementing a
         Kraft work item. `task` is the N of the plan's `## Task N` heading.

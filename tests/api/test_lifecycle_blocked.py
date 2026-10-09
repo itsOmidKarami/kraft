@@ -6,7 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
-from support.api import _come_after, _in_state, _paused, _set_status, _status_of
+from support.api import (
+    _come_after,
+    _in_state,
+    _paused,
+    _poll_events,
+    _set_status,
+    _status_of,
+)
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 
@@ -76,3 +83,39 @@ def test_pausing_a_blocked_item_puts_it_back_and_keeps_what_it_comes_after(clien
     assert [d["id"] for d in item["dependencies"]] == [dep]
     # Started again, it is blocked again.
     assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
+
+
+def _blocked(client, repo):
+    dep = _paused(client, repo, chain_template="default")
+    wid = _paused(client, repo, chain_template="default")
+    _come_after(wid, [dep])
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
+    return dep, wid
+
+
+def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo):
+    from functools import partial
+
+    from kraft import start_queue
+
+    client.portal.call(client.app.state.queue_task.cancel)
+    dep, wid = _blocked(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/unblock", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"id": wid, "dropped": [dep], "waiting_on": []}
+    assert _status_of(client, wid) == "blocked"  # the scheduler releases it, not this door
+    assert client.portal.call(partial(start_queue.tick, client.app)) == [wid]
+    _poll_events(client, wid, "work_item_resumed")
+    assert _status_of(client, dep) == "paused"
+
+
+def test_unblock_refuses_an_id_that_is_not_a_dependency(client, repo):
+    dep, wid = _blocked(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/unblock", json={"dependency": "f" * 32})
+
+    assert r.status_code == 409, r.text
+    assert "not one of" in r.json()["detail"]
+    assert [d["id"] for d in client.get(f"/api/work-items/{wid}").json()["dependencies"]] == [dep]

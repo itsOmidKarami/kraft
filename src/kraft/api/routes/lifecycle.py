@@ -82,6 +82,11 @@ class Steer(BaseModel):
     text: str
 
 
+class Unblock(BaseModel):
+    #: Drop only this dependency. Absent, every one the item still waits on.
+    dependency: str | None = None
+
+
 class Resume(BaseModel):
     #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
@@ -631,6 +636,31 @@ async def pause_work_item(wid: str, request: Request):
     # either way.
     await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
     return {"id": wid, "paused_sessions": ids}
+
+
+@api_router.post("/work-items/{wid}/unblock")
+async def unblock_work_item(wid: str, request: Request, body: Unblock | None = None):
+    """Stop the item coming after what it still waits on, or after the one
+    dependency named. It starts nothing: a blocked item with nothing left to
+    wait for is released by the scheduler's next pass (`kraft.start_queue`)."""
+    st = request.app.state
+    deps.forbid_self_action(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    if row["status"] not in admitting(Verb.UNBLOCK):
+        raise HTTPException(
+            409,
+            f"work item is {row['status']}: only a blocked or paused item's "
+            "dependencies can be dropped",
+        )
+    only = body.dependency if body else None
+    dropped = await st.db.write(lambda c: store.drop_dependencies(c, wid, only))
+    if only and not dropped:
+        raise HTTPException(409, f"{only} is not one of this work item's dependencies")
+    return {
+        "id": wid,
+        "dropped": dropped,
+        "waiting_on": st.db.read(lambda c: store.unmet_dependencies(c, wid)),
+    }
 
 
 @api_router.post("/work-items/{wid}/progress")

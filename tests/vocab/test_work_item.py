@@ -116,6 +116,7 @@ DOOR_VERB = {
     "budget_raise": Verb.RAISE_BUDGET,
     "abandon": Verb.ABANDON,
     "archive": Verb.ARCHIVE,
+    "unblock": Verb.UNBLOCK,
 }
 
 

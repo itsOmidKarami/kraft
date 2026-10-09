@@ -148,6 +148,22 @@ def test_create_after_sends_what_the_item_comes_after(tmp_path, monkeypatch):
     assert sent["depends_on"] == ["a1", "b2"]
 
 
+def test_unblock_names_the_dependency_it_drops(monkeypatch, capsys):
+    from kraft.client import transport
+
+    seen = {}
+
+    async def post(path, payload=None, **kw):
+        seen.update(path=path, payload=payload)
+        return 200, {"id": "w1", "dropped": ["a1"], "waiting_on": []}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "unblock", "w1", "--dependency", "a1"])
+    assert seen["path"].endswith("/work-items/w1/unblock")
+    assert seen["payload"] == {"dependency": "a1"}
+    assert "w1 no longer comes after a1" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("flag", "auto_gate"),
     [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],

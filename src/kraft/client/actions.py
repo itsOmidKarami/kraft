@@ -280,6 +280,16 @@ async def pause(work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{transport.segment(target)}/pause")
 
 
+async def unblock(work_item_id: str | None = None, dependency: str | None = None) -> dict:
+    """Drop what a blocked or paused item still comes after, or the one
+    dependency named, so it no longer waits for it."""
+    target = context._forbid_self_action(work_item_id)
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/unblock",
+        {"dependency": dependency} if dependency else {},
+    )
+
+
 async def abandon(work_item_id: str | None = None) -> dict:
     """Terminal. Removes the worktree, destroying anything uncommitted in it."""
     target = context._forbid_self_action(work_item_id)
