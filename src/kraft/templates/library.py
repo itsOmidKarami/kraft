@@ -203,6 +203,16 @@ def _read(path: Path) -> Mapping[str, object]:
     return data
 
 
+def _refuse_qualified(path: Path, what: str, name: object) -> None:
+    """A declaration is bare, in local files and in a plugin's own: `:` only
+    ever appears in a reference to a plugin's declaration."""
+    if ":" in str(name):
+        raise TemplateLibraryError(
+            f"{path}: {what} {name!r}: a name is declared bare; '<plugin>:<name>' is how a "
+            "plugin's declaration is referenced"
+        )
+
+
 def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Mapping[str, object]:
     section = data.get(namespace.value) or {}
     if not isinstance(section, Mapping):
@@ -210,6 +220,7 @@ def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Ma
             f"{path}: {namespace.value!r} must be a mapping of name to definition"
         )
     for name, body in section.items():
+        _refuse_qualified(path, f"{namespace.value} key", name)
         if not isinstance(body, Mapping):
             raise TemplateLibraryError(f"{path}: {namespace.value}.{name} must be a mapping")
     return section
@@ -340,6 +351,7 @@ class TemplateLibrary:
 
     def _add_chain(self, chain_path: Path, body: Mapping[str, object]) -> str:
         id = _chain_id(chain_path, body)
+        _refuse_qualified(chain_path, "chain id", id)
         if id in self._chains:
             # One selectable chain per file: two files claiming one id would
             # otherwise make the loser's chain vanish from `chain_ids`.
