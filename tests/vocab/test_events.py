@@ -1,4 +1,4 @@
-"""The event-type vocabulary: nine families, 108 types, three shared groups."""
+"""The event-type vocabulary: nine families, 110 types, three shared groups."""
 
 from __future__ import annotations
 
@@ -46,11 +46,11 @@ SECTIONS = {
 }
 
 
-def test_the_families_are_the_nine_in_docs_order_and_hold_108_types():
+def test_the_families_are_the_nine_in_docs_order_and_hold_110_types():
     assert FAMILIES == tuple(SECTIONS)
-    assert [len(f) for f in FAMILIES] == [21, 21, 18, 9, 9, 7, 13, 4, 6]
+    assert [len(f) for f in FAMILIES] == [23, 21, 18, 9, 9, 7, 13, 4, 6]
     assert EVENT_TYPES == tuple(m for f in FAMILIES for m in f)
-    assert len(BY_VALUE) == len(EVENT_TYPES) == 108
+    assert len(BY_VALUE) == len(EVENT_TYPES) == 110
     assert list(EVENT_TRAITS) == list(EVENT_TYPES)
 
 

@@ -247,7 +247,7 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.needs_context_question).toBeNull();
   });
 
-  it.each([
+  it.each<[EventType, Record<string, unknown>, string]>([
     ["work_item_queued", { verb: "resume", from: "paused" }, "queued"],
     ["work_item_dequeued", { why: "paused", detail: null, to: "needs_human" }, "needs_human"],
   ])("%s moves the row's status", (type, payload, status) => {

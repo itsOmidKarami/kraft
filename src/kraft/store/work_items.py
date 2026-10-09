@@ -368,7 +368,7 @@ def queue_work_item(
         (json.dumps(request), now, work_item_id),
     ):
         return False
-    events.append(conn, work_item_id, "work_item_queued", {"verb": verb, "from": row["status"]})
+    events.append(conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": row["status"]})
     return True
 
 
@@ -416,7 +416,7 @@ def dequeue_work_item(
     events.append(
         conn,
         work_item_id,
-        "work_item_dequeued",
+        WorkItemEvent.DEQUEUED,
         {"why": why, "detail": detail, "to": request["from"]},
     )
     return True
