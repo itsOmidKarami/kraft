@@ -165,6 +165,32 @@ def test_unblock_names_the_dependency_it_drops(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["item", "resume", "w1"],
+        ["item", "retry", "w1"],
+        ["item", "raise-budget", "w1", "--usd", "5"],
+    ],
+    ids=["resume", "retry", "raise-budget"],
+)
+def test_a_start_behind_an_unfinished_item_says_it_is_blocked(monkeypatch, capsys, argv):
+    from kraft.client import transport
+
+    async def post(path, payload=None, **kw):
+        return 200, {
+            "id": "w1",
+            "status": "blocked",
+            "waiting_on": [{"id": "a1", "title": "first", "status": "active"}],
+        }
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(argv)
+    out = capsys.readouterr().out
+    assert "blocked w1: it comes after a1 (active). It starts when they complete" in out
+    assert "started" not in out and "retried at" not in out
+
+
+@pytest.mark.parametrize(
     ("flag", "auto_gate"),
     [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],
     ids=["on-by-default", "on", "off"],

@@ -271,7 +271,8 @@ def build() -> MCPServer:
         own, keyed by canonical task path (`node.step.task`). This is also how a
         work item created by create_work_item is started for the first time. With
         every slot busy the item is queued (status "queued") and starts on its
-        own when one frees."""
+        own when one frees. An item that comes after an unfinished one is blocked
+        (status "blocked") and starts when they complete."""
         return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
@@ -287,7 +288,8 @@ def build() -> MCPServer:
         reruns the whole chain. This is the only way back onto an item that
         stopped for a human: resume only takes a paused item. With every slot busy
         the item is queued (status "queued") and starts on its own when one
-        frees."""
+        frees. An item that comes after an unfinished one is blocked (status
+        "blocked") and starts when they complete."""
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()

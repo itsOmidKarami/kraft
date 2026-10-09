@@ -135,3 +135,19 @@ def test_show_says_a_queued_item_is_queued_since_when_and_for_which_verb(monkeyp
     monkeypatch.setattr(transport, "_get", get)
     cli.main(["view", "show", "w1"])
     assert "for retry, since 2026-10-09T09:00:00+00:00" in capsys.readouterr().out
+
+
+def test_show_lists_what_a_blocked_item_comes_after(monkeypatch, capsys):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "blocked",
+            "dependencies": [{"id": "a1", "title": "first", "status": "active", "met": False}],
+            "chain_definition": {"nodes": []},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert "a1 (active)" in capsys.readouterr().out
