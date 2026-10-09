@@ -20,6 +20,7 @@ from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import config, events, notify
 from kraft import db as kdb
+from kraft.vocab import BY_VALUE
 
 DEFAULT_EVENTS = ["gate_requested", "work_item_needs_human"]
 #: A `notify.yaml` that does not parse. The token sits on the broken line, the
@@ -56,16 +57,44 @@ def test_notify_yaml_loads_with_every_missing_key_defaulted(tmp_path, text, expe
     [
         (MALFORMED.decode(), "^notify.yaml: not valid YAML$"),
         ("url: https://hook.invalid/t0ken\nbase_url: 8080\n", "^notify.yaml: base_url: "),
+        (
+            "url: https://hook.invalid/t0ken\nevents: [gate_requsted]\n",
+            "^notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
+            "for the names$",
+        ),
+        (
+            "events: [" + "https://hook.invalid/" + "a" * 20 + "MARKER" + "]\n",
+            r"^notify.yaml: events: unknown event type 'https://hook.invalid/a{19}\.\.\.'; see",
+        ),
+        (
+            "events: [" + ", ".join(f"bad{i}" for i in range(7)) + "]\n",
+            r"unknown event types 'bad0', 'bad1', 'bad2', 'bad3', 'bad4' and 2 more; see",
+        ),
     ],
-    ids=["malformed-yaml", "malformed-base-url"],
+    ids=[
+        "malformed-yaml",
+        "malformed-base-url",
+        "unknown-event",
+        "long-unknown-event-is-cut",
+        "many-unknown-events-are-counted",
+    ],
 )
 def test_notify_load_refuses_a_file_it_cannot_use(tmp_path, text, error):
     """A file that does not parse, or that parses into a value the model
     refuses (`base_url: 8080`, a YAML int), fails at load, not at send time."""
     path = tmp_path / "notify.yaml"
     path.write_text(text)
-    with pytest.raises(config.ConfigError, match=error):
+    with pytest.raises(config.ConfigError, match=error) as refused:
         config.Notify.load(path)
+    assert "t0ken" not in str(refused.value)
+    assert "MARKER" not in str(refused.value)
+
+
+def test_notify_events_accept_every_known_event_type_and_none():
+    """The vocabulary is the rule: every name `kraft.vocab` defines is accepted
+    and kept as the plain string it was written as; an empty list is valid."""
+    assert config.Notify(events=list(BY_VALUE)).events == list(BY_VALUE)
+    assert config.Notify(events=[]).events == []
 
 
 def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
@@ -515,8 +544,13 @@ def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
         ({"url": "file:///etc/passwd"}, "url must be an http or https URL"),
         ({"base_url": "file:///etc/passwd"}, "base_url must be an http or https URL"),
         ({"enabled": True}, "set a webhook URL before enabling notifications"),
+        (
+            {"events": ["gate_requsted"]},
+            "notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
+            "for the names",
+        ),
     ],
-    ids=["non-http-url", "non-http-base-url", "enabling-without-a-url"],
+    ids=["non-http-url", "non-http-base-url", "enabling-without-a-url", "unknown-event"],
 )
 def test_put_refuses_a_bad_setting_and_writes_nothing(client, body, detail):
     """A rejected PUT must not leave a half-applied config on disk -- for
@@ -592,12 +626,19 @@ def test_notifier_stops_before_the_database_closes(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "content",
-    [MALFORMED, INVALID_UTF8],
-    ids=["malformed", "invalid-utf8"],
+    ("content", "warning"),
+    [
+        (MALFORMED, "not valid YAML"),
+        (INVALID_UTF8, "not valid YAML"),
+        (
+            b"enabled: true\nurl: https://hook.invalid/t0ken\nevents: [gate_requsted]\n",
+            "events: unknown event type 'gate_requsted'",
+        ),
+    ],
+    ids=["malformed", "invalid-utf8", "unknown-event"],
 )
 def test_a_bad_notify_yaml_at_startup_disables_instead_of_crashing(
-    request, templates_dir, caplog, content
+    request, templates_dir, caplog, content, warning
 ):
     """`Notifier.__init__` calls `Notify.load` before `lifespan`'s `try:` --
     letting a broken file raise there would abort startup over an entirely
@@ -613,7 +654,8 @@ def test_a_bad_notify_yaml_at_startup_disables_instead_of_crashing(
     client = request.getfixturevalue("client")  # starts the app on the file above
 
     assert client.app.state.notifier.config["enabled"] is False
-    assert "notify.yaml: not valid YAML -- notifications disabled" in caplog.text
+    assert f"notify.yaml: {warning}" in caplog.text
+    assert "-- notifications disabled" in caplog.text
     assert "t0ken" not in caplog.text
 
 
@@ -632,8 +674,14 @@ _PUT = {"method": "PUT", "json": {"enabled": True}}
             "notify.yaml: url: Input should be a valid string",
         ),
         (MALFORMED, _PUT, "notify.yaml: not valid YAML"),
+        (
+            b"url: https://hook.invalid/t0ken\nevents: [gate_requsted]\n",
+            _GET,
+            "notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
+            "for the names",
+        ),
     ],
-    ids=["malformed", "utf8", "invalid-value", "malformed-put"],
+    ids=["malformed", "utf8", "invalid-value", "malformed-put", "unknown-event"],
 )
 def test_a_bad_notify_file_is_reported_cleanly(client, caplog, content, call, detail):
     """`read_yaml`'s `ConfigError` normally quotes the offending source line,

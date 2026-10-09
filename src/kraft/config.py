@@ -41,6 +41,7 @@ from pydantic_core import PydanticCustomError
 
 from kraft.automated_review import AutomatedReview
 from kraft.policy import PolicyError, SandboxPolicy, TemplatePolicyOverride, ToolNames, _cron_fields
+from kraft.vocab import BY_VALUE
 from kraft.worker import steering as _steering
 
 if TYPE_CHECKING:
@@ -1159,7 +1160,25 @@ class Notify(_Model):
     enabled: bool = False
     url: str | None = None
     base_url: str | None = None
-    events: list[str] = ["gate_requested", "work_item_needs_human"]
+    events: list[str] = Field(
+        ["gate_requested", "work_item_needs_human"],
+        json_schema_extra={"items": {"type": "string", "enum": sorted(BY_VALUE)}},
+    )
+
+    @field_validator("events")
+    @classmethod
+    def _known_events(cls, events: list[str]) -> list[str]:
+        unknown = [e for e in events if e not in BY_VALUE]
+        if unknown:
+            kind = "type" if len(unknown) == 1 else "types"
+            # A mis-indented webhook URL can land here; echo only a short head of it.
+            names = ", ".join(repr(e[:40] + "..." if len(e) > 40 else e) for e in unknown[:5])
+            if len(unknown) > 5:
+                names += f" and {len(unknown) - 5} more"
+            raise ValueError(
+                f"unknown event {kind} {names}; see the Events reference for the names"
+            )
+        return events
 
     @classmethod
     def load(cls, path: str | Path) -> Notify:
@@ -1184,11 +1203,15 @@ class Notify(_Model):
         try:
             return cls.model_validate(overrides)
         except ValidationError as exc:
-            # `input` echoes the offending value, which for `url` is the secret --
-            # so name only the field and pydantic's message, never the value.
-            err = exc.errors()[0]
-            where = ".".join(str(p) for p in err["loc"])
-            raise ConfigError(f"notify.yaml: {where}: {err['msg']}") from None
+            raise ConfigError(cls.refusal(exc)) from None
+
+    @staticmethod
+    def refusal(exc: ValidationError) -> str:
+        # `input` echoes the offending value, which for `url` is the secret --
+        # so name only the field and pydantic's message, never the value.
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err["loc"])
+        return f"notify.yaml: {where}: {err['msg'].removeprefix('Value error, ')}"
 
 
 # ── auto-intake ──────────────────────────────────────────────────────────────

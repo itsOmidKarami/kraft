@@ -52,6 +52,7 @@ To add an event type, add the member to its family and then:
 | a row in the family's traits table | importing `kraft.vocab` raises, naming the member |
 | a row in `docsite/content/5.reference/10.events.md` | `tests/vocab/test_events.py` |
 | the regenerated TS | `tests/test_vocab_generated.py` |
+| the regenerated `vscode/schemas/notify.schema.json` (`just schemas`; `notify.yaml`'s `events` lists the valid names) | `tests/test_config_schemas.py::test_the_committed_schema_is_current` and the `config-schemas-current` pre-commit hook |
 | the family size and the total in `tests/vocab/test_events.py` | that test |
 
 `events.append` refuses a type that is not a member, and a test walks `src/kraft` to check every `events.append` names a family member, so a writer cannot use a bare string.

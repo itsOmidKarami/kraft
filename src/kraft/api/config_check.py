@@ -399,7 +399,11 @@ def _check_notify(path, data, ctx):
     try:
         config_mod.Notify.model_validate(data)
     except ValidationError as exc:
-        return [_pydantic_issue(path, exc)]
+        return [
+            TemplateIssue(
+                path, None, config_mod.Notify.refusal(exc), loc=tuple(exc.errors()[0]["loc"])
+            )
+        ]
     if why := notify_problem(data):
         field = (
             "enabled"
