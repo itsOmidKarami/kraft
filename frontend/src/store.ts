@@ -31,6 +31,88 @@ function patchItem(
   return { workItems: { ...s.workItems, [id]: fn(cur) } };
 }
 
+interface Slot {
+  running: Promise<void>;
+  next?: Promise<void>;
+}
+/** Per-item re-read bookkeeping: the round in flight and the one trailing it. */
+const slots = new Map<string, Slot>();
+export const resetHydrateState = () => slots.clear();
+/** Test-only: how many items have a re-read in flight or queued. */
+export const hydrateInFlight = () => slots.size;
+
+const MAX_ROUNDS = 3;
+const newestSeq = (evs: KraftEvent[] = []) => evs.reduce((m, e) => Math.max(m, e.seq), 0);
+
+function start(id: string): Promise<void> {
+  const slot: Slot = { running: undefined as unknown as Promise<void> };
+  slot.running = fetchRounds(id).finally(() => {
+    if (!slot.next && slots.get(id) === slot) slots.delete(id);
+  });
+  slots.set(id, slot);
+  return slot.running;
+}
+
+/** One round in flight per item; calls made meanwhile share one trailing round. */
+function hydrate(id: string): Promise<void> {
+  const slot = slots.get(id);
+  if (!slot) return start(id);
+  slot.next ??= slot.running.then(() => {}, () => {}).then(() => start(id));
+  return slot.next;
+}
+
+function applyHydrated(id: string, full: WorkItem & { worker_sessions: WorkerSession[] }, evs: KraftEvent[]): void {
+  const { worker_sessions, ...item } = full;
+  const completedNodes = [
+    ...new Set(
+      evs
+        .filter((e) => e.type === "node_completed")
+        .map((e) => e.payload.node_id as string),
+    ),
+  ];
+  const fixEv = [...evs].reverse().find((e) => e.type === "fix_cycle_started");
+  const fixCycle = fixEv ? (fixEv.payload.cycle as number) : undefined;
+  // The cap numbers ride work_item_needs_human; a later node_started clears them.
+  const stopEv = [...evs]
+    .reverse()
+    .find((e) => e.type === "work_item_needs_human" || e.type === "node_started");
+  const cappedOut =
+    (stopEv?.type === "work_item_needs_human"
+      ? (stopEv.payload.capped as WorkItem["cappedOut"])
+      : null) ?? null;
+  const budget =
+    (stopEv?.type === "work_item_needs_human"
+      ? (stopEv.payload.budget as WorkItem["budget"])
+      : null) ?? null;
+  useStore.setState((s) => ({
+    workItems: {
+      ...s.workItems,
+      [id]: {
+        ...s.workItems[id],
+        ...item,
+        completedNodes,
+        cappedOut,
+        budget,
+        ...(fixCycle !== undefined ? { fixCycle } : {}),
+      },
+    },
+    sessionsByItem: { ...s.sessionsByItem, [id]: worker_sessions },
+    eventsByItem: { ...s.eventsByItem, [id]: evs },
+  }));
+}
+
+/** Re-fetch until a response is not older than the store; give up applying after MAX_ROUNDS. */
+async function fetchRounds(id: string): Promise<void> {
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const [full, evs] = await Promise.all([api.getWorkItem(id), api.getEvents(id)]);
+    // An event that arrived mid-fetch is newer than this snapshot: applying it would roll that event back.
+    if (newestSeq(useStore.getState().eventsByItem[id]) > newestSeq(evs)) continue;
+    applyHydrated(id, full, evs);
+    return;
+  }
+  // Nothing applied: the store keeps its reducer-patched state, and the next event's re-read tries again.
+}
+
 export const useStore = create<State>((set, get) => ({
   workItems: {},
   sessionsByItem: {},
@@ -54,49 +136,7 @@ export const useStore = create<State>((set, get) => ({
     for (const i of items) if (i.status === "needs_human") get().hydrateItem(i.id).catch(() => {});
   },
 
-  hydrateItem: async (id) => {
-    const [full, evs] = await Promise.all([
-      api.getWorkItem(id),
-      api.getEvents(id),
-    ]);
-    const { worker_sessions, ...item } = full;
-    const completedNodes = [
-      ...new Set(
-        evs
-          .filter((e) => e.type === "node_completed")
-          .map((e) => e.payload.node_id as string),
-      ),
-    ];
-    const fixEv = [...evs].reverse().find((e) => e.type === "fix_cycle_started");
-    const fixCycle = fixEv ? (fixEv.payload.cycle as number) : undefined;
-    // The cap numbers ride work_item_needs_human; a later node_started clears them.
-    const stopEv = [...evs]
-      .reverse()
-      .find((e) => e.type === "work_item_needs_human" || e.type === "node_started");
-    const cappedOut =
-      (stopEv?.type === "work_item_needs_human"
-        ? (stopEv.payload.capped as WorkItem["cappedOut"])
-        : null) ?? null;
-    const budget =
-      (stopEv?.type === "work_item_needs_human"
-        ? (stopEv.payload.budget as WorkItem["budget"])
-        : null) ?? null;
-    set((s) => ({
-      workItems: {
-        ...s.workItems,
-        [id]: {
-          ...s.workItems[id],
-          ...item,
-          completedNodes,
-          cappedOut,
-          budget,
-          ...(fixCycle !== undefined ? { fixCycle } : {}),
-        },
-      },
-      sessionsByItem: { ...s.sessionsByItem, [id]: worker_sessions },
-      eventsByItem: { ...s.eventsByItem, [id]: evs },
-    }));
-  },
+  hydrateItem: hydrate,
 
   applyEvent: (ev) => {
     const id = ev.work_item_id;
@@ -362,6 +402,20 @@ const REREAD = new Set<EventType>([
   "node_skipped",
   "work_item_queued",
   "work_item_dequeued",
+  "work_item_abandoned",
+  "gate_approved",
+  "gate_rejected",
+  "work_item_blocked_by_dependency",
+  "paused_by_broken_base",
+  "work_item_archived",
+  "work_item_restored",
+  // store.mark_reentered flips waiting/rate_limited to active and clears retry_at with no event of its own; the reducer leaves status alone here.
+  "node_started",
+  // An escalation turn going live or ending flips escalated, which the reducer never patches.
+  "escalation_message",
+  "worker_session_paused",
+  "session_unknown",
+  "worker_session_exited",
 ]);
 
 /**
