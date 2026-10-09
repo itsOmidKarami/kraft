@@ -379,9 +379,7 @@ def queue_work_item(
         (json.dumps(request), request["at"], work_item_id),
     ):
         return False
-    events.append(
-        conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": request["from"]}
-    )
+    events.append(conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": request["from"]})
     return True
 
 
@@ -544,7 +542,7 @@ def block_work_item(
     events.append(
         conn,
         work_item_id,
-        "work_item_blocked",
+        WorkItemEvent.BLOCKED,
         {
             "verb": verb,
             "from": request["from"],
@@ -584,7 +582,7 @@ def release_blocked(conn: sqlite3.Connection) -> list[str]:
                 "WHERE id = ? AND status = 'blocked'",
                 (now, now, wid),
             ):
-                events.append(conn, wid, "work_item_unblocked", {})
+                events.append(conn, wid, WorkItemEvent.UNBLOCKED, {})
                 released.append(wid)
     return released
 
@@ -598,7 +596,7 @@ def drop_dependencies(
     dropped = [d["id"] for d in deps if (d["id"] == only if only else not d["met"])]
     if dropped:
         set_dependencies(conn, work_item_id, [d["id"] for d in deps if d["id"] not in dropped])
-        events.append(conn, work_item_id, "work_item_dependencies_dropped", {"dropped": dropped})
+        events.append(conn, work_item_id, WorkItemEvent.DEPENDENCIES_DROPPED, {"dropped": dropped})
     return dropped
 
 
