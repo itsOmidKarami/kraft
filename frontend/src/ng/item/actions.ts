@@ -32,9 +32,6 @@ export const act = {
   applyDraft: (id: string) => post(`${at(id)}/draft/apply`),
   approve: (id: string, gate: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/approve`),
   reject: (id: string, gate: string, note: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/reject`, { note }),
-  /** B5 (R2): the worker capability's routes, unreachable until it ships — the card that calls them renders only with its fields. */
-  reassign: (id: string) => post(`${at(id)}/reassign`),
-  keepWaiting: (id: string) => post(`${at(id)}/keep-waiting`),
 };
 
 /** `GET /work-items/{id}/cancel-preview` (B4). */

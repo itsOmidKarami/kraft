@@ -130,24 +130,6 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
       actions: [],
     };
-  // B5 (R2): the worker capability is built elsewhere; until the server sends
-  // these fields this branch is unreachable and the item shows its plain waiting status.
-  if (status === "waiting" && stop && (stop.kind as string) === "worker_lost" && str(facts.last_seen_at) && str(facts.reassign_at)) {
-    const online = list(facts.workers_online);
-    return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Worker lost", where: [where, str(facts.worker)].filter(Boolean).join(" · "), node: stop.node,
-      text: `The worker running this item stopped answering ${ago(str(facts.last_seen_at))}. The attempt in flight counts as lost. If the worker does not return, Kraft hands the item to another worker.`,
-      facts: [
-        ["last seen", ago(str(facts.last_seen_at))],
-        ["reassigns", `automatically ${until(str(facts.reassign_at))}`],
-        ...(online.length ? [["others", `${online.length} ${online.length === 1 ? "worker" : "workers"} online · ${online.join(", ")}`] as [string, ReactNode]] : []),
-      ],
-      actions: [
-        { label: "Reassign now", primary: true, run: () => run(act.reassign(item.id)) },
-        { label: "Keep waiting", run: () => run(act.keepWaiting(item.id)) },
-      ],
-    };
-  }
   if (status === "needs_you" && stop?.kind === "conflict") {
     const unresolved = list(facts.unresolved);
     const resolved = list(facts.resolved);

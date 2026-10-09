@@ -8,7 +8,7 @@ import { PausedCard, StateCard } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /work-items/w1/keep-waiting", "POST /work-items/w1/reassign", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -49,7 +49,6 @@ describe("StateCard", () => {
     ["stuck", "Stuck", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
     ["stuck", "Stuck", null, judge, "verification › fix_loop › judge", "Retry from verification", "verification"],
     ["question", "Needs you", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
-    ["worker_lost", "Needs you", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
   ] as const)("a needs-you %s stop with no card of its own gets one: the reason, Retry by a path the server takes, Escalate…", async (kind, title, question, over, at, label, path) => {
     const calls = stubFetch(WRITES);
     const { h } = show({ display_status: "needs_you", status: "needs_human", needs_context_question: question, stop: stop(kind, { reason: "stuck: 1 finding(s) unchanged across cycle 1", ...over }) });
@@ -131,22 +130,6 @@ describe("StateCard", () => {
   it("waiting on CI offers no Retry now: the server would refuse it", () => {
     show({ display_status: "waiting", stop: stop("wait", { reason: "waiting for CI" }) });
     expect(within(screen.getByRole("region", { name: "Waiting on CI" })).queryByRole("button", { name: /Retry/ })).toBeNull();
-  });
-
-  it("worker lost: rendered only with the B5 fields, and never for another kind (R2)", async () => {
-    const calls = stubFetch(WRITES);
-    const facts = { worker: "ci-runner-3", last_seen_at: "2026-09-13T10:08:00Z", reassign_at: "2026-09-13T10:13:00Z", workers_online: ["ci-runner-1"] };
-    const { unmount } = show({ display_status: "waiting", stop: stop("worker_lost", { facts: { worker: "ci-runner-3" } }) });
-    expect(screen.queryByRole("region")).toBeNull();
-    unmount();
-    const other = show({ display_status: "waiting", stop: stop("stuck", { facts }) });
-    expect(screen.queryByRole("region")).toBeNull();
-    other.unmount();
-    show({ display_status: "waiting", stop: stop("worker_lost", { facts }) });
-    const card = screen.getByRole("region", { name: "Worker lost" });
-    await userEvent.click(within(card).getByRole("button", { name: "Reassign now" }));
-    await userEvent.click(within(card).getByRole("button", { name: "Keep waiting" }));
-    await waitFor(() => expect(posts(calls).map((c) => c.path)).toEqual(["/work-items/w1/reassign", "/work-items/w1/keep-waiting"]));
   });
 
   it("conflict: the files the handler left and cleared, review and send back", async () => {
