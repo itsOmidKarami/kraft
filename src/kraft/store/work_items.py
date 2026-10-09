@@ -632,12 +632,14 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
 #: module (`dev/check_claim_handoff.py`) can take it for a claim to `active`.
 MANUAL_ENDS = {
     "complete": (
-        "UPDATE work_items SET status = 'completed', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'completed', retry_at = NULL, queued_request = NULL, "
+        "updated_at = ? WHERE id = ?",
         WorkItemEvent.MANUALLY_COMPLETED,
         WorkItemEvent.COMPLETED,
     ),
     "cancel": (
-        "UPDATE work_items SET status = 'abandoned', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'abandoned', retry_at = NULL, queued_request = NULL, "
+        "updated_at = ? WHERE id = ?",
         WorkItemEvent.CANCELLED,
         WorkItemEvent.ABANDONED,
     ),
@@ -714,7 +716,8 @@ def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
     what happened — but it is out of the running set for good, and off the board.
     """
     conn.execute(
-        "UPDATE work_items SET status = 'abandoned', updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'abandoned', queued_request = NULL, updated_at = ? "
+        "WHERE id = ?",
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, WorkItemEvent.ABANDONED, {})

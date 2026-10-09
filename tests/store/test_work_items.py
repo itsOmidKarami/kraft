@@ -527,6 +527,29 @@ async def test_queueing_refuses_a_status_the_door_does_not_start_from(database):
     assert database.read(_status) == ("active", None)
 
 
+@pytest.mark.parametrize(
+    "end",
+    [
+        lambda c: store.abandon_work_item(c, "w1"),
+        lambda c: store.end_work_item(c, "w1", "cancel", "r"),
+        lambda c: store.end_work_item(c, "w1", "complete", "r"),
+    ],
+    ids=["abandon", "cancel", "complete"],
+)
+async def test_ending_a_queued_item_discards_its_request(database, end):
+    def seed(c):
+        schema.insert_item(c, status="paused")
+        store.queue_work_item(c, "w1", verb="resume", body={}, headers={}, from_statuses=["paused"])
+
+    await database.write(seed)
+    await database.write(end)
+
+    assert (
+        database.read(lambda c: c.execute("SELECT queued_request FROM work_items").fetchone()[0])
+        is None
+    )
+
+
 async def test_the_queue_is_read_earliest_first_and_a_kept_place_survives(database):
     def seed(c):
         for wid in ("a", "b"):

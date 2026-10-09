@@ -96,20 +96,76 @@ def test_a_start_makes_the_saved_request_again(client, stopped, board):
     ]
 
 
-def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(client, stopped, board):
-    wid = stopped
-    assert client.post(f"/api/work-items/{wid}/retry", json={}).json()["status"] == "queued"
+def _node_gone(wid, monkeypatch):
     with _db() as c, c:
         c.execute("UPDATE work_items SET current_node_id = 'gone' WHERE id = ?", (wid,))
+
+
+def _door_raises(wid, monkeypatch):
+    from kraft.api.routes import lifecycle
+
+    async def boom(*_):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lifecycle, "_retry", boom)
+
+
+@pytest.mark.parametrize(
+    ("breaks", "why", "detail"),
+    [(_node_gone, "refused", "no current node"), (_door_raises, "failed", "RuntimeError: boom")],
+    ids=["refused", "failed"],
+)
+def test_a_start_the_door_now_refuses_puts_the_item_back_and_says_why(
+    client, repo, stopped, board, monkeypatch, breaks, why, detail
+):
+    """Refused or failed, the item is back where it came from with the reason
+    in its timeline, and the pass goes on to the next queued item."""
+    wid = stopped
+    assert client.post(f"/api/work-items/{wid}/retry", json={}).json()["status"] == "queued"
+    after = _paused(client, repo, chain_template="default")
+    assert client.post(f"/api/work-items/{after}/resume", json={}).json()["status"] == "queued"
+    breaks(wid, monkeypatch)
+
+    _set_status(board, "paused")
+    assert _tick(client) == [after]
+
+    assert _status_of(client, wid) == "needs_human"
+    last = client.get(f"/api/work-items/{wid}/events").json()[-1]
+    assert last["type"] == "work_item_dequeued"
+    assert last["payload"]["why"] == why
+    assert detail in last["payload"]["detail"]
+
+
+def test_a_start_that_fails_after_its_claim_reports_the_stop_it_left(
+    client, repo, board, monkeypatch
+):
+    """The door's bracket stopped the item. The event names that status, which
+    an open board shows, not the one the item was queued from."""
+    from kraft import store
+
+    wid = _paused(client, repo, chain_template="default")
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "queued"
+
+    def boom(*_):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(store, "take_steer", boom)  # resume reads it after its claim
 
     _set_status(board, "paused")
     assert _tick(client) == []
 
     assert _status_of(client, wid) == "needs_human"
     last = client.get(f"/api/work-items/{wid}/events").json()[-1]
-    assert last["type"] == "work_item_dequeued"
-    assert last["payload"]["why"] == "refused"
-    assert "no current node" in last["payload"]["detail"]
+    assert (last["type"], last["payload"]["to"]) == ("work_item_dequeued", "needs_human")
+
+
+def test_an_autostart_filed_on_a_full_board_starts_when_a_slot_frees(client, repo, board):
+    wid = _post_default(client, repo)
+    assert _status_of(client, wid) == "queued"
+
+    _set_status(board, "paused")
+    assert _tick(client) == [wid]
+    _poll_events(client, wid, "work_item_resumed")
 
 
 def test_an_item_that_loses_the_slot_keeps_its_place(client, repo, board):

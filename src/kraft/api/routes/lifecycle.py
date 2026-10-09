@@ -621,7 +621,9 @@ async def pause_work_item(wid: str, request: Request):
         raise HTTPException(409, f"work item is {row['status']}, not running")
     if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         # Nothing of it runs: pausing withdraws the start it asked for.
-        await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused"))
+        if not await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused")):
+            # The scheduler took it first: it is starting, not leaving the hold.
+            raise HTTPException(409, "work item status changed; try again")
         return {"id": wid, "paused_sessions": []}
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
@@ -833,13 +835,21 @@ async def blocked_answer(request: Request, wid: str, verb: str, body, from_statu
     return {"id": wid, "status": WorkItemStatus.BLOCKED, "waiting_on": unmet}
 
 
-def _not_stopped(row) -> str:
-    """The 409 a retry on an item that is not stopped gets. A paused one is
-    told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
+def held_refusal(row) -> str | None:
+    """What a queued or blocked item answers a door that does not take it, or
+    None in any other status."""
     if row["status"] == WorkItemStatus.QUEUED:
         return queued_refusal(row)
     if row["status"] == WorkItemStatus.BLOCKED:
         return blocked_refusal(row)
+    return None
+
+
+def _not_stopped(row) -> str:
+    """The 409 a retry on an item that is not stopped gets. A paused one is
+    told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
+    if held := held_refusal(row):
+        return held
     if row["status"] == WorkItemStatus.PAUSED:
         return "work item is paused, not stopped: resume it instead, or skip what it would run"
     return "work item is not stopped"
@@ -850,10 +860,8 @@ def not_paused(row, gate: str | None = None) -> str:
     one is told what to do (Ruling 183: a steer never reaches a running item),
     and so is one waiting for a person: at a `gate`, approve or reject it;
     stopped anywhere else, retry it, which takes a steer too (R11a)."""
-    if row["status"] == WorkItemStatus.QUEUED:
-        return queued_refusal(row)
-    if row["status"] == WorkItemStatus.BLOCKED:
-        return blocked_refusal(row)
+    if held := held_refusal(row):
+        return held
     if row["status"] in RUNNING:
         return f"work item is {row['status']}: it is running, so pause it first"
     if row["status"] == WorkItemStatus.NEEDS_HUMAN and gate is not None:
@@ -1178,6 +1186,9 @@ async def _retry(wid: str, body: Retry, request: Request):
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     asked = body  # as the caller sent it: a queued retry is made again from this
+    if held := held_refusal(row):
+        # Ahead of the node check: an item held before it ever started has none.
+        raise HTTPException(409, held)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] not in admitting(Verb.RETRY):
@@ -1607,7 +1618,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.RAISE_BUDGET):
-        raise HTTPException(409, "work item is not stopped")
+        raise HTTPException(409, held_refusal(row) or "work item is not stopped")
     stop = (board._current_stop(st, wid) or {}).get("budget") or {}
     scope = stop.get("scope")
     item_wide = scope == "usd" and stop.get("path") == ""
@@ -1720,7 +1731,9 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     async with deps.skip_lock(request.app, wid):
         row = deps._work_item_row(st, wid)
         if row["status"] not in admitting(Verb.SKIP):
-            raise HTTPException(409, f"work item is {row['status']}, cannot skip")
+            raise HTTPException(
+                409, held_refusal(row) or f"work item is {row['status']}, cannot skip"
+            )
         running = escalate.escalation_running(st.db, wid)
         if running is not None:
             raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -2007,7 +2020,9 @@ async def reopen_mr(wid: str, request: Request):
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["stop_kind"] != StopKind.MR_CLOSED:
-        raise HTTPException(409, "work item is not stopped on a closed merge request")
+        raise HTTPException(
+            409, held_refusal(row) or "work item is not stopped on a closed merge request"
+        )
     ref = board._mr_ref(st, wid)
     if ref is None:
         raise HTTPException(409, "work item has no merge request to reopen")
@@ -2066,7 +2081,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.ESCALATE):
-        raise HTTPException(409, "work item is not needs_human or paused")
+        raise HTTPException(409, held_refusal(row) or "work item is not needs_human or paused")
     # A `paused` item that has never started (current_node_id is NULL, per
     # /work-items' "it lands paused" default) has no node/context to
     # escalate about -- dispatch reads row["current_node_id"] straight into
