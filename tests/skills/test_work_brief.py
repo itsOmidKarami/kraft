@@ -29,12 +29,31 @@ def test_the_skill_says_what_approving_does(text):
         "What changed",
         "What was verified",
         "What the review found, and what was done about it",
-        "What is unresolved",
+        "What was deliberately left out",
+        "What you are unsure about",
     ],
-    ids=["asked", "changed", "verified", "reviewed", "unresolved"],
+    ids=["asked", "changed", "verified", "reviewed", "left-out", "unsure"],
 )
 def test_the_skill_asks_for_each_section_the_gate_needs(text, section):
     assert f"**{section}.**" in text
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "When you found none of them, the brief is the four sections above. A line works the "
+        "same way: write what happened, and give no line to what you looked for and did not find",
+        "If a check did not run in it, name that check as not run",
+        "`kraft view events --json`",
+    ],
+    ids=["omits-what-was-not-found", "names-a-check-not-run", "reads-events-as-json"],
+)
+def test_the_skill_carries_the_wording_its_briefs_were_tested_with(text, instruction):
+    """Each of these changed what authors wrote when the wording was run on real
+    events. Without the first a clean run grows sections that say "nothing"; the
+    second is what names a skipped review; without the third every payload is cut
+    short before the fields the brief needs."""
+    assert instruction in text
 
 
 def test_the_skill_leaves_out_the_diff_and_the_final_review_brief(text):
