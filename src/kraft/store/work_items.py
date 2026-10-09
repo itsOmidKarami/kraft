@@ -7,7 +7,17 @@ import sqlite3
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-from kraft.vocab import ENDED, HOLDS_SLOT, STOP_TRAITS, SessionStatus, StopKind, WorkItemStatus
+from kraft.vocab import (
+    ENDED,
+    HOLDS_SLOT,
+    STOP_TRAITS,
+    SessionEvent,
+    SessionStatus,
+    SettingsEvent,
+    StopKind,
+    WorkItemEvent,
+    WorkItemStatus,
+)
 from kraft.vocab.sql import in_list, marks
 
 #: How much of the title goes into the branch name. A Kraft title is a
@@ -145,11 +155,11 @@ def create_work_item(
         payload["bead_id"] = bead_id
         if bead_priority is not None:
             payload["priority"] = bead_priority
-    events.append(conn, id, "work_item_created", payload)
+    events.append(conn, id, WorkItemEvent.CREATED, payload)
     if attachments:
         # Its own event, not a field on work_item_created: the timeline has to
         # explain why this item's chain has no spec node.
-        events.append(conn, id, "work_item_attachments", {"attachments": attachments})
+        events.append(conn, id, WorkItemEvent.ATTACHMENTS, {"attachments": attachments})
 
 
 def mark_needs_human(
@@ -248,7 +258,7 @@ def mark_needs_human(
         payload["facts"] = facts
     if limit is not None:
         payload["limit"] = limit
-    events.append(conn, work_item_id, "work_item_needs_human", payload)
+    events.append(conn, work_item_id, WorkItemEvent.NEEDS_HUMAN, payload)
 
 
 def mark_rate_limited(
@@ -264,7 +274,7 @@ def mark_rate_limited(
     ):
         return
     events.append(
-        conn, work_item_id, "work_item_rate_limited", {"node_id": node_id, "retry_at": retry_at}
+        conn, work_item_id, WorkItemEvent.RATE_LIMITED, {"node_id": node_id, "retry_at": retry_at}
     )
 
 
@@ -285,7 +295,7 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     ):
         return
     events.append(
-        conn, work_item_id, "work_item_waiting", {"node_id": node_id, "retry_at": retry_at}
+        conn, work_item_id, WorkItemEvent.WAITING, {"node_id": node_id, "retry_at": retry_at}
     )
 
 
@@ -308,7 +318,7 @@ def mark_blocked_by_dependency(
     events.append(
         conn,
         work_item_id,
-        "work_item_blocked_by_dependency",
+        WorkItemEvent.BLOCKED_BY_DEPENDENCY,
         {"node_id": node_id, "blocked_by": blocked_by},
     )
 
@@ -457,7 +467,7 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
         "UPDATE work_items SET status = 'completed', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_completed", {})
+    events.append(conn, work_item_id, WorkItemEvent.COMPLETED, {})
 
 
 #: An operator's terminal action -> (the write that ends the item, its audit
@@ -467,13 +477,13 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
 MANUAL_ENDS = {
     "complete": (
         "UPDATE work_items SET status = 'completed', retry_at = NULL, updated_at = ? WHERE id = ?",
-        "work_item_manually_completed",
-        "work_item_completed",
+        WorkItemEvent.MANUALLY_COMPLETED,
+        WorkItemEvent.COMPLETED,
     ),
     "cancel": (
         "UPDATE work_items SET status = 'abandoned', retry_at = NULL, updated_at = ? WHERE id = ?",
-        "work_item_cancelled",
-        "work_item_abandoned",
+        WorkItemEvent.CANCELLED,
+        WorkItemEvent.ABANDONED,
     ),
 }
 
@@ -502,7 +512,7 @@ def end_work_item(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
         )
-        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+        events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
     node_id = conn.execute(
         "SELECT current_node_id FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
@@ -551,7 +561,7 @@ def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
         "UPDATE work_items SET status = 'abandoned', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_abandoned", {})
+    events.append(conn, work_item_id, WorkItemEvent.ABANDONED, {})
 
 
 def archive_work_item(
@@ -590,7 +600,7 @@ def archive_work_item(
         payload |= {"rescued_branch": rescued_branch, "rescued_commits": rescued_commits}
     if worktree_kept is not None:
         payload["worktree_kept"] = worktree_kept
-    events.append(conn, work_item_id, "work_item_archived", payload)
+    events.append(conn, work_item_id, WorkItemEvent.ARCHIVED, payload)
 
 
 def restore_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
@@ -601,7 +611,7 @@ def restore_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
         "UPDATE work_items SET archived_at = NULL, archived_by = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_restored", {})
+    events.append(conn, work_item_id, WorkItemEvent.RESTORED, {})
 
 
 def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: list[str]) -> None:
@@ -621,13 +631,13 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
         (now, work_item_id),
     ):
         return
-    events.append(conn, work_item_id, "pause_requested", {"sessions": session_ids})
+    events.append(conn, work_item_id, WorkItemEvent.PAUSE_REQUESTED, {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
         )
-        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+        events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 
 
 def pause_for_broken_base(
@@ -655,7 +665,7 @@ def pause_for_broken_base(
     events.append(
         conn,
         work_item_id,
-        "paused_by_broken_base",
+        WorkItemEvent.PAUSED_BY_BROKEN_BASE,
         {"broken_by": broken_by, "follow_up_bead": follow_up_bead},
     )
 
@@ -665,7 +675,7 @@ def set_steer(conn: sqlite3.Connection, work_item_id: str, text: str) -> None:
         "UPDATE work_items SET pending_steer_context = ?, updated_at = ? WHERE id = ?",
         (text, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "steer_context_set", {"steer": text})
+    events.append(conn, work_item_id, WorkItemEvent.STEER_CONTEXT_SET, {"steer": text})
 
 
 def set_description(conn: sqlite3.Connection, work_item_id: str, description: str) -> None:
@@ -677,7 +687,9 @@ def set_description(conn: sqlite3.Connection, work_item_id: str, description: st
         "UPDATE work_items SET description = ?, updated_at = ? WHERE id = ?",
         (description or None, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_description_edited", {"description": description})
+    events.append(
+        conn, work_item_id, WorkItemEvent.DESCRIPTION_EDITED, {"description": description}
+    )
 
 
 def set_title(conn: sqlite3.Connection, work_item_id: str, title: str) -> None:
@@ -697,7 +709,7 @@ def set_title(conn: sqlite3.Connection, work_item_id: str, title: str) -> None:
         "UPDATE work_items SET title = ?, updated_at = ? WHERE id = ?",
         (title, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_title_edited", {"title": title})
+    events.append(conn, work_item_id, WorkItemEvent.TITLE_EDITED, {"title": title})
 
 
 def set_agent_overrides(
@@ -715,7 +727,7 @@ def set_agent_overrides(
     events.append(
         conn,
         work_item_id,
-        "agent_overrides_changed",
+        SettingsEvent.AGENT_OVERRIDES_CHANGED,
         {"overrides": json.loads(agent_overrides) if agent_overrides else {}},
     )
 
@@ -856,7 +868,7 @@ def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | N
     the route before the worktree rebase (Kraft-11e0) -- this only narrates it.
     Deliberately does NOT touch retry_counters: a human-initiated interruption
     is not a plugin failure."""
-    events.append(conn, work_item_id, "work_item_resumed", {"steer": steer})
+    events.append(conn, work_item_id, WorkItemEvent.RESUMED, {"steer": steer})
 
 
 def recent_auto_pickups(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:

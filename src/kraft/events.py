@@ -4,6 +4,8 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
+from kraft.vocab import BY_VALUE, EventType
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -12,7 +14,7 @@ def _now() -> str:
 def append(
     conn: sqlite3.Connection,
     work_item_id: str,
-    type: str,
+    type: EventType,
     payload: dict,
     *,
     node_id: str | None = None,
@@ -21,7 +23,11 @@ def append(
     `node` key (whichever is a string) -- which covers every emitter that
     already names its node in its payload without touching its call. An
     emitter that knows its node but does not name it in the payload passes
-    `node_id=` explicitly (Kraft UI v2 · B13)."""
+    `node_id=` explicitly (Kraft UI v2 · B13). A `type` outside `kraft.vocab`'s
+    event families is refused: a misspelled type would be written and never
+    read."""
+    if type not in BY_VALUE:
+        raise ValueError(f"{type!r} is not an event type")
     if node_id is None:
         default = payload.get("node_id", payload.get("node"))
         node_id = default if isinstance(default, str) else None

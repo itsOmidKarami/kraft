@@ -6,6 +6,7 @@ from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store.chain import materialized_chain_of
 from kraft.store.counters import clear_loop_counters, reject_loop_key
+from kraft.vocab import ChainEvent, GateEvent
 
 
 def current_fork(conn: sqlite3.Connection, work_item_id: str):
@@ -100,14 +101,14 @@ def fork_run(
                 events.append(
                     conn,
                     work_item_id,
-                    "gate_reopened",
+                    GateEvent.REOPENED,
                     {"gate": node.id, "reason": "retry"},
                     node_id=node.id,
                 )
     events.append(
         conn,
         work_item_id,
-        "run_forked",
+        ChainEvent.RUN_FORKED,
         {
             "fork": fork.id,
             "parent": fork.parent,

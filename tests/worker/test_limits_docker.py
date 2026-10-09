@@ -11,6 +11,7 @@ import pytest
 from kraft import events, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import config_dir
+from kraft.vocab import SandboxEvent
 from kraft.worker.backends import docker
 
 IMAGE = "docker.io/library/alpine:3"
@@ -84,7 +85,7 @@ async def test_a_memory_hog_is_killed_by_its_limit_and_recorded(
     killed = [
         e["payload"]
         for e in database.read(lambda c: events.read_after(c, 0, "w1"))
-        if e["type"] == sp.SANDBOX_OOM_KILLED
+        if e["type"] == SandboxEvent.OOM_KILLED
     ]
     # Docker on cgroup v2 can drop its OOM flag (moby#41929): then the kill
     # is recorded unconfirmed, the stop the same.

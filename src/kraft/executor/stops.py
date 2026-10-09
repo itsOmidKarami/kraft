@@ -318,7 +318,7 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
 
 async def stop_for_time_cap(db, work_item_id: str, node: ResolvedNode) -> str:
     """A scope's time cap ran out (Rulings 194, 195): the item stops for a
-    human under the reason `caps.REACHED` recorded -- "`<scope>` hit its time
+    human under the reason `LimitEvent.TIME_CAP_REACHED` recorded -- "`<scope>` hit its time
     cap of N minutes". Not a failure: no recovery, no fix attempt, and not in
     the stuck set, so no escalation turn answers it."""
     reason = db.read(lambda c: _caps.reason_of(c, work_item_id))

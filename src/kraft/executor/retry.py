@@ -9,6 +9,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.templates.forks import ChainPath
 from kraft.templates.models import GateNode
 from kraft.templates.retry import RetryOverride
+from kraft.vocab import LimitEvent
 
 
 async def retry(
@@ -71,7 +72,9 @@ async def retry(
         if by_person:
             left = store.cap_counts(c, work_item_id)
             reset = {k: n for k, n in before.items() if k not in left}
-            events.append(c, work_item_id, "cap_counters_reset", {"by": "human", "counters": reset})
+            events.append(
+                c, work_item_id, LimitEvent.CAP_COUNTERS_RESET, {"by": "human", "counters": reset}
+            )
         return fork
 
     fork = await db.write(_record)

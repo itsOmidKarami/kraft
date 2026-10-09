@@ -23,7 +23,14 @@ from kraft import caps, events, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
-from kraft.vocab import AGENT_REPORTABLE, UNREADABLE_EXIT, SessionStatus
+from kraft.vocab import (
+    AGENT_REPORTABLE,
+    UNREADABLE_EXIT,
+    LimitEvent,
+    SandboxEvent,
+    SessionEvent,
+    SessionStatus,
+)
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
@@ -47,7 +54,6 @@ _flush_sleep = asyncio.sleep
 
 
 #: The event naming the background jobs a worker's turn left running.
-JOBS_ABANDONED = "background_jobs_abandoned"
 
 #: How much of one job's command a reason quotes.
 _JOB_NAME_MAX = 200
@@ -58,7 +64,7 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
     still running (Kraft-xvugd): the session ends with its turn, so nothing
     would ever read that job's result. The prose in `agent._CTX` alone did not
     hold (Kraft-nxqft); this is the check behind it. The jobs are named in the
-    log's last line and a `JOBS_ABANDONED` event rather than left to a generic
+    log's last line and a `background_jobs_abandoned` event rather than left to a generic
     missing-result failure.
 
     A `needs_context` stop keeps its status -- it is a person's stop already,
@@ -84,7 +90,12 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
             "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (session_id,)
         ).fetchone()
         payload = {"session_id": session_id, "node_id": row["node_id"], "jobs": jobs}
-        events.append(c, row["work_item_id"], JOBS_ABANDONED, {**payload, "reason": reason})
+        events.append(
+            c,
+            row["work_item_id"],
+            SessionEvent.BACKGROUND_JOBS_ABANDONED,
+            {**payload, "reason": reason},
+        )
 
     await db.write(_record)
     return status if status == "needs_context" else "failed"
@@ -317,14 +328,13 @@ async def _record_unsynced(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "sandbox_branch_not_synced",
+                SandboxEvent.BRANCH_NOT_SYNCED,
                 {"session_id": session_id, "branch": branch, "reason": problem},
             )
         )
 
 
 #: What a sandboxed session its memory limit killed is recorded as.
-SANDBOX_OOM_KILLED = "sandbox_oom_killed"
 #: How the log line `record_oom_kill` appends starts: the stop's cause.
 OOM_LINE = "kraft: a process in the sandbox was killed"
 
@@ -368,7 +378,7 @@ async def record_oom_kill(
             "the task need less\n"
         )
     payload = {"session_id": session_id, "memory": oom.memory, "confirmed": oom.confirmed}
-    await db.write(lambda c: events.append(c, work_item_id, SANDBOX_OOM_KILLED, payload))
+    await db.write(lambda c: events.append(c, work_item_id, SandboxEvent.OOM_KILLED, payload))
     return "config_error" if status is None or status in UNREADABLE_EXIT else status
 
 
@@ -609,7 +619,7 @@ async def run_task(
     repo_entry: RepoEntry | None = None,
     #: The tightest time cap over this launch (`caps.at_launch`): past its
     #: deadline the process group, and a sandbox's container, is killed and
-    #: the session exits `capped_out` with `caps.REACHED` naming the scope.
+    #: the session exits `capped_out` with `LimitEvent.TIME_CAP_REACHED` naming the scope.
     time_cap: caps.Deadline | None = None,
     #: The name the result file (and its sidecars) goes under, when not the
     #: session's own: an escalation thread's, shared by its turns
@@ -1042,7 +1052,7 @@ async def run_task(
             events.append(
                 c,
                 work_item_id,
-                caps.REACHED,
+                LimitEvent.TIME_CAP_REACHED,
                 hit.payload(node_id=node_id, task=hook_point, session_id=session_id),
             )
 
@@ -1081,7 +1091,7 @@ async def run_task(
             lambda c, rl=rate_limit: events.append(
                 c,
                 work_item_id,
-                "rate_limit_hit",
+                LimitEvent.RATE_LIMIT_HIT,
                 {**asdict(rl), **(rate_limit_key or {}), "node_id": node_id},
             )
         )

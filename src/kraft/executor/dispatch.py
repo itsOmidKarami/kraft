@@ -63,7 +63,17 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
 )
-from kraft.vocab import ADVANCING, COMMAND_FINISHED, LIVE, UNFINISHED, SessionStatus
+from kraft.vocab import (
+    ADVANCING,
+    COMMAND_FINISHED,
+    LIVE,
+    UNFINISHED,
+    ChainEvent,
+    LimitEvent,
+    SandboxEvent,
+    SessionEvent,
+    SessionStatus,
+)
 from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
@@ -289,7 +299,7 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
 
 async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str:
     """A launch a spent time cap refused, recorded as its own session: it
-    exits `capped_out`, and `caps.REACHED` names the scope and the cap, so the
+    exits `capped_out`, and `LimitEvent.TIME_CAP_REACHED` names the scope and the cap, so the
     stop and analytics read it the same as a run killed at its deadline."""
     _, log_path, result_path = await _builtins.start_session(db, run_dirs, **common)
     await _builtins.finish_session(
@@ -304,7 +314,7 @@ async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str
         lambda c: events.append(
             c,
             common["work_item_id"],
-            _caps.REACHED,
+            LimitEvent.TIME_CAP_REACHED,
             hit.payload(
                 node_id=common["node_id"],
                 task=common["hook_point"],
@@ -383,7 +393,7 @@ async def record_kit(db, work_item_id: str, fetched: _kit.Fetched, lowered: _kit
         events.append(
             conn,
             work_item_id,
-            "sandbox_kit_resolved",
+            SandboxEvent.KIT_RESOLVED,
             {
                 "kit": lowered.kit,
                 "manifest": fetched.manifest,
@@ -569,7 +579,7 @@ async def _run_changed_test_scopes(
         lambda c: events.append(
             c,
             work_item_row["id"],
-            "test_scopes_selected",
+            ChainEvent.TEST_SCOPES_SELECTED,
             {
                 "node_id": node.id,
                 "hook_point": task.path,
@@ -1171,7 +1181,7 @@ async def _dispatch_task(
                 lambda c: events.append(
                     c,
                     work_item_row["id"],
-                    "scope_budget_reached",
+                    LimitEvent.SCOPE_BUDGET_REACHED,
                     {**breach.model_dump(), "task": task.path},
                     node_id=node.id,
                 )
@@ -1363,7 +1373,7 @@ async def _dispatch_task(
                 lambda c, e=earliest: events.append(
                     c,
                     work_item_row["id"],
-                    "launch_fallback_exhausted",
+                    LimitEvent.LAUNCH_FALLBACK_EXHAUSTED,
                     {"node_id": node.id, "task": task.path, "resets_at_iso": e},
                 )
             )
@@ -1448,7 +1458,7 @@ async def sweep_stragglers(
             lambda c, exc=exc: events.append(
                 c,
                 work_item_row["id"],
-                "sweep_failed",
+                ChainEvent.SWEEP_FAILED,
                 {"node_id": node_id, "task": task_path, "error": f"deferred: {exc}"},
             )
         )
@@ -1466,7 +1476,7 @@ async def sweep_stragglers(
             lambda c: events.append(
                 c,
                 work_item_row["id"],
-                "sweep_failed",
+                ChainEvent.SWEEP_FAILED,
                 {
                     "node_id": node_id,
                     "task": task_path,
@@ -1497,7 +1507,7 @@ async def sweep_stragglers(
                 lambda c: events.append(
                     c,
                     work_item_row["id"],
-                    "sweep_left_out",
+                    ChainEvent.SWEEP_LEFT_OUT,
                     {"node_id": node_id, "task": task_path, "paths": dropped},
                 )
             )
@@ -1512,7 +1522,7 @@ async def sweep_stragglers(
             lambda c, exc=exc: events.append(
                 c,
                 work_item_row["id"],
-                "sweep_failed",
+                ChainEvent.SWEEP_FAILED,
                 {"node_id": node_id, "task": task_path, "error": str(exc)},
             )
         )
@@ -1570,7 +1580,7 @@ async def _launch_agent(
             lambda c: events.append(
                 c,
                 work_item_row["id"],
-                "agent_session_resumed",
+                SessionEvent.AGENT_SESSION_RESUMED,
                 {"task": task.path, "session_id": resumed[0]},
                 node_id=node.id,
             )
@@ -2028,7 +2038,7 @@ async def run_recovery(
         lambda c: events.append(
             c,
             work_item_id,
-            "node_recovery_started",
+            ChainEvent.NODE_RECOVERY_STARTED,
             {
                 "node_id": node.id,
                 "scope": scope,

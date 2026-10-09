@@ -56,7 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
-from kraft.vocab import LIVE, STOPPED, StopKind, WorkItemStatus
+from kraft.vocab import LIVE, STOPPED, LimitEvent, StopKind, WorkItemStatus
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -67,9 +67,9 @@ logger = logging.getLogger(__name__)
 _BREACH_CONFIG = ConfigDict(extra="forbid")
 
 #: A task's status when a time cap stopped it or refused its launch. The
-#: session row exits `capped_out` (no status migration); `REACHED` names it.
+#: session row exits `capped_out` (no status migration);
+#: `LimitEvent.TIME_CAP_REACHED` names it.
 TIME_CAPPED = "time_capped"
-REACHED = "time_cap_reached"
 #: How often `poller` looks at parked items.
 _INTERVAL_S = 30
 
@@ -124,7 +124,7 @@ def reached_limit(conn, work_item_id: str) -> dict | None:
     """The `limit` of the newest `time_cap_reached`, for the stop it caused."""
     row = conn.execute(
         "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, REACHED),
+        (work_item_id, LimitEvent.TIME_CAP_REACHED),
     ).fetchone()
     if row is None:
         return None
@@ -556,21 +556,22 @@ def reason_of(conn, work_item_id: str) -> str:
     """The newest `time_cap_reached` reason, for the stop it caused."""
     row = conn.execute(
         "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
-        (work_item_id, REACHED),
+        (work_item_id, LimitEvent.TIME_CAP_REACHED),
     ).fetchone()
     return json.loads(row["payload"])["reason"] if row else "a time cap was reached"
 
 
 def time_capped_sessions(conn, work_item_ids) -> set[str]:
     """The sessions a time cap stopped or refused: they exit `capped_out`, the
-    status a fix loop's cap writes, and `REACHED` tells them apart."""
+    status a fix loop's cap writes, and `LimitEvent.TIME_CAP_REACHED` tells them
+    apart."""
     ids = list(work_item_ids)
     if not ids:
         return set()
     rows = conn.execute(
         "SELECT json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) AND type = ?",
-        (*ids, REACHED),
+        (*ids, LimitEvent.TIME_CAP_REACHED),
     ).fetchall()
     return {r["sid"] for r in rows if r["sid"]}
 
@@ -584,7 +585,7 @@ _GATE_SETTLED = (
     "node_skipped",
     "work_item_completed",
     "work_item_abandoned",
-    REACHED,
+    LimitEvent.TIME_CAP_REACHED,
 )
 
 
@@ -642,7 +643,9 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
         return False
     if seen["status"] == WorkItemStatus.NEEDS_HUMAN and now["pending_gate"] != seen["pending_gate"]:
         return False
-    events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
+    events.append(
+        conn, seen["id"], LimitEvent.TIME_CAP_REACHED, hit.payload(node_id=seen["current_node_id"])
+    )
     store.mark_needs_human(
         conn, seen["id"], seen["current_node_id"], hit.reason, kind=StopKind.CAP, limit=hit.limit
     )

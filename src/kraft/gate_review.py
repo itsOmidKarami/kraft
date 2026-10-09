@@ -24,7 +24,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
 from kraft.templates.models import AgentTask, ResolvedNode
-from kraft.vocab import ADVANCING
+from kraft.vocab import ADVANCING, GateEvent
 from kraft.worker import steering as _steering
 
 #: The only strings a verdict may be. Anything else -- a typo, a sentence, a
@@ -157,7 +157,7 @@ async def review(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "gate_auto_review_skipped",
+                GateEvent.AUTO_REVIEW_SKIPPED,
                 {"gate": gate, "reason": "unreviewable"},
                 node_id=node.id,
             )
@@ -171,7 +171,7 @@ async def review(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "gate_auto_review_skipped",
+                GateEvent.AUTO_REVIEW_SKIPPED,
                 {"gate": gate, "reason": "profile_fallback"},
                 node_id=node.id,
             )
@@ -197,7 +197,7 @@ async def review(
         lambda c: events.append(
             c,
             work_item_id,
-            "gate_auto_review_started",
+            GateEvent.AUTO_REVIEW_STARTED,
             {"gate": gate, "session_id": session_id},
             node_id=node.id,
         )

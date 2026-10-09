@@ -14,7 +14,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
-from kraft.vocab import StopKind, Verb, admitting
+from kraft.vocab import EscalationEvent, GateEvent, StopKind, Verb, admitting
 from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
@@ -405,7 +405,7 @@ async def review_gates(
                 lambda c, gate=gate: events.append(
                     c,
                     work_item_id,
-                    "gate_auto_review_skipped",
+                    GateEvent.AUTO_REVIEW_SKIPPED,
                     {"gate": gate, "reason": "budget"},
                     node_id=gate,
                 )
@@ -433,7 +433,7 @@ async def review_gates(
                 lambda c, gate=gate, verdict=verdict: events.append(
                     c,
                     work_item_id,
-                    "gate_auto_review_discarded",
+                    GateEvent.AUTO_REVIEW_DISCARDED,
                     {"gate": gate, "verdict": verdict, "reason": "gate no longer pending"},
                     node_id=gate,
                 )
@@ -456,7 +456,7 @@ async def review_gates(
                 lambda c, gate=gate, why=why: events.append(
                     c,
                     work_item_id,
-                    "gate_auto_review_skipped",
+                    GateEvent.AUTO_REVIEW_SKIPPED,
                     {"gate": gate, "reason": "undecided", **({"note": why} if why else {})},
                     node_id=gate,
                 )
@@ -945,7 +945,10 @@ async def auto_escalate_stuck(
         # forever. Dispatching another turn just asks again.
         await db.write(
             lambda c: events.append(
-                c, work_item_id, "work_item_auto_escalate_skipped", {"reason": "needs_context"}
+                c,
+                work_item_id,
+                EscalationEvent.WORK_ITEM_AUTO_ESCALATE_SKIPPED,
+                {"reason": "needs_context"},
             )
         )
         return status
@@ -964,7 +967,7 @@ async def auto_escalate_stuck(
                 lambda c: events.append(
                     c,
                     work_item_id,
-                    "work_item_auto_escalate_skipped",
+                    EscalationEvent.WORK_ITEM_AUTO_ESCALATE_SKIPPED,
                     {"reason": "node_escalation"},
                     node_id=row["current_node_id"],
                 )
@@ -992,7 +995,7 @@ async def auto_escalate_stuck(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "work_item_auto_escalate_skipped",
+                EscalationEvent.WORK_ITEM_AUTO_ESCALATE_SKIPPED,
                 {"reason": "budget"},
                 node_id=row["current_node_id"],
             )
@@ -1005,7 +1008,7 @@ async def auto_escalate_stuck(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "work_item_auto_escalate_capped",
+                EscalationEvent.WORK_ITEM_AUTO_ESCALATE_CAPPED,
                 {"cap": cap, "count": count},
                 node_id=row["current_node_id"],
             )
@@ -1133,7 +1136,7 @@ async def resume_after_escalation(
                 lambda c: events.append(
                     c,
                     work_item_id,
-                    "work_item_self_retry_dropped",
+                    EscalationEvent.WORK_ITEM_SELF_RETRY_DROPPED,
                     {"node_id": node_id, "status": status},
                 )
             )

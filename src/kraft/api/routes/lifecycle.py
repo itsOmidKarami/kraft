@@ -27,7 +27,20 @@ from kraft.policy import NO_CAP, PolicyError
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
-from kraft.vocab import ENDED, HOLDS_SLOT, RUNNING, StopKind, Verb, WorkItemStatus, admitting
+from kraft.vocab import (
+    ENDED,
+    HOLDS_SLOT,
+    RUNNING,
+    ChainEvent,
+    EscalationEvent,
+    ForgeEvent,
+    LimitEvent,
+    StopKind,
+    Verb,
+    WorkItemEvent,
+    WorkItemStatus,
+    admitting,
+)
 from kraft.worker import backends
 
 logger = logging.getLogger(__name__)
@@ -652,7 +665,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "total": len(tasks),
         "title": tasks[body.task - 1][0],
     }
-    await st.db.write(lambda c: events.append(c, wid, "plan_progress", payload))
+    await st.db.write(lambda c: events.append(c, wid, WorkItemEvent.PLAN_PROGRESS, payload))
     p = progress_mod.for_item(st.db, row, worktree)
     return {"id": wid, "progress": p.model_dump() if p else None}
 
@@ -984,7 +997,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 lambda c: events.append(
                     c,
                     wid,
-                    "worktree_rebase_verified",
+                    ChainEvent.WORKTREE_REBASE_VERIFIED,
                     {"reported_head": new_base, "worktree_head": worktree_head},
                     node_id=row["current_node_id"],
                 )
@@ -1187,7 +1200,7 @@ async def _retry(wid: str, body: Retry, request: Request):
             lambda c: events.append(
                 c,
                 wid,
-                "work_item_self_retry_requested",
+                EscalationEvent.WORK_ITEM_SELF_RETRY_REQUESTED,
                 {
                     "session_id": caller_session_id,
                     "node_id": node_id,
@@ -1308,7 +1321,7 @@ async def _retry(wid: str, body: Retry, request: Request):
                 lambda c: events.append(
                     c,
                     wid,
-                    "worktree_rebase_verified",
+                    ChainEvent.WORKTREE_REBASE_VERIFIED,
                     {"reported_head": new_base, "worktree_head": worktree_head},
                     node_id=node_id,
                 )
@@ -1573,7 +1586,7 @@ def _raise_policy_budget(wid: str, budget_usd: float | None):
             raise HTTPException(422, str(exc)) from exc
         store.set_policy_override(c, wid, override)
         events.append(
-            c, wid, "budget_raised", {"budget_usd": budget_usd, "key": "policy.budget_usd"}
+            c, wid, LimitEvent.BUDGET_RAISED, {"budget_usd": budget_usd, "key": "policy.budget_usd"}
         )
 
     return write
@@ -1881,7 +1894,7 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
         lambda c: events.append(
             c,
             wid,
-            "mr_closed",
+            ForgeEvent.MR_CLOSED,
             {"ref": ref["number"], "url": ref["url"], "by": "cancel"},
             node_id=row["current_node_id"],
         )
@@ -1922,7 +1935,7 @@ async def reopen_mr(wid: str, request: Request):
         lambda c: events.append(
             c,
             wid,
-            "mr_reopened",
+            ForgeEvent.MR_REOPENED,
             {"ref": ref["number"], "url": ref["url"]},
             node_id=row["current_node_id"],
         )
@@ -2106,7 +2119,11 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     def _record(c):
         store.set_ci_pipeline_ref(c, wid, "")
         events.append(
-            c, wid, "mr_labels_set", {"labels": list(labels)}, node_id=row["current_node_id"]
+            c,
+            wid,
+            ForgeEvent.MR_LABELS_SET,
+            {"labels": list(labels)},
+            node_id=row["current_node_id"],
         )
 
     await st.db.write(_record)

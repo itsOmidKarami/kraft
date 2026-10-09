@@ -20,6 +20,7 @@ import pytest
 
 from kraft import store, usage
 from kraft.adapters import subprocess as sp
+from kraft.vocab import SessionEvent
 from kraft.worker import reattach
 
 SUITE = "just test --no-testmon 2>&1 | tail -200"
@@ -167,7 +168,8 @@ async def run_agent(database, run_dirs, tmp_path):
         )
         found = database.read(
             lambda c: c.execute(
-                "SELECT type, payload FROM events WHERE type = ?", (sp.JOBS_ABANDONED,)
+                "SELECT type, payload FROM events WHERE type = ?",
+                (SessionEvent.BACKGROUND_JOBS_ABANDONED,),
             ).fetchall()
         )
         return status, (run_dirs.logs / "s1.log").read_text(), [json.loads(r[1]) for r in found]
@@ -235,7 +237,9 @@ async def test_a_session_adopted_after_a_restart_is_held_to_the_same_rule(
     await reattach._adopt(database, "s1", proc.pid, poll_s=0.01)
 
     assert it.sessions()[0]["status"] == "failed"
-    assert [e["payload"]["jobs"] for e in it.events(sp.JOBS_ABANDONED)] == [[SUITE, WAIT]]
+    assert [e["payload"]["jobs"] for e in it.events(SessionEvent.BACKGROUND_JOBS_ABANDONED)] == [
+        [SUITE, WAIT]
+    ]
 
 
 def test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs(run):

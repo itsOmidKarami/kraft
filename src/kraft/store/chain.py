@@ -8,6 +8,7 @@ from kraft import events
 from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
+from kraft.vocab import ChainEvent, GateEvent, SessionEvent, SettingsEvent
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -33,7 +34,7 @@ def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
         "UPDATE work_items SET current_node_id = ?, updated_at = ? WHERE id = ?",
         (first_node_id, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "chain_loaded", {})
+    events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {})
 
 
 def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
@@ -45,7 +46,7 @@ def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
         "current_node_id = ?, updated_at = ? WHERE id = ?",
         (node_id, node_id, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "node_started", {"node_id": node_id})
+    events.append(conn, work_item_id, ChainEvent.NODE_STARTED, {"node_id": node_id})
 
 
 def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
@@ -65,7 +66,7 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     if done:
         return
     conn.execute("UPDATE work_items SET updated_at = ? WHERE id = ?", (_now(), work_item_id))
-    events.append(conn, work_item_id, "node_completed", {"node_id": node_id})
+    events.append(conn, work_item_id, ChainEvent.NODE_COMPLETED, {"node_id": node_id})
 
 
 def set_chain_template(
@@ -90,7 +91,10 @@ def set_chain_template(
         (template_id, materialized_chain, _now(), work_item_id),
     )
     events.append(
-        conn, work_item_id, "chain_template_changed", {"from": old_template_id, "to": template_id}
+        conn,
+        work_item_id,
+        SettingsEvent.CHAIN_TEMPLATE_CHANGED,
+        {"from": old_template_id, "to": template_id},
     )
 
 
@@ -125,7 +129,7 @@ def set_attachments(
     events.append(
         conn,
         work_item_id,
-        "attachments_changed",
+        SettingsEvent.ATTACHMENTS_CHANGED,
         {
             "from": sorted(a["kind"] for a in json.loads(row["attachments"] or "[]")),
             "to": sorted(a["kind"] for a in attachments),
@@ -168,7 +172,7 @@ def revise_chain(
         f"UPDATE work_items SET {column} = ?, updated_at = ? WHERE id = ?",
         (revised, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "chain_revised", payload)
+    events.append(conn, work_item_id, GateEvent.CHAIN_REVISED, payload)
 
 
 def skip_node(
@@ -203,14 +207,17 @@ def skip_node(
     ):
         return
     events.append(
-        conn, work_item_id, "node_skipped", {"node_id": node_id, "gate": gate, "note": note}
+        conn,
+        work_item_id,
+        ChainEvent.NODE_SKIPPED,
+        {"node_id": node_id, "gate": gate, "note": note},
     )
     for sid in session_ids or []:
         conn.execute(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
         )
-        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+        events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 
 
 def skip_scope(
@@ -235,8 +242,8 @@ def skip_scope(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
         )
-        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
-    events.append(conn, work_item_id, "scope_skipped", {"path": path, "note": note})
+        events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
+    events.append(conn, work_item_id, ChainEvent.SCOPE_SKIPPED, {"path": path, "note": note})
 
 
 def skipped_paths(conn: sqlite3.Connection, work_item_id: str) -> frozenset[str]:
@@ -338,7 +345,9 @@ def set_policy_override(conn: sqlite3.Connection, work_item_id: str, override) -
         "UPDATE work_items SET policy_override = ?, updated_at = ? WHERE id = ?",
         (json.dumps(stored) if stored else None, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "policy_override_changed", {"policy": stored or {}})
+    events.append(
+        conn, work_item_id, SettingsEvent.POLICY_OVERRIDE_CHANGED, {"policy": stored or {}}
+    )
 
 
 def chain_node_ids(row) -> tuple[str, ...]:
@@ -744,5 +753,5 @@ def set_node_overrides(conn: sqlite3.Connection, work_item_id: str, patch: dict[
         "UPDATE work_items SET node_overrides = ?, updated_at = ? WHERE id = ?",
         (json.dumps(new) if new else None, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, "node_overrides_changed", {"overrides": new})
+    events.append(conn, work_item_id, SettingsEvent.NODE_OVERRIDES_CHANGED, {"overrides": new})
     return new

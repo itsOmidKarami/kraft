@@ -33,6 +33,7 @@ import httpx
 
 from kraft import config as config_mod
 from kraft import events
+from kraft.vocab import SettingsEvent
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +282,7 @@ class Notifier:
                 lambda c: events.append(
                     c,
                     ev["work_item_id"],
-                    "notification_failed",
+                    SettingsEvent.NOTIFICATION_FAILED,
                     {"event_type": ev["type"], "status": status, "host": host, "error": error},
                 )
             )

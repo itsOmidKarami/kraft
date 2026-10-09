@@ -38,9 +38,10 @@ import pytest
 from kraft import events, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import RunDirs, config_dir
+from kraft.vocab import SandboxEvent
 from kraft.worker import channel
 from kraft.worker.backends import docker
-from kraft.worker.egress import SANDBOX_EGRESS_REFUSED, EgressProxy
+from kraft.worker.egress import EgressProxy
 
 IMAGE = "docker.io/library/alpine:3"
 #: What `allowed.test` resolves to, for the proxy only: private, so only an
@@ -270,7 +271,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
         refused = [
             e["payload"]
             for e in database.read(lambda c: events.read_after(c, 0, "w1"))
-            if e["type"] == SANDBOX_EGRESS_REFUSED
+            if e["type"] == SandboxEvent.EGRESS_REFUSED
         ]
         out = work / "out"
         log = short_run.logs / f"s{os.getpid()}.log"

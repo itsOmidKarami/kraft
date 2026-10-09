@@ -6,6 +6,7 @@ from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
+from kraft.vocab import GateEvent
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
@@ -15,7 +16,7 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
         (_now(), work_item_id),
     ):
         return
-    events.append(conn, work_item_id, "gate_requested", {"gate": gate, "node_id": node_id})
+    events.append(conn, work_item_id, GateEvent.REQUESTED, {"gate": gate, "node_id": node_id})
 
 
 def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
@@ -40,7 +41,7 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
         (_now(), work_item_id),
     ):
         return
-    events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by}, node_id=gate)
+    events.append(conn, work_item_id, GateEvent.APPROVED, {"gate": gate, "by": by}, node_id=gate)
     chain.complete_node(conn, work_item_id, gate)
 
 
@@ -52,7 +53,7 @@ def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, ration
     events.append(
         conn,
         work_item_id,
-        "chain_revision_unchanged",
+        GateEvent.CHAIN_REVISION_UNCHANGED,
         {"gate": gate, "rationale": rationale},
         node_id=gate,
     )
@@ -87,7 +88,7 @@ def show_revision(conn: sqlite3.Connection, work_item_id, gate, digest: str) -> 
         events.append(
             conn,
             work_item_id,
-            "chain_revision_shown",
+            GateEvent.CHAIN_REVISION_SHOWN,
             {"gate": gate, "digest": digest},
             node_id=gate,
         )
@@ -135,7 +136,7 @@ def reject_gate(
     events.append(
         conn,
         work_item_id,
-        "gate_rejected",
+        GateEvent.REJECTED,
         {"gate": gate, "note": note, "node": node, "by": by, "verdict": verdict},
     )
 

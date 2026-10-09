@@ -21,8 +21,8 @@ from support.permissions import PATH, seed_session, templates
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
+from kraft.vocab import SandboxEvent
 from kraft.worker import channel
-from kraft.worker.egress import SANDBOX_EGRESS_REFUSED
 
 # Shared, not copied: the runtime under test, over each transport.
 from worker.test_egress_docker import _pulled, probed, runtime, short_run  # noqa: F401
@@ -131,5 +131,5 @@ def test_a_reply_on_another_items_thread_is_refused(daemon):
     out, evs = daemon('kraft item reply {other_thread} --body hi > out 2>&1; echo " rc=$?" >> out')
 
     assert "403" in out and not out.endswith(" rc=0\n"), out
-    refused = [e["payload"] for e in evs if e["type"] == SANDBOX_EGRESS_REFUSED]
+    refused = [e["payload"] for e in evs if e["type"] == SandboxEvent.EGRESS_REFUSED]
     assert len(refused) == 1 and "/replies" in json.dumps(refused[0]), refused

@@ -1,6 +1,7 @@
 import pytest
 
 from kraft import events
+from kraft.vocab import GateEvent
 
 
 async def _seed_work_item(database, wid="w1"):
@@ -34,12 +35,12 @@ async def test_append_returns_increasing_seq_and_read_after_is_exclusive(databas
 async def test_read_after_filters_by_work_item(database):
     await _seed_work_item(database, "w1")
     await _seed_work_item(database, "w2")
-    await database.write(lambda c: events.append(c, "w1", "x", {}))
-    await database.write(lambda c: events.append(c, "w2", "y", {}))
-    await database.write(lambda c: events.append(c, "w1", "z", {}))
+    await database.write(lambda c: events.append(c, "w1", "node_started", {}))
+    await database.write(lambda c: events.append(c, "w2", "node_completed", {}))
+    await database.write(lambda c: events.append(c, "w1", "plan_progress", {}))
 
     w1 = database.read(lambda c: events.read_after(c, 0, "w1"))
-    assert [e["type"] for e in w1] == ["x", "z"]
+    assert [e["type"] for e in w1] == ["node_started", "plan_progress"]
 
 
 async def test_row_and_event_commit_atomically(database):
@@ -96,7 +97,9 @@ async def test_append_node_id_defaults_from_payload_node(database):
     """The payload's `node` key is the other name an emitter uses for its node
     (`store.chain.complete_node`'s historical shape); either defaults `node_id`."""
     await _seed_work_item(database)
-    seq = await database.write(lambda c: events.append(c, "w1", "x", {"node": "implementation"}))
+    seq = await database.write(
+        lambda c: events.append(c, "w1", "node_started", {"node": "implementation"})
+    )
     row = database.read(
         lambda c: c.execute("SELECT node_id FROM events WHERE seq = ?", (seq,)).fetchone()
     )
@@ -107,7 +110,9 @@ async def test_append_node_id_ignores_a_non_string_node_payload_value(database):
     """A `node` key that is not a node id (a dict, say) must not leak into
     `node_id` as serialized junk."""
     await _seed_work_item(database)
-    seq = await database.write(lambda c: events.append(c, "w1", "x", {"node": {"not": "a string"}}))
+    seq = await database.write(
+        lambda c: events.append(c, "w1", "node_started", {"node": {"not": "a string"}})
+    )
     row = database.read(
         lambda c: c.execute("SELECT node_id FROM events WHERE seq = ?", (seq,)).fetchone()
     )
@@ -137,7 +142,8 @@ async def test_append_explicit_node_id_wins_over_the_payload(database, key):
 async def test_read_after_limit_caps_the_window(database):
     await _seed_work_item(database)
     seqs = [
-        await database.write(lambda c, i=i: events.append(c, "w1", "x", {"i": i})) for i in range(5)
+        await database.write(lambda c, i=i: events.append(c, "w1", "node_started", {"i": i}))
+        for i in range(5)
     ]
     page = database.read(lambda c: events.read_after(c, 0, "w1", limit=2))
     assert [e["seq"] for e in page] == seqs[:2]
@@ -146,7 +152,35 @@ async def test_read_after_limit_caps_the_window(database):
 async def test_read_before_returns_the_last_limit_events_oldest_first(database):
     await _seed_work_item(database)
     seqs = [
-        await database.write(lambda c, i=i: events.append(c, "w1", "x", {"i": i})) for i in range(5)
+        await database.write(lambda c, i=i: events.append(c, "w1", "node_started", {"i": i}))
+        for i in range(5)
     ]
     page = database.read(lambda c: events.read_before(c, seqs[4], "w1", limit=2))
     assert [e["seq"] for e in page] == seqs[2:4]
+
+
+async def test_append_refuses_a_type_that_is_not_in_the_vocabulary(database):
+    await _seed_work_item(database, "w1")
+    with pytest.raises(ValueError, match="'gate_aproved' is not an event type"):
+        await database.write(lambda c: events.append(c, "w1", "gate_aproved", {}))
+
+
+@pytest.mark.parametrize("given", [GateEvent.APPROVED, "gate_approved"], ids=["member", "string"])
+async def test_append_stores_a_known_type_as_its_string(database, given):
+    await _seed_work_item(database, "w1")
+    await database.write(lambda c: events.append(c, "w1", given, {}))
+    (row,) = database.read(lambda c: c.execute("SELECT type, typeof(type) FROM events").fetchall())
+    assert tuple(row) == ("gate_approved", "text")
+
+
+async def test_a_stored_type_outside_the_vocabulary_is_still_read(database):
+    await _seed_work_item(database, "w1")
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO events (work_item_id, type, payload, created_at) "
+            "VALUES ('w1', 'retired_long_ago', '{}', '2020-01-01T00:00:00+00:00')"
+        )
+    )
+    assert [e["type"] for e in database.read(lambda c: events.read_after(c, 0))] == [
+        "retired_long_ago"
+    ]

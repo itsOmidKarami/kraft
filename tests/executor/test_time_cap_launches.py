@@ -17,6 +17,7 @@ from kraft.adapters import agent as agent_mod
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
+from kraft.vocab import LimitEvent
 from kraft.worker import reattach
 
 LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
@@ -260,7 +261,7 @@ async def test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline(
     finally:
         proc.kill()
     assert it.sessions()[0]["status"] == "capped_out"
-    (reached,) = it.events(caps.REACHED)
+    (reached,) = it.events(LimitEvent.TIME_CAP_REACHED)
     assert reached["payload"]["session_id"] == "s1"
     assert it.status() == "needs_human"
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == (
@@ -295,7 +296,7 @@ async def test_the_poller_does_not_stop_an_item_that_moved_since_it_measured(ite
     stopped = await it.database.write(lambda c: caps.stop_if_still_parked(c, seen, hit))
 
     assert stopped is False
-    assert not it.events(caps.REACHED)
+    assert not it.events(LimitEvent.TIME_CAP_REACHED)
 
 
 async def test_the_poller_stops_an_item_still_where_it_measured_it(item_on):
@@ -311,4 +312,7 @@ async def test_the_poller_stops_an_item_still_where_it_measured_it(item_on):
     )
 
     assert stopped is True
-    assert json.loads(json.dumps(it.events(caps.REACHED)[0]["payload"]))["scope"] == "review"
+    assert (
+        json.loads(json.dumps(it.events(LimitEvent.TIME_CAP_REACHED)[0]["payload"]))["scope"]
+        == "review"
+    )

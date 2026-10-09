@@ -25,7 +25,7 @@ from kraft.adapters.forge.models import (
 from kraft.automated_review import AutomatedReview
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_WAIT, WaitBounds
-from kraft.vocab import RUNNING
+from kraft.vocab import RUNNING, ForgeEvent
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ async def _skip_ci(db, work_item_id: str, node_id: str, hook_point: str, orig_re
         lambda c: events.append(
             c,
             work_item_id,
-            "ci_not_configured",
+            ForgeEvent.CI_NOT_CONFIGURED,
             {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
         )
     )
@@ -308,7 +308,7 @@ async def _run_one(
             # merge request is recorded on its row too (Kraft-mjsf).
             def _record(c, n=number, u=url):
                 events.append(
-                    c, work_item_id, "mr_opened", {"number": n, "url": u}, node_id=node_id
+                    c, work_item_id, ForgeEvent.MR_OPENED, {"number": n, "url": u}, node_id=node_id
                 )
                 if repo_row_id is not None:
                     store.update_repo_state(
@@ -401,7 +401,7 @@ async def _run_one(
                         lambda c, log=log: events.append(
                             c,
                             work_item_id,
-                            "ci_infra_exhausted",
+                            ForgeEvent.CI_INFRA_EXHAUSTED,
                             {"node_id": node_id, "reason": log},
                         )
                     )
@@ -471,7 +471,7 @@ async def _run_one(
                     lambda c: events.append(
                         c,
                         work_item_id,
-                        "automated_review_not_configured",
+                        ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED,
                         {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
                     )
                 )
@@ -509,7 +509,7 @@ async def _run_one(
                     lambda c, r=reason: events.append(
                         c,
                         work_item_id,
-                        "automated_review_errored",
+                        ForgeEvent.AUTOMATED_REVIEW_ERRORED,
                         {"node_id": node_id, "reason": r},
                     )
                 )
@@ -801,7 +801,7 @@ async def _run_one(
                             lambda c, log=log: events.append(
                                 c,
                                 work_item_id,
-                                "ci_infra_exhausted",
+                                ForgeEvent.CI_INFRA_EXHAUSTED,
                                 {"node_id": node_id, "reason": log},
                             )
                         )
@@ -906,7 +906,7 @@ async def _stop_for_abandoned_run(db, work_item_id: str, node_id: str, log: str)
     reason = log.rstrip().splitlines()[-1]
     await db.write(
         lambda c: events.append(
-            c, work_item_id, "ci_run_abandoned", {"node_id": node_id, "reason": reason}
+            c, work_item_id, ForgeEvent.CI_RUN_ABANDONED, {"node_id": node_id, "reason": reason}
         )
     )
     return "infra_stop"

@@ -10,7 +10,7 @@ from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
 from kraft.usage import Usage
-from kraft.vocab import LIVE, SessionStatus
+from kraft.vocab import LIVE, LimitEvent, SessionEvent, SessionStatus
 from kraft.vocab.sql import in_list
 
 
@@ -123,7 +123,7 @@ def create_session(
     events.append(
         conn,
         work_item_id,
-        "worker_session_created",
+        SessionEvent.WORKER_SESSION_CREATED,
         {
             "session_id": id,
             "node_id": node_id,
@@ -437,7 +437,7 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     events.append(
         conn,
         row["work_item_id"],
-        "worker_session_started",
+        SessionEvent.WORKER_SESSION_STARTED,
         {
             "session_id": session_id,
             "node_id": row["node_id"],
@@ -461,9 +461,6 @@ def _tokens(usage: Usage) -> tuple[int, ...]:
 #: A model name a harness reports that is a display name, not a model: Cursor's
 #: `init.model` reads "Auto" (`usage._envelope_cursor`).
 _DISPLAY_MODELS = {"auto"}
-
-#: The timeline event for a session whose spend no dollar cap can count.
-UNPRICED = "spend_unpriced"
 
 
 def _with_launch_model(conn: sqlite3.Connection, session_id, usage: Usage | None):
@@ -490,7 +487,7 @@ def _warn_unpriced(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
         row is None
         or conn.execute(
             "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? LIMIT 1",
-            (row["work_item_id"], UNPRICED),
+            (row["work_item_id"], LimitEvent.SPEND_UNPRICED),
         ).fetchone()
     ):
         return
@@ -498,7 +495,7 @@ def _warn_unpriced(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
     events.append(
         conn,
         row["work_item_id"],
-        UNPRICED,
+        LimitEvent.SPEND_UNPRICED,
         {
             "session_id": session_id,
             "harness": row["harness"],
@@ -760,7 +757,7 @@ def session_exited(
     # The design calls this event worker_session_completed; this codebase has
     # always called the same moment worker_session_exited, so the usage rides
     # that rather than a second event meaning the same thing.
-    events.append(conn, row["work_item_id"], "worker_session_exited", payload)
+    events.append(conn, row["work_item_id"], SessionEvent.WORKER_SESSION_EXITED, payload)
 
 
 def stop_escalation_session(conn: sqlite3.Connection, work_item_id: str, session_id: str) -> None:
@@ -773,7 +770,9 @@ def stop_escalation_session(conn: sqlite3.Connection, work_item_id: str, session
         "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
         (now, session_id),
     )
-    events.append(conn, work_item_id, "worker_session_paused", {"session_id": session_id})
+    events.append(
+        conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": session_id}
+    )
 
 
 def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None = None) -> None:
@@ -789,7 +788,7 @@ def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None 
         "SELECT work_item_id FROM worker_sessions WHERE id = ?", (session_id,)
     ).fetchone()
     payload = {"session_id": session_id, **({"reason": reason} if reason else {})}
-    events.append(conn, row["work_item_id"], "session_unknown", payload)
+    events.append(conn, row["work_item_id"], SessionEvent.SESSION_UNKNOWN, payload)
 
 
 def set_session_egress(conn: sqlite3.Connection, session_id: str, egress: dict) -> None:
@@ -808,7 +807,7 @@ def session_reattached(conn: sqlite3.Connection, session_id) -> None:
     events.append(
         conn,
         row["work_item_id"],
-        "session_reattached",
+        SessionEvent.SESSION_REATTACHED,
         {"session_id": session_id, "pid": row["pid"]},
     )
 

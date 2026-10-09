@@ -5,7 +5,7 @@ import sqlite3
 from kraft import events
 from kraft.policy import Cap
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.vocab import CAP_SWEEP_LEAVES
+from kraft.vocab import CAP_SWEEP_LEAVES, SessionEvent, WorkItemEvent
 from kraft.vocab.sql import in_list
 
 
@@ -174,7 +174,7 @@ def retry_after_cap(
     events.append(
         conn,
         work_item_id,
-        "work_item_retried",
+        WorkItemEvent.RETRIED,
         {
             "node_id": node_id,
             "loop": key,
@@ -232,6 +232,6 @@ def mark_sessions_capped_out(
         events.append(
             conn,
             work_item_id,
-            "worker_session_exited",
+            SessionEvent.WORKER_SESSION_EXITED,
             {"session_id": row["id"], "status": "capped_out"},
         )

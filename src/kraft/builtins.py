@@ -24,6 +24,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
 from kraft.config import ConfigError, RepoEntry, base_ignore_args, git_read
 from kraft.paths import RunDirs, default_run_dir
+from kraft.vocab import LimitEvent
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
 from kraft.worker import inject as _inject
@@ -1854,7 +1855,7 @@ async def mr_rebase(
     except RebaseTimedOut as exc:
         # Recorded the same way a time cap stops any other task
         # (`dispatch.time_capped_session`, `adapters.subprocess.run_task`'s
-        # own mid-run kill): the session exits `capped_out`, `caps.REACHED`
+        # own mid-run kill): the session exits `capped_out`, `LimitEvent.TIME_CAP_REACHED`
         # names the scope and cap, and the walk stops for a human -- not a
         # new stop kind, the existing one.
         assert time_cap is not None  # only a passed time_cap can raise this
@@ -1875,7 +1876,7 @@ async def mr_rebase(
             lambda c: events.append(
                 c,
                 work_item_id,
-                _caps.REACHED,
+                LimitEvent.TIME_CAP_REACHED,
                 time_cap.hit.payload(node_id=node_id, task=hook_point, session_id=session_id),
             )
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -125,3 +126,38 @@ def _documented(heading: str) -> list[str]:
 @pytest.mark.parametrize("family", FAMILIES, ids=lambda f: f.__name__)
 def test_the_docs_page_lists_exactly_each_familys_types(family):
     assert _documented(SECTIONS[family][0]) == [m.value for m in family]
+
+
+#: `end_work_item` appends the two types it unpacked from `MANUAL_ENDS`,
+#: which holds members.
+_UNPACKED = {("store/work_items.py", "audit"), ("store/work_items.py", "ordinary")}
+
+
+def test_every_writer_names_its_type_as_a_family_member():
+    families = {f.__name__ for f in FAMILIES}
+    src = ROOT / "src" / "kraft"
+    calls, bad = 0, []
+    for path in sorted(src.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "events"
+            ):
+                continue
+            calls += 1
+            kind = node.args[2]
+            rel = path.relative_to(src).as_posix()
+            if (
+                isinstance(kind, ast.Attribute)
+                and isinstance(kind.value, ast.Name)
+                and kind.value.id in families
+            ):
+                continue
+            if isinstance(kind, ast.Name) and (rel, kind.id) in _UNPACKED:
+                continue
+            bad.append(f"{rel}:{node.lineno}")
+    assert calls > 100, "the walk found no writers: has `events.append` been renamed?"
+    assert bad == []

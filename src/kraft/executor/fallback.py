@@ -19,6 +19,7 @@ import time
 
 from kraft import events
 from kraft.templates.models import AgentTask
+from kraft.vocab import LimitEvent
 
 logger = logging.getLogger(__name__)
 
@@ -174,4 +175,6 @@ class Attempts:
             payload["reason"],
             f", until {payload['resets_at_iso']}" if payload["resets_at_iso"] else "",
         )
-        await self.db.write(lambda c: events.append(c, self.wid, "launch_fallback", payload))
+        await self.db.write(
+            lambda c: events.append(c, self.wid, LimitEvent.LAUNCH_FALLBACK, payload)
+        )

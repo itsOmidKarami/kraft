@@ -23,7 +23,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, GateNode, TaskKind
-from kraft.vocab import LIVE
+from kraft.vocab import LIVE, EscalationEvent
 from kraft.vocab.sql import in_list
 from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
@@ -358,7 +358,9 @@ async def _record_message(
     if runtime is not None:
         payload["runtime"] = runtime
     await db.write(
-        lambda c: events.append(c, work_item_id, "escalation_message", payload, node_id=node_id)
+        lambda c: events.append(
+            c, work_item_id, EscalationEvent.ESCALATION_MESSAGE, payload, node_id=node_id
+        )
     )
 
 

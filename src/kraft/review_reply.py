@@ -27,6 +27,7 @@ from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
 from kraft.templates.models import AgentTask
+from kraft.vocab import GateEvent
 from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
@@ -79,7 +80,11 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         error = repr(exc)
         await db.write(
             lambda c: events.append(
-                c, work_item_id, "reply_agent_failed", {"gate": gate, "error": error}, node_id=gate
+                c,
+                work_item_id,
+                GateEvent.REPLY_AGENT_FAILED,
+                {"gate": gate, "error": error},
+                node_id=gate,
             )
         )
         return "failed"
@@ -98,7 +103,11 @@ async def refused_without_channel(db, row, launch, gate: str) -> bool:
     reason = "the item's sandbox has no `network:`, so no route to Kraft: no reply agent runs"
     await db.write(
         lambda c: events.append(
-            c, row["id"], "reply_agent_skipped", {"gate": gate, "reason": reason}, node_id=gate
+            c,
+            row["id"],
+            GateEvent.REPLY_AGENT_SKIPPED,
+            {"gate": gate, "reason": reason},
+            node_id=gate,
         )
     )
     return True
@@ -181,7 +190,11 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     if files:
         await db.write(
             lambda c: events.append(
-                c, work_item_id, "reply_agent_wrote", {"gate": gate, "files": files}, node_id=gate
+                c,
+                work_item_id,
+                GateEvent.REPLY_AGENT_WROTE,
+                {"gate": gate, "files": files},
+                node_id=gate,
             )
         )
         return "wrote"

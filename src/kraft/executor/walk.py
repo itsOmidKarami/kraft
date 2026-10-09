@@ -43,7 +43,15 @@ from kraft.templates.models import (
     ResolvedNode,
     ResolvedTask,
 )
-from kraft.vocab import ENDED, HOLDS_SLOT, StopKind
+from kraft.vocab import (
+    ENDED,
+    HOLDS_SLOT,
+    ChainEvent,
+    EscalationEvent,
+    GateEvent,
+    StopKind,
+    WorkItemEvent,
+)
 
 
 def chain_of(row) -> MaterializedChain:
@@ -633,7 +641,7 @@ async def _escalate_stuck(
         lambda c: events.append(
             c,
             work_item_id,
-            "stuck_escalation_started",
+            EscalationEvent.STUCK_ESCALATION_STARTED,
             {"node_id": node.id, "task": task.path, "reason": stuck.reason, "attempt": used + 1},
         )
     )
@@ -653,7 +661,7 @@ async def _escalate_stuck(
         lambda c: events.append(
             c,
             work_item_id,
-            "stuck_escalation_finished",
+            EscalationEvent.STUCK_ESCALATION_FINISHED,
             {"node_id": node.id, "task": task.path, "status": status},
         )
     )
@@ -1369,7 +1377,7 @@ async def _walk_node_once(
         }
         await db.write(
             lambda c, payload=measured_payload: events.append(
-                c, work_item_id, "findings_measured", payload
+                c, work_item_id, ChainEvent.FINDINGS_MEASURED, payload
             )
         )
 
@@ -1492,7 +1500,7 @@ async def _walk_node_once(
             }
             await db.write(
                 lambda c, payload=judge_payload: events.append(
-                    c, work_item_id, "judge_verdict", payload
+                    c, work_item_id, ChainEvent.JUDGE_VERDICT, payload
                 )
             )
             if verdict == "stop_needs_human":
@@ -1581,7 +1589,9 @@ async def _walk_node_once(
             "failed_tasks": [t.path for t in failed],
         }
         await db.write(
-            lambda c, payload=payload: events.append(c, work_item_id, "fix_cycle_started", payload)
+            lambda c, payload=payload: events.append(
+                c, work_item_id, ChainEvent.FIX_CYCLE_STARTED, payload
+            )
         )
         instruction = (
             prompts.FIX_PROMPT.format(node_id=node.id, failed=", ".join(t.task.id for t in failed))
@@ -1651,7 +1661,7 @@ async def _walk_node_once(
             await db.write(lambda c: store.refund_counter(c, work_item_id, key))
             await db.write(
                 lambda c, refund={"node_id": node.id, "cycle": count, "outcome": fix}: (
-                    events.append(c, work_item_id, "fix_cycle_refunded", refund)
+                    events.append(c, work_item_id, ChainEvent.FIX_CYCLE_REFUNDED, refund)
                 )
             )
             if fix == BASE_MOVED:
@@ -1683,7 +1693,7 @@ async def _walk_node_once(
         }
         await db.write(
             lambda c, finished=finished: events.append(
-                c, work_item_id, "fix_cycle_finished", finished
+                c, work_item_id, ChainEvent.FIX_CYCLE_FINISHED, finished
             )
         )
         round = count
@@ -1713,7 +1723,9 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
     a future call path invoking this twice on the same `carried`."""
     if carried:
         await db.write(
-            lambda c: events.append(c, work_item_id, "steer_undelivered", {"steer": carried.take()})
+            lambda c: events.append(
+                c, work_item_id, WorkItemEvent.STEER_UNDELIVERED, {"steer": carried.take()}
+            )
         )
 
 
@@ -1773,7 +1785,7 @@ async def _restart_for_base_change(
                     lambda c, g=gate.id: events.append(
                         c,
                         work_item_id,
-                        "gate_reopened",
+                        GateEvent.REOPENED,
                         {"gate": g, "reason": "conflict_resolved"},
                         node_id=g,
                     )
@@ -1788,7 +1800,7 @@ async def _restart_for_base_change(
         lambda c: events.append(
             c,
             work_item_id,
-            "base_change_restart",
+            ChainEvent.BASE_CHANGE_RESTART,
             {
                 "node_id": node.id,
                 "restart_from": restart_from,
@@ -2044,7 +2056,7 @@ async def run_once(
             lambda c: events.append(
                 c,
                 work_item_id,
-                "worktree_prepared",
+                ChainEvent.WORKTREE_PREPARED,
                 {"report": report},
                 node_id=nodes[start_index].id,
             )
