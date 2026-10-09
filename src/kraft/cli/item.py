@@ -94,12 +94,14 @@ def _cmd_create(ns: argparse.Namespace) -> None:
 
 
 def _render_created(result: dict) -> str:
-    """The created item, and, when an --autostart was filed paused because
-    every slot was busy, why: what the board's composer says too."""
+    """The created item, and, when an --autostart found every slot busy, why:
+    what the board's composer says too."""
     slots = result.get("slots")
     shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
     if not slots:
         return shown
+    if queued := _queued(result):
+        return f"{shown}\n{queued}"
     return (
         f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
         f"Start it when one frees: kraft item resume {result['id']}"
@@ -190,9 +192,22 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
     )
 
 
+def _queued(result: dict) -> str | None:
+    """A start the board had no slot for, or None for any other answer."""
+    if result.get("status") != WorkItemStatus.QUEUED:
+        return None
+    slots = result.get("slots") or {}
+    return (
+        f"queued {result['id']}: {slots.get('busy')} of {slots.get('limit')} slots are busy. "
+        f"It starts when one frees; kraft item pause {result['id']} takes it out of the queue"
+    )
+
+
 def _resumed(result: dict) -> str:
     """resume's usual answer: the node it went on from, and the agent tasks
     a steer reached. No node is an item that had never started."""
+    if queued := _queued(result):
+        return queued
     node = result.get("node_id")
     line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
     if steered := result.get("steered"):
@@ -210,7 +225,10 @@ def _rerun_at(result: dict) -> str:
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action("retried {id}", small=lambda r: f"retried {r['id']} at {_rerun_at(r)}"),
+        common.item_action(
+            "retried {id}",
+            small=lambda r: _queued(r) or f"retried {r['id']} at {_rerun_at(r)}",
+        ),
         ns.json,
     )
 
@@ -221,7 +239,10 @@ def _cmd_raise_budget(ns: argparse.Namespace) -> None:
         asyncio.run(client.raise_budget(ns.usd, ns.id)),
         common.item_action(
             f"raised the cap on {{id}} to {cap} and retried it",
-            small=lambda r: f"raised the cap on {r['id']} to {cap}; retried at {_rerun_at(r)}",
+            small=lambda r: (
+                f"raised the cap on {r['id']} to {cap}; "
+                + (_queued(r) or f"retried at {_rerun_at(r)}")
+            ),
         ),
         ns.json,
     )
@@ -449,7 +470,9 @@ def _cmd_set_policy(ns: argparse.Namespace) -> None:
 def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
     create = subs.add_parser(
-        "create", parents=[common], help="file a work item (paused unless --autostart)"
+        "create",
+        parents=[common],
+        help="file a work item (paused unless --autostart; queued if every slot is busy)",
     )
     create.add_argument("title", help="the item's title: one line, as the board shows it")
     create.add_argument(
@@ -525,7 +548,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create.add_argument(
         "--autostart",
         action="store_true",
-        help="start it now instead of leaving it paused for a human; refused from a Kraft worker",
+        help="start it now instead of leaving it paused for a human; queued when every slot "
+        "is busy; refused from a Kraft worker",
     )
     create.set_defaults(func=_cmd_create, all=False)
 

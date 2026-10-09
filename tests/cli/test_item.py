@@ -90,25 +90,48 @@ def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, c
     assert "To keep them, cancel the item instead." in capsys.readouterr().err
 
 
-def test_create_autostart_at_the_slot_limit_says_why_it_was_filed_paused(
-    tmp_path, monkeypatch, capsys
-):
-    """The board's composer says so; the CLI dropped the server's `slots`,
-    and printed `status paused` with no reason."""
+_QUEUED_ANSWER = {"id": "w1", "status": "queued", "slots": {"busy": 3, "limit": 3}}
+_QUEUED_LINE = "queued w1: 3 of 3 slots are busy. It starts when one frees"
+
+
+def test_create_autostart_at_the_slot_limit_says_it_is_queued(tmp_path, monkeypatch, capsys):
+    """The board's composer says so; the CLI must not print `status queued`
+    with no reason."""
     from kraft.client import transport
 
     async def post(path, payload=None, **kw):
         assert payload["autostart"] is True
-        return 201, {"id": "w1", "status": "paused", "slots": {"busy": 3, "limit": 3}}
+        return 201, _QUEUED_ANSWER
 
     monkeypatch.setattr(transport, "_post", post)
     cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart"])
-    out = capsys.readouterr().out
-    assert (
-        "filed paused: 3 of 3 slots are busy. Start it when one frees: kraft item resume w1" in out
-    )
+    assert _QUEUED_LINE in capsys.readouterr().out
     cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart", "--json"])
     assert json.loads(capsys.readouterr().out)["slots"] == {"busy": 3, "limit": 3}
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["item", "resume", "w1"],
+        ["item", "retry", "w1"],
+        ["item", "raise-budget", "w1", "--usd", "5"],
+    ],
+    ids=["resume", "retry", "raise-budget"],
+)
+def test_a_start_on_a_full_board_says_it_is_queued(monkeypatch, capsys, argv):
+    """A queued answer is not an item row and not the door's usual answer:
+    printed as either, it read `started w1` for an item that had not."""
+    from kraft.client import transport
+
+    async def post(path, payload=None, **kw):
+        return 200, _QUEUED_ANSWER
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(argv)
+    out = capsys.readouterr().out
+    assert _QUEUED_LINE in out
+    assert "started" not in out and "retried at" not in out
 
 
 @pytest.mark.parametrize(

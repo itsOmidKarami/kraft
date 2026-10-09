@@ -39,6 +39,7 @@ STATUS_COLORS = total(
         WorkItemStatus.ABANDONED: "",
         WorkItemStatus.RATE_LIMITED: "",
         WorkItemStatus.WAITING: "",
+        WorkItemStatus.QUEUED: "",
     },
     name="STATUS_COLORS",
 )

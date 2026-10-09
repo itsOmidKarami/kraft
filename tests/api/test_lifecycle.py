@@ -23,6 +23,7 @@ from support.api import (
     _post_default,
     _set_status,
     _spawn_never_returning,
+    _status_of,
 )
 
 
@@ -153,9 +154,11 @@ def test_a_manual_start_is_bounded_by_the_slot_limit(client, repo, verb, busy):
     r = client.post(f"/api/work-items/{wid}/{verb}", json={})
 
     if busy:
-        assert r.status_code == 409, r.text
-        assert "1" in r.json()["detail"]
+        # Bounded, and held: the request waits for a slot instead of being refused.
+        assert r.status_code == 200, r.text
+        assert r.json() == {"id": wid, "status": "queued", "slots": {"busy": 1, "limit": 1}}
         assert client.get(f"/api/work-items/{other}").json()["status"] == "active"
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "queued"
     else:
         assert r.status_code == 200, r.text
 
@@ -618,10 +621,6 @@ def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
     evts = client.get(f"/api/work-items/{wid}/events").json()
     retried = next(e for e in evts if e["type"] == "work_item_retried")
     assert retried["payload"]["seeded"] is True
-
-
-def _status_of(client, wid: str) -> str:
-    return client.get(f"/api/work-items/{wid}").json()["status"]
 
 
 def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(client, repo):

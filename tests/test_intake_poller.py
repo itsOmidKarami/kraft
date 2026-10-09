@@ -218,6 +218,24 @@ async def test_respects_max_concurrent_counting_every_active_item(tmp_path, monk
     assert [r["bead_id"] for r in _work_items(app)] == ["HAND-1"]
 
 
+async def test_a_queued_item_keeps_its_slot_from_auto_intake(tmp_path, monkeypatch, stub_app):
+    """A person's start that is waiting for a slot outranks a pickup: the free
+    slot is the queue's."""
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+
+    app = stub_app(**_state(tmp_path, max_concurrent=1))
+    wid = await _file(app, bead_id="HAND-1", status="paused")
+    await app.state.db.write(
+        lambda c: store.queue_work_item(
+            c, wid, verb="resume", body={}, headers={}, from_statuses=["paused"]
+        )
+    )
+    assert await intake_mod.tick(app) == []
+    assert [r["bead_id"] for r in _work_items(app)] == ["HAND-1"]
+
+
 async def test_a_waiting_item_does_not_hold_an_intake_slot(tmp_path, monkeypatch, stub_app):
     """Kraft-g15w: three slow pipelines used to stall auto-intake for the full
     poll_timeout. A waiting row is not an active one, so the slot is free.

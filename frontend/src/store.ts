@@ -254,6 +254,11 @@ export const useStore = create<State>((set, get) => ({
         case "work_item_blocked_by_dependency":
         case "paused_by_broken_base":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "paused" })) };
+        case "work_item_queued":
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "queued" })) };
+        case "work_item_dequeued":
+          // Back to where it was queued from: the server's row says which.
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: p.to as WorkItem["status"] })) };
         case "worker_session_paused": {
           const rows = s.sessionsByItem[id] ?? [];
           return {
@@ -354,6 +359,8 @@ const REREAD = new Set([
   "work_item_completed",
   "work_item_cancelled",
   "node_skipped",
+  "work_item_queued",
+  "work_item_dequeued",
 ]);
 
 /**

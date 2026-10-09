@@ -105,7 +105,7 @@ It is the same call the matching [MCP tool](/reference/mcp-tools) makes, but not
 always the same value:
 
 - `kraft view show --json` prints the item's full detail (its effective chain, [worker](/concepts/vocabulary#worker) sessions and stop), where the `get_work_item` tool hands an agent a trimmed item.
-- `kraft item create --json` prints a trimmed object, not the raw payload: `id`, `status` and `title`, plus `slots`, `repo_warning`, `bead_warning` or `duplicate_warning` when one applies.
+- `kraft item create --json` prints a trimmed object, not the raw payload: `id`, `status` and `title`, plus `slots` (when `--autostart` queued the item), `repo_warning`, `bead_warning` or `duplicate_warning` when one applies.
 - `kraft view list --json` is scoped to the repo you are in unless you pass `--all` or `--repo`; `list_work_items` is never scoped.
 
 These verbs do not print the payload:

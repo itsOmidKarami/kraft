@@ -8,6 +8,10 @@ const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {})
 const row = (display_status: DisplayStatus, over: Partial<WorkItem> = {}) => detail({ display_status, ...over });
 
 describe("reasonTail", () => {
+  it("says a queued item is waiting for a slot", () => {
+    expect(reasonTail(row("queued"), NOW)).toBe("waiting for a free slot");
+  });
+
   it("says one short thing per status and stop kind", () => {
     const cases: [WorkItem, string][] = [
       [row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }), "approve final review"],

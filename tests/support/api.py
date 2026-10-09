@@ -287,6 +287,10 @@ def _set_status(wid: str, status: str) -> None:
         conn.close()
 
 
+def _status_of(client, wid: str) -> str:
+    return client.get(f"/api/work-items/{wid}").json()["status"]
+
+
 def _force_node(wid: str, node_id: str, status: str) -> None:
     """Force a work item onto a given node and status, without walking the
     chain to get there for real (Kraft-bz9b's repro needs a task failure at
@@ -395,6 +399,23 @@ def _in_state(client, repo, state: dict) -> str:
             store.mark_needs_human(c, wid, state["node"], state["reason"], kind=state["stop"], **kw)
         if "gate" in state:
             events.append(c, wid, "gate_requested", {"gate": state["gate"]}, node_id=state["node"])
+        if "queued_from" in state:
+            c.execute(
+                "UPDATE work_items SET queued_request = ? WHERE id = ?",
+                (
+                    json.dumps(
+                        {
+                            "verb": "resume",
+                            "body": {},
+                            "headers": {},
+                            "from": state["queued_from"],
+                            "stop_kind": None,
+                            "at": "2026-01-01T00:00:00+00:00",
+                        }
+                    ),
+                    wid,
+                ),
+            )
         if state.get("archived"):
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):

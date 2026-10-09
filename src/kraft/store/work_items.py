@@ -313,6 +313,127 @@ def mark_blocked_by_dependency(
     )
 
 
+def queued_request_of(row) -> dict | None:
+    """The start request a `queued` row holds, or None."""
+    return json.loads(row["queued_request"]) if row["queued_request"] else None
+
+
+def queue_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    *,
+    verb: str,
+    body: dict,
+    headers: dict[str, str],
+    from_statuses,
+) -> bool:
+    """Hold a start request the board had no slot for (`kraft.start_queue`).
+    True when it queued; False when the item is not in a status the door
+    starts from.
+
+    The request is saved, not a prepared run: the rebase, the counter clearing
+    and the steer all happen when the item starts, against the code as it is
+    then. `stop_kind` is saved with it because `work_items_stop_kind_clear`
+    clears the column the moment the row leaves the stop set, and a queued
+    retry that is paused goes back to the stop it came from.
+    """
+    row = conn.execute(
+        "SELECT status, stop_kind FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row is None or row["status"] not in [WorkItemStatus(s) for s in from_statuses]:
+        return False
+    now = _now()
+    request = {
+        "verb": verb,
+        "body": body,
+        "headers": headers,
+        "from": row["status"],
+        "stop_kind": row["stop_kind"],
+        "at": now,
+    }
+    if not write_status(
+        conn,
+        "UPDATE work_items SET status = 'queued', queued_request = ?, retry_at = NULL, "
+        "updated_at = ? WHERE id = ?",
+        (json.dumps(request), now, work_item_id),
+    ):
+        return False
+    events.append(conn, work_item_id, "work_item_queued", {"verb": verb, "from": row["status"]})
+    return True
+
+
+#: Where a queued item goes back to. A literal each, like `MANUAL_ENDS`, so no
+#: reader of this module can take either for a claim to `active`.
+_PUT_BACK = {
+    WorkItemStatus.PAUSED: (
+        "UPDATE work_items SET status = 'paused', stop_kind = ?, queued_request = NULL, "
+        "updated_at = ? WHERE id = ? AND status = 'queued'"
+    ),
+    WorkItemStatus.NEEDS_HUMAN: (
+        "UPDATE work_items SET status = 'needs_human', stop_kind = ?, queued_request = NULL, "
+        "updated_at = ? WHERE id = ? AND status = 'queued'"
+    ),
+}
+
+
+def take_queued(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
+    """Put a queued item back where it came from and hand back its request, for
+    the scheduler to start it through the door that queued it. No event: the
+    door writes its own. None when the item is no longer queued."""
+    row = conn.execute(
+        "SELECT status, queued_request FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row is None or row["status"] != WorkItemStatus.QUEUED or not row["queued_request"]:
+        return None
+    request = json.loads(row["queued_request"])
+    if not write_status(
+        conn,
+        _PUT_BACK[WorkItemStatus(request["from"])],
+        (request["stop_kind"], _now(), work_item_id),
+    ):
+        return None
+    return request
+
+
+def dequeue_work_item(
+    conn: sqlite3.Connection, work_item_id: str, *, why: str, detail: str | None = None
+) -> bool:
+    """Take an item out of the queue for good: a person paused it. It goes
+    back to the status it came from, stop reason included."""
+    request = take_queued(conn, work_item_id)
+    if request is None:
+        return False
+    events.append(
+        conn,
+        work_item_id,
+        "work_item_dequeued",
+        {"why": why, "detail": detail, "to": request["from"]},
+    )
+    return True
+
+
+def keep_place(conn: sqlite3.Connection, work_item_id: str, at: str) -> None:
+    """Give a queued item back the queue time it had: the scheduler took it,
+    the door found the slot gone and queued it again, and it must not go to
+    the back for that."""
+    conn.execute(
+        "UPDATE work_items SET queued_request = json_set(queued_request, '$.at', ?) "
+        "WHERE id = ? AND status = 'queued'",
+        (at, work_item_id),
+    )
+
+
+def queued_ids(conn: sqlite3.Connection) -> list[str]:
+    """The queue, earliest first."""
+    return [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM work_items WHERE status = 'queued' "
+            "ORDER BY json_extract(queued_request, '$.at'), id"
+        )
+    ]
+
+
 def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
     """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
     its own poller decides to re-enter it, before the spawned run has done

@@ -246,6 +246,14 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.needs_context_question).toBeNull();
   });
 
+  it.each([
+    ["work_item_queued", { verb: "resume", from: "paused" }, "queued"],
+    ["work_item_dequeued", { why: "paused", detail: null, to: "needs_human" }, "needs_human"],
+  ])("%s moves the row's status", (type, payload, status) => {
+    useStore.getState().applyEvent(ev({ type, payload }));
+    expect(useStore.getState().workItems.w1.status).toBe(status);
+  });
+
   it.each(["work_item_resumed", "work_item_retried", "node_started"])(
     "%s clears a stale question",
     (type) => {

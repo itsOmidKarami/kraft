@@ -172,6 +172,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "paused": return item.current_node_id ? { secondary: a("steer", "Steer"), primary: a("resume", "Resume") } : { secondary: null, primary: a("start", "Start") };
     // Kraft retries a waiting item by itself; /retry would answer it 409 (R10b-01).
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
+    // Queued for a slot: Kraft starts it; Pause takes it out of the queue.
+    case "queued": return { secondary: null, primary: a("pause", "Pause") };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {

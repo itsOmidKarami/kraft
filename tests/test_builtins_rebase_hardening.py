@@ -86,6 +86,9 @@ def _hanging_smudge_filter(repo, pids, seconds: float, *, deaf: bool = False) ->
     wtree.commit(repo, "slow.txt", "slow\n", "a filtered file")
 
 
+CAP = 6.0  # git must reach the hanging hook or filter before the cap, even on a loaded machine
+
+
 @pytest.mark.parametrize("lock", ["stale", "retaken", "never-started"])
 async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_started(
     database, run_dirs, repo, hung, monkeypatch, lock
@@ -117,7 +120,7 @@ async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_sta
         )
 
     with pytest.raises(kraft_builtins.RebaseTimedOut) as raised:
-        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main", timeout=2.0)
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main", timeout=CAP)
 
     [pid] = hung.read_text().split()
     with pytest.raises(ProcessLookupError):
@@ -127,7 +130,7 @@ async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_sta
         assert str(raised.value).endswith("was left mid-rebase for a human")
         return
     if lock == "never-started":
-        assert str(raised.value) == f"git rebase timed out after 2s for {worktree}"
+        assert str(raised.value) == f"git rebase timed out after {CAP:g}s for {worktree}"
     else:
         assert "--abort" not in str(raised.value)
     assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"

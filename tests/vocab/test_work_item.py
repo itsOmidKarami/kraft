@@ -43,7 +43,7 @@ def test_a_group_is_the_set_the_audit_found(group, members):
 @pytest.mark.parametrize(
     ("verb", "members"),
     [
-        (Verb.PAUSE, {S.ACTIVE, S.WAITING, S.RATE_LIMITED}),
+        (Verb.PAUSE, {S.ACTIVE, S.WAITING, S.RATE_LIMITED, S.QUEUED}),
         (Verb.RESUME, {S.PAUSED, S.NEEDS_HUMAN}),
         (Verb.STEER, {S.PAUSED, S.NEEDS_HUMAN}),
         (Verb.RETRY, {S.NEEDS_HUMAN}),
@@ -52,7 +52,15 @@ def test_a_group_is_the_set_the_audit_found(group, members):
         (Verb.ESCALATE, {S.NEEDS_HUMAN, S.PAUSED}),
         (
             Verb.ABANDON,
-            {S.WAITING, S.RATE_LIMITED, S.NEEDS_HUMAN, S.PAUSED, S.COMPLETED, S.ABANDONED},
+            {
+                S.WAITING,
+                S.RATE_LIMITED,
+                S.NEEDS_HUMAN,
+                S.PAUSED,
+                S.COMPLETED,
+                S.ABANDONED,
+                S.QUEUED,
+            },
         ),
         (Verb.ARCHIVE, {S.COMPLETED, S.ABANDONED}),
     ],

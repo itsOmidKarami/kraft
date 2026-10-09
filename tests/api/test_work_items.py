@@ -34,12 +34,11 @@ def test_new_work_item_schema_rejects_an_unknown_root_pointer_policy(policy):
         NewWorkItem.model_validate({"title": "x", "repo": "/r", "root_pointer_policy": policy})
 
 
-def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
+def test_autostart_create_is_queued_when_all_slots_are_busy(client, repo):
     """Kraft-m43g, Kraft-nxht: `create_work_item`'s autostart path used to hand
     `status="active"` straight to `intake`'s `INSERT` with no capacity check at
     all -- an autostart create always won a slot. It now loses this race the
-    same non-error way an explicit `autostart: False` already does: paused,
-    not rejected."""
+    same non-error way: queued for the slot it asked for, not rejected."""
     busy = _post_default(client, repo)
     _poll_events(client, busy, "gate_requested")
     _set_status(busy, "active")
@@ -51,11 +50,11 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     )
 
     assert r.status_code == 201, r.text
-    assert r.json()["status"] == "paused"
-    # Why it did not start, for the composer's "filed paused" toast.
+    assert r.json()["status"] == "queued"
+    # Why it did not start, for the composer's toast.
     assert r.json()["slots"] == {"busy": 1, "limit": 1}
     wid = r.json()["id"]
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "queued"
     assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 

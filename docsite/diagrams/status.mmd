@@ -1,8 +1,14 @@
 stateDiagram-v2
   direction LR
   [*] --> paused: filed
+  [*] --> queued: autostart, no free slot
   [*] --> active: autostart, auto-intake
   paused --> active: resume
+  paused --> queued: resume, no free slot
+  queued --> active: a slot frees
+  queued --> paused: pause
+  needs_human --> queued: retry, no free slot
+  queued --> needs_human: pause
   active --> paused: pause, bead blocker, broken base
   waiting --> paused: pause
   rate_limited --> paused: pause

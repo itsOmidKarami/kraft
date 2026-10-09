@@ -234,6 +234,14 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # `repository` is the last worker_sessions column: `egress` loses its comma
         # (harmless when `egress` was already dropped, version < 44).
         replace = (*replace, ("egress         TEXT,", "egress         TEXT"))
+    if version < 53:
+        # `queued` joined the status CHECK; this needle serves versions 23 to 52.
+        drop_lines = (*drop_lines, "queued_request", "-- the start request a", "-- {verb, body,")
+        drop_lines = (*drop_lines, "(`store.queue_work_item`).")
+        replace = (
+            *replace,
+            ("'waiting', 'queued'", "                      'rate_limited', 'waiting')),"),
+        )
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -303,7 +311,7 @@ def test_migrate_v4_to_v5_rebuilds_work_items_for_the_paused_status(tmp_path):
             "pending_steer_context",
             "-- steer text",
             "                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',",
-            "                      'rate_limited', 'waiting')),",
+            "                      'rate_limited', 'waiting', 'queued')),",
         ),
         replace=(
             (
@@ -531,6 +539,8 @@ ADDED_COLUMNS = [
     (44, "work_items", ("stop_kind",), None),
     # NULL: a row written before fan-out was recorded names no repository
     (51, "worker_sessions", ("repository",), None),
+    # NULL: a row written before the queue existed was never queued
+    (52, "work_items", ("queued_request",), None),
 ]
 
 
@@ -686,7 +696,7 @@ def test_migrate_v16_to_v17_rebuilds_for_rate_limited(tmp_path):
         conn,
         16,
         drop_lines=(
-            "                      'rate_limited', 'waiting')),",
+            "                      'rate_limited', 'waiting', 'queued')),",
             "                    'waiting', 'conflict', 'infra', 'infra_stop')),",
         ),
         replace=(

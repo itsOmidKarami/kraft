@@ -130,6 +130,17 @@
       "status": "completed",
       "node": "implementation",
       "archived": true
+    },
+    "queued": {
+      "status": "queued",
+      "node": "implementation",
+      "queued_from": "paused"
+    },
+    "queued_at_gate": {
+      "status": "queued",
+      "node": "spec_approval",
+      "gate": "spec_approval",
+      "queued_from": "needs_human"
     }
   },
   "doors": {
@@ -139,7 +150,9 @@
       "takes": [
         "running",
         "waiting_ci",
-        "rate_limited"
+        "rate_limited",
+        "queued",
+        "queued_at_gate"
       ]
     },
     "resume": {
@@ -245,7 +258,9 @@
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
-        "escalated"
+        "escalated",
+        "queued",
+        "queued_at_gate"
       ]
     },
     "archive": {
@@ -307,7 +322,9 @@
         "escalated",
         "completed",
         "abandoned",
-        "archived"
+        "archived",
+        "queued",
+        "queued_at_gate"
       ]
     }
   }

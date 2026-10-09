@@ -221,15 +221,14 @@ def _no_downstream_steer(client, repo):
 @pytest.mark.parametrize(
     ("node_id", "setup", "detail"),
     [
-        ("implementation", _full_board, "all 1 slots are busy"),
         ("merge", _no_downstream_steer, "node 'merge' has no agent task downstream to steer"),
     ],
-    ids=["all-slots-busy", "a-steer-nothing-downstream-reads"],
+    ids=["a-steer-nothing-downstream-reads"],
 )
 def test_a_strangers_retry_refuses_before_it_kills_the_escalation_turn(
     client, repo, monkeypatch, node_id, setup, detail
 ):
-    """Both refusals run ahead of the kill: `_stop_live_sessions` SIGINTs the
+    """The refusal runs ahead of the kill: `_stop_live_sessions` SIGINTs the
     turn and that does not undo itself because the request then 409s, so a
     human who gets the error must find the turn still running. `merge` is
     the chain's last node and forge-only, so a steer there reaches nothing."""
@@ -245,6 +244,24 @@ def test_a_strangers_retry_refuses_before_it_kills_the_escalation_turn(
     assert terminated == []
     assert _session_status() == "pending"
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+
+
+def test_a_strangers_retry_on_a_full_board_is_queued_and_leaves_the_turn_running(
+    client, repo, monkeypatch
+):
+    """The kill belongs to the start. Queued, the retry has changed nothing
+    yet, so the escalation turn keeps working."""
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    wid = _stopped_with_a_running_escalation(client, repo, "implementation")
+    _full_board(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert terminated == []
+    assert _session_status() == "pending"
 
 
 def test_a_strangers_retry_cancels_the_escalation_task_not_just_its_pid(client, repo, monkeypatch):

@@ -76,8 +76,13 @@ async def _poll(app) -> dict:
         return _invalid()
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     # Every active item counts, not only auto-started ones: a person working on
-    # three things must not find the poller adding a fourth.
-    slots = int(st.policy.max_concurrent if st.policy else 1) - st.db.read(store.active_count)
+    # three things must not find the poller adding a fourth. A queued item
+    # counts too: it was promised the next free slot (`kraft.start_queue`).
+    slots = (
+        int(st.policy.max_concurrent if st.policy else 1)
+        - st.db.read(store.active_count)
+        - len(st.db.read(store.queued_ids))
+    )
     if _daily_breached(st.db, budget):
         logger.info("auto-intake: daily budget reached, starting nothing")
         blocked = "daily_budget"

@@ -17,7 +17,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 52
+SCHEMA_VERSION = 53
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -121,6 +121,10 @@ CREATE TABLE work_items (
   -- column existed. `work_items_stop_kind_clear` clears it the moment the
   -- row leaves that set, so it can never point at a stop that is over.
   stop_kind        TEXT,
+  -- the start request a `queued` item holds for a free slot, JSON
+  -- {verb, body, headers, from, stop_kind, at}. NULL unless queued
+  -- (`store.queue_work_item`).
+  queued_request   TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -1130,6 +1134,67 @@ FROM worker_sessions""",
     # Which repository a fanned-out session ran for, so a node's view can say
     # where each run happened. Additive: an older row reads as no repository.
     51: ["ALTER TABLE worker_sessions ADD COLUMN repository TEXT"],
+    # `queued` joins the status CHECK. SQLite cannot alter a CHECK, so
+    # work_items is rebuilt the way migrations 17 and 23 were, from literal
+    # text: history is not rebuilt from today's vocabulary. Dropping the table
+    # drops its trigger, which is recreated as migration 44 wrote it.
+    52: [
+        """CREATE TABLE work_items_new (
+  id               TEXT PRIMARY KEY,
+  bead_id          TEXT,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  repo             TEXT NOT NULL,
+  chain_template   TEXT,
+  chain_definition TEXT NOT NULL,
+  current_node_id  TEXT,
+  status           TEXT NOT NULL CHECK (status IN
+                     ('active', 'needs_human', 'completed', 'paused', 'abandoned',
+                      'rate_limited', 'waiting', 'queued')),
+  pending_steer_context TEXT,
+  submodules       TEXT,
+  root_merge_policy TEXT,
+  attachments      TEXT,
+  base_ref         TEXT,
+  bead_cwd         TEXT,
+  branch           TEXT,
+  implements_beads TEXT,
+  retry_at         TEXT,
+  escalation_session_id TEXT,
+  auto_gate        INTEGER NOT NULL DEFAULT 0,
+  agent_overrides  TEXT,
+  budget_set       INTEGER NOT NULL DEFAULT 0,
+  budget_usd       REAL,
+  node_overrides   TEXT,
+  policy_override  TEXT,
+  archived_at      TEXT,
+  archived_by      TEXT,
+  ci_pipeline_ref  TEXT,
+  current_step     INTEGER NOT NULL DEFAULT 0,
+  materialized_chain TEXT,
+  run_chain        TEXT,
+  stop_kind        TEXT,
+  queued_request   TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+)""",
+        """INSERT INTO work_items_new (id, bead_id, title, description, repo, chain_template,
+  chain_definition, current_node_id, status, pending_steer_context, submodules,
+  root_merge_policy, attachments, base_ref, bead_cwd, branch, implements_beads,
+  retry_at, escalation_session_id, auto_gate, agent_overrides, budget_set, budget_usd,
+  node_overrides, policy_override, archived_at, archived_by, ci_pipeline_ref,
+  current_step, materialized_chain, run_chain, stop_kind, created_at, updated_at)
+SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
+       current_node_id, status, pending_steer_context, submodules, root_merge_policy,
+       attachments, base_ref, bead_cwd, branch, implements_beads, retry_at,
+       escalation_session_id, auto_gate, agent_overrides, budget_set, budget_usd,
+       node_overrides, policy_override, archived_at, archived_by, ci_pipeline_ref,
+       current_step, materialized_chain, run_chain, stop_kind, created_at, updated_at
+  FROM work_items""",
+        "DROP TABLE work_items",
+        "ALTER TABLE work_items_new RENAME TO work_items",
+        _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER,
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
