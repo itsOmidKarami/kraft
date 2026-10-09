@@ -12,6 +12,7 @@ class DisplayStatus(StrEnum):
     PAUSED = "paused"
     RUNNING = "running"
     WAITING = "waiting"
+    QUEUED = "queued"
     NEEDS_YOU = "needs_you"
     ESCALATED = "escalated"
     FAILED = "failed"

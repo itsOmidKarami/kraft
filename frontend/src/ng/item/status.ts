@@ -20,6 +20,7 @@ const FULL: PanelItem[] = ["escalate", "complete", "archive", "cancel"];
 const TONE: Record<DisplayStatus, Tone> = {
   running: "neutral",
   waiting: "info",
+  queued: "info",
   needs_you: "warn",
   escalated: "warn",
   failed: "bad",

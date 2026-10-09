@@ -34,6 +34,7 @@ class WorkItemStatus(StrEnum):
     ABANDONED = "abandoned"
     RATE_LIMITED = "rate_limited"
     WAITING = "waiting"
+    QUEUED = "queued"
 
 
 class Verb(StrEnum):
@@ -121,6 +122,12 @@ TRAITS = total(
             commands_may_start=True,
             mr_watched=True,
             admits_status=frozenset({V.PAUSE, V.SKIP, V.ABANDON}),
+        ),
+        # Asked to start with every slot busy (`kraft.start_queue`). Nothing of
+        # it runs; pause takes it out of the queue.
+        S.QUEUED: StatusTraits(
+            DisplayStatus.QUEUED,
+            admits_status=frozenset({V.PAUSE, V.ABANDON}),
         ),
     },
     name="TRAITS",
