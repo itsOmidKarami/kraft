@@ -97,6 +97,11 @@ def _show_value(item: dict, key: str, value) -> str:
         return ", ".join(f"{d['id']} ({d['status']})" for d in value or []) or "none"
     if key == "queued" and value:
         return f"for {value['verb']}, since {value['since']}"
+    if key == "concerns" and value:
+        # An agent wrote these, so like a title they are printed as plain text.
+        return "\n".join(
+            render.plain_text(line) for concern in value for line in str(concern).splitlines()
+        )
     return str(value)
 
 

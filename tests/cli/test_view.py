@@ -151,3 +151,25 @@ def test_show_lists_what_a_blocked_item_comes_after(monkeypatch, capsys):
     monkeypatch.setattr(transport, "_get", get)
     cli.main(["view", "show", "w1"])
     assert "a1 (active)" in capsys.readouterr().out
+
+
+def test_show_prints_what_a_task_flagged_about_its_own_work(monkeypatch, capsys):
+    """A task that finished `done_with_concerns` owes the person at the next
+    gate its doubt. The detail endpoint carries it; the trimmed view dropped it."""
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "needs_human",
+            "pending_gate": "local_review",
+            "concerns": ["Failure not reproducible locally; fix is inferred.\x1b[2J"],
+            "chain_definition": {"nodes": []},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    out = capsys.readouterr().out
+    assert "concerns" in out and "Failure not reproducible locally; fix is inferred." in out
+    assert "['" not in out  # the text, not a Python list
+    assert "\x1b" not in out  # an agent wrote it: no escape reaches the terminal

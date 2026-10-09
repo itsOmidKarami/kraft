@@ -162,6 +162,17 @@ describe("GateBody", () => {
     expect(screen.queryByText("fixed already")).toBeNull();
   });
 
+  // A task's own doubt is owed to whoever decides the gate; the API bounds it at the last resolved gate.
+  it.each([
+    ["a pending gate lists them", pending, true],
+    ["a gate that is not pending does not", detail(), false],
+  ])("concerns: %s", (_n, item, shown) => {
+    stubFetch();
+    render(<GateBody item={{ ...item, concerns: ["fix is inferred, not reproduced"] }} version="1" gate={gate} events={[]} />);
+    expect(screen.queryByText("fix is inferred, not reproduced") !== null).toBe(shown);
+    expect(screen.queryByText("Concerns · 1") !== null).toBe(shown);
+  });
+
   it("reads the threads again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/threads/);
     const at = (version: string) => <MemoryRouter><GateBody item={pending} version={version} gate={gate} events={[]} /></MemoryRouter>;

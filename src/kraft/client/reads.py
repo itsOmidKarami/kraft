@@ -150,6 +150,9 @@ def trim_work_item(item: dict) -> dict:
         **({"usage": item["usage"]["total"]} if item.get("usage") else {}),
         # The item's own policy override (Kraft-ab1bh), only when it has one.
         **({"policy_override": item["policy_override"]} if item.get("policy_override") else {}),
+        # What a task flagged about its own work, owed to whoever decides the
+        # next gate (Kraft-e6rv7). Only when there is one.
+        **({"concerns": item["concerns"]} if item.get("concerns") else {}),
         "next_node_id": _next_node_id(item),
     }
 
