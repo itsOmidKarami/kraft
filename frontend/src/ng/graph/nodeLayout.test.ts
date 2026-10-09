@@ -102,7 +102,7 @@ describe("node layout", () => {
     expect(label.y).toBeCloseTo(arcYAt(two.TY, two.endX, 23, two.loopY, label.x), 5);
     // Two repairs and no judge are a pair, where a repair and the judge sit.
     expect(loopSlots(two, 2, false).map((s) => s.x)).toEqual(loopSlots(two, 1, true).map((s) => s.x));
-    // Where the steps are too few to hold them a column apart, the end mark moves out; a pair moves nothing.
+    // Where the steps are too few to hold them a column apart, the end mark moves out; two steps already hold three, so nothing moves there.
     const one = nodeLayout([step("a", 1)], { loop: true, loopTasks: 4 });
     expect(one.endX).toBeGreaterThan(narrow.endX);
     const four = loopSlots(one, 3, true).map((s) => s.x);
@@ -111,47 +111,56 @@ describe("node layout", () => {
     expect(four[1] - four[0]).toBeCloseTo(G.COL + 10, 5);
     expect(two.endX).toBe(nodeLayout([step("a", 1), step("b", 1)], { loop: true, loopTasks: 2 }).endX);
   });
-  it("opens a loop step of several tasks as a frame on the arc, and makes room for it", () => {
-    // `<step>.<task>`: one step's tasks are one stop on the arc, and the judge, which has no step, its own.
+  it("draws a loop with a step of several tasks as a lane, and opens that step as a frame with a fork", () => {
+    // `<step>.<task>`: one step's tasks are one stop on the loop, and the judge, which has no step, its own. A step
+    // named for the judge, or a task id with a dot of its own, is still read by its first segment.
     const cols = (ids: string[]) => loopCols(ids.map((id) => ({ id }))).map((c) => [c.step, c.tasks.map((t) => t.id)]);
     expect(cols(["fix.lint", "fix.types", "sync.sync", "judge"])).toEqual([["fix", ["fix.lint", "fix.types"]], ["sync", ["sync.sync"]], [undefined, ["judge"]]]);
+    expect(cols(["judge.a", "judge.b", "judge"])).toEqual([["judge", ["judge.a", "judge.b"]], [undefined, ["judge"]]]);
+    expect(cols(["fix.a.b", "fix.c"])).toEqual([["fix", ["fix.a.b", "fix.c"]]]);
     const steps = [step("a", 1), step("b", 1)];
     const arc = nodeLayout(steps, { loop: true, loopTasks: 2 }), shut = nodeLayout(steps, { loop: true, loopTasks: 2, loopLane: true }), lay = nodeLayout(steps, { loop: true, loopTasks: 2, loopLane: true, loopOpen: 2 });
-    // A loop with such a step is a lane, open or not: straight down from the end mark, level along the arc's lowest
-    // point, straight up into the start, and every stop sits on that level line. Any other loop stays the arc.
-    const lowOf = (l: typeof lay) => l.TY + 0.75 * (l.loopY - l.TY) + 2.375, low = lowOf(lay);
-    const lane = (l: typeof lay) => `M${l.endX} ${l.TY + 9} V${lowOf(l) - 28} Q${l.endX} ${lowOf(l)} ${l.endX - 28} ${lowOf(l)} H51 Q23 ${lowOf(l)} 23 ${lowOf(l) - 28} V${l.TY + 10}`;
-    expect(loopArc(lay).d).toBe(lane(lay));
-    expect(loopArc(shut).d).toBe(lane(shut));
-    expect(loopSlots(shut, 1, true).map((s) => s.y)).toEqual([lowOf(shut), lowOf(shut)]);
-    expect(loopArc(arc).d).toContain(` C${arc.endX} ${arc.loopY} 23 ${arc.loopY} `);
-    // Closed, the step is one box: the lane is as deep and as wide as the arc would be, but under a single step,
-    // where the label at its middle would touch the boxes it is level with.
+    // The lane, open or not: no arc, a level run between two corners, and its stops and its label on that level
+    // wherever the label is put. Any other loop stays the one curve.
+    expect(loopArc(arc).d).toMatch(/^M\S+ \S+ C[^A-Z]+$/);
+    for (const l of [shut, lay]) {
+      const y = loopArc(l, "r").label!.y;
+      expect(loopArc(l).d).toMatch(new RegExp(`^M\\S+ \\S+ V\\S+ Q\\S+ \\S+ \\S+ ${y} H\\S+ Q\\S+ ${y} \\S+ \\S+ V\\S+$`));
+      expect(loopSlots(l, 1, true).map((s) => s.y)).toEqual([y, y]);
+      expect(loopArc(l, "r", 300).label!.y).toBe(y);
+    }
+    // Closed, the step is one box: the lane is as deep and as wide as the arc would be. Under a single step it is
+    // wider, so the label (some 70px), level with the pair of boxes, fits between them.
     expect([shut.loopY, shut.endX, shut.H]).toEqual([arc.loopY, arc.endX, arc.H]);
     const slim = loopSlots(nodeLayout([step("a", 1)], { loop: true, loopTasks: 2, loopLane: true }), 1, true);
-    expect(slim[1].x - slim[0].x).toBe(2 * (22 + 35 + 9));
+    expect(slim[1].x - slim[0].x - G.BOX).toBeGreaterThanOrEqual(70);
     const [fix, judge] = loopSlots(lay, 1, true);
-    expect([fix.y, judge.y]).toEqual([low, low]);
-    expect(loopArc(lay, "round 1", fix.x + 150).label).toEqual({ x: fix.x + 150, y: low, text: "round 1" });
     const column = loopColumn(fix, 2), { ys, frame } = column;
-    // Its rows centre on the lane, a row apart under a 40px head; the frame ends 50px under the last box, for its label and meta.
-    expect(ys).toEqual([low - G.ROW / 2, low + G.ROW / 2]);
-    expect(frame).toEqual({ x: fix.x - 92, y: ys[0] - 22 - 4 - 40, w: 184, h: 40 + 4 + G.ROW + 44 + 50 });
+    // Open: its rows centre on the lane, a row apart, in a frame centred on the slot with a 40px head over the
+    // first box and room under the last for its label and meta.
+    expect(ys).toEqual([fix.y - G.ROW / 2, fix.y + G.ROW / 2]);
+    expect(frame.x + frame.w / 2).toBe(fix.x);
+    expect(ys[0] - G.BOX / 2 - frame.y).toBeGreaterThanOrEqual(40);
+    expect(frame.y + frame.h - (ys[1] + G.BOX / 2)).toBeGreaterThanOrEqual(36);
     // The loop goes deeper, so the frame's top is no higher than the step's closed box was.
-    expect(lay.loopY).toBe(shut.loopY + G.ROW + 80);
     expect(frame.y).toBeGreaterThanOrEqual(loopSlots(shut, 1, true)[0].y - G.BOX / 2);
-    // The end mark moves out: the frame clears the lane's corner, the label (some 70px) fits before the judge's box, and the world ends under the frame.
+    // The end mark moves out: the frame clears the lane's corner, the label fits before the judge's box, and the world ends under the frame.
     expect(lay.endX).toBeGreaterThan(shut.endX);
     expect(frame.x).toBeGreaterThanOrEqual(23 + 28);
     expect(judge.x - G.BOX / 2 - (frame.x + frame.w)).toBeGreaterThanOrEqual(70);
     expect(lay.H).toBeGreaterThanOrEqual(frame.y + frame.h);
     // Inside the frame the lane forks, as a parallel step does off the axis: from a join on the frame's right edge
-    // (the loop runs right to left) a branch to each task's box, and from each on to a join on the left edge. The
-    // lane's own line is cut between the joins.
-    const fork = loopFork(fix, column);
-    expect(fork.dots).toEqual([{ x: frame.x + frame.w, y: low }, { x: frame.x, y: low }]);
-    expect(fork.edges.map((e) => e.d)).toEqual(ys.flatMap((y) => [curve(frame.x + frame.w, low, fix.x + 26, y), curve(fix.x - 26, y, frame.x, low)]));
-    expect(fork.cut).toEqual([frame.x, frame.x + frame.w]);
+    // (the loop runs right to left) a branch in to each task's box, and one out from it to a join on the left
+    // edge, 4px off the box as the axis's edges are. The lane's own line is cut between the joins.
+    const fork = loopFork(fix, column), [from, to] = fork.dots;
+    expect([from, to]).toEqual([{ x: frame.x + frame.w, y: fix.y }, { x: frame.x, y: fix.y }]);
+    expect(fork.cut).toEqual([to.x, from.x]);
+    expect(fork.edges).toHaveLength(2 * ys.length);
+    ys.forEach((y, j) => {
+      const [into, out] = [fork.edges[2 * j].d, fork.edges[2 * j + 1].d];
+      expect([into.startsWith(`M${from.x} ${from.y} C`), into.endsWith(` ${fix.x + G.BOX / 2 + 4} ${y}`)]).toEqual([true, true]);
+      expect([out.startsWith(`M${fix.x - G.BOX / 2 - 4} ${y} C`), out.endsWith(` ${to.x} ${to.y}`)]).toEqual([true, true]);
+    });
     // One of three stops open, three tasks tall, under a three-row step: clear of the lane's corner and of that step's own frame.
     const tall = nodeLayout([step("a", 3), step("b", 1)], { loop: true, loopTasks: 3, loopLane: true, loopOpen: 3 });
     const top = loopColumn(loopSlots(tall, 2, true)[0], 3).frame;

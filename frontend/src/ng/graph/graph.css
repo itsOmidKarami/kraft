@@ -82,7 +82,6 @@
 .arc.tone-red circle { fill: var(--bad); }
 .arc-fork { animation: scope-in .24s ease .2s both; }
 .is-calm .arc-fork { animation: scope-in .12s linear; }
-.arc clipPath path { stroke: none; }
 .arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-sub); pointer-events: none; }
 .arc-label.tone-active { color: var(--warn); }
 .arc-label.tone-red, .arc-label.tone-reject { color: var(--bad); }

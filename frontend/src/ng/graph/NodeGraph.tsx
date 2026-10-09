@@ -53,11 +53,17 @@ type Props = {
 const taskKey = (s: string, t: string) => `t:${s}/${t}`;
 /** A fix-loop step of several tasks, closed: one stop, which selects nothing and opens. */
 const loopStepKey = (s: string) => `g:${s}`;
-/** That box's look: the worst of its tasks, running while any runs. */
-function stepLook(tasks: GraphItem[]): Pick<GraphItem, "state" | "running" | "faded"> {
-  const has = (s: GlyphState) => tasks.some((t) => (t.state ?? "todo") === s);
-  const state = (["failed", "current", "amber"] as const).find(has) ?? (has("done") ? (has("todo") ? "current" : "done") : "todo");
-  return { state, running: tasks.some((t) => t.running), faded: tasks.every((t) => t.faded) };
+/** That box's look: the worst of its tasks, running while any runs, with that task's own word for why it waits
+ *  ("needs you", "paused") so the box is not read as running when nothing runs. Some done and the rest not begun
+ *  is under way too, and says how far. */
+function stepLook(tasks: GraphItem[]): Pick<GraphItem, "state" | "running" | "paused" | "faded"> & { wait?: string } {
+  const stateOf = (t: GraphItem) => t.state ?? "todo";
+  const worst = (["failed", "current", "amber"] as GlyphState[]).map((s) => tasks.find((t) => stateOf(t) === s)).find(Boolean);
+  const done = tasks.filter((t) => stateOf(t) === "done").length;
+  const running = tasks.some((t) => t.running), faded = tasks.every((t) => t.faded);
+  if (worst) return { state: worst.state, running, paused: !running && tasks.some((t) => t.paused), faded, wait: worst.meta };
+  if (done === tasks.length) return { state: "done", faded };
+  return done ? { state: "current", faded, wait: `${done} of ${tasks.length} done` } : { state: "todo", faded };
 }
 const labelKey = (s: string) => `l:${s}`;
 const parse = (key: string): NodeSel => {
@@ -136,7 +142,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     quiet.current = true;
     roving.go(openCol ? taskKey("fix_loop", openCol.tasks[0].id) : loopKept.current && loopStepKey(loopKept.current));
     quiet.current = false;
-  }, [loopPhase.layout]); // eslint-disable-line react-hooks/exhaustive-deps
+    // The step too: another opened over an open one changes no phase.
+  }, [loopPhase.layout, openCol?.step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ←/→ to the neighbouring step at the same row (clamped), ↑/↓ within a step, ↑ from the top task to the step's label.
   const loopKeys = arcCols.map((col) => (col.tasks.length > 1 && col !== openCol ? [loopStepKey(col.step!)] : col.tasks.map((t) => taskKey("fix_loop", t.id))));
@@ -183,8 +190,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     if (dir === "ArrowDown") return i >= 0 && i + 1 >= steps[k].tasks.length && loopKeys.length ? loopKeys[0][0] : at(k, i + 1);
   };
   const onKeyDown = (e: KeyboardEvent) => {
-    // Esc steps back one: an open loop step to its box first.
-    if (e.key === "Escape") { e.preventDefault(); if (several(loopOpen)) toggleLoop(undefined); else onEscape?.(); return; }
+    // Esc steps back one: from inside an open loop step, to its box; anywhere else it is the page's own.
+    if (e.key === "Escape") { e.preventDefault(); if (several(loopOpen) && (e.target as Element).closest(".loop-frame, .is-framed")) toggleLoop(undefined); else onEscape?.(); return; }
     const key = roving.active;
     if (!key || !(e.target as Element).closest(".graph-node, .step-label, .scope-chip, .scope-task")) return;
     if (e.key.startsWith("Arrow")) { e.preventDefault(); roving.go(move(key, e.key)); }
@@ -338,13 +345,13 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               type="button"
               tabIndex={roving.tabIndex(key)}
               aria-expanded={false}
-              aria-label={accessibleName({ id: col.step!, ...look }, `fix-loop step of ${n} parallel tasks`)}
+              aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${n} parallel tasks`)}
               className={`graph-node is-task${look.state === "current" ? " is-bold" : ""}${look.state === "todo" ? " is-todo" : ""}${look.state === "amber" ? " is-warn" : ""}${look.faded ? " is-faded" : ""}`}
               style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
               onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
               onClick={() => toggleLoop(col.step)}
             >
-              <NodeGlyph icon="layers" {...look} size="md" sel={selStep === col.step} />
+              <NodeGlyph icon="layers" state={look.state} running={look.running} paused={look.paused} size="md" sel={selStep === col.step} />
               <span className="graph-label" style={{ maxWidth: G.COL - 6 }}>{breakable(col.step!)}</span>
               <span className="graph-meta tone-muted">{n} in parallel</span>
             </button>
