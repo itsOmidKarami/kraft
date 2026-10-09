@@ -13,13 +13,15 @@ into the queue (`store.release_blocked`), so there is one path to `active`.
 the status it came from, and makes that request again through the same route
 function, with a `Request` rebuilt from the saved caller. So a queued start
 runs every check, the rebase, the counter clearing and the steer delivery a
-fresh request would, against the item as it is now. Three ends:
+fresh request would, against the item as it is now. Four ends:
 
 * it starts, and the door writes its own event;
 * the door now refuses it, or fails: the item stays where it came from, and
   `work_item_dequeued` carries the refusal or the error;
 * another request took the slot first: the door queues it again, and it is
-  given back the place it had.
+  given back the place it had;
+* the server shuts down before the door claims it: it is queued again, in its
+  place, and the next server starts it.
 """
 
 from __future__ import annotations
@@ -102,6 +104,12 @@ async def _take_and_start(app, wid: str) -> bool:
             await lifecycle._retry(wid, lifecycle.Retry(**saved["body"]), request)
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
+    except asyncio.CancelledError:
+        # The server is shutting down mid-start. An item the door has not
+        # claimed goes back in the queue, in its place, for the next server to
+        # start: left where it came from, its request would be lost unsaid.
+        await st.db.write(lambda c: _requeue(c, wid, saved))
+        raise
     except HTTPException as exc:
         await _dequeued(st, wid, "refused", str(exc.detail))
         return False
@@ -120,6 +128,20 @@ async def _take_and_start(app, wid: str) -> bool:
         await st.db.write(lambda c: store.keep_place(c, wid, saved["at"]))
         return False
     return True
+
+
+def _requeue(conn, wid: str, saved: dict) -> None:
+    """Queue `saved` again, as the door does when it finds the slot gone. Only
+    while the item is still where the take left it: a claimed item is running."""
+    if store.queue_work_item(
+        conn,
+        wid,
+        verb=saved["verb"],
+        body=saved["body"],
+        headers=saved["headers"],
+        from_statuses=[saved["from"]],
+    ):
+        store.keep_place(conn, wid, saved["at"])
 
 
 async def _dequeued(st, wid: str, why: str, detail: str) -> None:
