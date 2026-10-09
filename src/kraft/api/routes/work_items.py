@@ -470,14 +470,23 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     )
     if row["status"] not in HOLDS_SLOT:
         # Lost the capacity race inside `intake`'s own INSERT (Kraft-m43g,
-        # Kraft-nxht): landed "paused" same as an explicit `not autostart`,
-        # not rejected -- there is no walk to spawn. `slots` says why, so a
-        # caller that asked to start it can say so rather than file it silently.
+        # Kraft-nxht): filed, and queued for the slot it asked for. `slots`
+        # says why it is not running yet.
+        await st.db.write(
+            lambda c: store.queue_work_item(
+                c,
+                wid,
+                verb="resume",
+                body={},
+                headers=deps.caller_headers(request),
+                from_statuses=[WorkItemStatus.PAUSED],
+            )
+        )
         slots = {
             "busy": st.db.read(store.active_count),
             "limit": st.policy.max_concurrent if st.policy else 1,
         }
-        return {"id": wid, "status": row["status"], "slots": slots, **extra}
+        return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": slots, **extra}
 
     deps.spawn(
         request.app,

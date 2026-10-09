@@ -253,6 +253,16 @@ def _live_work_item_row(st, wid):
     return row
 
 
+#: The headers that say who is asking (`routes.gates._decided_by`,
+#: `forbid_self_action`). Saved with a queued start request so the start reads
+#: the same caller. No credential is among them.
+CALLER_HEADERS = ("x-kraft-session-id", "x-kraft-client")
+
+
+def caller_headers(request) -> dict[str, str]:
+    return {h: v for h in CALLER_HEADERS if (v := request.headers.get(h))}
+
+
 def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) -> None:
     """403 when the caller names a worker session of `wid` itself: design §6
     rule 2, a worker does not approve, reject, pause, resume, skip, abandon,

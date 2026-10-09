@@ -102,26 +102,21 @@ def test_raise_budget_on_unknown_spend_takes_only_no_cap(
     [ITEM_WIDE, {"scope": "work_item", "spent_usd": 1.0, "cap_usd": 1.0}],
     ids=["policy", "own"],
 )
-def test_raise_budget_with_every_slot_busy_changes_nothing(client, repo, breach):
-    """The retry would 409 on a full board, and it used to after the cap was
-    already written: raised, and the item still stopped. Now the route asks
-    first, and a refusal leaves the cap where it was."""
+def test_raise_budget_with_every_slot_busy_raises_the_cap_and_queues(client, repo, breach):
+    """A full board no longer refuses: the cap is raised, which is a setting,
+    and the retry it implies waits for a slot."""
     client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
     wid = _budget_stopped_item(client, repo, breach, policy={"budget_usd": 0.05})
     busy = _budget_stopped_item(client, repo, breach)
     _set_status(busy, "active")
-    before = client.get(f"/api/work-items/{wid}").json()
 
     r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 2.0})
 
-    assert r.status_code == 409, r.text
-    assert "slots are busy" in r.json()["detail"]
-    assert "cap was not changed" in r.json()["detail"]
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
     after = client.get(f"/api/work-items/{wid}").json()
-    assert after["budget_cap"] == before["budget_cap"]
-    assert after["policy_override"] == before["policy_override"]
-    assert after["status"] == "needs_human"
-    assert _raised(client, wid) == []
+    assert after["status"] == "queued"
+    assert len(_raised(client, wid)) == 1
 
 
 def test_a_retry_refused_after_the_raise_says_the_cap_was_raised(monkeypatch, client, repo):

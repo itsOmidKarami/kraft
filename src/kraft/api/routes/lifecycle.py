@@ -601,6 +601,10 @@ async def pause_work_item(wid: str, request: Request):
     # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
     if row["status"] not in admitting(Verb.PAUSE):
         raise HTTPException(409, f"work item is {row['status']}, not running")
+    if row["status"] == WorkItemStatus.QUEUED:
+        # Nothing of it runs: pausing withdraws the start it asked for.
+        await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused"))
+        return {"id": wid, "paused_sessions": []}
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
     # mark first, then signal: the adapter checks the row when its child dies, and
@@ -706,9 +710,46 @@ def review_reachable(row) -> bool:
     return not reached
 
 
+def queued_refusal(row) -> str:
+    """The 409 every door but pause, cancel and abandon gives a queued item."""
+    return (
+        "work item is queued for a free slot and starts on its own: "
+        f"pause it to take it out of the queue (kraft item pause {row['id']})"
+    )
+
+
+async def queued_answer(request: Request, wid: str, verb: str, body, from_statuses) -> dict:
+    """Hold a start request that passed every check but capacity, and answer
+    for it. `kraft.start_queue` makes the same request again when a slot
+    frees, so `body` is saved as the caller sent it."""
+    st = request.app.state
+    queued = await st.db.write(
+        lambda c: store.queue_work_item(
+            c,
+            wid,
+            verb=verb,
+            body=body.model_dump(mode="json", exclude_defaults=True),
+            headers=deps.caller_headers(request),
+            from_statuses=from_statuses,
+        )
+    )
+    if not queued:
+        raise HTTPException(
+            409, "work item is not stopped" if verb == "retry" else "work item is not paused"
+        )
+    limit = st.policy.max_concurrent if st.policy else 1
+    return {
+        "id": wid,
+        "status": WorkItemStatus.QUEUED,
+        "slots": {"busy": st.db.read(store.active_count), "limit": limit},
+    }
+
+
 def _not_stopped(row) -> str:
     """The 409 a retry on an item that is not stopped gets. A paused one is
     told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
+    if row["status"] == WorkItemStatus.QUEUED:
+        return queued_refusal(row)
     if row["status"] == WorkItemStatus.PAUSED:
         return "work item is paused, not stopped: resume it instead, or skip what it would run"
     return "work item is not stopped"
@@ -719,6 +760,8 @@ def not_paused(row, gate: str | None = None) -> str:
     one is told what to do (Ruling 183: a steer never reaches a running item),
     and so is one waiting for a person: at a `gate`, approve or reject it;
     stopped anywhere else, retry it, which takes a steer too (R11a)."""
+    if row["status"] == WorkItemStatus.QUEUED:
+        return queued_refusal(row)
     if row["status"] in RUNNING:
         return f"work item is {row['status']}: it is running, so pause it first"
     if row["status"] == WorkItemStatus.NEEDS_HUMAN and gate is not None:
@@ -875,9 +918,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         )
         if not claimed:
             if st.db.read(store.active_count) >= limit:
-                raise HTTPException(
-                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-                )
+                return await queued_answer(request, wid, "resume", body, from_statuses)
             raise HTTPException(409, "work item is not paused")
         # The claim moves before this awaited rebase deliberately (Kraft-11e0):
         # the up-to-60s network call now happens on an item already marked
@@ -1042,6 +1083,7 @@ async def _retry(wid: str, body: Retry, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
+    asked = body  # as the caller sent it: a queued retry is made again from this
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] not in admitting(Verb.RETRY):
@@ -1088,13 +1130,8 @@ async def _retry(wid: str, body: Retry, request: Request):
         # place that authoritatively decides capacity (Kraft-m43g,
         # Kraft-nxht), but a cheap advisory check here, ahead of the kill,
         # keeps a full board from paying for a live turn's death (SIGTERM
-        # plus a cancelled walk task) only to 409 on the claim afterwards
-        # anyway (code-review finding).
-        limit = st.policy.max_concurrent if st.policy else 1
-        if st.db.read(store.active_count) >= limit:
-            raise HTTPException(
-                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-            )
+        # plus a cancelled walk task): a full board queues the retry ahead of
+        # the kill, which belongs to the start (code-review finding).
         precheck_steer = (body.steer or "").strip() or None
         if precheck_steer is not None and not steer_reachable(row, node_id):
             raise HTTPException(
@@ -1102,6 +1139,11 @@ async def _retry(wid: str, body: Retry, request: Request):
                 f"node {node_id!r} has no agent task downstream to steer; "
                 "this text would be dropped",
             )
+        limit = st.policy.max_concurrent if st.policy else 1
+        if st.db.read(store.active_count) >= limit:
+            # Queued with the turn left running: the kill below belongs to the
+            # start, which makes this same request again.
+            return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
         # `running_sessions_for_node` matches an escalation session by
         # hook_point, not node, so the session `escalation_running` just
         # found above is always among the ones killed here -- including a
@@ -1224,9 +1266,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         )
         if not claimed:
             if st.db.read(store.active_count) >= limit:
-                raise HTTPException(
-                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-                )
+                return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
         worktree = st.run_dirs.worktrees / wid
         conflict = None
@@ -1455,8 +1495,9 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     Refuses, before the write, any other stop: a node, step or task's
     `budget_usd`, a `token_budget` or `budget.daily_usd` would stop the
     item again right after. And refuses, before the write too, a retry that
-    could not start now (every slot busy, a walk still running), so a 409
-    never leaves the cap raised and the item stopped. The retry's own claim
+    could not start (a walk still running), so a 409
+    never leaves the cap raised and the item stopped. With every slot busy the
+    cap is raised and the retry is queued. The retry's own claim
     is still what decides: if it refuses after all, the answer says the cap
     was raised and the retry was not.
     """
@@ -1539,16 +1580,9 @@ def _raise_policy_budget(wid: str, budget_usd: float | None):
 
 
 def _refuse_a_retry_that_cannot_start(request: Request, wid: str) -> None:
-    """`_retry`'s own refusals that do not depend on the cap, asked before
-    `raise_budget` writes it: a full board, or a walk still running."""
-    st = request.app.state
-    limit = st.policy.max_concurrent if st.policy else 1
-    if st.db.read(store.active_count) >= limit:
-        raise HTTPException(
-            409,
-            f"all {limit} slots are busy; pause something or raise max_concurrent. "
-            "The cap was not changed",
-        )
+    """`_retry`'s one refusal that does not depend on the cap, asked before
+    `raise_budget` writes it: a walk still running. A full board is not one:
+    the cap is raised and the retry is queued."""
     if deps.task_is_live(request.app, wid):
         raise HTTPException(
             409, "a walk is already running for this work item; the cap was not changed"

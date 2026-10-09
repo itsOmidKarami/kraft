@@ -17,6 +17,7 @@ BADGE = {
     S.ACTIVE: DisplayStatus.RUNNING,
     S.WAITING: DisplayStatus.WAITING,
     S.RATE_LIMITED: DisplayStatus.WAITING,
+    S.QUEUED: DisplayStatus.QUEUED,
     S.PAUSED: DisplayStatus.PAUSED,
     S.COMPLETED: DisplayStatus.DONE,
     S.ABANDONED: DisplayStatus.CANCELLED,
