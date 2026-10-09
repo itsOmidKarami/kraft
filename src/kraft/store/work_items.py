@@ -328,6 +328,28 @@ def queued_request_of(row) -> dict | None:
     return json.loads(row["queued_request"]) if row["queued_request"] else None
 
 
+def _start_request(
+    conn: sqlite3.Connection, work_item_id: str, *, verb, body, headers, from_statuses
+) -> dict | None:
+    """The start request to save with a held item, or None when the item is not
+    in a status the door starts from. `stop_kind` goes with it because
+    `work_items_stop_kind_clear` clears the column the moment the row leaves
+    the stop set, and a held retry that is paused goes back to its stop."""
+    row = conn.execute(
+        "SELECT status, stop_kind FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row is None or row["status"] not in [WorkItemStatus(s) for s in from_statuses]:
+        return None
+    return {
+        "verb": verb,
+        "body": body,
+        "headers": headers,
+        "from": row["status"],
+        "stop_kind": row["stop_kind"],
+        "at": _now(),
+    }
+
+
 def queue_work_item(
     conn: sqlite3.Connection,
     work_item_id: str,
@@ -343,32 +365,23 @@ def queue_work_item(
 
     The request is saved, not a prepared run: the rebase, the counter clearing
     and the steer all happen when the item starts, against the code as it is
-    then. `stop_kind` is saved with it because `work_items_stop_kind_clear`
-    clears the column the moment the row leaves the stop set, and a queued
-    retry that is paused goes back to the stop it came from.
+    then.
     """
-    row = conn.execute(
-        "SELECT status, stop_kind FROM work_items WHERE id = ?", (work_item_id,)
-    ).fetchone()
-    if row is None or row["status"] not in [WorkItemStatus(s) for s in from_statuses]:
+    request = _start_request(
+        conn, work_item_id, verb=verb, body=body, headers=headers, from_statuses=from_statuses
+    )
+    if request is None:
         return False
-    now = _now()
-    request = {
-        "verb": verb,
-        "body": body,
-        "headers": headers,
-        "from": row["status"],
-        "stop_kind": row["stop_kind"],
-        "at": now,
-    }
     if not write_status(
         conn,
         "UPDATE work_items SET status = 'queued', queued_request = ?, retry_at = NULL, "
         "updated_at = ? WHERE id = ?",
-        (json.dumps(request), now, work_item_id),
+        (json.dumps(request), request["at"], work_item_id),
     ):
         return False
-    events.append(conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": row["status"]})
+    events.append(
+        conn, work_item_id, WorkItemEvent.QUEUED, {"verb": verb, "from": request["from"]}
+    )
     return True
 
 
@@ -377,23 +390,24 @@ def queue_work_item(
 _PUT_BACK = {
     WorkItemStatus.PAUSED: (
         "UPDATE work_items SET status = 'paused', stop_kind = ?, queued_request = NULL, "
-        "updated_at = ? WHERE id = ? AND status = 'queued'"
+        "updated_at = ? WHERE id = ? AND status IN ('queued', 'blocked')"
     ),
     WorkItemStatus.NEEDS_HUMAN: (
         "UPDATE work_items SET status = 'needs_human', stop_kind = ?, queued_request = NULL, "
-        "updated_at = ? WHERE id = ? AND status = 'queued'"
+        "updated_at = ? WHERE id = ? AND status IN ('queued', 'blocked')"
     ),
 }
 
 
 def take_queued(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
-    """Put a queued item back where it came from and hand back its request, for
-    the scheduler to start it through the door that queued it. No event: the
-    door writes its own. None when the item is no longer queued."""
+    """Put a queued or blocked item back where it came from and hand back its
+    request, for the scheduler to start it through the door that queued it. No
+    event: the door writes its own. None when the item is neither."""
     row = conn.execute(
         "SELECT status, queued_request FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()
-    if row is None or row["status"] != WorkItemStatus.QUEUED or not row["queued_request"]:
+    held = (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED)
+    if row is None or row["status"] not in held or not row["queued_request"]:
         return None
     request = json.loads(row["queued_request"])
     if not write_status(
@@ -408,8 +422,9 @@ def take_queued(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
 def dequeue_work_item(
     conn: sqlite3.Connection, work_item_id: str, *, why: str, detail: str | None = None
 ) -> bool:
-    """Take an item out of the queue for good: a person paused it. It goes
-    back to the status it came from, stop reason included."""
+    """Take a queued or blocked item out of the hold for good: a person paused
+    it, or what it comes after was abandoned. It goes back to the status it
+    came from, stop reason included."""
     request = take_queued(conn, work_item_id)
     if request is None:
         return False
@@ -442,6 +457,149 @@ def queued_ids(conn: sqlite3.Connection) -> list[str]:
             "ORDER BY json_extract(queued_request, '$.at'), id"
         )
     ]
+
+
+def set_dependencies(conn: sqlite3.Connection, work_item_id: str, ids: list[str]) -> None:
+    """The work items `work_item_id` comes after. Set at intake; afterwards only
+    `drop_dependencies` shortens it, so a cycle cannot be built."""
+    conn.execute(
+        "UPDATE work_items SET depends_on = ? WHERE id = ?",
+        (json.dumps(ids) if ids else None, work_item_id),
+    )
+
+
+def dependency_problem(conn: sqlite3.Connection, ids: list[str]) -> str | None:
+    """Why a new item cannot come after `ids`, or None."""
+    for dep in ids:
+        row = conn.execute("SELECT status FROM work_items WHERE id = ?", (dep,)).fetchone()
+        if row is None:
+            return f"no work item {dep!r} to come after"
+        if row["status"] == WorkItemStatus.ABANDONED:
+            return f"work item {dep} was abandoned and will never complete: nothing can come after it"
+    return None
+
+
+def any_unfinished(conn: sqlite3.Connection, ids: list[str]) -> bool:
+    """Whether any of `ids` is not `completed` yet."""
+    return any(
+        conn.execute(
+            "SELECT 1 FROM work_items WHERE id = ? AND status != 'completed'", (dep,)
+        ).fetchone()
+        for dep in ids
+    )
+
+
+def dependencies_of(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
+    """What the item comes after, in the order it was declared. `met` is true
+    only for a `completed` one: its whole chain ran, post-merge nodes included."""
+    row = conn.execute(
+        "SELECT depends_on FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    ids = json.loads(row["depends_on"]) if row is not None and row["depends_on"] else []
+    out = []
+    for dep in ids:
+        found = conn.execute(
+            "SELECT id, title, status FROM work_items WHERE id = ?", (dep,)
+        ).fetchone()
+        if found is not None:
+            out.append(
+                {
+                    "id": found["id"],
+                    "title": found["title"],
+                    "status": found["status"],
+                    "met": found["status"] == WorkItemStatus.COMPLETED,
+                }
+            )
+    return out
+
+
+def unmet_dependencies(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
+    return [d for d in dependencies_of(conn, work_item_id) if not d["met"]]
+
+
+def block_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    *,
+    verb: str,
+    body: dict,
+    headers: dict[str, str],
+    from_statuses,
+) -> bool:
+    """Hold a start request until the items this one comes after complete.
+    The request is saved as a queued one is; `release_blocked` moves the item
+    to the queue, which makes the request again."""
+    request = _start_request(
+        conn, work_item_id, verb=verb, body=body, headers=headers, from_statuses=from_statuses
+    )
+    if request is None:
+        return False
+    if not write_status(
+        conn,
+        "UPDATE work_items SET status = 'blocked', queued_request = ?, retry_at = NULL, "
+        "updated_at = ? WHERE id = ?",
+        (json.dumps(request), request["at"], work_item_id),
+    ):
+        return False
+    events.append(
+        conn,
+        work_item_id,
+        "work_item_blocked",
+        {
+            "verb": verb,
+            "from": request["from"],
+            "on": [d["id"] for d in unmet_dependencies(conn, work_item_id)],
+        },
+    )
+    return True
+
+
+def release_blocked(conn: sqlite3.Connection) -> list[str]:
+    """One pass over the blocked items. One whose dependencies are all met
+    joins the queue, at the back; one with an abandoned dependency goes back
+    where it came from, because that dependency will never be met. Returns the
+    ids released."""
+    released = []
+    rows = conn.execute(
+        "SELECT id FROM work_items WHERE status = 'blocked' "
+        "ORDER BY json_extract(queued_request, '$.at'), id"
+    ).fetchall()
+    for row in rows:
+        wid = row["id"]
+        unmet = unmet_dependencies(conn, wid)
+        dead = [d for d in unmet if d["status"] == WorkItemStatus.ABANDONED]
+        if dead:
+            dequeue_work_item(
+                conn,
+                wid,
+                why="dependency_abandoned",
+                detail=", ".join(f"{d['id']} ({d['title']})" for d in dead),
+            )
+        elif not unmet:
+            now = _now()
+            if write_status(
+                conn,
+                "UPDATE work_items SET status = 'queued', "
+                "queued_request = json_set(queued_request, '$.at', ?), updated_at = ? "
+                "WHERE id = ? AND status = 'blocked'",
+                (now, now, wid),
+            ):
+                events.append(conn, wid, "work_item_unblocked", {})
+                released.append(wid)
+    return released
+
+
+def drop_dependencies(
+    conn: sqlite3.Connection, work_item_id: str, only: str | None = None
+) -> list[str]:
+    """Stop the item coming after `only`, or after every item it still waits
+    on. A met dependency stays on the record. Returns the ids dropped."""
+    deps = dependencies_of(conn, work_item_id)
+    dropped = [d["id"] for d in deps if (d["id"] == only if only else not d["met"])]
+    if dropped:
+        set_dependencies(conn, work_item_id, [d["id"] for d in deps if d["id"] not in dropped])
+        events.append(conn, work_item_id, "work_item_dependencies_dropped", {"dropped": dropped})
+    return dropped
 
 
 def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
