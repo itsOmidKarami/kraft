@@ -555,31 +555,48 @@ def _stop(c):
 
 
 @pytest.mark.parametrize(
-    ("hold", "move", "to", "then"),
+    ("hold", "body", "move", "to", "then", "dropped"),
     [
-        (store.queue_work_item, _stop, "needs_human", "work_item_needs_human"),
-        (store.block_work_item, _stop, "needs_human", "work_item_needs_human"),
         (
             store.queue_work_item,
+            {"steer": "keep the header"},
+            _stop,
+            "needs_human",
+            "work_item_needs_human",
+            "the queued retry was dropped, with its steer: keep the header",
+        ),
+        (
+            store.block_work_item,
+            {},
+            _stop,
+            "needs_human",
+            "work_item_needs_human",
+            "the queued retry was dropped",
+        ),
+        (
+            store.queue_work_item,
+            {},
             lambda c: store.pause_work_item(c, "w1", []),
             "paused",
             "pause_requested",
+            "the queued retry was dropped",
         ),
-        (None, _stop, "needs_human", "work_item_needs_human"),
+        (None, {}, _stop, "needs_human", "work_item_needs_human", None),
     ],
     ids=["queued-stopped", "blocked-stopped", "queued-paused", "not-held"],
 )
 async def test_a_held_item_moved_by_anything_but_the_queue_leaves_the_hold_and_says_so(
-    database, hold, move, to, then
+    database, hold, body, move, to, then, dropped
 ):
     """A stop, a gate review's verdict, any status write that is not the
-    queue's own: the start the item held is over, and its timeline says so.
-    A write on an item that held nothing says nothing."""
+    queue's own: the start the item held is over, and its timeline says so,
+    with the steer a person attached to it, which reaches no agent now. A
+    write on an item that held nothing says nothing."""
 
     def seed(c):
         schema.insert_item(c, status="paused")
         if hold:
-            hold(c, "w1", verb="retry", body={}, headers={}, from_statuses=["paused"])
+            hold(c, "w1", verb="retry", body=body, headers={}, from_statuses=["paused"])
 
     await database.write(seed)
 
@@ -592,7 +609,7 @@ async def test_a_held_item_moved_by_anything_but_the_queue_leaves_the_hold_and_s
     )
     log = database.read(lambda c: events.read_after(c, 0, "w1"))
     dequeued = [e["payload"] for e in log if e["type"] == "work_item_dequeued"]
-    assert dequeued == ([{"why": "superseded", "detail": None, "to": to}] if hold else [])
+    assert dequeued == ([{"why": "superseded", "detail": dropped, "to": to}] if hold else [])
     # Left the hold, then why: the mover's own event comes after.
     tail = ["work_item_dequeued", then] if hold else [then]
     assert [e["type"] for e in log][-len(tail) :] == tail

@@ -97,14 +97,16 @@ def test_pausing_an_item_the_scheduler_just_took_is_refused(
     assert says in r.json()["detail"]
 
 
-def test_pausing_an_item_while_the_queue_starts_it_says_so(client, repo, monkeypatch):
-    """Between the scheduler's take and the door's claim the row reads paused.
-    Pause answers that a start is under way, not that the item is held."""
+@pytest.mark.parametrize("state", ["queued", "queued_at_gate"], ids=["from-paused", "from-a-stop"])
+def test_pausing_an_item_while_the_queue_starts_it_says_so(client, repo, monkeypatch, state):
+    """Between the scheduler's take and the door's claim the row reads paused,
+    or needs_human for an item queued from a stop. Pause answers that a start
+    is under way, not that the item is held."""
     from kraft import start_queue
     from kraft.api.routes import lifecycle
 
     client.portal.call(client.app.state.queue_task.cancel)
-    wid = _in_state(client, repo, DOORS["states"]["queued"])
+    wid = _in_state(client, repo, DOORS["states"][state])
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def door(*_):
