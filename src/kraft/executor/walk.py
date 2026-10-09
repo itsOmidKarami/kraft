@@ -1368,8 +1368,8 @@ async def _walk_node_once(
             # The commit this measurement is about, so the next round can tell a
             # re-rating of an untouched tree from a real change.
             "head_sha": head_sha,
-            # Which measuring tasks have a session at this round and which have
-            # none. Ahead of `findings`: the plain event view cuts a payload short.
+            # Which measuring tasks have a session this measurement read and which
+            # have none. Ahead of `findings`: the plain event view cuts a payload short.
             "measured_tasks": sorted(p for p, ran in has_session.items() if ran),
             "unmeasured_tasks": sorted(p for p, ran in has_session.items() if not ran),
             "findings": [

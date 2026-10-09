@@ -2137,6 +2137,8 @@ def _current_rows(
     barrier is judged by those same rows, so it fires only where the collector
     itself reads the earlier task as not passed.
     """
+    # shortcut: a task an operator skipped after it failed still sets the barrier
+    # (a skip writes no row), upgrade if a later step's reused row must survive it.
     current: dict[str, list[sqlite3.Row]] = {}
     barrier = -1
     for step in steps:
