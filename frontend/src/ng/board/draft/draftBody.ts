@@ -11,6 +11,8 @@ export interface DraftState {
   plan: string;
   /** A bead this item implements (the server closes it on completion); blank for none. */
   bead: string;
+  /** Work items this one comes after (ids): started before they complete, it is blocked. */
+  after: string[];
   /** Nodes skipped by the person (never a covered one: the attachment drops those). */
   skip: string[];
   /** Auto-escalate every gate that declares a reviewer. */
@@ -30,7 +32,7 @@ export interface DraftState {
 }
 
 export const emptyDraft = (p: Partial<DraftState> = {}): DraftState => ({
-  title: "", brief: "", repo: "", chain: "", spec: "", plan: "", bead: "", skip: [], autoEscalate: false, autoGate: true,
+  title: "", brief: "", repo: "", chain: "", spec: "", plan: "", bead: "", after: [], skip: [], autoEscalate: false, autoGate: true,
   budget: "", attempts: "", wallMin: "", nodeAttempts: {}, nodeWallMin: {}, members: [], pointer: "ignore", ...p,
 });
 
@@ -71,6 +73,7 @@ export function draftBody(d: DraftState, nodes: ChainNode[], workspace: string |
     chain_template: d.chain,
     attachments,
     ...(d.bead.trim() ? { implements_beads: [d.bead.trim()] } : {}),
+    ...(d.after.length ? { depends_on: d.after } : {}),
     skip_nodes: d.skip,
     ...(budget != null ? { budget_usd: budget } : {}),
     ...(Object.keys(overrides).length ? { node_overrides: overrides } : {}),

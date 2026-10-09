@@ -346,6 +346,9 @@ export interface WorkItem {
   /** Whether an agent may review this item's `auto_escalate` gates before a
    *  human sees them (Kraft-zr3s). Set at intake; the column is on every row. */
   auto_gate?: boolean;
+  /** What the item comes after, declared at intake; `met` once that one
+   *  completed. Only on the detail endpoint. */
+  dependencies?: { id: string; title: string; status: WorkItemStatus; met: boolean }[];
   /** The board's status badge (Kraft UI v2 · B1). */
   display_status?: DisplayStatus;
   /** The stop `display_status` is reporting on; `null` off `needs_human`,

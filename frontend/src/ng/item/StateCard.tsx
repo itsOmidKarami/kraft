@@ -1,12 +1,12 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
-import { ago, until, usd } from "../../format";
+import { ago, plural, until, usd } from "../../format";
 import type { ChainNode, DiffFile, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { neverStarted, spentLine } from "./status";
+import { neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
@@ -207,6 +207,47 @@ function useEndEvents(item: ItemDetail): KraftEvent[] {
     api.getEvents(item.id).then(setEvents, () => setEvents([]));
   }, [item.id, wants, item.updated_at]);
   return events;
+}
+
+/** What the item still comes after, each a link to its page, for as long as
+ *  one of them is unfinished. Unblock is offered where `/unblock` takes it (a
+ *  blocked or paused item) and drops the unfinished ones. A blocked item with
+ *  none left stays blocked until the scheduler's next pass, and says so. */
+export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const deps = item.dependencies ?? [];
+  const waits = deps.filter((d) => !d.met).length;
+  const blocked = item.display_status === "blocked";
+  if (!waits && !blocked) return null;
+  const unblock = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await act.unblock(item.id);
+    setBusy(false);
+    if (r.ok) reload();
+    else setError(r.error);
+  };
+  return (
+    <section className={`item-card is-${blocked ? "info" : "neutral"}`} aria-label={blocked ? "Blocked" : "Comes after"}>
+      <h2 className="item-card-head">
+        <Clock size={14} aria-hidden /> <span className="item-card-title">{blocked ? "Blocked" : "Comes after"}</span>
+        <span className="item-card-where">{waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where}</span>
+      </h2>
+      <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
+      <dl className="item-facts item-card-facts">
+        {deps.map((d) => (
+          <div key={d.id}><dt>{d.status.replace("_", " ")}</dt><dd><Link className="item-link" to={`/work-items/${encodeURIComponent(d.id)}`}>{d.title}</Link></dd></div>
+        ))}
+      </dl>
+      {error && <p className="item-error" role="alert">{error}</p>}
+      {waits > 0 && (blocked || item.display_status === "paused") && (
+        <div className="item-actions">
+          <Button disabled={busy} onClick={unblock}>Unblock</Button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 /** The paused card (Decisions §6 Steer and pause, prototype lines 85–90): a

@@ -25,6 +25,11 @@ describe("draftBody", () => {
     expect("implements_beads" in draftBody(emptyDraft(base), NODES, null, false)).toBe(false);
   });
 
+  it("names what the item comes after only when something was picked", () => {
+    expect(draftBody(emptyDraft({ ...base, after: ["a1", "b2"] }), NODES, null, false).depends_on).toEqual(["a1", "b2"]);
+    expect("depends_on" in draftBody(emptyDraft(base), NODES, null, false)).toBe(false);
+  });
+
   it("sends attachments, skips, a set budget (not a blank one), agent review off, and autostart", () => {
     const b = draftBody(emptyDraft({ ...base, spec: "docs/spec.md", plan: " ", skip: ["mr_checks"], budget: "$7.50", autoGate: false }), NODES, null, true);
     expect(b).toMatchObject({ attachments: [{ kind: "spec", path: "docs/spec.md" }], skip_nodes: ["mr_checks"], budget_usd: 7.5, auto_gate: false, autostart: true });

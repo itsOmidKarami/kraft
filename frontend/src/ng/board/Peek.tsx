@@ -17,7 +17,7 @@ import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
-import { PausedCard, StateCard } from "../item/StateCard";
+import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
 import { budgetRaise, headerState, MAIN_LABEL, neverStarted } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
@@ -111,6 +111,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
       <div ref={anchor} className="peek-cards">
         <Banner item={item} onRaise={onRaise} reload={reload} note={<GateNote item={item} version={version} />} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
+        <ComesAfterCard item={item} reload={reload} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
         {error && <p className="item-error" role="alert">{error}</p>}

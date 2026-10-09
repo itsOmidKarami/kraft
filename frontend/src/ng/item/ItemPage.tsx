@@ -9,7 +9,7 @@ import { useSelect } from "./draft/select";
 import { LeaveGuard } from "./draft/LeaveDialog";
 import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
-import { PausedCard, StateCard } from "./StateCard";
+import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
@@ -77,6 +77,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
       <Banner item={item} onRaise={raise} reload={reload} />
       <StateCard item={item} files={files} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
+      <ComesAfterCard item={item} reload={reload} />
       <PausedCard item={item} reload={reload} />
       <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={threadOf} />
       <Workspace item={item} version={version} reload={reload} />
