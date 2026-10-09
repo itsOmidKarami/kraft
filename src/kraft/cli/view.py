@@ -9,7 +9,7 @@ import sys
 
 from kraft import client, render, usage
 from kraft.cli import common
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import StopKind, WorkItemStatus
 
 #: argparse choices; a typo answers an error, not an empty board. Plain strings,
 #: not members: argparse prints `repr(choice)` in its error.
@@ -110,7 +110,7 @@ def _raise_hint(item: dict) -> str | None:
     reader was never pointed at (R10a-10). A node's, a token or the daily cap
     is not one `raise-budget` takes (`item/status.ts`'s `budgetRaise`)."""
     stop = item.get("stop") or {}
-    if item.get("status") != WorkItemStatus.NEEDS_HUMAN or stop.get("kind") != "budget":
+    if item.get("status") != WorkItemStatus.NEEDS_HUMAN or stop.get("kind") != StopKind.BUDGET:
         return None
     if not (stop.get("limit") or stop.get("scope") == "work_item"):
         return None

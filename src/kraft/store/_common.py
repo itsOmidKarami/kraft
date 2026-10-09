@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from kraft.vocab import ENDED as ENDED  # the statuses an item never leaves (Kraft-dncfg)
+from kraft.vocab import ENDED  # the statuses an item never leaves (Kraft-dncfg)
 from kraft.vocab.sql import marks
 
 

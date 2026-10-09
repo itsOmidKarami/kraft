@@ -27,7 +27,7 @@ from kraft.policy import NO_CAP, PolicyError
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
-from kraft.vocab import ENDED, HOLDS_SLOT, RUNNING, Verb, WorkItemStatus, admitting
+from kraft.vocab import ENDED, HOLDS_SLOT, RUNNING, StopKind, Verb, WorkItemStatus, admitting
 from kraft.worker import backends
 
 logger = logging.getLogger(__name__)
@@ -1865,7 +1865,7 @@ async def reopen_mr(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
-    if row["stop_kind"] != "mr_closed":
+    if row["stop_kind"] != StopKind.MR_CLOSED:
         raise HTTPException(409, "work item is not stopped on a closed merge request")
     ref = board._mr_ref(st, wid)
     if ref is None:

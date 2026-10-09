@@ -15,6 +15,7 @@ from support.harness import entry_of
 from kraft import executor, policy, store
 from kraft.executor import dispatch
 from kraft.executor.context import RATE_LIMITED, WAITING
+from kraft.vocab import ENDED as ENDED_STATUSES
 
 #: One node of two ordered steps, then a second node. `first` has already run.
 TWO_STEPS = """
@@ -201,7 +202,7 @@ STATUS_WRITES = {
     "pause_for_broken_base": lambda c, wid: store.pause_for_broken_base(
         c, wid, broken_by="abc", follow_up_bead=None
     ),
-    "claim_for_run": lambda c, wid: store.claim_for_run(c, wid, from_statuses=list(store.ENDED)),
+    "claim_for_run": lambda c, wid: store.claim_for_run(c, wid, from_statuses=list(ENDED_STATUSES)),
     "request_gate": lambda c, wid: store.request_gate(c, wid, "n", "g"),
     "approve_gate": lambda c, wid: store.approve_gate(c, wid, "n"),
     "reject_gate": lambda c, wid: store.reject_gate(c, wid, "n", "no", reopen=True),

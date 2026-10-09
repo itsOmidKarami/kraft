@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, WorkItem } from "../../types";
+import { DISPLAY_STATUSES } from "../../types/vocab.generated";
 import { detail } from "../item/testkit";
 import { groupOf, groupsOf, type BoardView } from "./model";
 
@@ -15,6 +16,11 @@ describe("groupOf", () => {
       ["done", "done"], ["cancelled", "done"],
     ];
     for (const [s, g] of cases) expect(groupOf({ display_status: s, current_node_id: "x" }), s).toBe(g);
+  });
+
+  it("files every generated display status, and an unknown one as running", () => {
+    for (const s of DISPLAY_STATUSES) expect(["needs", "running", "not_started", "done"], s).toContain(groupOf({ display_status: s, current_node_id: "x" }));
+    expect(groupOf({ display_status: "brand_new" as DisplayStatus, current_node_id: "n" })).toBe("running");
   });
 
   it("tells a never-started item from one paused mid-chain by its current node", () => {
