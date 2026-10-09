@@ -17,6 +17,7 @@ from kraft import (
     executor,
     mr_poller,
     rate_limit_retry,
+    start_queue,
     waits,
 )
 from kraft import auth as auth_mod
@@ -283,6 +284,9 @@ async def lifespan(app: FastAPI):
     # something cannot be the coroutine that used to sit in the wait
     # (Kraft-ru98). One scheduler for every wait kind.
     app.state.wait_task = asyncio.ensure_future(waits.poller(app))
+    # Always on, like the wait scheduler: a queued item was promised a start
+    # when a slot frees, and nothing else looks.
+    app.state.queue_task = asyncio.ensure_future(start_queue.poller(app))
     # Always on: a parked item's total time cap and a gate's own timeout run
     # out while nothing of the item runs, so no launch is there to see it.
     app.state.caps_task = asyncio.ensure_future(caps.poller(app))
@@ -339,6 +343,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         app.state.wait_task.cancel()
         await asyncio.gather(app.state.wait_task, return_exceptions=True)
+        app.state.queue_task.cancel()
+        await asyncio.gather(app.state.queue_task, return_exceptions=True)
         app.state.caps_task.cancel()
         await asyncio.gather(app.state.caps_task, return_exceptions=True)
         app.state.auto_escalate_delay_task.cancel()
