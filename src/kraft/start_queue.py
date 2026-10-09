@@ -84,11 +84,11 @@ async def _start_one(app, wid: str) -> bool:
         else:
             await lifecycle.resume_work_item(wid, lifecycle.Resume(**saved["body"]), request)
     except HTTPException as exc:
-        await _dequeued(st, wid, saved, "refused", str(exc.detail))
+        await _dequeued(st, wid, "refused", str(exc.detail))
         return False
     except Exception as exc:  # noqa: BLE001 -- it has left the queue: say so, and let the pass go on
         logger.exception("start queue: starting %s failed", wid)
-        await _dequeued(st, wid, saved, "failed", f"{type(exc).__name__}: {exc}")
+        await _dequeued(st, wid, "failed", f"{type(exc).__name__}: {exc}")
         return False
     status = st.db.read(
         lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()[
@@ -103,13 +103,16 @@ async def _start_one(app, wid: str) -> bool:
     return True
 
 
-async def _dequeued(st, wid: str, saved: dict, why: str, detail: str) -> None:
-    """The item was put back and did not start: its timeline says why."""
-    await st.db.write(
-        lambda c: events.append(
-            c, wid, WorkItemEvent.DEQUEUED, {"why": why, "detail": detail, "to": saved["from"]}
-        )
-    )
+async def _dequeued(st, wid: str, why: str, detail: str) -> None:
+    """The item was put back and did not start: its timeline says why. `to` is
+    the status it is in now, which an open board shows: where it came from, or
+    the stop of a door that failed after its claim (`stops.claimed_or_stopped`)."""
+
+    def write(c):
+        to = c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()["status"]
+        events.append(c, wid, WorkItemEvent.DEQUEUED, {"why": why, "detail": detail, "to": to})
+
+    await st.db.write(write)
 
 
 async def poller(app) -> None:
