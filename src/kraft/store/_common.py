@@ -18,6 +18,10 @@ def write_status(conn, sql: str, params: tuple) -> bool:
     whole literal at its call site, so `dev/check_claim_handoff.py` still sees
     each claim. The ending writes (`mark_completed`, `MANUAL_ENDS`,
     `abandon_work_item`) do not: ending is the one move an item may always make.
+
+    A write that took also ends the hold of any item it moved out of `queued`
+    or `blocked` without the start queue (`_end_overtaken_holds`), which
+    appends that item's `work_item_dequeued` before the caller's own event.
     """
     wrote = (
         conn.execute(f"{sql} AND status NOT IN ({marks(ENDED)})", (*params, *ENDED)).rowcount == 1

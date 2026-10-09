@@ -633,8 +633,9 @@ async def pause_work_item(wid: str, request: Request):
     if row["status"] in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
         # Nothing of it runs: pausing withdraws the start it asked for.
         if not await st.db.write(lambda c: store.dequeue_work_item(c, wid, why="paused")):
-            # Something took it first: the scheduler, which is starting it, or a
-            # blocked item's abandoned dependency.
+            # Something took it first: the scheduler, which is starting it, a
+            # blocked item's abandoned dependency, or a write that superseded
+            # the hold (`store._common._end_overtaken_holds`).
             raise HTTPException(
                 409,
                 _STARTING

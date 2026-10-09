@@ -303,7 +303,7 @@ export const useStore = create<State>((set, get) => ({
           // Released to the queue, which starts it: the server's row is queued.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "queued" })) };
         case "work_item_dequeued":
-          // Back to where it was queued from: the server's row says which.
+          // Out of the hold: `to` is the status the server's row is in now.
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: p.to as WorkItem["status"] })) };
         case "worker_session_paused": {
           const rows = s.sessionsByItem[id] ?? [];
