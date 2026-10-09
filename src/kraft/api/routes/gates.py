@@ -10,6 +10,7 @@ from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import stops
 from kraft.templates import revision
 from kraft.templates.models import GateNode
+from kraft.vocab import StopKind
 
 
 def gate_nodes(st, row) -> tuple:
@@ -242,7 +243,9 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         # going to work. The node that produced the bad artifact needs to be
         # redone, not re-approved, so this is a clear stop, not a silent one.
         await st.db.write(
-            lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason, kind="config")
+            lambda c: store.mark_needs_human(
+                c, wid, row["current_node_id"], reason, kind=StopKind.CONFIG
+            )
         )
         raise HTTPException(
             422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"

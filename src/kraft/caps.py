@@ -56,7 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
-from kraft.vocab import LIVE, STOPPED, WorkItemStatus
+from kraft.vocab import LIVE, STOPPED, StopKind, WorkItemStatus
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -644,7 +644,7 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
         return False
     events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
     store.mark_needs_human(
-        conn, seen["id"], seen["current_node_id"], hit.reason, kind="cap", limit=hit.limit
+        conn, seen["id"], seen["current_node_id"], hit.reason, kind=StopKind.CAP, limit=hit.limit
     )
     return True
 

@@ -14,7 +14,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
-from kraft.vocab import Verb, admitting
+from kraft.vocab import StopKind, Verb, admitting
 from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ async def apply_rejection(
             nodes[gate_index].id,
             f"{key} exhausted after {count - 1} rejection(s)",
             {"cycles": count - 1, "attempts": cap.attempts},
-            kind="cap",
+            kind=StopKind.CAP,
         )
     )
     return None
@@ -499,7 +499,9 @@ async def review_gates(
                 if approved is None:
                     await db.write(
                         lambda c, reason=reason, node=row["current_node_id"]: (
-                            store.mark_needs_human(c, work_item_id, node, reason, kind="config")
+                            store.mark_needs_human(
+                                c, work_item_id, node, reason, kind=StopKind.CONFIG
+                            )
                         )
                     )
                     return "needs_human"
@@ -1154,7 +1156,9 @@ async def resume_after_escalation(
         except RuntimeError as exc:
             reason = str(exc)
             await db.write(
-                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+                lambda c: store.mark_needs_human(
+                    c, work_item_id, node_id, reason, kind=StopKind.INFRA
+                )
             )
             return status_of(db, work_item_id)
         # `refresh_worktree_base` reports the upstream head even when the

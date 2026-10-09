@@ -923,7 +923,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             cause = forge_mod.failure_cause(reason) or "git"
             await st.db.write(
                 lambda c: store.mark_needs_human(
-                    c, wid, row["current_node_id"], reason, kind="infra", facts={"cause": cause}
+                    c,
+                    wid,
+                    row["current_node_id"],
+                    reason,
+                    kind=StopKind.INFRA,
+                    facts={"cause": cause},
                 )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
@@ -1249,7 +1254,7 @@ async def _retry(wid: str, body: Retry, request: Request):
             cause = forge_mod.failure_cause(reason) or "git"
             await st.db.write(
                 lambda c: store.mark_needs_human(
-                    c, wid, node_id, reason, kind="infra", facts={"cause": cause}
+                    c, wid, node_id, reason, kind=StopKind.INFRA, facts={"cause": cause}
                 )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
