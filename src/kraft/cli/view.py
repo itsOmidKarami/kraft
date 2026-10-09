@@ -93,6 +93,8 @@ def _show_value(item: dict, key: str, value) -> str:
         # 1.4 stored one as typed: printed raw it reaches the terminal. `view
         # list` drops them (`render._cell`); so does this. `--json` is the row.
         return "\n".join(render.plain_text(line) for line in str(value).splitlines())
+    if key == "queued" and value:
+        return f"for {value['verb']}, since {value['since']}"
     return str(value)
 
 

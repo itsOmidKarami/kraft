@@ -140,6 +140,7 @@ def trim_work_item(item: dict) -> dict:
         "progress",
         # why it is stopped, and what the chain suggests doing about it (Kraft-s7c04.27)
         "stop_reason",
+        "queued",
         "suggested_action",
     )
     return {

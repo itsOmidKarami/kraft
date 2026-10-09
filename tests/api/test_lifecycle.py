@@ -174,10 +174,13 @@ def test_pausing_a_queued_retry_puts_the_stop_back(client, repo):
         client.post(f"/api/work-items/{wid}/retry", json={"steer": "s"}).json()["status"]
         == "queued"
     )
+    queued = client.get(f"/api/work-items/{wid}").json()["queued"]
+    assert queued["verb"] == "retry" and queued["since"]
     r = client.post(f"/api/work-items/{wid}/pause", json={})
 
     assert r.status_code == 200, r.text
     after = client.get(f"/api/work-items/{wid}").json()
+    assert after["queued"] is None
     assert (after["status"], after["stop"]["kind"], after["stop_reason"]) == (
         "needs_human",
         "failed",

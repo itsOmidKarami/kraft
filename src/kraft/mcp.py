@@ -227,7 +227,8 @@ def build() -> MCPServer:
     async def pause_work_item(work_item_id: str | None = None) -> dict:
         """Stop a running Kraft work item's current attempt. Pair with
         resume_work_item to redirect work that is going wrong: there is no way to
-        talk to a running agent, so steering means pausing and resuming."""
+        talk to a running agent, so steering means pausing and resuming.
+        Pausing a queued item takes it out of the queue, back to where it was."""
         return await client.pause(work_item_id)
 
     @server.tool()
@@ -253,7 +254,9 @@ def build() -> MCPServer:
         """Start or restart a paused Kraft work item. `steer` reaches every
         paused agent task; `steers` gives individual paused agent tasks their
         own, keyed by canonical task path (`node.step.task`). This is also how a
-        work item created by create_work_item is started for the first time."""
+        work item created by create_work_item is started for the first time. With
+        every slot busy the item is queued (status "queued") and starts on its
+        own when one frees."""
         return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
@@ -267,7 +270,9 @@ def build() -> MCPServer:
         retry's prompt: the node it stopped on, or `path` (canonical: `node`,
         `node.step` or `node.step.task`) and everything after it; `restart`
         reruns the whole chain. This is the only way back onto an item that
-        stopped for a human: resume only takes a paused item."""
+        stopped for a human: resume only takes a paused item. With every slot busy
+        the item is queued (status "queued") and starts on its own when one
+        frees."""
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
@@ -278,6 +283,7 @@ def build() -> MCPServer:
         the item-wide `budget_usd` of its policy (merged into the item's
         policy override, its other fields kept). A stop on a node's
         `budget_usd`, a `token_budget` or `budget.daily_usd` is refused.
+        With every slot busy the cap is raised and the retry is queued.
         Only a human should decide this — ask first."""
         return await client.raise_budget(budget_usd, work_item_id)
 

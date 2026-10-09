@@ -1088,6 +1088,12 @@ async def get_work_item(wid: str, request: Request):
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": stop_payload["reason"] if stop_payload else None,
+        # Set while queued: which start it is waiting to make, and since when.
+        "queued": (
+            {"verb": q["verb"], "since": q["at"]}
+            if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
+            else None
+        ),
         # What the chain or a repair concluded a person should do about that
         # stop -- `{action: skip|retry|abandon, reason}` -- or None
         # (Kraft-s7c04.27). Each action is one existing verb.

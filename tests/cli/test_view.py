@@ -119,3 +119,19 @@ def test_show_prints_a_title_1_4_stored_as_plain_text(monkeypatch, capsys):
     assert "second line [31mredevil" in out
     cli.main(["view", "show", "w1", "--json"])
     assert json.loads(capsys.readouterr().out)["title"] == title
+
+
+def test_show_says_a_queued_item_is_queued_since_when_and_for_which_verb(monkeypatch, capsys):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "queued",
+            "queued": {"verb": "retry", "since": "2026-10-09T09:00:00+00:00"},
+            "chain_definition": {"nodes": []},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert "for retry, since 2026-10-09T09:00:00+00:00" in capsys.readouterr().out
