@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { dollars, DOLLARS_HINT, dollarsText, repoName, tokens, usd } from "../../../format";
+import { dollars, DOLLARS_HINT, dollarsText, repoName, tokenText, tokenTip, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -91,7 +91,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
   );
 }
 
-function Meter({ label, used, of, ratio, max, onEdit, editRef }: { label: string; used: string; of: string | null; ratio?: number; max?: string; onEdit?: () => void; editRef?: Ref<HTMLButtonElement> }) {
+function Meter({ label, used, of, ratio, max, onEdit, editRef }: { label: string; used: React.ReactNode; of: string | null; ratio?: number; max?: string; onEdit?: () => void; editRef?: Ref<HTMLButtonElement> }) {
   const tone = ratio == null ? "" : ratio >= 1 ? " is-bad" : ratio > 0.75 ? " is-warn" : "";
   return (
     <div className={`meter${tone}`}>
@@ -233,7 +233,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
         />
       )}
       {editBudget && <BudgetEditor item={item} onCancel={closeBudget} onDone={() => { closeBudget(); reload(); }} />}
-      {used && <Meter label="Tokens" used={tokens(used.tokens_in + used.tokens_out)} of={null} />}
+      {used && <Meter label="Tokens" used={<span data-tip={tokenTip(used)}>{tokenText(used)}</span>} of={null} />}
       {daily && <Meter label="Today, all items" used={usd(daily.spent_usd)} of={daily.cap_usd != null ? usd(daily.cap_usd) : null} ratio={daily.cap_usd ? daily.spent_usd / daily.cap_usd : undefined} max="policy · shared" />}
       <p className="item-muted">Whichever limit is reached first stops the item. An item cap can't go above the policy maximum.</p>
       <dl className="item-facts ip-facts ip-gap">

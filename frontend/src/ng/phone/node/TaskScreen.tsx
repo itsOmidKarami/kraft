@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ago, elapsed, lineCount, tokens, usd } from "../../../format";
+import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
 import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
@@ -122,7 +122,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
               ]} />
               <Block title="Result">
                 <Facts rows={[
-                  ...(at.tokens_in != null ? ([["tokens", tokens((at.tokens_in ?? 0) + (at.tokens_out ?? 0))]] as [string, React.ReactNode][]) : []),
+                  ...(at.tokens_in != null ? ([["tokens", tokenText(at)]] as [string, React.ReactNode][]) : []),
                   ...(at.cost_usd != null ? ([["cost", usd(at.cost_usd, true, at.cost_estimated)]] as [string, React.ReactNode][]) : []),
                   ...(summary ? ([["summary", <button key="s" type="button" className="ph-linkbtn" onClick={() => navigate(`?doc=${encodeURIComponent(summary.document_id)}`)}>{summary.title}</button>]] as [string, React.ReactNode][]) : []),
                 ]} />

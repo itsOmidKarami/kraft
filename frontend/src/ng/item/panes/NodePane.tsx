@@ -1,4 +1,4 @@
-import { tokens, usd } from "../../../format";
+import { tokenText, tokenTip, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf } from "../nodeGraph";
@@ -21,7 +21,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
         {node.fix_loop && <div><dt>fix loop</dt><dd>{rounds ? `round ${rounds.latest}${rounds.total ? ` of ${rounds.total}` : ""}` : "not looped"}</dd></div>}
         {node.on_failure?.length ? <div><dt>on failure</dt><dd>{node.on_failure.map(taskName).join(", ")}</dd></div> : null}
         {next && <div><dt>then</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onNode(next.id)}>{next.id}</button></dd></div>}
-        {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · {tokens(by.tokens_in + by.tokens_out)} tokens · {usd(by.cost_usd, by.cost_complete)}</dd></div>}
+        {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · <span data-tip={tokenTip(by)}>{tokenText(by)} tokens</span> · {usd(by.cost_usd, by.cost_complete)}</dd></div>}
       </dl>
       {steps.length > 0 && (
         <>
