@@ -2,11 +2,13 @@
 anything; an operator adds collections and installs, updates and removes plugins."""
 
 import json
+import socket
 
 import pytest
 from support.plugins import AGENT, chain, instance, make_collection, publish
 
 from kraft import cli, update
+from kraft.client import actions
 from kraft.cli import plugin as plugin_cli
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import fetch
@@ -507,3 +509,29 @@ def test_update_json_is_the_results_with_each_review(installed, capsys):
         "reach": [],
         "content": ["component tasks.more added"],
     }
+
+
+@pytest.mark.parametrize("server", ["none", "refuses"])
+def test_a_missing_server_is_not_a_warning(installed, capsys, monkeypatch, server):
+    """The next start reads the new lock, so no server is not a problem; one
+    that answers an error is."""
+    if server == "none":  # the real call, at a port nothing listens on
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            monkeypatch.setenv("KRAFT_PORT", str(probe.getsockname()[1]))
+        monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+        monkeypatch.setattr(plugin_cli.client, "reload_plugins", actions.reload_plugins)
+    else:
+
+        async def refused():
+            raise ValueError("kraft 500: boom")
+
+        monkeypatch.setattr(plugin_cli.client, "reload_plugins", refused)
+
+    code, out = _run(capsys, "disable", ID)
+
+    assert code == 0 and f"{ID}: disabled" in out
+    assert ("warning: the running server did not reload: kraft 500: boom" in out) is (
+        server == "refuses"
+    )
+    assert "no Kraft server" not in out
