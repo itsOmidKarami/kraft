@@ -215,6 +215,8 @@ def test_collection_add_refuses_a_taken_name(added, capsys, tmp_path):
 
     assert code != 0 and f"collection acme is already added from {added.repo.as_uri()}" in out
     assert added.written() == before
+    mirrors = [m.name for m in (added.plugins / "mirrors").iterdir()]
+    assert mirrors == [fetch.mirror_path(added.plugins, "acme", added.repo.as_uri()).name]
     assert _run(capsys, "collection", "add", added.repo.as_uri())[0] == 0  # the same source again
     assert added.written() == before
 
@@ -552,3 +554,60 @@ def test_a_missing_server_is_not_a_warning(installed, capsys, monkeypatch, serve
         server == "refuses"
     )
     assert "no Kraft server" not in out
+
+
+def _the_same_collection(home, tmp_path):
+    return home.repo
+
+
+def _another_collection_with_the_name(home, tmp_path):
+    return make_collection(tmp_path / "elsewhere", GOOD, name="other")
+
+
+def _a_plugin_this_instance_cannot_meet(home, tmp_path):
+    needs = {"requires": {"kraft": "2", "harnesses": ["codex"], "profiles": ["deep"]}}
+    plugin = {"deploy": {**GOOD["release"], "manifest": needs}}
+    return make_collection(tmp_path / "elsewhere", plugin, name="other")
+
+
+def _a_version_that_breaks_a_local_chain(home, tmp_path):
+    write_yaml(home.config / "chains" / "mine.yaml", chain("release:base"))
+    publish(home.repo, "release", version="1.1.0", library={"tasks": {"other": AGENT}}, chains={})
+    (home.repo / "plugins" / "release" / "chains" / "ship.yaml").unlink()
+    return home.repo
+
+
+def _a_skill_into_an_installed_plugin(home, tmp_path):
+    reaches = {**AGENT, "skill": "release:notes"}
+    plugin = {"deploy": {"library": {"tasks": {"base": reaches}}, "chains": {"go": chain("base")}}}
+    return make_collection(tmp_path / "elsewhere", plugin, name="other")
+
+
+@pytest.mark.parametrize(
+    "collection, code, says",
+    [
+        (_the_same_collection, 0, "release 1.0.0"),
+        (_another_collection_with_the_name, 1, "namespace 'release' is taken by release@acme"),
+        (_a_plugin_this_instance_cannot_meet, 1, "requires agent profile 'deep'"),
+        (_a_version_that_breaks_a_local_chain, 1, "chain mine would stop resolving"),
+        (_a_skill_into_an_installed_plugin, 1, "names another installed Kraft plugin"),
+    ],
+    ids=[
+        "same-id-is-not-a-clash",
+        "namespace-taken",
+        "requires-unmet",
+        "breaks-a-chain",
+        "dependency",
+    ],
+)
+def test_validate_against_a_kraft_home(installed, capsys, tmp_path, collection, code, says):
+    """With a Kraft home, `validate` is the install's own checks, and still
+    installs nothing."""
+    path = collection(installed, tmp_path)
+    before = installed.written()
+
+    got, out = _run(capsys, "validate", str(path))
+
+    assert got == code and says in out, out
+    assert "no Kraft home was used" not in out
+    assert installed.written() == before and installed.reloads == []

@@ -7,8 +7,9 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
-from kraft.api import config_check
+from kraft.api import config_check, deps
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -219,3 +220,102 @@ def test_lint_report_with_and_without_the_instance_plugins(tmp_path):
     offline = config_check.lint_report(config, plugins=None)
     assert (offline["valid"], offline["chains"]) == (True, [])
     assert [u["message"].endswith("not checked (plugin)") for u in offline["unchecked"]] == [True]
+
+
+# ── plugins.yaml, and the files whose edit can drop a plugin ──
+
+
+@pytest.fixture
+def with_release(client, tmp_path):
+    """The running server with `release@acme` installed and loaded: a task
+    capped at 8 dollars, and a `requires` on the agent profile `extra`."""
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    harnesses = yaml.safe_load((st.templates_dir / "harnesses.yaml").read_text())
+    harnesses["profiles"]["extra"] = {"model": {"codex": "m"}}
+    (st.templates_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
+    release = {
+        "library": {"tasks": {"base": {**AGENT, "policy": {"budget_usd": 8}}}},
+        "chains": {"ship": chain("base")},
+        "manifest": {"requires": {"kraft": "2", "harnesses": ["codex"], "profiles": ["extra"]}},
+    }
+    collection = make_collection(tmp_path, {"release": release})
+    install(st.templates_dir, st.run_dirs.plugins, collection, "release")
+    deps._reload_templates(st)
+    assert "release:ship" in st.library.chain_ids and not deps.invalid_templates(st)
+    return st
+
+
+def _plugins_yaml(st, **plugins):
+    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
+    return yaml.safe_dump({**written, "plugins": {**written["plugins"], **plugins}})
+
+
+USES_RELEASE = (
+    "nodes:\n  - id: n\n    kind: exec\n    tasks:\n      - {id: t, extends: 'release:base'}\n"
+)
+USES_ANOTHER_TOOLS_SKILL = (
+    "nodes:\n  - id: n\n    kind: exec\n    tasks:\n"
+    "      - {id: t, kind: agent, harness: codex, prompt: p, skill: 'tools:notes'}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "chain_text, edit, says",
+    [
+        (USES_RELEASE, {"release@acme": False}, "chain mine would stop resolving"),
+        (USES_ANOTHER_TOOLS_SKILL, {"tools@acme": True}, "chain mine would stop resolving"),
+        (USES_RELEASE, {"release@acme": {"auto_update": True}}, None),
+        (USES_RELEASE, {"release@acme": {"enabeld": False}}, "enabeld"),
+    ],
+    ids=["breaks-a-chain", "captures-a-reference", "an-edit-that-unloads-nothing", "typo"],
+)
+def test_a_plugins_yaml_edit_is_checked(with_release, chain_text, edit, says):
+    """A hand edit is refused for what it would stop resolving, with the reason."""
+    st = with_release
+    (st.templates_dir / "chains" / "mine.yaml").write_text(chain_text)
+    deps._reload_templates(st)
+    assert "mine" not in st.invalid_chains
+
+    issues = config_check.check("plugins.yaml", _plugins_yaml(st, **edit), config_check.context(st))
+
+    assert [says in i.message for i in issues] == ([True] if says else [])
+
+
+def test_a_lock_that_does_not_parse_is_an_issue(with_release):
+    ctx = config_check.context(with_release)
+    lock = (with_release.templates_dir / "plugins.lock").read_text()
+    assert config_check.check("plugins.lock", lock, ctx) == []
+    (issue,) = config_check.check(
+        "plugins.lock", lock.replace("lock_version: 1", "lock_version: 2"), ctx
+    )
+    assert "lock_version" in issue.message
+
+
+@pytest.mark.parametrize(
+    "file, edit, says",
+    [
+        (
+            "policy.yaml",
+            lambda d: d.update(maxima={"tasks": {"budget_usd": 5}}),
+            "would leave plugin release@acme out: ",
+        ),
+        (
+            "harnesses.yaml",
+            lambda d: d["profiles"].pop("extra"),
+            "would leave plugin release@acme out: requires agent profile 'extra'",
+        ),
+    ],
+    ids=["maxima-lowered", "required-profile-removed"],
+)
+def test_an_edit_that_drops_a_plugin_is_reported(with_release, file, edit, says):
+    """Reported on the pending reload, before it is applied."""
+    st = with_release
+    data = yaml.safe_load((st.templates_dir / file).read_text())
+    assert config_check.check(file, yaml.safe_dump(data), config_check.context(st)) == []
+    edit(data)
+
+    issues = config_check.check(file, yaml.safe_dump(data), config_check.context(st))
+
+    assert [says in i.message for i in issues] == [True], [i.message for i in issues]

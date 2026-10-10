@@ -69,7 +69,7 @@ origin: src/kraft/plugins/config.py §PluginsConfig
 ## REQ plugin-namespaces-are-unique
 
 IF a plugin's namespace equals another installed plugin's namespace or a `repos.yaml` entry's `id`, THEN the system SHALL refuse the install.
-enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[duplicate-namespace], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[held-by-a-pending-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-repo-id]
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[duplicate-namespace], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[held-by-a-pending-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-repo-id], tests/cli/test_plugin.py::test_validate_against_a_kraft_home[namespace-taken]
 origin: src/kraft/plugins/config.py §PluginsConfig
 
 ## REQ a-plugin-runs-on-one-kraft-major
@@ -117,7 +117,7 @@ origin: src/kraft/plugins/config.py §CollectionConfig
 ## REQ validate-runs-the-install-checks
 
 WHEN an author validates a local collection or plugin, the system SHALL run the same extraction checks, plugin checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
-enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate[refused-content], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json
+enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate[refused-content], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_plugin.py::test_validate_against_a_kraft_home[same-id-is-not-a-clash], tests/cli/test_plugin.py::test_validate_against_a_kraft_home[requires-unmet], tests/cli/test_plugin.py::test_validate_against_a_kraft_home[breaks-a-chain]
 origin: src/kraft/cli/plugin.py §validate
 
 ## REQ plugins-load-only-from-the-lock
@@ -129,7 +129,7 @@ origin: src/kraft/plugins/load.py §installed
 ## REQ a-broken-plugin-affects-only-itself
 
 IF a plugin fails a load-time check, THEN the system SHALL leave only that plugin out, report it under `invalid_templates`, and load the rest of the library.
-enforced-by: tests/plugins/test_load.py::test_a_broken_plugin_library_affects_only_that_plugin, tests/plugins/test_load.py::test_load_time_checks[requires-harness-removed], tests/plugins/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_a_plugin_that_did_not_load[store-deleted]
+enforced-by: tests/plugins/test_load.py::test_a_broken_plugin_library_affects_only_that_plugin, tests/plugins/test_load.py::test_load_time_checks[requires-harness-removed], tests/plugins/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_a_plugin_that_did_not_load[store-deleted], tests/plugins/test_load.py::test_a_limit_above_a_lowered_maximum_leaves_the_plugin_out
 origin: src/kraft/plugins/load.py §installed
 
 ## REQ a-hand-alias-or-ref-change-waits-for-update
@@ -153,7 +153,7 @@ origin: src/kraft/skill.py §validate
 ## REQ a-plugin-is-self-contained
 
 IF a plugin's qualified `extends`, `steering`, `profile` or `skill` reference names another installed Kraft plugin's namespace, THEN the system SHALL refuse the plugin.
-enforced-by: tests/plugins/test_update.py::test_a_plugin_cannot_carry[reference-to-another-plugin], tests/plugins/test_update.py::test_a_skill_may_not_reach_into_another_kraft_plugin[another-kraft-plugin]
+enforced-by: tests/plugins/test_update.py::test_a_plugin_cannot_carry[reference-to-another-plugin], tests/plugins/test_update.py::test_a_skill_may_not_reach_into_another_kraft_plugin[another-kraft-plugin], tests/cli/test_plugin.py::test_validate_against_a_kraft_home[dependency]
 origin: src/kraft/plugins/update.py §check
 
 ## REQ a-plugin-cannot-run-commands-or-grant-permissions
@@ -245,3 +245,15 @@ origin: src/kraft/cli/plugin.py §_not_a_worker
 WHEN a `kraft admin plugin` verb changes what loads, the system SHALL rebuild the running server's library from the new lock and SHALL NOT apply a pending edit of another config file.
 enforced-by: tests/api/test_deps.py::test_a_plugin_reload_leaves_the_operators_pending_edits_pending, tests/cli/test_plugin.py::test_install_as_alias
 origin: src/kraft/apply.py §reload
+
+## REQ a-plugins-yaml-edit-is-checked
+
+IF a hand edit of `plugins.yaml` would leave a currently resolving chain or reference unresolved, THEN the system SHALL report it on the pending reload with the reason, and SHALL list a changed `plugins.yaml` or `plugins.lock` as a pending reload.
+enforced-by: tests/api/test_config_check.py::test_a_plugins_yaml_edit_is_checked[breaks-a-chain], tests/api/test_config_check.py::test_a_plugins_yaml_edit_is_checked[captures-a-reference], tests/api/test_deps.py::test_a_plugin_reload_leaves_the_operators_pending_edits_pending
+origin: src/kraft/api/config_check.py §_check_plugins
+
+## REQ an-edit-that-drops-a-plugin-is-reported
+
+IF an edit of `policy.yaml` or `harnesses.yaml` would leave a loaded plugin out, THEN the system SHALL report the plugin and the reason before the edit is applied.
+enforced-by: tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[maxima-lowered], tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[required-profile-removed]
+origin: src/kraft/api/config_check.py §_check_policy

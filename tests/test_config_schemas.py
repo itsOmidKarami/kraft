@@ -80,6 +80,17 @@ def test_a_misspelled_library_section_is_refused():
     assert list(validator("library.schema.json").iter_errors({"taks": {}}))
 
 
+def test_the_plugins_schema_catches_shape_and_typos():
+    """What an editor can catch in `plugins.yaml`; the rules that compare
+    entries are the loader's."""
+    schema = validator("plugins.schema.json")
+    source = {"collections": {"acme": {"git": "https://github.com/acme/kraft-plugins.git"}}}
+    assert schema.is_valid({**source, "plugins": {"release@acme": True, "x@acme": {"as": "y"}}})
+    assert not schema.is_valid({**source, "plugins": {"release@acme": {"enabeld": False}}})
+    assert not schema.is_valid({"collections": {"acme": {"git": "acme/kraft-plugins"}}})
+    assert not schema.is_valid({**source, "plugns": {}})
+
+
 def test_every_extendable_model_is_in_the_chain_defs():
     defs = config_schemas.SCHEMAS["chain.schema.json"]()["$defs"]
     assert config_schemas.EXTENDABLE <= set(defs)

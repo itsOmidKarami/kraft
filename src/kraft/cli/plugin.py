@@ -4,9 +4,10 @@ The verbs edit `plugins.yaml` and run `kraft.plugins.update.update`; each one
 that changes what loads asks a running server to rebuild its library from the
 new lock. A worker runs none of the ones that write.
 
-`validate` runs every check an install would that needs no instance:
-extraction under the limits, the manifests, the Kraft version, and a lint of
-each plugin on its own. It installs nothing and writes nothing.
+`validate` runs every check an install would: extraction under the limits,
+the manifests, the Kraft version, and a lint, against this instance when
+there is a Kraft home and of each plugin on its own when there is none. It
+installs nothing and writes nothing.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from kraft.policy import PolicyError
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
-#: What only an instance can check. Slice 3 runs these when a Kraft home exists.
+#: What only an instance can check: run when a Kraft home exists.
 _NEEDS_AN_INSTANCE = (
     "no Kraft home was used, so these were skipped: requires.harnesses and requires.profiles, "
     "namespace clashes, and lint against an instance's own library"
@@ -70,10 +71,61 @@ def _lint(found: manifest.PluginManifest, extracted: fetch.Extracted, root: Path
         return [{"file": str(root), "message": m.replace(tmp, str(root))} for m in messages]
 
 
-def validate(path: Path) -> dict:
+def _lint_in(
+    found: manifest.PluginManifest,
+    extracted: fetch.Extracted,
+    root: Path,
+    collection: str | None,
+    home: tuple[Path, Path],
+) -> list[dict]:
+    """What installing the plugin into the instance at `home` would be refused
+    for: an unmet `requires`, a namespace another plugin holds, and anything
+    of the instance's own that would stop resolving. The same plugin already
+    installed is replaced, not a clash."""
+    config_dir, plugins_dir = home
+
+    def same(plugin_id: str) -> bool:
+        name, _, where = plugin_id.partition("@")
+        return name == found.name and collection in (None, where)
+
+    now = load.installed(config_dir, plugins_dir)
+    loaded = [p for p in now if not same(p.id)]
+    held = next((p.id for p in loaded if p.namespace == found.name), None)
+    if held is not None:
+        return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}]
+    if why := load.instance_problem(found.name, found.requires, config_dir):
+        return [{"file": str(root), "message": why}]
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Path(tmp)
+        for rel, (_mode, data) in extracted.files.items():
+            (store / rel).parent.mkdir(parents=True, exist_ok=True)
+            (store / rel).write_bytes(data)
+        candidate = InstalledPlugin(
+            f"{found.name}@{collection or 'validate'}", found.name, found.name, found.version, store
+        )
+        try:
+            broken = plugin_update.breaks(
+                plugin_update.state_of(config_dir, now),
+                plugin_update.state_of(config_dir, [*loaded, candidate]),
+                config_dir,
+                found.name,
+            )
+        except PolicyError as exc:
+            broken = [str(exc)]
+        return [{"file": str(root), "message": m.replace(tmp, str(root))} for m in broken]
+
+
+def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
     """`{plugins, problems, warnings, skipped}` for the collection or the one
-    plugin directory at `path`."""
-    report: dict = {"plugins": [], "problems": [], "warnings": [], "skipped": [_NEEDS_AN_INSTANCE]}
+    plugin directory at `path`. With `home`, a Kraft home's config and plugins
+    directories, each plugin is also judged as an install into that instance."""
+    report: dict = {
+        "plugins": [],
+        "problems": [],
+        "warnings": [],
+        "skipped": [] if home else [_NEEDS_AN_INSTANCE],
+    }
+    collection_name = None
 
     def problem(file: Path, message: str) -> None:
         report["problems"].append({"file": str(file), "message": message})
@@ -91,6 +143,7 @@ def validate(path: Path) -> dict:
             for key in manifest.unknown_keys(raw, manifest.CollectionManifest)
         ]
         targets = [(entry.name, path / entry.source.removeprefix("./")) for entry in listed.plugins]
+        collection_name = listed.name
     elif (path / manifest.PLUGIN_JSON).is_file():
         targets = [(None, path)]
     else:
@@ -111,7 +164,8 @@ def validate(path: Path) -> dict:
             )
             found = manifest.plugin(raw, str(plugin_file))
             manifest.check_plugin(found, entry, extracted.files)
-            plugin_update.check(found, extracted.files)
+            others = {p.namespace for p in load.installed(*home)} if home else set()
+            plugin_update.check(found, extracted.files, other_namespaces=others - {found.name})
         except plugin_update.Refused as exc:
             for why in exc.problems:
                 problem(root, why)
@@ -131,7 +185,12 @@ def validate(path: Path) -> dict:
         if why is not None:
             problem(plugin_file, f"{found.name} {found.version} {why}; this is Kraft {running}")
             continue
-        report["problems"] += _lint(found, extracted, root)
+        problems = (
+            _lint_in(found, extracted, root, collection_name, home)
+            if home
+            else _lint(found, extracted, root)
+        )
+        report["problems"] += problems
         report["plugins"].append(
             {"name": found.name, "version": found.version, "digest": fetch.digest(extracted.files)}
         )
@@ -147,7 +206,10 @@ def _render(report: dict) -> str:
 
 
 def _cmd_validate(ns: argparse.Namespace) -> None:
-    report = validate(Path(ns.path).resolve())
+    config_dir, plugins_dir = _home()
+    # A Kraft home is one that has a library; CI has none.
+    home = (config_dir, plugins_dir) if (config_dir / "library.yaml").is_file() else None
+    report = validate(Path(ns.path).resolve(), home)
     common.emit(report, _render, ns.json)
     if report["problems"]:
         raise SystemExit(1)
@@ -277,12 +339,6 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
         manifest.ManifestError,
     ) as exc:
         raise _refuse(str(exc)) from exc
-    if mirror is not None:
-        final = fetch.mirror_path(plugins_dir, name, source["git"])
-        if final.is_dir():
-            shutil.rmtree(mirror)
-        else:
-            mirror.rename(final)
 
     def change(raw: dict, config: PluginsConfig) -> None:
         known = config.collections.get(name)
@@ -296,7 +352,17 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
             entry["auto_update"] = True
         raw["collections"][name] = entry
 
-    _edit(change)
+    try:
+        _edit(change)
+        if mirror is not None:
+            final = fetch.mirror_path(plugins_dir, name, source["git"])
+            if not final.is_dir():
+                mirror.rename(final)
+    finally:
+        # What was fetched to read the name, when the collection was not added
+        # or already had its mirror.
+        if mirror is not None:
+            shutil.rmtree(mirror, ignore_errors=True)
     shown = {**source, "git": fetch.redact(source["git"])} if "git" in source else source
     common.emit({"collection": name, **shown}, lambda v: f"added collection {name}", ns.json)
 
@@ -566,7 +632,7 @@ def _still_referenced(config: PluginsConfig, config_dir: Path, plugin_id: str, v
     namespace = locked.namespace if locked else config.namespace(plugin_id)
     uses = [
         f"{where}: {key} {value!r}"
-        for where, key, _kind, value in plugin_update._references(config_dir)
+        for where, key, _kind, value in plugin_update.references(config_dir)
         if value.split(":", 1)[0] == namespace
     ]
     if uses:
