@@ -478,6 +478,8 @@ export interface UsageRollup {
   tokens_cache_read?: number;
   /** False when some session predates the split: its cache use is in tokens_in. */
   split_complete?: boolean;
+  /** False when some session spent tokens but has no output count yet: tokens_out is a floor. */
+  out_complete?: boolean;
   cost_usd: number;
   /** False when a session spent tokens but reported no cost — the sum is a floor. */
   cost_complete: boolean;
