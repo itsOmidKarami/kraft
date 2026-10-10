@@ -62,8 +62,9 @@ def installed(
 
 
 def plugin_json(name: str, **over) -> dict:
-    """A valid `.kraft/plugin.json` for `name`."""
-    return {"name": name, "version": "1.0.0", "requires": {"kraft": "2"}, **over}
+    """A valid `.kraft/plugin.json` for `name`, requiring the harness `AGENT` runs on."""
+    requires = {"kraft": "2", "harnesses": ["codex"]}
+    return {"name": name, "version": "1.0.0", "requires": requires, **over}
 
 
 def make_collection(tmp_path: Path, plugins: dict[str, dict], *, name: str = "acme") -> Path:
@@ -141,4 +142,35 @@ def install(
     }
     write_yaml(config_dir / "plugins.yaml", config)
     write_yaml(config_dir / "plugins.lock", lock)
+    # The instance defines the harness the fixture plugins require.
+    harnesses = read_yaml(config_dir / "harnesses.yaml")
+    if "codex" not in (harnesses.get("harnesses") or {}):
+        harnesses["harnesses"] = {
+            **(harnesses.get("harnesses") or {}),
+            "codex": {"provider": "codex"},
+        }
+        write_yaml(config_dir / "harnesses.yaml", harnesses)
     return store
+
+
+def extracted(
+    *,
+    library: dict | None = None,
+    chains: dict | None = None,
+    skills: dict | None = None,
+    profiles: dict | None = None,
+    manifest_fields: dict | None = None,
+) -> fetch.Extracted:
+    """A plugin named `release` as extraction hands it on, built in memory:
+    what `update.check` and `review.review` take."""
+    declared = plugin_json("release", **(manifest_fields or {}))
+    files = {manifest.PLUGIN_JSON: ("100644", json.dumps(declared).encode())}
+    if library is not None:
+        files["library.yaml"] = ("100644", yaml.safe_dump(library).encode())
+    for chain_name, body in (chains or {}).items():
+        files[f"chains/{chain_name}.yaml"] = ("100644", yaml.safe_dump(body).encode())
+    for skill_name, text in (skills or {}).items():
+        files[f"skills/{skill_name}/SKILL.md"] = ("100644", text.encode())
+    if profiles is not None:
+        files["profiles.yaml"] = ("100644", yaml.safe_dump({"profiles": profiles}).encode())
+    return fetch.Extracted(files)
