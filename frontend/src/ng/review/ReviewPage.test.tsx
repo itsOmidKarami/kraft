@@ -114,6 +114,11 @@ describe("a file's header and its hunks", () => {
     expect(lines()).toEqual([]);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Viewed" })));
     expect(lines()).toHaveLength(4);
+    // A mark the server refuses folds nothing.
+    vi.mocked(http.request).mockImplementation(async () => ({ status: 409, body: { detail: "the worker still has this worktree open" } }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Viewed" })));
+    expect(screen.getByRole("button", { name: "Viewed" })).toHaveAttribute("aria-pressed", "false");
+    expect(lines()).toHaveLength(4);
   });
 
   it("shows the unchanged lines above a hunk, read once, and takes a comment on one", async () => {

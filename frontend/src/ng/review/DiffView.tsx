@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, ChevronsUpDown, EllipsisVertical, MessageSquare
 import { IconButton } from "../ui/IconButton";
 import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
-import { hiddenBefore, STEP, type Grow } from "./expand";
+import { hiddenAfter, hiddenBefore, STEP, type Grow } from "./expand";
 import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
 import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type LineIndex, type LineRange } from "./range";
@@ -125,6 +125,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   // An added or a deleted file is all in its diff: nothing more to show.
   const canExpand = !!p.onExpand && pf.status !== "added" && pf.status !== "deleted";
   const hidden = useMemo(() => hiddenBefore(pf), [pf]);
+  const after = canExpand ? hiddenAfter(pf) : 0;
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
     let h = -1;
@@ -337,7 +338,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
                   slots={p.after ? anchors[i].map((a) => p.after!(file.path, a)) : NONE}
                 />
               ))}
-              {canExpand && pf.rest !== 0 && <div className="rv-hunk"><Expander gap={pf.hunks.length} hidden={pf.rest ?? null} tail g={gutter} /></div>}
+              {after !== 0 && <div className="rv-hunk"><Expander gap={pf.hunks.length} hidden={after} tail g={gutter} /></div>}
             </div>
           )}
         </div>

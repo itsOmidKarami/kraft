@@ -59,6 +59,19 @@ export function widen(pf: PatchFile, w: Whole): PatchFile {
   return { ...pf, hunks, rest: w.lines.length - (w.spans[w.spans.length - 1]?.[1] ?? 0) };
 }
 
+/** Git's own context around a change, which `/compare` leaves alone. */
+const CONTEXT = 3;
+
+/** The lines after `pf`'s last hunk: counted once the whole file was read. Before that, 0 when the hunk
+ *  stops short of git's context after its last change (the file ends there), else null: not known. */
+export function hiddenAfter(pf: PatchFile): number | null {
+  if (pf.rest !== undefined) return pf.rest;
+  const last = pf.hunks[pf.hunks.length - 1]?.lines ?? [];
+  let trailing = 0;
+  while (trailing < last.length && last[last.length - 1 - trailing].kind === " ") trailing++;
+  return trailing < CONTEXT ? 0 : null;
+}
+
 /** How many lines sit unshown before each hunk of `pf`: between it and the hunk before, or the file's first line. */
 export function hiddenBefore(pf: PatchFile): number[] {
   let next = 1;

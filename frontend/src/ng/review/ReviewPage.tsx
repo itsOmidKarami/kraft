@@ -65,10 +65,10 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   });
   const [picked, setPicked] = useState<Pick | null>(null);
   const viewed = useViewed(item.id, place.to, compare);
-  // A file marked viewed folds away, and opens again when the mark is taken off.
+  // A file marked viewed folds away, and opens again when the mark is taken off; a mark the server refused folds nothing.
   const setViewed = (path: string, v: boolean) => {
     setFold(path, v);
-    void viewed.toggle(path, v);
+    void viewed.toggle(path, v).then((held) => held || setFold(path, !v));
   };
   const all = compare.state === "ready" ? compare.data.files : [];
   const files = byNodes(all, place.nodes);

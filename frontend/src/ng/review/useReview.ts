@@ -119,7 +119,7 @@ export function useThreads(id: string) {
 
 /** Viewed marks (B11): the comparison's own, overlaid by what was clicked since
  *  it loaded. A click is sent at once and taken back, with the server's words,
- *  if refused. */
+ *  if refused; `toggle` answers whether it held. */
 export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compare>) {
   const [marks, setMarks] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -130,9 +130,10 @@ export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compar
     setMarks((m) => ({ ...m, [path]: viewed }));
     const q = new URLSearchParams({ file: path, to });
     const { status, body } = await request(`/work-items/${encodeURIComponent(id)}/viewed?${q}`, { method: viewed ? "PUT" : "DELETE" });
-    if (status === 200) return setError(null);
+    if (status === 200) return setError(null), true;
     setMarks((m) => ({ ...m, [path]: !viewed }));
     setError(detailOf(body));
+    return false;
   };
   return { isViewed, toggle, error };
 }

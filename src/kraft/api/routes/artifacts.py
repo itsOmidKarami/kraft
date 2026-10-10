@@ -264,6 +264,9 @@ async def compare_work_item(
         ]
         diff = review.filter_diff(diff, keep)
     if file:
+        # shortcut: git still diffs every changed file at this context and the rest
+        # is dropped here; give git the path (and a rename's old one) if a large
+        # change makes one file's read slow.
         files = [f for f in files if f["path"] == file]
         diff = review.filter_diff(diff, {file})
     diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)

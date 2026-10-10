@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grow, hiddenBefore, spansOf, STEP, widen, type Grow, type Span } from "./expand";
+import { grow, hiddenAfter, hiddenBefore, spansOf, STEP, widen, type Grow, type Span } from "./expand";
 import { parsePatch } from "./patch";
 
 // A 60-line file with lines 10 and 50 changed: one diff line per file line, and one more for each change.
@@ -16,6 +16,8 @@ describe("a diff's unchanged lines", () => {
     expect(whole.lines).toHaveLength(62);
     expect(whole.spans).toEqual([[6, 14], [47, 55]]);
     expect(hiddenBefore(pf)).toEqual([6, 33]);
+    // Three unchanged lines follow the last change, as many as git gives: more may follow. Two: the file ends.
+    expect([hiddenAfter(pf), hiddenAfter(fileOf([[47, 52]]))]).toEqual([null, 0]);
     expect(spansOf(pf, fileOf([[1, 5]]))).toBeNull();
   });
 
@@ -37,7 +39,7 @@ describe("a diff's unchanged lines", () => {
     expect(wide.hunks[1]).toMatchObject({ header: "@@ -27,27 +27,27 @@", oldStart: 27, newStart: 27 });
     expect(wide.hunks[1].lines[0]).toEqual({ kind: " ", old: 27, new: 27, text: "line 27" });
     expect(hiddenBefore(wide)).toEqual([6, 13]);
-    expect(wide.rest).toBe(7);
-    expect(widen(pf, { lines: whole.lines, spans: [[0, 62]] }).rest).toBe(0);
+    expect(hiddenAfter(wide)).toBe(7);
+    expect(hiddenAfter(widen(pf, { lines: whole.lines, spans: [[0, 62]] }))).toBe(0);
   });
 });
