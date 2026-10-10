@@ -329,6 +329,7 @@ async def lifespan(app: FastAPI):
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
     # After the library is loaded from the lock: a start never waits on the network.
     deps.in_background(app, deps.auto_update_plugins)
+    app.state.plugin_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
     try:
         yield
     finally:
@@ -363,6 +364,9 @@ async def lifespan(app: FastAPI):
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
+        # The daily task first: it is what starts the next restore_task.
+        app.state.plugin_update_task.cancel()
+        await asyncio.gather(app.state.plugin_update_task, return_exceptions=True)
         app.state.restore_task.cancel()
         await asyncio.gather(app.state.apply_task, app.state.restore_task, return_exceptions=True)
         # Before the walks are cancelled: a setup command runs in a thread

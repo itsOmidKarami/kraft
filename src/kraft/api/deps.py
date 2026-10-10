@@ -441,6 +441,18 @@ def in_background(app, work) -> asyncio.Task:
     return app.state.restore_task
 
 
+#: Between two auto-update checks of a running server.
+AUTO_UPDATE_EVERY_S = 24 * 60 * 60
+
+
+async def auto_update_daily(app) -> None:
+    """Check again once a day: a server run as a service may not restart for
+    weeks, and the check at start would be its only one."""
+    while True:
+        await asyncio.sleep(AUTO_UPDATE_EVERY_S)
+        await in_background(app, auto_update_plugins)
+
+
 def collect_plugin_stores(st) -> list[str]:
     """Delete each plugin store that none of these names: the lock, the
     library this server has loaded, or the snapshot of a work item that has

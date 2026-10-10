@@ -716,6 +716,28 @@ def test_a_plugin_background_task_that_fails_says_so(client, caplog):
     assert "plugin background task failed" in caplog.text and "disk full" in caplog.text
 
 
+def test_a_running_server_checks_for_auto_updates_again(client, monkeypatch):
+    """Not only at start: a server run as a service may not restart for weeks."""
+    checks = []
+
+    async def check(app):
+        checks.append(app)
+
+    async def two_checks():
+        task = asyncio.ensure_future(deps.auto_update_daily(client.app))
+        while len(checks) < 2:
+            await asyncio.sleep(0.01)
+        task.cancel()
+
+    assert not client.app.state.plugin_update_task.done()
+    monkeypatch.setattr(deps, "AUTO_UPDATE_EVERY_S", 0.01)
+    monkeypatch.setattr(deps, "auto_update_plugins", check)
+
+    client.portal.call(asyncio.wait_for, two_checks(), 5)
+
+    assert checks[:2] == [client.app, client.app]
+
+
 def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
     """After a start: the update is applied, the library is rebuilt on it, the
     old store goes, and health reports the outcome without being degraded."""
