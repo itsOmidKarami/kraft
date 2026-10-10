@@ -108,44 +108,41 @@ def test_a_python_file_moved_into_a_skipped_tree_is_still_a_python_change(tmp_pa
     assert _changes(repo, base, "pull_request") == ["code=true", "python=true"]
 
 
-_DOCS_ONLY_SKIPS = ("test", "e2e-cli", "frontend", "vscode", "e2e", "ui-contract")
+_NEEDS = _JOBS["test-gate"]["needs"]
+_DOCS_ONLY = dict.fromkeys(
+    ("test", "e2e-cli", "frontend", "vscode", "e2e", "ui-contract"), "skipped"
+)
+#: What skips, and passes, by the kind of change: (code, python, the skips).
+_PYTHON_CHANGE = ("true", "true", {"docs-tests": "skipped"})
+_NO_PYTHON = ("true", "false", {"docs-tests": "skipped", "e2e-cli": "skipped"})
 
 
 @pytest.mark.parametrize(
     ("code", "python", "results", "merges"),
     [
-        pytest.param("true", "true", {"docs-tests": "skipped"}, True, id="a-python-change"),
+        pytest.param(*_PYTHON_CHANGE, True, id="a-python-change"),
+        pytest.param(*_NO_PYTHON, True, id="no-python-changed"),
+        pytest.param("false", "false", _DOCS_ONLY, True, id="docs-only"),
         pytest.param(
-            "true",
             "false",
-            {"test": "skipped", "e2e-cli": "skipped"},
-            True,
-            id="no-python-changed",
-        ),
-        pytest.param(
-            "false", "false", dict.fromkeys(_DOCS_ONLY_SKIPS, "skipped"), True, id="docs-only"
-        ),
-        pytest.param(
-            "true",
             "false",
-            {"test": "skipped", "e2e-cli": "skipped", "docs-tests": "skipped"},
+            {**_DOCS_ONLY, "docs-tests": "skipped"},
             False,
-            id="no-python-changed-and-nothing-stood-in",
+            id="docs-only-and-nothing-stood-in",
         ),
-        pytest.param(
-            "true",
-            "false",
-            {"test": "skipped", "e2e-cli": "skipped", "frontend": "skipped"},
-            False,
-            id="no-python-changed-but-frontend-skipped",
-        ),
-        pytest.param(
-            "true",
-            "true",
-            {"docs-tests": "skipped", "test": "skipped"},
-            False,
-            id="a-python-change-whose-shards-skipped",
-        ),
+        # A job may skip only where the change asked it to: every other skip fails.
+        *[
+            pytest.param(
+                code, python, {**skips, job: "skipped"}, False, id=f"{job}-skipped-on-{kind}"
+            )
+            for kind, (code, python, skips) in {
+                "a-python-change": _PYTHON_CHANGE,
+                "no-python-changed": _NO_PYTHON,
+                "docs-only": ("false", "false", _DOCS_ONLY),
+            }.items()
+            for job in _NEEDS
+            if job not in skips and job != "docs-tests"
+        ],
         pytest.param(
             "true", "true", {"docs-tests": "skipped", "lint": "failure"}, False, id="a-failed-job"
         ),
@@ -166,7 +163,7 @@ _DOCS_ONLY_SKIPS = ("test", "e2e-cli", "frontend", "vscode", "e2e", "ui-contract
     ],
 )
 def test_the_gate_passes_only_the_skips_the_change_asked_for(code, python, results, merges):
-    needs = {job: {"result": results.get(job, "success")} for job in _JOBS["test-gate"]["needs"]}
+    needs = {job: {"result": results.get(job, "success")} for job in _NEEDS}
     assert set(results) <= set(needs)
 
     ran = _bash(_script("test-gate"), {"CODE": code, "PYTHON": python, "NEEDS": json.dumps(needs)})

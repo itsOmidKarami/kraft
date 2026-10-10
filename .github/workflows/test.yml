@@ -41,10 +41,11 @@ jobs:
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
     # the test job checks). `python` is false for those and for one that also
     # changes frontend/, with nothing else and no .py file among them: no
-    # Python moved, so the unit shards and the real-CLI tier have nothing new
-    # to say. Pushes to main run everything, and so does a PR if this job
-    # fails: the heavy jobs skip only on an explicit 'false'. The unit tests
-    # that read the changed trees still run, in `docs-tests`.
+    # Python moved, so the unit tier runs on the newest Python alone and the
+    # real-CLI tier skips. Pushes to main run everything, and so does a PR if
+    # this job fails: nothing is trimmed or skipped except on an explicit
+    # 'false'. The unit tests that read the docs still run on a docs-only
+    # pull request, in `docs-tests`.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
@@ -104,18 +105,20 @@ jobs:
     # The unit tier on every supported Python (`requires-python` in pyproject.toml
     # is the floor, 3.12; the newest is 3.14), each in three shards
     # (`KRAFT_TEST_SHARD`, read by the repo-root conftest.py). One wheel serves
-    # all of them, so this is the only place a version gap shows. Coverage and
-    # junit come from the newest Python only, one file per shard, and
-    # `test-report` below puts them together. fail-fast off, so one leg's
-    # failure doesn't hide another's.
+    # all of them, so this is the only place a version gap shows. A pull request
+    # that changes no Python (`changes`) runs the newest alone: every unit test
+    # still runs, since some read frontend/ files, but nothing in it can differ
+    # by Python version. Coverage and junit come from the newest Python only,
+    # one file per shard, and `test-report` below puts them together. fail-fast
+    # off, so one leg's failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/3)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(needs.changes.outputs.python == 'false' && '["3.14"]' || '["3.12", "3.13", "3.14"]') }}
         shard: [1, 2, 3]
     # Job-level, so it beats the workflow's UV_PYTHON for `uv run` too: `uv run`
     # rebuilds the venv whenever UV_PYTHON names another version than the one
@@ -174,7 +177,7 @@ jobs:
     # One set of junit annotations and one coverage comment for the three
     # shards. Not in `test-gate`: it reports on the tests and checks nothing
     # itself, so a comment that could not be posted does not block a merge.
-    # It does not run when the shards were skipped (no Python changed).
+    # It does not run when the shards were skipped (a docs-only pull request).
     name: test report
     needs: test
     if: ${{ !cancelled() && needs.test.result != 'skipped' }}
@@ -227,17 +230,15 @@ jobs:
           MERGE_COVERAGE_FILES: true
 
   docs-tests:
-    # On a pull request that changes no Python, the unit tests that read a
-    # changed tree stand in for the skipped shards: a test that parses a docsite
-    # page's policy example, the README's install URL, a frontend type a Python
-    # model mirrors. The grep names the same trees `changes` does, so a new test
-    # that reads one is picked up without editing a list; it is wide on purpose
-    # (any test file that so much as mentions the tree). A test that reaches
-    # one without naming it is caught on main, which runs everything. Python
-    # 3.14 only, like every job but the shards.
-    name: python tests (by path)
+    # On a docs-only pull request, the unit tests that read a docs file stand
+    # in for the skipped matrix: a test that parses a docsite page's policy
+    # example, the README's install URL, docs/templates-v1-design.md's YAML. The
+    # grep names the same trees `changes` calls docs-only, so a new test that
+    # reads one is picked up without editing a list. Python 3.14 only, like
+    # every job but the matrix.
+    name: docs tests
     needs: changes
-    if: needs.changes.outputs.python == 'false'
+    if: needs.changes.outputs.code == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,13 +253,8 @@ jobs:
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
       - run: uv sync --frozen
-      - env:
-          CODE: ${{ needs.changes.outputs.code }}
-        run: |
-          trees='docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md'
-          # Not docs-only, so frontend/ changed too.
-          if [ "$CODE" != false ]; then trees="$trees|\"frontend\"|frontend/"; fi
-          git grep -lE "$trees" -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
+      - run: |
+          git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
           cat "$RUNNER_TEMP/docs-tests.txt"
           xargs uv run pytest -m "not e2e" -n logical < "$RUNNER_TEMP/docs-tests.txt"
 
@@ -293,12 +289,11 @@ jobs:
     # hand also leaves a skipped gate, not a red one.
     #
     # The shell below reads every `needs` result. Each must be `success`, with
-    # the exceptions that follow `changes`. On a pull request that changes no
-    # Python, the unit shards and the real-CLI tier report `skipped`, which
-    # passes, and `python tests (by path)` must then succeed. On a docs-only one
-    # the frontend and browser jobs skip as well. On any other change
-    # `python tests (by path)` is the one job expected to skip. Anything else
-    # -- failure, cancelled, or a skip nobody asked for -- fails.
+    # the exceptions that follow `changes`. On a docs-only pull request the
+    # path-gated jobs report `skipped`, which passes, and `docs tests` must then
+    # succeed; on any other change `docs tests` is expected to skip. On a pull
+    # request that changes no Python, `e2e (real CLIs)` skips as well. Anything
+    # else -- failure, cancelled, or a skip nobody asked for -- fails.
     # tests/test_ci_workflow.py runs this script on each of those cases.
     name: test
     needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e, ui-contract]
@@ -325,12 +320,11 @@ jobs:
             echo "$job: $result"
             case "$job:$result:$CODE:$PYTHON" in
               *:success:*) ;;
-              docs-tests:skipped:*:false) fail ;;  # no Python changed: it stands in for the shards
-              docs-tests:skipped:*) ;;             # a Python change skips it
-              # no Python changed: these two skip, and only they may
-              test:skipped:*:false | e2e-cli:skipped:*:false) ;;
-              # docs-only: the frontend and browser jobs skip too
-              frontend:skipped:false:* | vscode:skipped:false:*) ;;
+              docs-tests:skipped:false:*) fail ;;  # docs-only: it stands in for the shards
+              docs-tests:skipped:*) ;;             # a code change skips it
+              e2e-cli:skipped:*:false) ;;          # no Python changed
+              # docs-only: the path-gated jobs skip, and only they may
+              test:skipped:false:* | frontend:skipped:false:* | vscode:skipped:false:*) ;;
               e2e:skipped:false:* | ui-contract:skipped:false:*) ;;
               *) fail ;;
             esac
