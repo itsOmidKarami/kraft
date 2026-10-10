@@ -370,6 +370,7 @@ def test_health_block_shows_storage():
         }
     )
     assert "12G of 10G" in block and "held" in block
+    assert "kraft view storage" in block
 
 
 def test_storage_block_shows_usage_categories_and_each_worktree():

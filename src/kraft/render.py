@@ -519,7 +519,8 @@ def health_block(payload: dict) -> str:
             (
                 "storage",
                 f"{human_size(stored['used_bytes'])} of "
-                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')})",
+                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')}); "
+                "kraft view storage",
             )
         )
     for error in index.get("errors") or []:
