@@ -396,6 +396,8 @@ def test_an_alias_change_only_breaks_what_is_not_the_plugins(tmp_path, local, ou
     result = _run(home, install=[ID], entry=PluginEntry(**{"as": "rel"}))[ID]
 
     assert result.outcome == outcome, result
+    if outcome == "applied":
+        assert _locked(home).namespace == "rel"
     if outcome == "refused":
         assert any("chain mine would stop resolving" in why for why in result.problems)
         assert _written(home) == before
