@@ -297,7 +297,8 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
         raw["collections"][name] = entry
 
     _edit(change)
-    common.emit({"collection": name, **source}, lambda v: f"added collection {name}", ns.json)
+    shown = {**source, "git": fetch.redact(source["git"])} if "git" in source else source
+    common.emit({"collection": name, **shown}, lambda v: f"added collection {name}", ns.json)
 
 
 def _cmd_collection_list(ns: argparse.Namespace) -> None:

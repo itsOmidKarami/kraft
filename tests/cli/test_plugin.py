@@ -484,6 +484,23 @@ def test_urls_are_redacted(home, capsys):
     assert all("hunter2" not in text for text in shown), shown
 
 
+def test_added_collection_json_does_not_echo_the_user(home, capsys, monkeypatch):
+    real = fetch.fetch
+    # An ssh URL is the one a config accepts with a user in it; fetch the local repo instead.
+    local = home.repo.as_uri()
+    monkeypatch.setattr(
+        fetch, "fetch", lambda plugins_dir, name, url, ref: real(plugins_dir, name, local, ref)
+    )
+
+    code, out = _run(capsys, "collection", "add", "ssh://hunter2@example.com/acme.git", "--json")
+
+    assert code == 0, out
+    assert json.loads(out) == {
+        "collection": "acme",
+        "git": "ssh://example.com/acme.git",
+    }
+
+
 def test_update_json_is_the_results_with_each_review(installed, capsys):
     publish(
         installed.repo,
