@@ -4,7 +4,7 @@ import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
 import { stepsOf, taskName } from "./paths";
-import { isScopeTask } from "./scopeView";
+import { isScopeTask, scopeLead, scopesView } from "./scopeView";
 import type { ItemDetail } from "./useItem";
 
 export const ESCALATION = "escalation";
@@ -166,7 +166,9 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
     tasks: st.tasks.map((path): GraphItem => {
       const ss = sessionsOf(item, path);
       // In a fix-loop node the round says which run this is; a count of runs across rounds would badge every task.
-      const last = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
+      const newest = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
+      // A changed-test-scope task is all of its scopes: one that failed, or still runs, speaks for it, whichever ran last.
+      const last = (isScopeTask(item, path) && scopeLead(scopesView(item, path, shown ?? 1, now))) || newest;
       // The scopes of a changed-test-scope task are sessions of it too, but not attempts: no count on its box.
       return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...(!last && skippedAt(item, path) ? SKIPPED : sessionLook(last, now)) };
     }),
@@ -189,6 +191,14 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
 }
 
 /** Why a round has no repair after it (yet). */
+/** Why a fix loop's repair or judge has no run in the round shown, as its pane and its screen say it: the words of
+ *  its row on the node (`loopOf`) while the round is the newest, and that a round which is over did not run it. */
+export function loopIdle(node: ApiNode, loop: "repair" | "judge", round: number, rounds: { latest: number; total?: number }, events?: KraftEvent[]): string {
+  if (loop === "judge" && round === 1) return "skipped · the first repair runs without the judge";
+  if (round < rounds.latest) return "not run in this round";
+  return loop === "judge" ? "not yet" : repairIdle(round, rounds.total, verdictOf(events, node.id, round - 1)?.startsWith("stop"));
+}
+
 export const repairIdle = (round: number, total: number | undefined, judgeStopped: boolean | undefined) =>
   judgeStopped ? "stopped by judge" : round >= (total ?? Infinity) ? "last round" : "not yet";
 

@@ -411,6 +411,14 @@ describe("the task screen (E)", () => {
     expect(group && within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(chips);
   });
 
+  it.each([
+    ["verification.fix_loop.judge", "fix-loop judge · after round 2 · not yet"],
+    ["verification.fix_loop.main.repair", "fix-loop repair · between rounds 2 and 3 · not yet"],
+  ])("says of the newest round's %s what its row on the node says: it may yet run", async (sel, want) => {
+    mount(looped(), `/work-items/w1/nodes/verification?sel=${sel}`);
+    expect(await screen.findByText(want)).toBeInTheDocument();
+  });
+
   it("says a fix-loop task did not run in the round shown", async () => {
     mount(looped(), "/work-items/w1/nodes/verification?sel=verification.fix_loop.judge&round=1");
     expect(await screen.findByText(/fix-loop judge · after round 1 · skipped · the first repair runs without the judge/)).toBeInTheDocument();
@@ -484,11 +492,26 @@ describe("the task screen (E)", () => {
       expect(within(document.querySelector(".ph-facts") as HTMLElement).getByText("repo").nextElementSibling).toHaveTextContent("pkg");
     });
 
-    const several = () => scoped([scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { chain_definition: { template_id: "default", nodes }, materialized_chain: scopeChain("sequential", WORKSPACE) });
+    /** The task in a node whose fix loop ran these rounds. */
+    const rounds = (runs: Parameters<typeof scoped>[0], over = {}) => scoped(runs, { chain_definition: { template_id: "default", nodes: nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n)) }, ...over });
+
+    it("reads a task with a failed scope as failed, though a later scope passed, and opens on the one that failed", async () => {
+      const [bad, good] = [scopeRun(null, "just test-api", 0, "failed"), scopeRun(null, "just test-web", 0, "done")];
+      const calls = mount(rounds([bad, good]), `${TESTS}&tab=log`);
+      expect(await screen.findByText("task · round 1 of 3 · failed")).toBeInTheDocument();
+      // Its log is the failed scope's, not the one that happened to run last.
+      await waitFor(() => expect([...new Set(calls.filter((c) => c.path.endsWith("/log")).map((c) => c.path.split("/")[2]))]).toEqual([bad[1].id]));
+    });
+
     it.each([
       ["one that waits has no log to read", it0, ":just test-e2e", "test scope · round 1 · waiting", null],
-      ["one its repository ran without says it was not picked", it0, ":just test-gone", "test scope · round 1 · not picked", "Not picked: no changed path reaches it this round."],
-      ["one in a repository the round did not get to says so", several, "web:just test-c", "test scope · round 1 · not reached", "Its repository was not reached this round."],
+      ["a command the task never ran is not found", it0, ":just test-gone", "test scope · round 1 · not found", "Not found: this task ran no scope with this command."],
+      // Round 1 ran it; rounds 2 and 3 ran its repository without it.
+      ["one its repository ran without says it was not picked", () => rounds([scopeRun(null, "just test-api", 0, "done"), scopeRun(null, "just test-web", 0, "done"), scopeRun(null, "just test-api", 1, "done"), scopeRun(null, "just test-api", 2, "done")]), ":just test-web", "test scope · round 3 of 3 · not picked", "Not picked: no changed path reaches it this round."],
+      // Round 2 runs on and has recorded no picks: it has dropped nothing yet.
+      ["one of a round still choosing says so", () => rounds([scopeRun(null, "just test-api", 0, "done"), scopeRun(null, "just test-web", 0, "done"), scopeRun(null, "just test-api", 1, "running")]), ":just test-web", "test scope · round 2 of 3 · still choosing", "Still choosing: this round has not picked its scopes yet."],
+      // Round 1 ran it in pkg; round 2 stopped at ws.
+      ["one in a repository the round did not get to says so", () => rounds([scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "done"), scopeRun("ws", "just test-a", 1, "failed")], { materialized_chain: scopeChain("sequential", WORKSPACE) }), "pkg:just test-b", "test scope · round 2 of 3 · not reached", "Its repository was not reached this round."],
     ])("opens a scope with no run: %s", async (_n, of, scope, sub, body) => {
       mount(of(), `${TESTS}&scope=${encodeURIComponent(scope).replace(/%20/g, "+")}`);
       expect(await screen.findByText(sub)).toBeInTheDocument();

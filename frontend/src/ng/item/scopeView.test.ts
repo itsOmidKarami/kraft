@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameWidth, isScopeTask, otherRounds, reposOf, scopesView, type Chip, type ScopesView } from "./scopeView";
+import { frameWidth, isScopeTask, otherRounds, reposOf, scopeAt, scopeLead, scopeRuns, scopesView, type Chip, type ScopesView } from "./scopeView";
 import { asOfPass } from "./nodeGraph";
 import { detail, FROZEN, pendingRun, SCOPE_PATH, scopeChain, scopeRun, scoped, WORKSPACE } from "./testkit";
 
@@ -142,6 +142,54 @@ describe("a scope task in a node the chain ran again", () => {
     // A pass that resumed at round 2 has no round 1 to speak of.
     const resumed = item([run(null, "just test-a", 1, "done"), run(null, "just test-a", 2, "done")]);
     expect(otherRounds(resumed, PATH, ":just test-a", 3, 2)).toEqual(["2: passed"]);
+  });
+});
+
+describe("a scope the round has no chip for", () => {
+  const miss = (it: ReturnType<typeof item>, key: string, round: number) => {
+    const { miss, why, command } = scopeAt(it, PATH, key, scopesView(it, PATH, round, NOW));
+    return [miss, why, command];
+  };
+  const three = () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done"), run(null, "just test-a", 1, "done"), run(null, "just test-a", 2, "done")]);
+
+  it.each([
+    // Round 3 against round 2 alone: b ran in round 1, and neither since.
+    ["a scope another round ran", () => three(), ":just test-b", 3, "not picked", "Not picked: no changed path reaches it this round.", "just test-b"],
+    ["a command no round ran", () => three(), ":just test-gone", 3, "not found", "Not found: this task ran no scope with this command.", "just test-gone"],
+    ["a key with no repository part", () => three(), "just test-a", 3, "not found", "Not found: this task ran no scope with this command.", "just test-a"],
+    // Round 2 runs on and has recorded no picks: what it dropped is not known yet.
+    ["a round still choosing", () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done"), run(null, "just test-a", 1, "running")]), ":just test-b", 2, "still choosing", "Still choosing: this round has not picked its scopes yet.", "just test-b"],
+    ["a repository the round did not reach", () => item([run("ws", "just test-a", 0, "done"), run("pkg", "just test-p", 0, "done"), run("ws", "just test-a", 1, "failed")], { materialized_chain: chain("sequential", WORKSPACE) }), "pkg:just test-p", 2, "not reached", "Its repository was not reached this round.", "just test-p"],
+  ])("says why: %s", (_n, of, key, round, want, why, command) => {
+    expect(miss(of(), key, round)).toEqual([want, why, command]);
+  });
+
+  it("finds the chip and its row when the round has one, a dropped one included", () => {
+    const it = three();
+    expect(scopeAt(it, PATH, ":just test-a", scopesView(it, PATH, 2, NOW))).toMatchObject({ chip: { state: "done" }, row: { id: null }, command: "just test-a" });
+    expect(scopeAt(it, PATH, ":just test-b", scopesView(it, PATH, 2, NOW)).chip).toMatchObject({ state: "skipped" });
+  });
+});
+
+describe("a changed-test-scope task as one thing", () => {
+  it.each([
+    ["a scope that failed speaks for it, though a later one passed", [run(null, "just test-a", 0, "failed"), run(null, "just test-b", 0, "done")], "just test-a"],
+    ["else a scope still running", [run(null, "just test-a", 0, "running"), run(null, "just test-b", 0, "done")], "just test-a"],
+    ["a failure before one still running", [run(null, "just test-a", 0, "running"), run(null, "just test-b", 0, "failed")], "just test-b"],
+    ["every scope passed: its last run, as any task", [run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done")], undefined],
+  ] as const)("%s", (_n, runs, want) => {
+    expect(scopeLead(scopesView(item([...runs]), PATH, 1, NOW))?.command).toBe(want);
+  });
+
+  it("counts the latest run of each scope: a scope that failed and then passed in the round did not fail", () => {
+    const [first, again] = [run(null, "just test-a", 0, "failed"), run(null, "just test-a", 0, "done")];
+    Object.assign(again[1], { attempt: 2, created_at: "2026-09-13T10:11:00Z" });
+    const it = item([again], { worker_sessions: [first[1], again[1]] });
+    expect(scopeLead(scopesView(it, PATH, 1, NOW))).toBeUndefined();
+    // Both are runs of the scope in the round, oldest first; another round's are not.
+    expect(scopeRuns(it, PATH, ":just test-a", 1).map((s) => s.status)).toEqual(["failed", "done"]);
+    expect(scopeRuns(it, PATH, ":just test-a", 2)).toEqual([]);
+    expect(scopeRuns(it, PATH, ":just test-b", 1)).toEqual([]);
   });
 });
 

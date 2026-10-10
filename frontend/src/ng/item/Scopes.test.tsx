@@ -113,6 +113,59 @@ describe("an open changed-test-scope task", () => {
     ]);
   });
 
+  it("neither counts nor names the repository of an item that has one", async () => {
+    const one = scoped([scopeRun(null, "just test-a", 0, "done", { order: 0 }), scopeRun(null, "just test-a", 1, "done", { order: 0 }), scopeRun(null, "just test-c", 1, "done", { order: 2 })], { chain_definition: { template_id: "default", nodes } });
+    mount(`${AT}?sel=${SCOPE_PATH}`, one);
+    const f = await screen.findByRole("group", { name: /repositories and scopes/ });
+    const overview = pane("test_changed_scopes");
+    expect([...overview.querySelector("dl")!.querySelectorAll(":scope > div > dt")].map((d) => d.textContent)).toEqual(["this round", "scopes", "config"]);
+    // "Not reached" is what happens to a repository after one that failed: there is no such repository here.
+    expect([...overview.querySelector(".scope-legend")!.children].map((l) => l.textContent?.slice(0, 10))).toEqual(["newpicked ", "not picked"]);
+    await userEvent.click(within(f).getByRole("button", { name: "just test-c, done, new this round" }));
+    const scope = pane("just test-c");
+    expect([...scope.querySelectorAll("dl > div dt")].map((d) => d.textContent)).toEqual(["status", "command", "paths", "task", "execution", "other rounds"]);
+    expect(scope.querySelector(".pane-crumbs, nav")!.textContent).not.toContain("kraft-web");
+  });
+
+  it.each([
+    ["ws:just test-gone", "just test-gone", "test scope · round 2 of 3 · not found", "Not found: this task ran no scope with this command."],
+    // pkg ran `test-b` in round 1 and was not reached in round 2.
+    ["pkg:just test-b", "just test-b", "test scope · round 2 of 3 · not reached", "Its repository was not reached this round."],
+  ])("says why a scope the round has no chip for has none: %s", async (key, title, want, body) => {
+    mount(`${AT}?sel=${SCOPE_PATH}&${new URLSearchParams({ scope: key })}`);
+    expect(sub(title)).toBe(want);
+    expect(within(pane(title)).getByText(body)).toBeInTheDocument();
+  });
+
+  it("offers the runs of a scope the round ran more than once, and reads the one picked", async () => {
+    const [first, again, other] = [scopeRun("ws", "just test-a", 1, "failed", { order: 0 }, 9000), scopeRun("ws", "just test-a", 1, "done", { order: 0 }), scopeRun("ws", "just test-c", 1, "done", { order: 2 })];
+    Object.assign(first[1], { attempt: 2, created_at: "2026-09-13T10:08:00Z" });
+    Object.assign(again[1], { attempt: 3 });
+    const it = scoped([scopeRun("ws", "just test-a", 0, "done", { order: 0 }), again, other], { chain_definition: { template_id: "default", nodes }, materialized_chain: WS });
+    it.worker_sessions.push(first[1]);
+    mount(`${AT}?sel=${SCOPE_PATH}&${new URLSearchParams({ scope: "ws:just test-a" })}`, it);
+    const scope = () => pane("just test-a");
+    const pill = within(scope()).getByRole("button", { name: "attempt 2 of 2" });
+    expect(pill.closest(".pane-sub")).toHaveTextContent(/^test scope · round 2 of 3 · attempt 2 of 2▾ · passed 24s$/);
+    await userEvent.click(pill);
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /^Attempt 1/ }));
+    expect(where()).toContain("attempt=2");
+    expect(scope().querySelector(".pane-sub")).toHaveTextContent(/^test scope · round 2 of 3 · attempt 1 of 2▾ · failed 9s$/);
+    expect(within(scope()).getByText("status").nextElementSibling).toHaveTextContent("failed · 9s");
+    // A scope the round ran once has no runs to pick between, and the run picked is not another scope's.
+    const f = await screen.findByRole("group", { name: /repositories and scopes/ });
+    await userEvent.click(within(f).getByRole("button", { name: /^just test-c/ }));
+    expect(where()).not.toContain("attempt=");
+    expect(within(pane("just test-c")).queryByRole("button", { name: /^attempt/ })).toBeNull();
+  });
+
+  it("reads a task with a failed scope as failed, though a later scope passed", async () => {
+    const it = scoped([scopeRun("ws", "just test-a", 0, "failed", { order: 0 }, 9000), scopeRun("ws", "just test-c", 0, "done", { order: 2 })], { chain_definition: { template_id: "default", nodes }, materialized_chain: WS });
+    mount(`${AT}?sel=${SCOPE_PATH}`, it);
+    await screen.findByRole("group", { name: /repositories and scopes/ });
+    expect(sub("test_changed_scopes")).toMatch(/· failed$/);
+  });
+
   it("says a parallel task's scopes run together within a repo", async () => {
     mount(`${AT}?sel=${SCOPE_PATH}`, item({ materialized_chain: scopeChain("parallel", WORKSPACE) }));
     await screen.findByRole("group", { name: /repositories and scopes/ });

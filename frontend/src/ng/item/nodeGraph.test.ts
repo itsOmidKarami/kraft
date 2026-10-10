@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { asOfPass, footerState, lookWord, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
+import { asOfPass, footerState, lookWord, loopIdle, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
 import { notStarted } from "./chainValues";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
@@ -155,6 +155,36 @@ describe("nodeGraph scope task", () => {
     expect(item.worker_sessions.map((x) => x.attempt)).toEqual([1, 1, 1]);
     const counted = { ...item, worker_sessions: item.worker_sessions.map((x, i) => ({ ...x, attempt: i + 1 })) };
     expect(nodeGraph(counted, solo, NOW).steps[0].tasks[0].attempt).toBeUndefined();
+  });
+});
+
+describe("nodeGraph scope task state", () => {
+  const solo: ChainNode = { id: "verification", kind: "exec", gate_after: null, tasks: [SCOPE_PATH], steps: [[SCOPE_PATH]] };
+  it.each([
+    ["failed when a scope failed, though a later one passed", ["failed", "done"], "failed"],
+    ["running while a scope still runs, though a later one passed", ["running", "done"], "current"],
+    ["done when every scope passed", ["done", "done"], "done"],
+  ])("draws its box %s", (_n, [a, b], want) => {
+    const item = scoped([scopeRun(null, "just test-a", 0, a), scopeRun(null, "just test-b", 0, b)]);
+    expect(nodeGraph(item, solo, NOW).steps[0].tasks[0].state).toBe(want);
+  });
+});
+
+describe("loopIdle", () => {
+  const stop = (cycle: number): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", payload: { node_id: "verification", cycle, verdict: "stop_needs_human" }, created_at: "2026-09-13T09:30:00Z" }) as KraftEvent;
+  it.each([
+    // The node's own row for the newest round, and that a round which is over did not run it.
+    ["repair", 2, { latest: 2, total: 3 }, [], "not yet"],
+    ["repair", 3, { latest: 3, total: 3 }, [], "last round"],
+    ["repair", 2, { latest: 2, total: 3 }, [stop(1)], "stopped by judge"],
+    ["repair", 1, { latest: 2, total: 3 }, [], "not run in this round"],
+    ["judge", 2, { latest: 2, total: 3 }, [], "not yet"],
+    // The judge after the last round has no repair to rule on, and its row still says "not yet".
+    ["judge", 3, { latest: 3, total: 3 }, [], "not yet"],
+    ["judge", 2, { latest: 3, total: 3 }, [], "not run in this round"],
+    ["judge", 1, { latest: 1, total: 3 }, [], "skipped · the first repair runs without the judge"],
+  ] as const)("%s of round %s in %j: %s", (loop, round, rounds, events, want) => {
+    expect(loopIdle(node, loop, round, rounds, [...events])).toBe(want);
   });
 });
 

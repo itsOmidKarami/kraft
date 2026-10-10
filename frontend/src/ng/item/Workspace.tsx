@@ -236,7 +236,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             reserve={reserve}
             selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}
             expand={expand}
-            onScope={(key) => { setShut(null); dispatch({ type: "pick", sel: place.sel }, { scope: key }); }}
+            onScope={(key) => { setShut(null); dispatch({ type: "pick", sel: place.sel }, { scope: key, attempt: undefined }); }}
             onCollapse={() => { setShut(herePath); if (place.scope) go({ ...place, scope: undefined }); }}
             onSelect={(x) => pick(nodeSel(x))}
             onOpen={(x) => { setShut(null); dispatch({ type: "expand", sel: nodeSel(x) }); }}

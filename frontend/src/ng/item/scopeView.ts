@@ -25,7 +25,7 @@ export type Chip = {
   session?: WorkerSession;
 };
 export type RepoState = "done" | "failed" | "running" | "waiting" | "unreached";
-export type RepoRow = { id: string | null; name: string; state: RepoState; note: string; chips: Chip[] };
+export type RepoRow = { id: string | null; name: string; state: RepoState; note: string; chips: Chip[]; /** The round runs on and has not recorded its picks: what it dropped is not known yet. */ choosing?: true };
 export type ScopesView = { path: string; round: number; execution: "sequential" | "parallel"; rows: RepoRow[] };
 
 /** A repository's row in the open frame: 40px, or in parallel as tall as its stacked chips. */
@@ -157,7 +157,8 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
     };
     const ran = picked.map((r) => chip(r));
     // What the round before ran and this one did not: once this one has chosen all of its scopes, which is when it ends or records its picks.
-    const dropped = round > 1 && (!liveRound || picked.some((r) => r.selected)) && ran.length ? before.filter((b) => !picked.some((r) => sameAs(r, b))).map((b) => chip(b, true)) : [];
+    const choosing = liveRound && !picked.some((r) => r.selected);
+    const dropped = round > 1 && !choosing && ran.length ? before.filter((b) => !picked.some((r) => sameAs(r, b))).map((b) => chip(b, true)) : [];
     const chips = [...ran, ...dropped].sort(byOrder).map(({ order: _order, ...c }) => c);
     const failed = ran.find((c) => c.state === "failed");
     let state: RepoState, note: string;
@@ -174,7 +175,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
     } else if (failedBefore) [state, note] = ["unreached", `not reached · ${failedBefore} failed`];
     else if (liveRound) [state, note] = ["waiting", "waiting"];
     else [state, note] = ["unreached", "not reached"];
-    rows.push({ id, name: repo.name, state, note, chips });
+    rows.push({ id, name: repo.name, state, note, chips, ...(choosing && { choosing }) });
   }
   return { path, round, execution, rows };
 }
@@ -195,6 +196,42 @@ export function otherRounds(item: ItemDetail, path: string, key: string, round: 
     out.push(`${n}: ${ran ? (ran.pending ? "waiting" : ran.passed === null ? "running" : ran.passed ? "passed" : "failed") : here.length ? "not picked" : "repo not reached"}`);
   }
   return out;
+}
+
+/** The session that speaks for a changed-test-scope task in a round: a scope that failed, else one still going. The
+ *  task is not done while one of its scopes is not, whichever ran last; undefined when every scope passed. */
+export function scopeLead(view: ScopesView): WorkerSession | undefined {
+  const ran = view.rows.flatMap((r) => r.chips).filter((c) => c.session);
+  return (ran.find((c) => c.state === "failed") ?? ran.find((c) => c.state === "running" || c.state === "waiting"))?.session;
+}
+
+/** A scope's runs in a round, oldest first: more than one when it was run again inside the round. */
+export const scopeRuns = (item: ItemDetail, path: string, key: string, round: number): WorkerSession[] =>
+  passOf(item, path.split(".")[0]).filter((s) => s.hook_point === path && s.round === round - 1 && !!s.command && scopeKey(s.repository, s.command) === key).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
+
+/** A chip as one of its scope's runs reads: an earlier run of it in the round, picked. */
+export function chipOfRun(chip: Chip, s: WorkerSession, now: number): Chip {
+  const state = chipState(s, null);
+  return { ...chip, session: s, state, meta: metaOf(state, s, now) };
+}
+
+export type ScopeMiss = "not picked" | "not reached" | "not found" | "still choosing";
+/** One scope of the task in a round, by its key: its repository's row and its chip, or why the round has none for it.
+ *  A key no round of the pass ran is not a scope of the task ("not found": a stale or hand-made link); a round that
+ *  runs on and has not recorded its picks has dropped nothing yet ("still choosing"). */
+export function scopeAt(item: ItemDetail, path: string, key: string, view: ScopesView): { row?: RepoRow; chip?: Chip; command: string; miss?: ScopeMiss; why?: string } {
+  // A key is `<repository or nothing>:<command>`; one with no colon names no repository.
+  const at = key.indexOf(":");
+  const [repo, command] = [key.slice(0, Math.max(at, 0)), key.slice(at + 1)];
+  for (const row of view.rows) {
+    const chip = row.chips.find((c) => c.key === key);
+    if (chip) return { row, chip, command };
+  }
+  const row = view.rows.find((r) => (r.id ?? "") === repo);
+  if (!runsOf(item, path).some((r) => scopeKey(r.repository, r.command) === key)) return { row, command, miss: "not found", why: "Not found: this task ran no scope with this command." };
+  if (row?.choosing) return { row, command, miss: "still choosing", why: "Still choosing: this round has not picked its scopes yet." };
+  if (row && row.chips.length > 0) return { row, command, miss: "not picked", why: "Not picked: no changed path reaches it this round." };
+  return { row, command, miss: "not reached", why: "Its repository was not reached this round." };
 }
 
 /** A chip's state in the words a scope's subtitle uses: "passed 24s", "failed 1m", "running", "not picked". */
