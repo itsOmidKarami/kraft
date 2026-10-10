@@ -406,40 +406,13 @@ async def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(dat
     assert rollup["total"]["cost_complete"] is False
 
 
-async def test_a_session_with_tokens_and_no_output_count_marks_the_rollup_incomplete(database):
-    """A session that never reported its output (still running, paused or
-    killed) has `tokens_out` NULL. Summing that as zero would print a partial
-    output as the whole of it, so the rollup says the sum is a floor."""
-    await database.write(
-        lambda c: c.execute(
-            "INSERT INTO work_items (id, title, repo, chain_template, "
-            "chain_definition, status, created_at, updated_at) VALUES "
-            "('w','t','/r','quick-task','{}','active','now','now')"
-        )
-    )
-    await database.write(lambda c: _session(c, "told", "verify", u=Usage(100, 10, 0.5, "m")))
-    # tokens, but no output count
-    await database.write(
-        lambda c: _session(c, "untold", "verify", status="failed", u=Usage(900, None, 0.1, "m"))
-    )
-    await database.write(lambda c: _session(c, "whole", "plan", u=Usage(100, 10, 0.5, "m")))
-    # no tokens at all: a subprocess task, not a missing count
-    await database.write(lambda c: _session(c, "free", "env_setup"))
-    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
-    by = {n["node"]: n for n in rollup["by_node"]}
-
-    assert by["verify"]["tokens_out"] == 10  # what was reported, still summed
-    assert by["verify"]["out_complete"] is False
-    assert by["plan"]["out_complete"] is True
-    assert by["env_setup"]["out_complete"] is True
-    assert rollup["total"]["out_complete"] is False
-
-
 async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess(database):
     """Kraft-wz83s: a running session's `cost_usd` is `session_progress`'s
     estimate, not a settled figure -- the rollup says so (`cost_estimated`),
     distinct from `cost_complete`, which is about a *finished* session that
-    never reported at all."""
+    never reported at all. A running session has no output count either, so the
+    sum says it is a floor (`out_complete`); a node whose sessions all exited,
+    and a no-token subprocess task, are not."""
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, title, repo, chain_template, "
@@ -461,9 +434,13 @@ async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_gue
         store.session_running(c, sid, 1, 1.0)
         # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens
         # is a round $2.00.
-        store.session_progress(c, sid, Usage(tokens_in=1_000_000, model="claude-sonnet-5"))
+        # a live claude session's output is unknown, not zero (`usage.from_stream`)
+        live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+        store.session_progress(c, sid, live)
 
     await database.write(lambda c: _running(c, "live", "verify"))
+    await database.write(lambda c: _session(c, "done", "plan", u=Usage(100, 10, 0.5, "m")))
+    await database.write(lambda c: _session(c, "free", "env_setup"))
     rollup = database.read(lambda c: store.usage_rollup(c, "w"))
     verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
 
@@ -471,6 +448,11 @@ async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_gue
     assert verify["cost_estimated"] is True
     assert verify["cost_complete"] is True  # a number was reported, just not a final one
     assert rollup["total"]["cost_estimated"] is True
+    by = {n["node"]: n for n in rollup["by_node"]}
+    assert by["verify"]["out_complete"] is False
+    assert by["plan"]["out_complete"] is True
+    assert by["env_setup"]["out_complete"] is True
+    assert rollup["total"]["out_complete"] is False
 
 
 async def test_rollup_counts_a_paused_session_s_real_span(database):
