@@ -440,14 +440,16 @@ def _item_policy(row, launch: LaunchContext | None) -> _policy.SandboxPolicy | N
 
 
 def frozen_steering(row) -> dict:
-    """The steering frozen into this item's snapshot at intake: the task
-    steering and the repository steering `resolve_agent_task` takes."""
+    """What `resolve_agent_task` takes from this item's snapshot, frozen at
+    intake: the task steering, the repository steering, and the plugin
+    versions its chain was resolved through."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
-        return {"steering": None, "repository_steering": None}
+        return {"steering": None, "repository_steering": None, "plugins": None}
     return {
         "steering": snapshot.chain.steering,
         "repository_steering": snapshot.repository_steering,
+        "plugins": snapshot.chain.plugins,
     }
 
 
@@ -1279,7 +1281,11 @@ async def _dispatch_task(
     try:
         # A profile's own list is live configuration, like the profile body;
         # a file that does not load has none, and the launch below says why.
-        table = _agent.harness_table(harnesses)[0] if t.fallback is None and t.profile else None
+        table = (
+            _agent.harness_table(harnesses, frozen_steering(work_item_row)["plugins"])[0]
+            if t.fallback is None and t.profile
+            else None
+        )
     except _agent.HarnessUnavailable:
         table = None
     cands = _fallback.candidates(t, table)

@@ -312,7 +312,10 @@ def revise(
         )
     except ValidationError as exc:
         raise RevisionError(f"the revised chain does not validate: {first_error(exc)}") from exc
-    revised = replace(chain, chain=ResolvedChain.from_chain(authored, steering=steering))
+    revised = replace(
+        chain,
+        chain=ResolvedChain.from_chain(authored, steering=steering, plugins=chain.chain.plugins),
+    )
     for path, override in changes.overrides.items():
         open_node(revised.chain.nodes, path.split(PATH_SEPARATOR)[0], f"override {path}")
         try:
@@ -334,7 +337,9 @@ def revise(
         # revision touches none of those, so it applies there unchanged.
         whole = replace(
             chain,
-            chain=ResolvedChain.from_chain(chain.untrimmed, steering=chain.chain.steering),
+            chain=ResolvedChain.from_chain(
+                chain.untrimmed, steering=chain.chain.steering, plugins=chain.chain.plugins
+            ),
             untrimmed=None,
         )
         revised = replace(

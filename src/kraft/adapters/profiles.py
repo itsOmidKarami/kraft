@@ -4,6 +4,7 @@ Kraft-ps1ao). Re-exported by `kraft.adapters.agent`, whose names these are."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from kraft import harness as _harness
@@ -32,14 +33,18 @@ class ProfileUnavailable(HarnessUnavailable):
 _PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
 
 
-def harness_table(harnesses: _harness.HarnessSet) -> tuple[HarnessProfileTable, Path]:
+def harness_table(
+    harnesses: _harness.HarnessSet, pins: Mapping[str, Mapping[str, str | None]] | None = None
+) -> tuple[HarnessProfileTable, Path]:
     """The live `harnesses.yaml` and its path, or `HarnessUnavailable`. Read
     from the app's templates directory (`KRAFT_CONFIG_DIR`, else
-    `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch."""
+    `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch.
+    A plugin's agent profiles are the exception: `pins` are the versions a
+    work item started with (`ResolvedChain.plugins`), and theirs are read."""
     path = config_dir() / "harnesses.yaml"
     try:
         table = HarnessProfileTable.from_yaml(
-            path, harnesses=harnesses.valid, plugins=plugins_load.installed(path.parent)
+            path, harnesses=harnesses.valid, plugins=plugins_load.for_item(pins, path.parent)
         )
         return table, path
     except TemplateEnvironmentError as exc:
