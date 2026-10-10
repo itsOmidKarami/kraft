@@ -298,9 +298,9 @@ export interface WorkItem {
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
    *  from `deferred_findings`: these are critical/important, not minor ones
    *  that never entered the loop. Only on the detail endpoint. */
+  judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
   /** Task and step paths skipped in this run. */
   skipped_paths?: string[];
-  judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
   /** `done_with_concerns` text from every session that reported one; only on the detail endpoint. */
   concerns?: string[];
   /** The agent's question, set only while a `needs_human` stop is answerable
