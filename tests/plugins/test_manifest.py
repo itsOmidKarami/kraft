@@ -84,6 +84,7 @@ def _plugin(change=None, *, entry="release", files=FILES, text=None):
         {"change": {"author": {"name": "Someone"}}},
         {"files": {".kraft/plugin.json": ("100644", b"{}")}},
         {"text": json.dumps({**PLUGIN, "description": "a‮b"})},
+        {"text": json.dumps({**PLUGIN, "version": "1.4." + "9" * 80})},
     ],
     ids=[
         "kraft-name",
@@ -98,6 +99,7 @@ def _plugin(change=None, *, entry="release", files=FILES, text=None):
         "author-without-email",
         "no-components",
         "hidden-character-in-a-string",
+        "a-version-too-long-to-compare",
     ],
 )
 def test_a_plugin_is_refused(kwargs):
@@ -205,6 +207,7 @@ _CORPUS = [
     ("plugin", PLUGIN, True),
     ("plugin", {**PLUGIN, "version": "1.4"}, False),
     ("plugin", {**PLUGIN, "version": "2.0.0-rc.1"}, True),
+    ("plugin", {**PLUGIN, "version": "1.4." + "9" * 80}, False),
     ("plugin", {**PLUGIN, "requires": {"kraft": "2.4.1"}}, False),
     ("plugin", {**PLUGIN, "requires": {"kraft": "2", "python": "3"}}, False),
     ("plugin", {**PLUGIN, "requires": {"kraft": "2", "harnesses": ["claude"]}}, True),

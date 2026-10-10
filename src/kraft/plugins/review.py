@@ -30,7 +30,7 @@ from kraft.plugins.update import LIMITS
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 _MERGES = ("mr.merge", "mr.mark_ready")
-_GATE_FIELDS = ("chain_finalized", "skippable", "reject_to")
+_GATE_FIELDS = ("chain_finalized", "skippable", "reject_to", "artifact_required")
 _ROUTE = ("harness", "model", "effort", "profile", "fallback")
 _INPUTS = ("inputs",)
 _NODE = re.compile(r"\.nodes\[([^\]]+)\]")
@@ -105,7 +105,8 @@ def _flatten(value: object, at: str, out: dict[str, object], lists: dict[str, li
         lists[at] = [str(item["id"]) for item in value]
         for item in value:
             _flatten(item, f"{at}[{item['id']}]", out, lists)
-    elif value is not None and value != [] and value != {}:
+    elif value is not None and value != {} and (value != [] or at.endswith(".fallback")):
+        # `fallback: []` says "none"; absent, the task takes its profile's.
         out[at] = value
 
 
@@ -275,9 +276,10 @@ def _chain_change(
 
 def _reordered(path: str, before: list[str], after: list[str]) -> tuple[str, str]:
     """`(section, line)` for an id-keyed list whose common entries changed
-    order. A moved node runs its work on the other side of a gate or a merge;
-    tasks and steps stay inside their node."""
-    section = "reach" if path.endswith(".nodes") else "content"
+    order. A moved node runs its work on the other side of a gate or a merge,
+    and a moved step on the other side of a wait or a check in its node; the
+    tasks of one step run together."""
+    section = "reach" if path.endswith((".nodes", ".steps")) else "content"
     return section, f"{path}: order changed, {before} -> {after}"
 
 

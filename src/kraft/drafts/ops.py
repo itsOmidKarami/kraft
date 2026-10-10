@@ -92,7 +92,7 @@ def plugin_components(st) -> dict[str, dict]:
     (`release:base`): what a draft reads through and never writes. Kept with
     the library it was read from, which a reload replaces."""
     library = getattr(st, "library", None)
-    if library is None:
+    if library is None or not library.plugins:
         return {}
     cached = getattr(st, "_plugin_components", None)
     if cached is not None and cached[0] is library:
@@ -105,6 +105,13 @@ def plugin_components(st) -> dict[str, dict]:
             )
     st._plugin_components = (library, out)
     return out
+
+
+def with_plugins(st, own: object) -> dict:
+    """The library mapping `own` (normalised, as `authored.load` gives it)
+    with the plugins' components beside its own: what an `extends` is read
+    through. A copy of theirs, so owning what a node inherits changes nothing."""
+    return _beside(own, authored.normalise(copy.deepcopy(plugin_components(st))))
 
 
 def _beside(own: object, shipped: Mapping[str, dict]) -> dict:
@@ -558,7 +565,11 @@ def _new_task(id_base: str | None, kind: str | None, extends: str | None, taken)
     if kind is not None and kind not in set(TaskKind):
         raise OpError(f"no task kind {kind!r}")
     # A plugin's component is `release:base`; the task it becomes is `base`.
-    id = id_base if id_base is not None else _unique((kind or extends).rpartition(":")[2], taken)
+    id = (
+        id_base
+        if id_base is not None
+        else _unique((kind or extends).rpartition(":")[2], [*taken, *RESERVED_SEGMENTS])
+    )
     return {"id": id, "kind": kind} if kind else {"id": id, "extends": extends}
 
 
@@ -739,7 +750,8 @@ def new_chain(d: Draft, **source: str) -> None:
             # references already made `<namespace>:<name>`, so the copy resolves.
             if origin not in library.chain_ids:
                 raise OpError(f"there is no chain {origin!r} to copy")
-            d._chain = authored.load(yaml.safe_dump(plain(library.chain_data(origin))))
+            copied = yaml.safe_dump(plain(library.chain_data(origin)), sort_keys=False)
+            d._chain = authored.load(copied)
             authored.put(d._chain, "", "id", d.key)
             d.exists = True
             d.dirty.add(d.name)

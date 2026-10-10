@@ -12,7 +12,12 @@ BASE = {
     "library": {
         "steering": {"house": {"instructions": "Be careful."}},
         "tasks": {
-            "base": {**AGENT, "steering": ["house"], "policy": {"time_cap_minutes": 30}},
+            "base": {
+                **AGENT,
+                "steering": ["house"],
+                "policy": {"time_cap_minutes": 30},
+                "fallback": [],
+            },
             "open": {"kind": "forge", "target": "mr.open_draft"},
             "sync": {"kind": "forge", "target": "mr.sync"},
         },
@@ -30,7 +35,7 @@ BASE = {
                         "judge": {"id": "judge", "extends": "base"},
                     },
                 },
-                {"id": "approve", "kind": "gate"},
+                {"id": "approve", "kind": "gate", "artifact": "plan", "artifact_required": True},
                 {
                     "id": "land",
                     "kind": "exec",
@@ -41,7 +46,16 @@ BASE = {
         },
         # Its target is `ship`'s only by a string prefix of the chain id.
         "ship2": {
-            "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "s", "extends": "sync"}]}]
+            "nodes": [
+                {
+                    "id": "n",
+                    "kind": "exec",
+                    "steps": [
+                        {"id": "first", "tasks": [{"id": "s", "extends": "sync"}]},
+                        {"id": "then", "tasks": [{"id": "t", "extends": "sync"}]},
+                    ],
+                }
+            ]
         },
     },
     "skills": {"deploy-review": "Check the rollout.\n"},
@@ -59,7 +73,11 @@ def _gate_removed(spec):
 
 
 def _gate_replaced(spec):
-    _nodes(spec)[1].update(kind="exec", tasks=[{"id": "open", "extends": "open"}])
+    _nodes(spec)[1] = {
+        "id": "approve",
+        "kind": "exec",
+        "tasks": [{"id": "open", "extends": "open"}],
+    }
 
 
 def _auto_review(spec):
@@ -143,6 +161,18 @@ def _more_fix_rounds(spec):
     _nodes(spec)[0]["fix_loop"]["max_attempts"] = 9
 
 
+def _profiles_own_fallback(spec):
+    del spec["library"]["tasks"]["base"]["fallback"]
+
+
+def _steps_swapped(spec):
+    spec["chains"]["ship2"]["nodes"][0]["steps"].reverse()
+
+
+def _gate_needs_no_document(spec):
+    _nodes(spec)[1]["artifact_required"] = False
+
+
 def _downgrade(spec):
     spec["manifest_fields"]["version"] = "1.3.9"
 
@@ -172,6 +202,8 @@ def _downgrade(spec):
         (_writes, "reach", "release:ship.nodes[land]: no longer read-only"),
         (_every_repository, "reach", "scope 'once' -> 'each_repository'"),
         (_more_fix_rounds, "reach", "limit max_attempts raised, 2 -> 9"),
+        (_profiles_own_fallback, "reach", "fallback removed (was [])"),
+        (_gate_needs_no_document, "reach", "artifact_required True -> False"),
         (_plugin_ref, "content", "new plugin skill reference 'superpowers:brainstorming'"),
         (_downgrade, "reach", "downgrade: 1.4.0 -> 1.3.9"),
     ],
@@ -193,6 +225,8 @@ def _downgrade(spec):
         "no-longer-read-only",
         "scope",
         "fix-loop-rounds",
+        "no-fallback-dropped",
+        "gate-needs-no-document",
         "plugin-ref",
         "downgrade",
     ],
@@ -209,8 +243,18 @@ def test_review_calls_out(change, section, says):
 
 @pytest.mark.parametrize(
     ("change", "section"),
-    [(_gate_after_merge, "reach"), (_build_after_gate, "reach"), (_tasks_swapped, "content")],
-    ids=["gate-after-merge", "work-moved-past-a-gate", "tasks-swapped-in-a-node"],
+    [
+        (_gate_after_merge, "reach"),
+        (_build_after_gate, "reach"),
+        (_steps_swapped, "reach"),
+        (_tasks_swapped, "content"),
+    ],
+    ids=[
+        "gate-after-merge",
+        "work-moved-past-a-gate",
+        "steps-swapped-in-a-node",
+        "tasks-swapped-in-a-node",
+    ],
 )
 def test_a_reordered_chain_is_reviewed(change, section):
     """Nodes keyed by id show no changed fact when they only move, so the

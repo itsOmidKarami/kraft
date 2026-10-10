@@ -538,6 +538,10 @@ def _plugin_checks(templates: Path) -> list[dict]:
             notes.append(f"{plugin_id}: alias change pending; run kraft admin plugin update")
         if collection.ref != locked.ref:
             notes.append(f"{plugin_id}: ref change pending; run kraft admin plugin update")
+        if plugin_update._moved(collection, locked):
+            notes.append(
+                f"{plugin_id}: collection URL change pending; run kraft admin plugin update"
+            )
         if collection.auto_update or listed.entry(plugin_id).auto_update:
             auto.append(plugin_id)
         if collection.git is not None and locked.commit is not None:
