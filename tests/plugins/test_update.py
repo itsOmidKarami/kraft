@@ -11,6 +11,7 @@ from support.plugins import AGENT, chain, instance, make_collection, plugin_json
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import load, manifest, update
 from kraft.plugins.config import PluginEntry, PluginsLock
+from kraft.policy import PolicyError
 
 
 def _files(library=None, chains=None):
@@ -365,6 +366,39 @@ def test_a_limit_above_the_instance_maxima_is_refused(acme):
         "sets budget_usd 8 > the administrator maximum 5 (maxima.tasks.budget_usd)",
         library=_task(policy={"budget_usd": 8}),
     )
+
+
+def test_a_policy_that_does_not_load_stops_the_update(acme):
+    """A candidate is never judged without the maxima: no result, no write."""
+    repo, home = acme
+    _run(home, install=[ID])
+    publish(repo, "release", version="1.1.0")
+    (home[0] / "policy.yaml").write_text("default: [\n")
+    before = _written(home)
+
+    with pytest.raises(PolicyError):
+        _run(home)
+
+    assert _written(home) == before
+
+
+@pytest.mark.parametrize(
+    "local, outcome",
+    [({}, "applied"), ({"chains": {"mine": chain("release:base")}}, "refused")],
+    ids=["own-chains-go", "local-chain-still-extends-the-old-namespace"],
+)
+def test_an_alias_change_only_breaks_what_is_not_the_plugins(tmp_path, local, outcome):
+    repo = make_collection(tmp_path, {"release": RELEASE})
+    home = instance(tmp_path, {"acme": {"git": repo.as_uri()}}, **local)
+    _run(home, install=[ID])
+    before = _written(home)
+
+    result = _run(home, install=[ID], entry=PluginEntry(**{"as": "rel"}))[ID]
+
+    assert result.outcome == outcome, result
+    if outcome == "refused":
+        assert any("chain mine would stop resolving" in why for why in result.problems)
+        assert _written(home) == before
 
 
 def test_requires_must_be_satisfied(acme):
