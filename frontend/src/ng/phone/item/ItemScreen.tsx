@@ -151,7 +151,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             {card.hint && <p className="ph-statecard-text ph-statecard-fix">{withCode(card.hint)}</p>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
-                {card.facts.map(([k, v], i) => <div key={i} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
+                {card.facts.map(([k, v, to], i) => <div key={i} className="ph-fact"><dt>{k}</dt><dd>{to ? <button type="button" className="ph-linkbtn ph-factlink ph-underline" onClick={() => navigate(itemUrl(to))}>{v}</button> : v}</dd></div>)}
               </dl>
             )}
           </section>
