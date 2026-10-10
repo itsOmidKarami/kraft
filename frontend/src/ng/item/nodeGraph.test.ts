@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { footerState, lookWord, loopRounds, nodeGraph, passOf, sessionLook } from "./nodeGraph";
+import { footerState, lookWord, loopRounds, nodeGraph, passOf, sessionLook, settled } from "./nodeGraph";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -36,6 +36,8 @@ describe("nodeGraph", () => {
     const g = nodeGraph(item, node, NOW);
     expect(g.steps[0].tasks.map((t) => [t.id, t.state, t.meta, lookWord(t)])).toEqual([["lint", "done", "skipped", "skipped"], ["typecheck", "done", "skipped", "skipped"]]);
     expect(g.steps[1].tasks[0].state).toBe("todo");
+    // The panes count it settled, as they do a finished one; a session only paused is neither.
+    expect([item.worker_sessions[0], s("x", { status: "paused" }), s("x"), undefined].map(settled)).toEqual([true, false, true, false]);
   });
 
   it("draws a task by its kind in the frozen chain, before it has run (WI-3)", () => {

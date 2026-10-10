@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, sessionLook, sessionsOf, settled, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -196,7 +196,7 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
 
 type Latest = ReturnType<typeof sessionsOf>[number] | undefined;
 /** What a step's tasks came to, from the newest session of each. */
-const stepStatus = (latest: Latest[]) => (latest.every((x) => x?.status.startsWith("done")) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started");
+const stepStatus = (latest: Latest[]) => (latest.every(settled) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started");
 
 /** A step's tasks as rows, each opening its task. */
 function StepTasks({ paths, latest, now, onTask }: { paths: string[]; latest: Latest[]; now: number; onTask: (path: string) => void }) {
