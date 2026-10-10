@@ -2,6 +2,8 @@ export interface Health {
   status: "ok" | "degraded";
   invalid_templates: Record<string, string>;
   invalid_policy: string[];
+  /** Null without `storage.worktrees.limit`. `held`: starts that need a new worktree are waiting on disk space. */
+  storage?: { state: "ok" | "over_quota" | "held"; used_bytes: number; quota_bytes: number; limit_bytes: number; measured_at: string } | null;
   /** Where the server is listening — the login screen tells the user. */
   bind?: string;
   /** Paired with `bind` for the sidebar footer ("127.0.0.1:8765"); absent on

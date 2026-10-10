@@ -24,6 +24,18 @@ const Where = () => {
 const routed = (ui: ReactElement) => render(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
 const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...routed(<StateCard item={detail(over)} {...h} />) });
 
+describe("StateCard: queued for storage", () => {
+  it("says the worktrees are over the limit and that it starts when space frees", () => {
+    show({ display_status: "queued", status: "queued", queued: { verb: "resume", since: "2026-10-10T09:00:00+00:00", storage: { used_bytes: Math.floor(12.1 * 1024 ** 3), limit_bytes: 10 * 1024 ** 3 } } });
+    expect(screen.getByRole("region", { name: "Queued" })).toHaveTextContent("Waiting for space: worktrees use 12.1G of the 10G storage limit. It starts when space frees.");
+  });
+
+  it("is no card when a busy slot is what it waits on", () => {
+    show({ display_status: "queued", status: "queued", queued: { verb: "resume", since: "2026-10-10T09:00:00+00:00", storage: null } });
+    expect(screen.queryByRole("region", { name: "Queued" })).toBeNull();
+  });
+});
+
 describe("ComesAfterCard", () => {
   const DEPS = [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] as const;
   const after = (over: Parameters<typeof detail>[0]) => {

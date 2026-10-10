@@ -36,3 +36,10 @@ export function parse(unit: Unit, text: string, zero = false): { value: number |
   if (unit === "s-as-min") return Number.isInteger(n * 60) ? { value: n * 60 } : { error: "Enter whole seconds' worth of minutes." };
   return Number.isInteger(n) ? { value: n } : { error: "Enter a whole number." };
 }
+
+/** A storage size as `policy.yaml` writes it (`10G`): blank clears; anything else needs a whole number and a unit. */
+export function parseSize(text: string): { value: string | null } | { error: string } {
+  const typed = text.trim();
+  if (!typed) return { value: null };
+  return /^[1-9]\d*[kmgt]b?$/i.test(typed) ? { value: typed.toUpperCase() } : { error: "Enter a whole number with a unit: 1000M, 10G, 1T." };
+}

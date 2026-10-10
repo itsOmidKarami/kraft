@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, events, executor, store
+from kraft import caps, events, executor, storage, store
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
@@ -1147,7 +1147,12 @@ async def get_work_item(wid: str, request: Request):
         "stop_reason": stop_payload["reason"] if stop_payload else None,
         # Set while queued: which start it is waiting to make, and since when.
         "queued": (
-            {"verb": q["verb"], "since": q["at"]}
+            {
+                "verb": q["verb"],
+                "since": q["at"],
+                # Set when the storage limit, not a busy slot, is what it waits on.
+                "storage": storage.figures(st) if storage.holds(st, wid) else None,
+            }
             if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
             else None
         ),

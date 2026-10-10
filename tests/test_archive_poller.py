@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft import archive, policy, store
+from kraft import archive, policy, storage, store
 
 
 def _state(tmp_path, *, archive_after_days) -> dict:
@@ -147,3 +147,14 @@ async def test_one_failing_row_does_not_stop_the_tick(tmp_path, repo, stub_app, 
     monkeypatch.setattr(lifecycle, "_archive_one", first_one_fails)
 
     assert await archive.tick(app) == ["w2"]
+
+
+async def test_archiving_takes_the_items_bytes_off_the_storage_cache(tmp_path, repo, stub_app):
+    """A clean-up must release held starts without waiting for the next walk."""
+    app = stub_app(**_state(tmp_path, archive_after_days=30))
+    await _seed_completed_item(app, repo, updated_at=_days_ago(31))
+    app.state.storage_usage = storage.Usage("t", 120, {"w1": 40, "other": 80}, {})
+
+    assert await archive.tick(app) == ["w1"]
+
+    assert (app.state.storage_usage.governed, app.state.storage_usage.items) == (80, {"other": 80})

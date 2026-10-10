@@ -13,7 +13,7 @@ describe("reasonTail", () => {
   });
 
   it("says a queued item is waiting for a slot", () => {
-    expect(reasonTail(row("queued"), NOW)).toBe("waiting for a free slot");
+    expect(reasonTail(row("queued"), NOW)).toBe("waiting to start");
   });
 
   it("says one short thing per status and stop kind", () => {

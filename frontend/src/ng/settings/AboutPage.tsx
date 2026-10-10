@@ -68,7 +68,9 @@ export function AboutPage() {
   const address = health ? `${health.bind ?? ""}${health.port != null ? `:${health.port}` : ""}` : "";
   const process = health?.pid != null ? `pid ${health.pid}${health.uptime_s != null ? ` · up ${elapsed(health.uptime_s * 1000)}` : ""}` : "";
   const index = health?.index ? `${health.index.documents} documents · ${health.index.last_scan_at ? `scanned ${ago(health.index.last_scan_at)}` : "not scanned yet"}${health.index.errors.length ? ` · ${health.index.errors.length} scan error${health.index.errors.length === 1 ? "" : "s"}` : ""}` : "";
-  const problems = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
+  const held = health?.storage?.state === "held";
+  const invalid = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
+  const problems = invalid + (held ? 1 : 0);
   const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => showToast(done), () => showToast("Could not copy"));
   const diagnostics = [
     `kraft ${installed || "unknown"}${update ? ` (${update.channel})` : ""}`,
@@ -140,8 +142,8 @@ export function AboutPage() {
           <button type="button" className="set-btn" onClick={() => void copy(diagnostics, "Copied the diagnostics")}><Copy size={12} aria-hidden /> Copy diagnostics</button>
         </div>
         <dl className="set-about-kv">
-          {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}`) : "…"}</span></span>)}
-          {problems > 0 && row("", <span className="set-hint">Open the Chains and Policy pages for the details.</span>)}
+          {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}${held ? " · worktrees over the storage limit, starts held" : ""}`) : "…"}</span></span>)}
+          {invalid > 0 && row("", <span className="set-hint">Open the Chains and Policy pages for the details.</span>)}
           {row("Address", <><span className="set-mono">{address || "…"}</span>{access && (access.auth_required ? " · sign-in on" : " · sign-in off on localhost")}</>)}
           {health?.run_dir && row("Run directory", <span className="set-mono">{health.run_dir}</span>)}
           {process && row("Process", <span className="set-mono">{process}</span>)}

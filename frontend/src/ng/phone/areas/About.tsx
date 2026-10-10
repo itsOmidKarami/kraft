@@ -58,7 +58,9 @@ export function AboutScreen() {
   const installed = update?.installed ?? health?.version ?? "";
   const command = "kraft admin update";
   const address = health ? `${health.bind ?? ""}${health.port != null ? `:${health.port}` : ""}` : "";
-  const problems = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
+  const held = health?.storage?.state === "held";
+  const invalid = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
+  const problems = invalid + (held ? 1 : 0);
   const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => showToast(done), () => showToast("Could not copy: select the text instead")) ?? showToast("Could not copy: select the text instead");
   const diagnostics = [
     `kraft ${installed || "unknown"}${update ? ` (${update.channel})` : ""}`,
@@ -91,7 +93,7 @@ export function AboutScreen() {
       <Group
         title="This instance"
         rows={[
-          { label: "health", value: health ? (health.status === "ok" ? "ok" : `degraded · ${problems}`) : "…", sub: health?.status === "ok" ? "all chains and policy valid" : problems ? "Open the Chains and Policy screens for the details." : undefined },
+          { label: "health", value: health ? (health.status === "ok" ? "ok" : `degraded · ${problems}`) : "…", sub: health?.status === "ok" ? "all chains and policy valid" : held ? "Worktrees are over the storage limit: starts are held." : invalid ? "Open the Chains and Policy screens for the details." : undefined },
           { label: "address", value: address || "…", mono: true },
           { label: "Copy diagnostics", onClick: () => void copy(diagnostics, "Copied the diagnostics") },
         ]}

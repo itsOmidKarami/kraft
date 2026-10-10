@@ -285,6 +285,9 @@ export interface WorkItem {
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */
   head_sha?: string | null;
+  /** While queued: the start it waits to make and since when. `storage` is set when the
+   *  worktree storage limit, not a busy slot, is what it waits on. Detail only. */
+  queued?: { verb: string; since: string; storage: { used_bytes: number; limit_bytes: number } | null } | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
   /** The latest changed-test-scope verification run, one entry per scope that

@@ -45,6 +45,12 @@ describe("ng AboutPage", () => {
     expect(screen.getByText("ok · all chains and policy valid")).toBeInTheDocument();
   });
 
+  it("names held storage as the problem when nothing else is wrong", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "degraded", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "1.4.0", storage: { state: "held", used_bytes: 12, quota_bytes: 8, limit_bytes: 10, measured_at: "2026-10-10T09:00:00+00:00" } });
+    render(<AboutPage />);
+    expect(await screen.findByText(/degraded · 1 problem · worktrees over the storage limit, starts held/)).toBeInTheDocument();
+  });
+
   it("says to restart when an update was installed under this running server", async () => {
     vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "2.0.0" });
     render(<AboutPage />);

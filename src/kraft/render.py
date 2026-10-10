@@ -73,6 +73,14 @@ def visible_width(text: str) -> int:
     return len(strip_ansi(text))
 
 
+def human_size(n: int) -> str:
+    """Bytes as `12.1G`: the largest unit the number reaches, one decimal at most."""
+    for unit, size in (("T", 1024**4), ("G", 1024**3), ("M", 1024**2)):
+        if n >= size:
+            return f"{n / size:.1f}".removesuffix(".0") + unit
+    return f"{n // 1024}K"
+
+
 def relative_time(iso: str | None, now: datetime | None = None) -> str:
     """ "4m ago". A board is scanned, not read; an ISO timestamp is neither.
 
@@ -505,6 +513,15 @@ def health_block(payload: dict) -> str:
         pairs.append(("invalid policy", str(payload["invalid_policy"])))
     if payload.get("invalid_intake"):
         pairs.append(("invalid intake", str(payload["invalid_intake"])))
+    stored = payload.get("storage")
+    if stored:
+        pairs.append(
+            (
+                "storage",
+                f"{human_size(stored['used_bytes'])} of "
+                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')})",
+            )
+        )
     for error in index.get("errors") or []:
         pairs.append(("index error", str(error)))
     reattach = payload.get("reattach_summary") or {}
