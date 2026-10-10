@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
 import pytest
+from support.archive import days_ago, seed_completed_item
 
 from kraft import policy, storage
 
@@ -17,12 +19,13 @@ def _fill(path, size=MB):
     path.write_bytes(os.urandom(size))
 
 
-def _policy(limit=None, quota=None) -> policy.Policy:
+def _policy(limit=None, quota=None, min_age_s=None) -> policy.Policy:
     return policy.Policy(
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
         storage_limit_bytes=limit,
         storage_quota_bytes=quota,
+        storage_auto_cleanup_min_age_s=min_age_s,
     )
 
 
@@ -172,6 +175,143 @@ async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatc
     await storage.tick(app)
 
     assert storage.usage(app.state) is None
+
+
+def _state(tmp_path, *, limit, quota, min_age_s) -> dict:
+    return {
+        "templates_dir": tmp_path / "templates",
+        "skills_dir": tmp_path / "skills",
+        "policy": _policy(limit, quota, min_age_s),
+    }
+
+
+async def _three(app, repo):
+    """Three completed items: `old` ended 3 days ago, `mid` 2, `new` 1."""
+    return [
+        await seed_completed_item(app, repo, updated_at=days_ago(age), wid=wid)
+        for wid, age in (("old", 3), ("mid", 2), ("new", 1))
+    ]
+
+
+def _measures(monkeypatch, governed, each=40):
+    monkeypatch.setattr(
+        storage,
+        "measure",
+        lambda base, stop=None: _usage(governed, {"old": each, "mid": each, "new": each}),
+    )
+
+
+async def test_tick_over_limit_archives_oldest_first_down_to_quota(
+    tmp_path, repo, stub_app, monkeypatch
+):
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    old, mid, new = await _three(app, repo)
+    _measures(monkeypatch, 120)
+
+    assert await storage.tick(app) == ["old", "mid"]
+
+    assert not old.exists() and not mid.exists() and new.exists()
+    assert storage.usage(app.state).governed == 40
+    event = app.state.db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id='old' AND type='work_item_archived'"
+        ).fetchone()
+    )
+    payload = json.loads(event["payload"])
+    assert (payload["by"], payload["reason"]) == ("auto", "storage")
+
+
+async def test_tick_never_takes_an_item_newer_than_min_age(tmp_path, repo, stub_app, monkeypatch):
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=60 * 3600))
+    old, mid, new = await _three(app, repo)
+    _measures(monkeypatch, 120)
+
+    assert await storage.tick(app) == ["old"]
+
+    assert mid.exists() and new.exists()
+    assert storage.state_of(app.state.policy, storage.usage(app.state)) == "over_quota"
+    assert app.state.storage_too_recent == 2
+    assert storage.health(app.state)["too_recent"] == 2
+
+
+async def test_tick_without_auto_cleanup_archives_nothing(tmp_path, repo, stub_app, monkeypatch):
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=None))
+    old, _mid, _new = await _three(app, repo)
+    _measures(monkeypatch, 120)
+
+    assert await storage.tick(app) == []
+    assert old.exists()
+
+
+async def test_tick_between_quota_and_limit_archives_nothing(tmp_path, repo, stub_app, monkeypatch):
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    old, _mid, _new = await _three(app, repo)
+    _measures(monkeypatch, 100)
+
+    assert await storage.tick(app) == []
+    assert old.exists()
+
+
+async def test_tick_goes_on_past_an_item_whose_archive_fails(tmp_path, repo, stub_app, monkeypatch):
+    from kraft.api.routes import lifecycle
+
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    await _three(app, repo)
+    _measures(monkeypatch, 120)
+    real = lifecycle._archive_one
+
+    async def flaky(app, row, by, **kw):
+        if row["id"] == "old":
+            raise RuntimeError("git fell over")
+        return await real(app, row, by, **kw)
+
+    monkeypatch.setattr(lifecycle, "_archive_one", flaky)
+
+    assert await storage.tick(app) == ["mid", "new"]
+
+
+async def test_tick_goes_on_when_an_archive_frees_nothing(tmp_path, repo, stub_app, monkeypatch):
+    """An archive that kept its worktree (a failed rescue) is not counted and
+    takes nothing off the figure; the loop moves to the next item."""
+    from kraft.api.routes import lifecycle
+
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    await _three(app, repo)
+    _measures(monkeypatch, 120)
+    real = lifecycle._archive_one
+
+    async def kept(app, row, by, **kw):
+        if row["id"] == "old":
+            return {"worktree_removed": False, "worktree_kept": "rescue failed"}
+        return await real(app, row, by, **kw)
+
+    monkeypatch.setattr(lifecycle, "_archive_one", kept)
+
+    assert await storage.tick(app) == ["mid", "new"]
+
+
+async def test_tick_stops_after_three_archives_that_free_nothing(
+    tmp_path, repo, stub_app, monkeypatch
+):
+    """A broken repo must not get every finished item marked archived."""
+    from kraft.api.routes import lifecycle
+
+    app = stub_app(**_state(tmp_path, limit=100, quota=0, min_age_s=0))
+    for n in range(4):
+        await seed_completed_item(app, repo, updated_at=days_ago(9 - n), wid=f"w{n}")
+    monkeypatch.setattr(
+        storage, "measure", lambda base, stop=None: _usage(120, {f"w{n}": 30 for n in range(4)})
+    )
+    asked = []
+
+    async def frees_nothing(app, row, by, **kw):
+        asked.append(row["id"])
+        return {"worktree_removed": False}
+
+    monkeypatch.setattr(lifecycle, "_archive_one", frees_nothing)
+
+    assert await storage.tick(app) == []
+    assert asked == ["w0", "w1", "w2"]
 
 
 async def test_two_kicks_while_one_runs_start_one_tick_and_the_task_is_kept(monkeypatch):

@@ -29,6 +29,7 @@ export const KEYS = {
   archive: spec("housekeeping", "archive.after_days", "days", true),
   storageLimit: spec("housekeeping", "storage.worktrees.limit", "size"),
   storageQuota: spec("housekeeping", "storage.worktrees.quota", "size"),
+  storageCleanup: spec("housekeeping", "storage.worktrees.auto_cleanup.min_age", "age"),
   relaunch: spec("retries", "rate_limit_retries", "count"),
   forge: spec("retries", "forge_cli_timeout_s", "s"),
 } as const;

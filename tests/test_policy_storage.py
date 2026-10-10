@@ -48,8 +48,28 @@ def test_size_bytes_refuses_anything_else_and_names_the_fix(text):
         ({"limit": "10G", "quota": "5G"}, "storage_quota_bytes", 5 * 1024**3),
         (None, "storage_limit_bytes", None),
         (None, "storage_quota_bytes", None),
+        ({"limit": "10G"}, "storage_auto_cleanup_min_age_s", None),
+        ({"limit": "10G", "auto_cleanup": None}, "storage_auto_cleanup_min_age_s", None),
+        ({"limit": "10G", "auto_cleanup": {}}, "storage_auto_cleanup_min_age_s", 24 * 3600),
+        (
+            {"limit": "10G", "auto_cleanup": {"min_age": "2D"}},
+            "storage_auto_cleanup_min_age_s",
+            2 * 86400,
+        ),
+        ({"limit": "10G", "auto_cleanup": {"min_age": "0h"}}, "storage_auto_cleanup_min_age_s", 0),
     ],
-    ids=["limit", "quota-defaults-to-80-percent", "quota-as-written", "no-limit", "no-quota"],
+    ids=[
+        "limit",
+        "quota-defaults-to-80-percent",
+        "quota-as-written",
+        "no-limit",
+        "no-quota",
+        "auto-cleanup-off-by-default",
+        "auto-cleanup-null",
+        "auto-cleanup-default-24h",
+        "auto-cleanup-days",
+        "auto-cleanup-no-floor",
+    ],
 )
 def test_storage_worktrees_loads(worktrees, attr, expected):
     assert getattr(_policy(worktrees), attr) == expected
@@ -63,9 +83,31 @@ def test_storage_worktrees_loads(worktrees, attr, expected):
         ({"quota": "8G"}, "needs a limit"),
         ({"limit": 10}, "10G"),
         ({"limit": "10G", "cap": "1G"}, "cap"),
+        ({"auto_cleanup": {}}, "needs a limit"),
+        ({"limit": "10G", "auto_cleanup": {"min_age": 24}}, "24h"),
+        ({"limit": "10G", "auto_cleanup": {"min_age": "1w"}}, "24h"),
     ],
-    ids=["quota-equals-limit", "quota-over-limit", "quota-alone", "bare-int", "unknown-key"],
+    ids=[
+        "quota-equals-limit",
+        "quota-over-limit",
+        "quota-alone",
+        "bare-int",
+        "unknown-key",
+        "auto-cleanup-without-limit",
+        "auto-cleanup-age-without-unit",
+        "auto-cleanup-weeks",
+    ],
 )
 def test_storage_worktrees_refuses(worktrees, message):
     with pytest.raises(ValidationError, match=message):
         policy.PolicyInput.model_validate({**_BASE, "storage": {"worktrees": worktrees}})
+
+
+@pytest.mark.parametrize(
+    "text",
+    [24, "24", "1w", "90m", "1.5d", "-1h", "h"],
+    ids=["bare-int", "bare-str", "weeks", "minutes", "fraction", "negative", "no-number"],
+)
+def test_age_seconds_refuses_anything_but_hours_and_days_and_names_the_fix(text):
+    with pytest.raises(ValueError, match="24h"):
+        policy.age_seconds(text)

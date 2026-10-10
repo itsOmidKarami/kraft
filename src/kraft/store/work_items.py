@@ -733,6 +733,7 @@ def archive_work_item(
     rescued_branch: str | None = None,
     rescued_commits: int | None = None,
     worktree_kept: str | None = None,
+    reason: str | None = None,
 ) -> None:
     """Marks a completed/abandoned item archived without touching `status`
     (UI v2 · 03): "Ended as" keeps reading completed/abandoned, and every
@@ -745,7 +746,8 @@ def archive_work_item(
     archive left the item's branch in place because nothing else held its
     commits; `rescued_branch` and `rescued_commits` when it named a detached
     HEAD's commits; `worktree_kept` (the reason) when that failed and the
-    worktree stayed.
+    worktree stayed. `reason` is `"storage"` when the storage limit's automatic
+    clean-up archived it (`kraft.storage.tick`).
     """
     now = _now()
     conn.execute(
@@ -759,6 +761,8 @@ def archive_work_item(
         payload |= {"rescued_branch": rescued_branch, "rescued_commits": rescued_commits}
     if worktree_kept is not None:
         payload["worktree_kept"] = worktree_kept
+    if reason is not None:
+        payload["reason"] = reason
     events.append(conn, work_item_id, WorkItemEvent.ARCHIVED, payload)
 
 

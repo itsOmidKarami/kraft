@@ -193,6 +193,23 @@ describe("Policy housekeeping (N.1)", () => {
     await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "storage.worktrees.quota", value: "5G" }]));
   });
 
+  it("storage: automatic clean-up reads off, then its age, and sends an age", async () => {
+    const housekeeping = (cleanup: unknown) => ({ max_concurrent: { value: 5, source: "policy" }, archive_after_days: { value: 30, source: "policy" }, storage_limit: { value: "10G", source: "policy" }, storage_quota: { value: null, source: "default" }, storage_quota_default: "8G", storage_auto_cleanup: cleanup });
+    const { calls } = open("housekeeping", ans(policyView({}, resolved({ housekeeping: housekeeping({ value: null, source: "default" }) }))));
+    const row = await screen.findByRole("button", { name: /^automatic clean-up/ });
+    expect(within(row).getByText("off", { exact: true })).toBeInTheDocument();
+    await userEvent.click(row);
+    await userEvent.type(screen.getByLabelText("automatic clean-up", { selector: "input" }), "2d{Enter}");
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "storage.worktrees.auto_cleanup.min_age", value: "2d" }]));
+  });
+
+  it("storage: a set clean-up age is the cell and says what it does", async () => {
+    open("housekeeping", ans(policyView({}, resolved({ housekeeping: { max_concurrent: { value: 5, source: "policy" }, archive_after_days: { value: 30, source: "policy" }, storage_limit: { value: "10G", source: "policy" }, storage_quota: { value: null, source: "default" }, storage_quota_default: "8G", storage_auto_cleanup: { value: "24h", source: "policy" } } }))));
+    const row = await screen.findByRole("button", { name: /^automatic clean-up/ });
+    expect(within(row).getByText("24h", { exact: true })).toBeInTheDocument();
+    expect(within(row).getByText(/ended 24h ago or more/)).toBeInTheDocument();
+  });
+
   it("an unreadable policy says so and offers YAML", async () => {
     open("limits", ans(policyView({ problems: [problem({ message: "line 3: bad indent" })] }, null)));
     expect(await screen.findByRole("alert")).toHaveTextContent("policy.yaml does not load: line 3: bad indent");

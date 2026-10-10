@@ -81,6 +81,7 @@ _POLICY_FIELD_RENAMES = {
     "archive_after_days": "archive.after_days",
     "storage_limit_bytes": "storage.worktrees.limit",
     "storage_quota_bytes": "storage.worktrees.quota",
+    "storage_auto_cleanup_min_age_s": "storage.worktrees.auto_cleanup.min_age",
 }
 
 
