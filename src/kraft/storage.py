@@ -16,10 +16,13 @@ import os
 import stat
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
+from kraft import render
 from kraft.store import _now
 from kraft.vocab import Verb, admitting
+from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +133,7 @@ def health(st) -> dict | None:
         "quota_bytes": st.policy.storage_quota_bytes,
         "limit_bytes": st.policy.storage_limit_bytes,
         "measured_at": used.measured_at,
+        "too_recent": getattr(st, "storage_too_recent", 0),
     }
 
 
@@ -182,13 +186,63 @@ async def refresh(app) -> Usage:
 _INTERVAL_S = 600
 
 
-async def tick(app) -> None:
-    """Measure, when a limit is set. Nothing else: Kraft never archives for the
-    limit, a person does (the spec's "Clean-up is a person's")."""
+async def tick(app) -> list[str]:
+    """Measure, when a limit is set. Over the limit with `auto_cleanup` set,
+    archive finished items that ended at least `min_age` ago, oldest first,
+    until usage is back at or under quota. Returns the ids archived."""
     st = app.state
+    st.storage_too_recent = 0
     if st.policy is None or st.policy.storage_limit_bytes is None:
-        return
+        return []
     await refresh(app)
+    min_age = st.policy.storage_auto_cleanup_min_age_s
+    if min_age is None or state_of(st.policy, usage(st)) != "held":
+        return []
+    from kraft.api.routes import lifecycle  # deferred: kraft.api starts this poller
+
+    cutoff = (datetime.fromisoformat(_now()) - timedelta(seconds=min_age)).isoformat()
+    finished = st.db.read(
+        lambda c: c.execute(
+            f"SELECT * FROM work_items WHERE status IN ({in_list(admitting(Verb.ARCHIVE))}) "
+            "AND archived_at IS NULL ORDER BY updated_at, id"
+        ).fetchall()
+    )
+    finished = [r for r in finished if (st.run_dirs.worktrees / r["id"]).is_dir()]
+    # Read once: a reload that drops the limit mid-loop must not change the target.
+    quota = st.policy.storage_quota_bytes
+    archived: list[str] = []
+    stuck = 0
+    for n, row in enumerate(finished):
+        if usage(st).governed <= quota:
+            break
+        if row["updated_at"] > cutoff:
+            # Ordered by `updated_at`: every row after this one is newer still.
+            st.storage_too_recent = len(finished) - n
+            break
+        try:
+            await lifecycle._archive_one(app, row, "auto", reason="storage")
+        except Exception:  # noqa: BLE001 -- one row's failure must not keep the rest
+            logger.exception("storage: archiving %s failed", row["id"])
+            continue
+        # The directory, not `worktree_removed` (see `_archive_one`).
+        if not (st.run_dirs.worktrees / row["id"]).exists():
+            archived.append(row["id"])
+            stuck = 0
+            continue
+        # Archived, but its worktree stayed (a failed rescue, or git failing).
+        # Three in a row is a broken repo or disk, not three unlucky items:
+        # stop marking finished items archived without freeing anything.
+        stuck += 1
+        if stuck == 3:
+            logger.error("storage: three archives in a row freed nothing; stopping this tick")
+            break
+    if archived:
+        logger.info(
+            "storage: over limit, archived %s; worktrees now use %s",
+            ", ".join(archived),
+            render.human_size(usage(st).governed),
+        )
+    return archived
 
 
 def kick(app) -> None:

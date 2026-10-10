@@ -481,8 +481,17 @@ async def abandon_work_item(wid: str, request: Request):
     return {"id": wid, "status": "abandoned", **removed}
 
 
-async def _archive_one(app, row, by: str) -> dict:
-    """Shared by the archive route and `archive.poller`: reclaim the
+def _archive_lock(st) -> asyncio.Lock:
+    """One archive at a time. Made on first use: the stand-in apps the poller
+    tests build have no lifespan to make it in."""
+    lock = getattr(st, "_archive_lock", None)
+    if lock is None:
+        lock = st._archive_lock = asyncio.Lock()
+    return lock
+
+
+async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
+    """Shared by the archive route, `archive.poller` and `storage.tick`: reclaim the
     worktree the way `abandon_work_item` does, then flip the row. Returns
     `worktree_removed` (a completed item usually still has one; an
     already-abandoned item does not, and `_remove_worktree`'s git calls fail
@@ -497,33 +506,43 @@ async def _archive_one(app, row, by: str) -> dict:
     """
     st = app.state
     wid = row["id"]
-    repo, branch = Path(row["repo"]), store.branch_for(row)
-    members = _connected_members(st, row)
-    worktree = st.run_dirs.worktrees / wid
-    kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
-    extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
-    extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
-    await st.db.write(lambda c: store.archive_work_item(c, wid, by, **extra))
-    for where, count in kept.items():
-        logger.info(
-            "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count
+    # The age poller, the storage poller and the route can all hold one row.
+    async with _archive_lock(st):
+        current = st.db.read(
+            lambda c: c.execute(
+                "SELECT archived_at, archived_by FROM work_items WHERE id = ?", (wid,)
+            ).fetchone()
         )
-    if "worktree_kept" in extra:
-        # The rescue failed, so the worktree (and a sandbox's ref store beside
-        # it) holds the only copy of those commits: archived, but left whole.
-        return {"worktree_removed": False, **extra}
-    killed = await asyncio.to_thread(_kill_orphans_under, worktree)
-    if killed:
-        logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
-    await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
-    removed = await _remove_worktree(
-        repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
-    )
-    # The directory, not `worktree_removed`: that flag also goes False when the
-    # worktree went but deleting its branch or a ref failed (`_remove_worktree`).
-    if not worktree.exists():
-        storage.forget(st, wid)
-    return {**removed, **extra}
+        if current is None or current["archived_at"]:
+            # `archived_by` so the route answers who did archive it, not "you".
+            return {"worktree_removed": False, "archived_by": current and current["archived_by"]}
+        repo, branch = Path(row["repo"]), store.branch_for(row)
+        members = _connected_members(st, row)
+        worktree = st.run_dirs.worktrees / wid
+        kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
+        extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
+        extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
+        await st.db.write(lambda c: store.archive_work_item(c, wid, by, reason=reason, **extra))
+        for where, count in kept.items():
+            logger.info(
+                "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count
+            )
+        if "worktree_kept" in extra:
+            # The rescue failed, so the worktree (and a sandbox's ref store beside
+            # it) holds the only copy of those commits: archived, but left whole.
+            return {"worktree_removed": False, **extra}
+        killed = await asyncio.to_thread(_kill_orphans_under, worktree)
+        if killed:
+            logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
+        await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
+        removed = await _remove_worktree(
+            repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
+        )
+        # The directory, not `worktree_removed`: that flag also goes False when the
+        # worktree went but deleting its branch or a ref failed (`_remove_worktree`).
+        if not worktree.exists():
+            storage.forget(st, wid)
+        return {**removed, **extra}
 
 
 # UI v2 · 03.
