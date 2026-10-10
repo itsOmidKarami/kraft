@@ -1,4 +1,4 @@
-import { elapsed, tokens, usd } from "../../../format";
+import { elapsed, tokenText, tokenTip, usd } from "../../../format";
 import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
@@ -97,7 +97,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
       {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} /> : null}
       <h3 className="ip-h">Result</h3>
       <dl className="item-facts ip-facts">
-        {fact("tokens", s.tokens_in != null ? tokens((s.tokens_in ?? 0) + (s.tokens_out ?? 0)) : null)}
+        {fact("tokens", s.tokens_in != null ? <span data-tip={tokenTip(s)}>{tokenText(s)}</span> : null)}
         {fact("cost", s.cost_usd != null ? usd(s.cost_usd, true, s.cost_estimated) : null)}
       </dl>
       <h3 className="ip-h">Documents</h3>
