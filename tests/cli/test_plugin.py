@@ -34,7 +34,12 @@ def _run(capsys, *argv):
             "extends no task named 'release:nope'",
         ),
         (
-            {"release": {**GOOD["release"], "manifest": {"requires": {"kraft": "3.0"}}}},
+            {
+                "release": {
+                    **GOOD["release"],
+                    "manifest": {"requires": {"kraft": "3.0", "harnesses": ["codex"]}},
+                }
+            },
             "",
             "2.4.0",
             1,
@@ -56,6 +61,13 @@ def _run(capsys, *argv):
             "chains/Review.yaml is not part of the plugin layout",
         ),
         (GOOD, "plugins", None, 1, "holds neither"),
+        (
+            {"release": {"library": {"tasks": {"run": {"kind": "subprocess", "command": "make"}}}}},
+            "",
+            None,
+            1,
+            "may not carry a subprocess task",
+        ),
     ],
     ids=[
         "collection",
@@ -66,6 +78,7 @@ def _run(capsys, *argv):
         "no-home",
         "ignored-look-alike",
         "not-a-plugin",
+        "refused-content",
     ],
 )
 def test_validate(tmp_path, capsys, monkeypatch, plugins, sub, running, code, says):

@@ -14,6 +14,7 @@ from pathlib import Path
 from kraft import harness, update
 from kraft.cli import common
 from kraft.plugins import fetch, manifest
+from kraft.plugins import update as plugin_update
 from kraft.plugins.load import InstalledPlugin
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
@@ -95,6 +96,11 @@ def validate(path: Path) -> dict:
             )
             found = manifest.plugin(raw, str(plugin_file))
             manifest.check_plugin(found, entry, extracted.files)
+            plugin_update.check(found, extracted.files)
+        except plugin_update.Refused as exc:
+            for why in exc.problems:
+                problem(root, why)
+            continue
         except (fetch.PluginRefused, manifest.ManifestError) as exc:
             problem(root, str(exc))
             continue
