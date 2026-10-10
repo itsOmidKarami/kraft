@@ -113,8 +113,11 @@ def _components(rel: str, data: object) -> Iterator[tuple[str, Mapping]]:
 
 
 def _moved(collection: CollectionConfig, locked: LockEntry) -> bool:
-    """Whether the collection's URL is another than the one locked. A lock
-    that recorded none says nothing: the next update records it."""
+    """Whether the collection is read from another place than the one locked.
+    A git lock that recorded no URL says nothing: the next update records it.
+    A directory's lock has no commit, so a URL now is another source."""
+    if locked.commit is None:
+        return collection.git is not None
     return locked.git is not None and collection.git != locked.git
 
 
@@ -539,20 +542,26 @@ def update(
             store = (
                 plugins_root / "store" / locked.digest.removeprefix("sha256:") if locked else None
             )
-            try:
-                old = fetch.extract_dir(store) if store is not None and store.is_dir() else None
-                reviewed = review_mod.review(plugin_id, old, extracted)
-            except (fetch.PluginRefused, manifest.ManifestError, OSError, KeyError, ValueError):
-                # An edited or damaged store: everything in the candidate is shown
-                # as new, and the review says the comparison is missing.
+            old = reviewed = None
+            if store is not None and store.is_dir():
+                try:
+                    old = fetch.extract_dir(store)
+                    reviewed = review_mod.review(plugin_id, old, extracted)
+                except Exception:  # noqa: BLE001 -- an edited store can break in any way
+                    old = None
+            if old is None:
+                # Nothing installed, or a store that is gone or does not read:
+                # everything in the candidate is shown as new.
                 reviewed = review_mod.review(plugin_id, None, extracted)
-                if locked is not None:
-                    unread = f"the installed {locked.version} could not be read to compare with"
-                    reviewed = replace(reviewed, reach=(unread, *reviewed.reach))
-            if locked is not None and _moved(collection, locked):
-                moved = f"collection URL changed: {fetch.redact(locked.git or '')} -> " + (
-                    fetch.redact(collection.git or "")
+            if old is None and locked is not None:
+                # Still an update, and one nobody can compare: said first, and held.
+                unread = f"the installed {locked.version} could not be read to compare with"
+                reviewed = replace(
+                    reviewed, old_version=locked.version, reach=(unread, *reviewed.reach)
                 )
+            if locked is not None and _moved(collection, locked):
+                was = fetch.redact(locked.git) if locked.git else "a local directory"
+                moved = f"collection URL changed: {was} -> " + (fetch.redact(collection.git or ""))
                 reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
             root = Path(scratch) / digest.removeprefix("sha256:")

@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 import yaml
 from support.harness import git
-from support.plugins import AGENT, chain, instance, make_collection, plugin_json, publish
+from support.plugins import (
+    AGENT,
+    chain,
+    drop_store,
+    instance,
+    make_collection,
+    plugin_json,
+    publish,
+)
 
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import load, manifest, update
@@ -283,22 +291,42 @@ def test_a_lock_that_recorded_no_url_is_not_a_moved_collection(acme):
     assert _run(home)[ID].outcome == "current"
 
 
-def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme):
+@pytest.mark.parametrize("stored", ["{", "[]", None], ids=["not-json", "not-an-object", "gone"])
+def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme, stored):
     """Everything is then shown as new: the review says the comparison is
-    missing, and that line holds an auto-update."""
+    missing, as its first line, and that line is why an auto-update holds."""
     repo, home = acme
     _run(home, install=[ID])
     store = home[1] / "store" / _locked(home).digest.removeprefix("sha256:")
-    manifest_file = store / ".kraft" / "plugin.json"
-    manifest_file.parent.chmod(0o755)
-    manifest_file.chmod(0o644)
-    manifest_file.write_text("{")
+    if stored is None:
+        drop_store(store)
+    else:
+        manifest_file = store / ".kraft" / "plugin.json"
+        manifest_file.parent.chmod(0o755)
+        manifest_file.chmod(0o644)
+        manifest_file.write_text(stored)
     publish(repo, "release", version="1.1.0", library={"tasks": {"base": AGENT, "more": AGENT}})
 
     found = _run(home)[ID].review
 
-    assert found.reach[0] == "the installed 1.0.0 could not be read to compare with"
-    assert update.may_apply_unattended(found) is not None
+    unread = "the installed 1.0.0 could not be read to compare with"
+    assert (found.old_version, found.reach[0]) == ("1.0.0", unread)
+    assert update.may_apply_unattended(found).startswith(unread)
+
+
+def test_a_directory_collection_given_a_url_is_a_moved_collection(tmp_path):
+    """Its lock has no URL to compare: a URL at all is another source."""
+    repo = make_collection(tmp_path, {"release": RELEASE})
+    home = instance(tmp_path, {"acme": {"path": str(repo)}})
+    _run(home, install=[ID])
+    assert _run(home)[ID].outcome == "current"
+    config = read_yaml(home[0] / "plugins.yaml")
+    config["collections"]["acme"] = {"git": repo.as_uri()}
+    write_yaml(home[0] / "plugins.yaml", config)
+
+    found = _run(home)[ID].review
+
+    assert found.reach[0] == f"collection URL changed: a local directory -> {repo.as_uri()}"
 
 
 def test_re_install_takes_the_newest_commit(acme):
