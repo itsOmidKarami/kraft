@@ -8,8 +8,8 @@ import pytest
 from support.plugins import AGENT, chain, instance, make_collection, publish
 
 from kraft import cli, update
-from kraft.client import actions
 from kraft.cli import plugin as plugin_cli
+from kraft.client import actions
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import fetch
 from kraft.plugins.config import PluginsLock
