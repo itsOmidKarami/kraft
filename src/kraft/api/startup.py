@@ -327,6 +327,8 @@ async def lifespan(app: FastAPI):
     # restart (Kraft-ygnw6). A tick with no triggers files nothing.
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
+    # After the library is loaded from the lock: a start never waits on the network.
+    app.state.restore_task = asyncio.ensure_future(deps.restore_plugins(app))
     try:
         yield
     finally:
@@ -361,7 +363,8 @@ async def lifespan(app: FastAPI):
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
-        await asyncio.gather(app.state.apply_task, return_exceptions=True)
+        app.state.restore_task.cancel()
+        await asyncio.gather(app.state.apply_task, app.state.restore_task, return_exceptions=True)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()

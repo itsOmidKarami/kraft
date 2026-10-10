@@ -388,6 +388,60 @@ def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.Install
     return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
 
 
+async def restore_plugins(app) -> None:
+    """Put back every locked store that is gone (a config directory copied to
+    a new machine, a cleared run directory, a teammate's newer lock), then
+    load what came back. Off the event loop: it may fetch. One that cannot be
+    restored stays left out, with the reason under `invalid_templates`."""
+    from kraft import apply
+
+    st = app.state
+    missing = tuple(p for p in installed_plugins(st) if not p.quiet and not p.root.is_dir())
+    if missing:
+        failed = await asyncio.to_thread(
+            plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+        )
+        _reload_templates(st)
+        apply.notify(app)
+        if failed:
+            logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+    # After the restore, and after every reload: what nothing reads any more goes.
+    collect_plugin_stores(st)
+
+
+def collect_plugin_stores(st) -> list[str]:
+    """Delete each plugin store that none of these names: the lock, the
+    library this server has loaded, or the snapshot of a work item that has
+    not ended (a paused or stopped one can still be retried onto it). A
+    directory collection's store is the lock's, so it stays while installed.
+    Nothing is deleted while the lock cannot be read or another plugin change
+    is running."""
+    from kraft.plugins import update as plugin_update
+    from kraft.plugins.config import PluginsLock
+
+    try:
+        locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
+    except config_mod.ConfigError:
+        return []
+    keep = {entry.digest.removeprefix("sha256:") for entry in locked}
+    keep |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+    ended = sorted(ENDED)
+    rows = st.db.read(
+        lambda c: c.execute(
+            "SELECT materialized_chain FROM work_items WHERE materialized_chain IS NOT NULL "
+            f"AND status NOT IN ({', '.join('?' * len(ended))})",
+            ended,
+        ).fetchall()
+    )
+    for (stored,) in rows:
+        for pin in (json.loads(stored).get("plugins") or {}).values():
+            keep.add(str(pin["digest"]).removeprefix("sha256:"))
+    try:
+        return plugins_load.gc(keep, st.run_dirs.plugins)
+    except plugin_update.Busy:
+        return []
+
+
 def load_library(
     templates_dir: Path,
     skills_dir: Path | None = None,
@@ -480,6 +534,11 @@ def resolve_chain_or_422(st, chain_template: str | None):
     except TemplateLibraryError as exc:
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
+        for plugin in library.plugins:
+            # Not "unknown chain": its plugin is installed and its store is on the way back.
+            away = not plugin.quiet and not plugin.root.is_dir()
+            if away and f"{plugin.namespace}:" in f"{name} {exc}":
+                raise HTTPException(503, f"plugin {plugin.id} is being restored; retry") from exc
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 

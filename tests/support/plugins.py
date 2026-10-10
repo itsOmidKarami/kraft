@@ -4,6 +4,7 @@ plugin's store directory, as the library and the profile table read them."""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import yaml
@@ -199,3 +200,11 @@ def extracted(
     if profiles is not None:
         files["profiles.yaml"] = ("100644", yaml.safe_dump({"profiles": profiles}).encode())
     return fetch.Extracted(files)
+
+
+def drop_store(store: Path) -> None:
+    """Delete an extracted plugin: a cleared run directory, or a store GC took."""
+    for path in [store, *store.rglob("*")]:
+        if path.is_dir():
+            path.chmod(0o755)
+    shutil.rmtree(store)

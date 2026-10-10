@@ -556,3 +556,116 @@ def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, fil
     path.write_text(good)
     client.post("/api/templates/reload")
     assert client.get("/api/apply").json()["reload"] == []
+
+
+def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client, tmp_path):
+    """A config directory copied to a new machine, or a teammate's lock pulled in."""
+    from support.plugins import drop_store
+
+    store = _install_release(client, tmp_path)
+    drop_store(store)
+    deps._reload_templates(client.app.state)
+    assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
+
+    r = client.post("/api/templates/reload")
+
+    assert "release:ship" in r.json()["valid"] and store.is_dir()
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
+    from support.plugins import drop_store
+
+    st = client.app.state
+    store = _install_release(client, tmp_path)
+    with pytest.raises(HTTPException) as no_such_chain:
+        deps.resolve_chain_or_422(st, "release:nope")
+    assert no_such_chain.value.status_code == 422
+    drop_store(store)
+    deps._reload_templates(st)
+
+    with pytest.raises(HTTPException) as away:
+        deps.resolve_chain_or_422(st, "release:ship")
+    with pytest.raises(HTTPException) as unknown:
+        deps.resolve_chain_or_422(st, "nope")
+
+    assert (away.value.status_code, away.value.detail) == (
+        503,
+        "plugin release@acme is being restored; retry",
+    )
+    assert unknown.value.status_code == 422
+
+
+def _other_version(st, tmp_path):
+    """A second extracted plugin in the store that the lock does not name."""
+    from support.plugins import extracted
+
+    from kraft.plugins import fetch
+
+    return fetch.write_store(st.run_dirs.plugins, extracted(skills={"old": "an older method"}))
+
+
+@pytest.mark.parametrize(
+    "status, pinned, kept",
+    [
+        ("paused", True, True),
+        ("needs_human", True, True),
+        ("completed", True, False),
+        ("paused", False, False),
+    ],
+    ids=[
+        "pinned-by-paused-item",
+        "pinned-by-stopped-item",
+        "pinned-by-ended-item",
+        "pinned-by-nothing",
+    ],
+)
+def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
+    client, tmp_path, status, pinned, kept
+):
+    import json
+
+    from support.store_fixtures import mk_item
+
+    st = client.app.state
+    locked = _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+    (st.run_dirs.plugins / "staging" / "half-written").mkdir(parents=True)
+    snapshot = {"plugins": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
+    stored = json.dumps(snapshot if pinned else {})
+
+    async def an_item():
+        await mk_item(st.db)
+        await st.db.write(
+            lambda c: c.execute(
+                "UPDATE work_items SET materialized_chain = ?, status = ? WHERE id = 'w1'",
+                (stored, status),
+            )
+        )
+
+    client.portal.call(an_item)
+
+    removed = client.portal.call(deps.collect_plugin_stores, st)
+
+    assert (old.is_dir(), removed) == (kept, [] if kept else [old.name])
+    assert locked.is_dir() and not (st.run_dirs.plugins / "staging").exists()
+
+
+def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, tmp_path):
+    st = client.app.state
+    locked = _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+    lock = st.templates_dir / "plugins.lock"
+    good = lock.read_text()
+    lock.write_text("plugins: [\n")
+    client.post("/api/templates/reload")
+    assert old.is_dir()
+
+    lock.write_text(good)
+    client.post("/api/templates/reload")
+
+    assert not old.exists()
+    # No library is loaded to say what it reads: the lock alone keeps its stores.
+    (st.templates_dir / "library.yaml").write_text("tasks: [\n")
+    client.post("/api/templates/reload")
+    assert st.library is None and locked.is_dir()
