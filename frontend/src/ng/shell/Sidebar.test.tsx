@@ -55,6 +55,9 @@ describe("ng Sidebar", () => {
     expect(rows.map((r) => r.getAttribute("href"))).toEqual(ROUTES.filter((r) => r.group).map((r) => r.path));
     // About closes the Settings group (SB-5): bind:port and the restart warnings live there.
     expect(rows.at(-1)).toHaveAttribute("href", "/settings/about");
+    // Storage sits just above About, and a click lands on its page.
+    expect(rows.at(-2)).toHaveAttribute("href", "/settings/storage");
+    expect(rows.at(-2)).toHaveAttribute("aria-label", "Storage");
     expect(within(nav()).getByRole("button", { name: "Search" })).toBeInTheDocument();
     expect(within(nav()).getByText("Templates")).toBeInTheDocument();
     expect(within(nav()).getByText("Settings")).toBeInTheDocument();

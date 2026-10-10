@@ -1,0 +1,29 @@
+/* Settings › Storage. Colours only through theme.css tokens. */
+.set-st-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-st-bar { position: relative; height: 10px; border-radius: 5px; background: var(--line); }
+.set-st-fill { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--text-sub); }
+.set-st-bar.is-over_quota .set-st-fill { background: var(--warn); }
+.set-st-bar.is-held .set-st-fill { background: var(--bad); }
+.set-st-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.set-st-note { margin: 0; font-size: 12px; }
+.set-st-note:empty { display: none; }
+.set-st-note.is-warn { color: var(--warn); }
+.set-st-note.is-held { color: var(--bad); }
+.set-st-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.set-st-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
+.set-st-sum { margin: 0 0 10px; font-size: 12.5px; }
+.set-st-list { margin: 0 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
+.set-st-li { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.set-st-li-title { font-weight: 500; }
+.set-st-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.set-st-table th { padding: 4px 8px; text-align: left; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+.set-st-table .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.set-st-table tr.is-orphan td { color: var(--text-muted); }
+.set-st-title { color: var(--text); text-decoration: none; }
+.set-st-title:hover { text-decoration: underline; }
+.set-st-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.set-st-tag { font-size: 10.5px; color: var(--text-muted); }
+/* "Where it goes": the label column fits its longest label; the About page's 130px does not. */
+.set-about-kv.set-st-kv { grid-template-columns: max-content minmax(0, 1fr); }
+@media (max-width: 767px) { .set-about-kv.set-st-kv { grid-template-columns: minmax(0, 1fr); } }

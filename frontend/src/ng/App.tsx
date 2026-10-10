@@ -26,6 +26,7 @@ import { ChainsPage } from "./templates/ChainsPage";
 import { ReposPage } from "./templates/ReposPage";
 import { IntakePage } from "./settings/IntakePage";
 import { PolicyPage } from "./settings/PolicyPage";
+import { StoragePage } from "./settings/StoragePage";
 import { Toaster } from "./ui/Toast";
 import { Tooltip } from "./ui/Tooltip";
 
@@ -39,7 +40,7 @@ const Gallery = DEV_PAGES ? lazy(() => import("./graph/Gallery").then((m) => ({ 
 const TokenSheet = DEV_PAGES ? lazy(() => import("./theme/TokenSheet").then((m) => ({ default: m.TokenSheet }))) : null;
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/settings/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/settings/harnesses": <HarnessesPage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/storage": <StoragePage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/settings/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/settings/harnesses": <HarnessesPage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);

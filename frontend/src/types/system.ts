@@ -82,3 +82,51 @@ export interface Analytics {
   rejected_gates_by_gate: { gate: string; n: number }[];
   stop_reasons: { label: string; n: number }[];
 }
+
+/** `GET /storage`: the cached measurement of the run folder joined to the work items. Null `state`, `quota_bytes` and `limit_bytes` mean no `storage.worktrees.limit` is set. */
+export type StorageState = "ok" | "over_quota" | "held";
+export interface StorageItem {
+  id: string;
+  title: string;
+  status: string;
+  archived: boolean;
+  bytes: number;
+  updated_at: string;
+  /** Completed or abandoned, and not archived: what a clean-up may take. */
+  reclaimable: boolean;
+}
+export interface StorageUsage {
+  measured_at: string;
+  state: StorageState | null;
+  used_bytes: number;
+  quota_bytes: number | null;
+  limit_bytes: number | null;
+  reclaimable_bytes: number;
+  /** worktrees, sandboxes, logs, results, databases, attachments, other. */
+  categories: Record<string, number>;
+  /** Largest first. */
+  items: StorageItem[];
+  /** Worktree folders with no work item row. */
+  orphans: { name: string; bytes: number }[];
+}
+
+/** `POST /storage/preview`: what archiving the ids would do. It changes nothing. */
+export interface StoragePreviewItem {
+  id: string;
+  title: string;
+  bytes: number;
+  archivable: boolean;
+  /** Why not, when `archivable` is false. */
+  refusal: string | null;
+  /** Null when the item has no worktree. */
+  uncommitted_files: number | null;
+  unpushed_commits: number;
+  /** True when the branch has commits nothing else holds, so archiving keeps it. */
+  branch_kept: boolean;
+}
+export interface StoragePreview {
+  freed_bytes: number;
+  used_after_bytes: number;
+  state_after: StorageState | null;
+  items: StoragePreviewItem[];
+}

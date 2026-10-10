@@ -151,13 +151,21 @@ def figures(st) -> dict:
 
 def forget(st, wid: str) -> None:
     """Take a removed item's bytes off the cache, so an archive or abandon is
-    seen without a walk. The next walk reconciles; `categories` waits for it."""
+    seen without a walk, off `categories` too (worktrees first, then sandboxes,
+    so the two still add up to `governed`). The next walk reconciles."""
     used = usage(st)
     if used is None or wid not in used.items:
         return
     items = {k: v for k, v in used.items.items() if k != wid}
+    categories = dict(used.categories)
+    left = used.items[wid]
+    for key in ("worktrees", "sandboxes"):
+        take = min(left, categories.get(key, 0))
+        if take:
+            categories[key] -= take
+            left -= take
     st.storage_usage = dataclasses.replace(
-        used, governed=max(0, used.governed - used.items[wid]), items=items
+        used, governed=max(0, used.governed - used.items[wid]), items=items, categories=categories
     )
 
 
