@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, SCOPE_PATH, scoped, scopeRun, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -365,7 +365,6 @@ describe("the task screen (E)", () => {
     const it = scoped([api, web], { chain_definition: { template_id: "default", nodes }, worker_sessions: [earlier, api[1], web[1]] });
     const calls = mount(it, `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
     const scopes = (await screen.findByText("Scopes")).closest("section")!;
-    expect(within(scopes).getByText("kraft-web").parentElement).toHaveTextContent("kraft-web · failed · 48s");
     expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "earlier run 1 · failed"]);
     expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
     await userEvent.click(within(scopes).getByRole("button", { name: /just test-api/ }));
@@ -376,6 +375,18 @@ describe("the task screen (E)", () => {
     await userEvent.click(screen.getByRole("button", { name: /earlier run 1/ }));
     expect(where()).toContain("attempt=7");
     expect(where()).not.toContain("scope=");
+  });
+
+  it.each([
+    // One repository: nothing to tell apart, so it is not named (as the desktop's frame has it).
+    ["one repository is its scopes alone", () => [scopeRun(null, "just test-api", 0, "done")], {}, []],
+    ["one repository with nothing run still says why", () => [], {}, ["not reached"]],
+    ["several are each named, with how they went", () => [scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { materialized_chain: scopeChain("sequential", WORKSPACE) }, ["ws · done · 24s", "pkg · failed · 24s", "web · not reached · pkg failed"]],
+  ])("heads a changed-test-scope task's scopes by repository only when there are several: %s", async (_n, runs, over, lines) => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    mount(scoped(runs(), { chain_definition: { template_id: "default", nodes }, ...over }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    const scopes = (await screen.findByText("Scopes")).closest("section")!;
+    expect([...scopes.querySelectorAll(".ph-scope-repo > p")].map((p) => p.textContent)).toEqual(lines);
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {
