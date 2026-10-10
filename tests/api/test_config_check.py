@@ -196,3 +196,26 @@ def test_lint_reports_an_unknown_icon_in_a_chain_and_in_the_library(tmp_path):
         "run.main.t: unknown icon 'no-such-icon'",
         "tasks.implementer: unknown icon 'gone'",
     }
+
+
+def test_lint_report_with_and_without_the_instance_plugins(tmp_path):
+    """The route lints against the installed plugins; `--dir` has none and
+    reports what it could not judge instead of calling it broken."""
+    from support.plugins import AGENT, chain, home, install, make_collection
+
+    from kraft.plugins import load
+
+    config = home(tmp_path, chains={"local": chain("release:base")})
+    plugins = tmp_path / "run" / "plugins"
+    release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    install(config, plugins, make_collection(tmp_path, {"release": release}), "release")
+
+    online = config_check.lint_report(config, plugins=load.installed(config, plugins))
+    assert (online["valid"], online["chains"], online["unchecked"]) == (
+        True,
+        ["release:ship", "local"],
+        [],
+    )
+    offline = config_check.lint_report(config, plugins=None)
+    assert (offline["valid"], offline["chains"]) == (True, [])
+    assert [u["message"].endswith("not checked (plugin)") for u in offline["unchecked"]] == [True]

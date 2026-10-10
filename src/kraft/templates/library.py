@@ -282,7 +282,14 @@ class TemplateLibrary:
         #: `<namespace>:<name>`.
         self.plugins = tuple(plugins)
         #: Namespace to store directory, for `skill.validate`.
-        self.plugin_dirs = {p.namespace: p.root for p in self.plugins}
+        #: None for a plugin that is known but not loaded: a reference into it
+        #: is refused, never handed to the agent as another tool's skill.
+        self.plugin_dirs: dict[str, Path | None] = {}
+        for plugin in self.plugins:
+            if plugin.left_out is None:
+                self.plugin_dirs[plugin.namespace] = plugin.root
+            else:
+                self.plugin_dirs.setdefault(plugin.namespace, None)
 
     @classmethod
     def from_yaml_dir(
@@ -358,7 +365,8 @@ class TemplateLibrary:
 
         built = cls(components, {}, steering, skills_dir, plugins)
         for plugin in plugins:
-            built._add_plugin(plugin)
+            if plugin.left_out is None:
+                built._add_plugin(plugin)
         for chain_path, body in chains:
             built._add_chain(chain_path, body)
         return built

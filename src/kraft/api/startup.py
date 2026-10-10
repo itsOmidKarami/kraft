@@ -35,6 +35,7 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
+from kraft.plugins import load as plugins_load
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker.egress import EgressProxy
@@ -108,7 +109,13 @@ async def lifespan(app: FastAPI):
             )
     except OSError:
         logger.exception("theme migration failed; theme.yaml left as it was")
-    library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
+    # From the lock and the store alone: startup never waits on the network.
+    library, invalid_library = deps.load_library(
+        templates_dir,
+        app.state.skills_dir,
+        plugins_load.installed(templates_dir, run_dirs.plugins, verify=True),
+    )
+    app.state.plugins_problem = plugins_load.config_problem(templates_dir)
     # Now, not with the rest of app.state below: reattach's launch factory
     # reads it, for an item filed before repository steering was frozen.
     app.state.library = library

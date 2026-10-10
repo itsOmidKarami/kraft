@@ -111,7 +111,9 @@ def _view(st) -> dict:
     providers = harness_mod.load(None).valid
     library = getattr(st, "library", None)
     try:
-        table = HarnessProfileTable.from_yaml(path, harnesses=providers)
+        table = HarnessProfileTable.from_yaml(
+            path, harnesses=providers, plugins=getattr(library, "plugins", ())
+        )
         profiles, error = table.profiles, None
     except TemplateEnvironmentError as exc:
         table, profiles, error = HarnessProfileTable(profiles={}), {}, str(exc)

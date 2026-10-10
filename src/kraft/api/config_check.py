@@ -7,7 +7,7 @@ from __future__ import annotations
 import functools
 import re
 import tempfile
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -21,6 +21,7 @@ from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
 from kraft.executor import fallback
+from kraft.plugins import load as plugins_load
 from kraft.templates import positions
 from kraft.templates.environment import (
     AgentProfileInput,
@@ -65,6 +66,8 @@ class CheckContext:
     skills_dir: Path | None
     instance_policy: policy_mod.InstancePolicy | None
     providers: Mapping[str, harness_mod.Harness]
+    #: The installed plugins the running library was built with.
+    plugins: tuple[plugins_load.InstalledPlugin, ...] = ()
 
 
 def context(st) -> CheckContext:
@@ -74,6 +77,7 @@ def context(st) -> CheckContext:
         skills_dir=getattr(st, "skills_dir", None),
         instance_policy=getattr(st, "instance_policy", None),
         providers=harness_mod.load(None).valid,
+        plugins=getattr(getattr(st, "library", None), "plugins", ()),
     )
 
 
@@ -222,7 +226,11 @@ def library_candidate(
     Raises `TemplateLibraryError`."""
     if library is None:
         candidate = TemplateLibrary.from_mappings(
-            data, _chains_on_disk(path.parent), library_path=path, skills_dir=skills_dir
+            data,
+            _chains_on_disk(path.parent),
+            library_path=path,
+            skills_dir=skills_dir,
+            plugins=plugins_load.installed(path.parent),
         )
     else:
         candidate = library.with_library(data, path)
@@ -524,6 +532,7 @@ def lint_report(
     *,
     skills_dir: Path | None = None,
     instance_policy: policy_mod.InstancePolicy | None = None,
+    plugins: Sequence[plugins_load.InstalledPlugin] | None = (),
 ) -> dict:
     """`kraft admin templates lint`'s answer, from the route and `--dir` alike:
     `TemplateLibrary.lint_dir`, plus each agent task of a resolving chain that
@@ -533,13 +542,15 @@ def lint_report(
     doctor's `harnesses.yaml` row already says why."""
     templates_dir = Path(templates_dir)
     report = TemplateLibrary.lint_dir(
-        templates_dir, skills_dir=skills_dir, instance_policy=instance_policy
+        templates_dir, skills_dir=skills_dir, instance_policy=instance_policy, plugins=plugins
     )
     issues = list(report.issues)
     path = templates_dir / "harnesses.yaml"
     providers = harness_mod.load(None).valid
     try:
-        library = TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir)
+        library = TemplateLibrary.from_yaml_dir(
+            templates_dir, skills_dir=skills_dir, plugins=plugins or ()
+        )
     except TemplateLibraryError:
         library = None
     if library is not None:
@@ -549,7 +560,7 @@ def lint_report(
             file = library.chain_file(chain)
             issues += chain_icon_issues(library, file, chain, dict(library.chain_data(chain)))
         try:
-            table = HarnessProfileTable.from_yaml(path, harnesses=providers)
+            table = HarnessProfileTable.from_yaml(path, harnesses=providers, plugins=plugins or ())
         except TemplateEnvironmentError:
             table = None
         problems = (
@@ -558,12 +569,14 @@ def lint_report(
             else {}
         )
         for (chain, _), why in sorted(problems.items()):
-            issues.append(TemplateIssue(templates_dir / CHAINS_DIR / f"{chain}.yaml", chain, why))
+            issues.append(TemplateIssue(library.chain_file(chain), chain, why))
     failed = {issue.chain for issue in issues}
     return {
         "valid": not issues,
         "chains": [id for id in report.chains if id not in failed],
         "issues": [positions.issue_view(i) for i in issues],
+        # Offline (`--dir`) only: chains that reference a plugin, left unjudged.
+        "unchecked": [positions.issue_view(i) for i in report.unchecked],
     }
 
 
@@ -597,16 +610,19 @@ def harness_breakage(
     """Why `candidate` (the whole harnesses.yaml) must not be saved over
     `current`, or None. A task that could not launch before is not the
     edit's to fix."""
+    plugins = library.plugins if library is not None else ()
     try:
         before_table = (
-            HarnessProfileTable.from_mapping(current, path, harnesses=providers)
+            HarnessProfileTable.from_mapping(current, path, harnesses=providers, plugins=plugins)
             if current is not None
             else None
         )
     except TemplateEnvironmentError:
         before_table = None
     try:
-        table = HarnessProfileTable.from_mapping(candidate, path, harnesses=providers)
+        table = HarnessProfileTable.from_mapping(
+            candidate, path, harnesses=providers, plugins=plugins
+        )
     except TemplateEnvironmentError as exc:
         return str(exc)
     chosen = selections(library)

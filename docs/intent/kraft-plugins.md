@@ -75,7 +75,7 @@ origin: src/kraft/plugins/config.py §PluginsConfig
 ## REQ a-plugin-runs-on-one-kraft-major
 
 IF the running Kraft's release is below a plugin's `requires.kraft` version or in a different major, THEN the system SHALL refuse the plugin at validate, install and update, and SHALL leave it out at load.
-enforced-by: tests/plugins/test_manifest.py::test_kraft_compatibility[below-minimum], tests/plugins/test_manifest.py::test_kraft_compatibility[next-major], tests/plugins/test_manifest.py::test_kraft_compatibility[earlier-major], tests/plugins/test_manifest.py::test_kraft_compatibility[release-candidate]
+enforced-by: tests/plugins/test_manifest.py::test_kraft_compatibility[below-minimum], tests/plugins/test_manifest.py::test_kraft_compatibility[next-major], tests/plugins/test_manifest.py::test_kraft_compatibility[earlier-major], tests/plugins/test_manifest.py::test_kraft_compatibility[release-candidate], tests/plugins/test_load.py::test_a_plugin_for_another_major_is_left_out
 origin: src/kraft/plugins/manifest.py §kraft_compatible
 
 ## REQ unknown-manifest-keys-are-ignored
@@ -119,3 +119,33 @@ origin: src/kraft/plugins/config.py §CollectionConfig
 WHEN an author validates a local collection or plugin, the system SHALL run the same extraction checks, plugin checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
 enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json
 origin: src/kraft/cli/plugin.py §validate
+
+## REQ plugins-load-only-from-the-lock
+
+The system SHALL load a plugin only when it has both an enabled `plugins.yaml` entry and a lock entry, SHALL load it from the store the lock names, and SHALL NOT fetch a collection when it loads the library.
+enforced-by: tests/plugins/test_load.py::test_load_reads_the_lock_not_the_ref, tests/plugins/test_load.py::test_what_loads[listed-not-locked], tests/plugins/test_load.py::test_what_loads[locked-not-listed], tests/plugins/test_load.py::test_what_loads[disabled]
+origin: src/kraft/plugins/load.py §installed
+
+## REQ a-broken-plugin-affects-only-itself
+
+IF a plugin fails a load-time check, THEN the system SHALL leave only that plugin out, report it under `invalid_templates`, and load the rest of the library.
+enforced-by: tests/plugins/test_load.py::test_a_broken_plugin_library_affects_only_that_plugin, tests/plugins/test_load.py::test_load_time_checks[requires-harness-removed], tests/plugins/test_load.py::test_load_time_checks[repo-id-taken], tests/api/test_deps.py::test_health_names_a_plugin_that_did_not_load[store-deleted]
+origin: src/kraft/plugins/load.py §installed
+
+## REQ a-hand-alias-or-ref-change-waits-for-update
+
+WHILE a plugin's `plugins.yaml` alias or its collection's `ref` differs from the lock's, the system SHALL keep loading the plugin under its locked namespace and commit until an update applies the change.
+enforced-by: tests/plugins/test_load.py::test_what_loads[alias-change-pending]
+origin: src/kraft/plugins/load.py §installed
+
+## REQ a-plugin-whose-digest-does-not-match-is-not-loaded
+
+IF a plugin's extracted files do not match the lock's digest, THEN the system SHALL leave that plugin out and report it under `invalid_templates`.
+enforced-by: tests/plugins/test_load.py::test_a_digest_mismatch_leaves_the_plugin_out, tests/api/test_deps.py::test_health_names_a_plugin_that_did_not_load[store-edited]
+origin: src/kraft/plugins/load.py §installed
+
+## REQ an-unloaded-plugin-skill-is-never-delegated
+
+IF a skill reference's qualifier is the namespace of a plugin in `plugins.yaml` or `plugins.lock` that did not load, THEN the system SHALL fail validation instead of handing the reference to the agent.
+enforced-by: tests/test_skill.py::test_plugin_skill_references[unloaded-plugin-is-an-error], tests/plugins/test_load.py::test_what_loads[disabled]
+origin: src/kraft/skill.py §validate
