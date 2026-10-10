@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useContext, useMemo, useRef, useState } from "react";
 import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
 import { authoredNodes, changeAt, kindOf, nodeGlyph, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
+import { ReadOnly } from "./plugin";
 import { problemWord } from "./problems";
 
 type Props = {
@@ -83,7 +84,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
   const [menu, setMenu] = useState<number | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   // No seams while reviewing: the review is read-only (the prototype's `!s.review`).
-  const seams: Seam[] = review ? [] : Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 }));
+  const readOnly = useContext(ReadOnly);
+  const seams: Seam[] = review || readOnly ? [] : Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 }));
   const sel = authored.findIndex((n) => n.id === selected);
   const target = sel >= 0 && kindOf(r, authored[sel]) === "gate" ? rejectTarget(r, authored, sel) : undefined;
   const arcs: ChainArc[] = target && selected ? [{ kind: "reject", from: selected, to: target }] : [];
@@ -101,7 +103,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         seams={seams}
         opening="fit"
         fit={EDITOR_FIT}
-        onDrag={review ? undefined : onDrag}
+        onDrag={review || readOnly ? undefined : onDrag}
         reserve={reserve}
         onSelect={onSelect}
         onOpen={onOpen}
@@ -113,7 +115,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
           setMenu(at);
         }}
       />
-      {!nodes.length && <p className="tpl-empty-chain">Add the first node with +</p>}
+      {!nodes.length && !readOnly && <p className="tpl-empty-chain">Add the first node with +</p>}
       {strip && <p className={`tpl-strip${strip.ok ? "" : " is-bad"}`} role="status">{strip.text}</p>}
       {menu !== null && (
         <SeamMenu

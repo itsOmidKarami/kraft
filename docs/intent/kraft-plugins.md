@@ -323,3 +323,15 @@ origin: src/kraft/plugins/update.py §auto_update
 WHEN `kraft admin update` would install a release whose major leaves a loaded plugin's `requires.kraft` unmet, the system SHALL list those plugins and ask before installing.
 enforced-by: tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[next-major-asks], tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[next-major-accepted], tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[same-major-says-nothing]
 origin: src/kraft/cli/admin.py §_confirm_dropped_plugins
+
+## REQ plugin-content-is-read-only
+
+IF a write would save a plugin's component or chain, THEN the system SHALL answer 409 and name the plugin.
+enforced-by: tests/api/test_plugin_content.py::test_saving_a_plugin_entry_answers_409[put-chain], tests/api/test_plugin_content.py::test_saving_a_plugin_entry_answers_409[chains-draft], tests/api/test_plugin_content.py::test_saving_a_plugin_entry_answers_409[library-op]
+origin: src/kraft/templates/catalogue.py §read_only_message
+
+## REQ a-plugin-copy-resolves-locally
+
+WHEN a plugin component or chain is copied into a local draft, the system SHALL carry its plugin-internal references qualified, so the copy resolves.
+enforced-by: tests/api/test_plugin_content.py::test_copy_from_a_plugin[chain], tests/api/test_plugin_content.py::test_copy_from_a_plugin[component]
+origin: src/kraft/drafts/ops.py §copy_component

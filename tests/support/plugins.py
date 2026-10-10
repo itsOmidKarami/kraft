@@ -215,3 +215,21 @@ def edit_plugins_yaml(config_dir: Path, change) -> None:
     written = read_yaml(config_dir / "plugins.yaml")
     change(written)
     write_yaml(config_dir / "plugins.yaml", written)
+
+
+def load_release(client, tmp_path: Path, **spec) -> Path:
+    """`release@acme` installed into a running test server and loaded: a task
+    `base` that names its own skill, and a chain `ship`. Returns its store."""
+    from kraft.api import deps
+
+    st = client.app.state
+    plugin = {
+        "library": {"tasks": {"base": {**AGENT, "skill": "notes"}}},
+        "chains": {"ship": chain("base")},
+        "skills": {"notes": "the method"},
+        **spec,
+    }
+    collection = make_collection(tmp_path, {"release": plugin})
+    store = install(st.templates_dir, st.run_dirs.plugins, collection, "release")
+    deps._reload_templates(st)
+    return store

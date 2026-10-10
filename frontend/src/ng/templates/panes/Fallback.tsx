@@ -1,6 +1,8 @@
 import { X } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
-import type { Option } from "./controls";
+import { useContext } from "react";
+import { ReadOnly } from "../plugin";
+import { Kv, type Option } from "./controls";
 
 /** One `fallback:` entry (`FallbackEntry`): an optional harness plus one route,
  *  a profile or a model and/or effort. Whatever it omits is the task's own. */
@@ -42,6 +44,8 @@ export function FallbackRows({ value, harness, harnesses, profiles, onChange }: 
   onChange: (next: Entry[] | null) => void;
 }) {
   const entries = entriesOf(value);
+  const readOnly = useContext(ReadOnly);
+  if (readOnly) return <Kv k="fallback" v={entries.map(entryText).join(" → ") || "none"} muted={!entries.length} />;
   const set = (i: number, e: Entry) => onChange(entries.map((x, j) => (j === i ? e : x)));
   const add = () => onChange([...entries, { harness: harnesses?.find((h) => h !== harness && !entries.some((e) => e.harness === h)) ?? harnesses?.[0] ?? harness }]);
   const remove = (i: number) => {

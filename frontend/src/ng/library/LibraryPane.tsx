@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Inspector } from "../graph/Inspector";
 import { detailOf } from "../http";
 import { isTextField, mod } from "../keys";
@@ -23,6 +23,8 @@ import { LibraryOverview } from "./overview";
 import { Instructions } from "./steering";
 import { UsedBy } from "./UsedBy";
 import type { Use } from "./types";
+import { ReadOnly } from "../templates/plugin";
+import { yamlOf } from "../phone/areas/yaml";
 
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }];
 const STEERING_TABS = [{ value: "instructions", label: "Instructions" }, { value: "used", label: "Used by" }, { value: "yaml", label: "YAML" }];
@@ -56,7 +58,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   onExpand: () => void;
 }) {
   const [tab, setTab] = useState("overview");
-  const [card, setCard] = useState<{ t: "icon" } | { t: "remove" } | { t: "dup" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "icon" } | { t: "remove" } | { t: "dup" } | { t: "copy" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   const at = (el: HTMLElement) => void (anchor.current = el);
@@ -86,6 +88,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, []);
+  const readOnly = useContext(ReadOnly);
   const r = draft.view!.result;
   const scope = draft.scope;
   const d = libDescribe(r, path);
@@ -116,8 +119,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   })();
   const tabs = d.kind === "fixloop" ? undefined : d.kind === "steering" ? STEERING_TABS : TABS;
   const shown = tabs?.some((x) => x.value === tab) ? tab : tabs?.[0].value;
-  const pickable = ["node", "step", "task", "esc", "review"].includes(d.kind);
-  const renameable = !["fixloop", "judge"].includes(d.kind);
+  const pickable = !readOnly && ["node", "step", "task", "esc", "review"].includes(d.kind);
+  const renameable = !readOnly && !["fixloop", "judge"].includes(d.kind);
   const parent = path.split(".").slice(0, -1).join(".");
   // The ids a rename must avoid: the section's names for a component, else the siblings in its step or node.
   const siblings = root ? names : ((): string[] => {
@@ -157,6 +160,14 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     showToast(`Duplicated as ${name}`);
     onDuplicated(to);
   };
+  // A plugin's component is changed by copying it: the copy is the library's own, under a name of its own.
+  const copy = async (name: string) => {
+    const a = await draft.ops([{ op: "copy_component", ref: path, name }], { quiet: true });
+    if (a.status !== 200) return setRefused(detailOf(a.body));
+    closeCard();
+    showToast(`Copied to your library as ${name}`);
+    onDuplicated(String(a.body.ops?.[0]?.result?.path ?? `${d.section}.${name}`));
+  };
   const pickBase = async (base: string) => {
     const a = await draft.ops([{ op: "change_base", node: path, base }], { preview: true });
     if (a.status !== 200) return showToast(detailOf(a.body));
@@ -168,7 +179,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     closeCard();
     if (a.status === 200) showToast(`Base is now ${base}`);
   };
-  const footer = (
+  const footer = readOnly ? (root ? <Button variant="primary" onClick={(e) => { at(e.currentTarget); setCard({ t: "copy" }); }}>Copy to my library</Button> : undefined) : (
     <>
       {root && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "dup" }); }}>Duplicate</Button>}
       {d.kind === "node" && typeof own?.extends === "string" && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "extend" }); }}>Change base…</Button>}
@@ -205,7 +216,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
         ) : shown === "instructions" ? <Instructions draft={draft} path={path} />
           : shown === "used" ? <UsedBy uses={uses ?? []} />
           : shown === "config" ? <LibraryConfig ctx={ctx} />
-          : shown === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
+          : shown === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} fixed={readOnly ? yamlOf(own ?? {}) : undefined} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
             : <LibraryOverview d={d} ctx={ctx} uses={uses} />}
       </Inspector>
       {card?.t === "icon" && (
@@ -216,6 +227,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
       )}
       {card?.t === "remove" && <RemoveCard anchor={anchor} label={`Remove ${noun}`} refs={uselist} onRemove={() => void remove()} onClose={closeCard} />}
       {card?.t === "dup" && <IdCard anchor={anchor} title={`Duplicate ${d.id} as`} initial={`${d.id}_copy`} taken={names} go="Duplicate" refused={refused} onGo={(name) => void duplicate(name)} onClose={closeCard} />}
+      {card?.t === "copy" && <IdCard anchor={anchor} title={`Copy ${d.id} to my library as`} initial={d.id.split(":").pop()!} taken={names} go="Copy" refused={refused} onGo={(name) => void copy(name)} onClose={closeCard} />}
       {card?.t === "extend" && <ExtendMenu anchor={anchor} title="Change base" note="Next, you'll see which of its overrides fit the new base." exclude={d.component.split(".")[1]} onPick={(b) => void pickBase(b)} onClose={closeCard} />}
       {card?.t === "base" && <ChangeBaseCard anchor={anchor} node={path} base={card.base} check={card.check} onApply={() => void applyBase(card.base)} onClose={closeCard} />}
     </>

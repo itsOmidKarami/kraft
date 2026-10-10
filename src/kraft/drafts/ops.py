@@ -20,7 +20,7 @@ from yaml import YAMLError
 
 from kraft.drafts import authored, resolve, store
 from kraft.plugins import load as plugins_load
-from kraft.templates import positions
+from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import (
     LIBRARY_FILE,
@@ -58,6 +58,10 @@ class OpError(Exception):
         super().__init__(message)
         #: More of the 422's body: a fragment's `line` and `col`.
         self.extra = extra
+
+
+class PluginReadOnly(OpError):
+    """An op on a plugin's own chain or component: the request answers 409."""
 
 
 def _check_id(id: object, taken) -> str:
@@ -689,6 +693,17 @@ def new_chain(d: Draft, **source: str) -> None:
     if origin is None:
         d._chain = {"id": d.key, "description": "", "nodes": []}
     else:
+        library = getattr(d.st, "library", None)
+        if isinstance(origin, str) and library is not None and library.plugin_of(origin):
+            # A loaded plugin's chain, as the library holds it: its own bare
+            # references already made `<namespace>:<name>`, so the copy resolves.
+            if origin not in library.chain_ids:
+                raise OpError(f"there is no chain {origin!r} to copy")
+            d._chain = authored.load(yaml.safe_dump(plain(library.chain_data(origin))))
+            authored.put(d._chain, "", "id", d.key)
+            d.exists = True
+            d.dirty.add(d.name)
+            return
         # A chain id, never a path: `../../x` read any YAML file Kraft could.
         if not isinstance(origin, str) or not store.AREAS["chains"].valid(origin):
             raise OpError(f"there is no chain {origin!r} to copy")
@@ -899,6 +914,43 @@ def move_to_library(d: Draft, path: str, name: str) -> dict:
     return {"path": _join(section.value, name)}
 
 
+def plain(value: object) -> object:
+    """A library mapping as plain dicts and lists, to serialise."""
+    if isinstance(value, Mapping):
+        return {k: plain(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [plain(v) for v in value]
+    return value
+
+
+def copy_component(d: Draft, ref: str, name: str) -> dict:
+    """A loaded plugin's component (`tasks.release:base`, as the library lists
+    it) into `library.yaml` as `<section>.<name>`: the way to change what a
+    plugin ships. Its plugin-internal references come along qualified, so the
+    copy resolves. The library joins the draft."""
+    library = getattr(d.st, "library", None)
+    section, _, qualified = ref.partition(".") if isinstance(ref, str) else ("", "", "")
+    if library is None or section not in [ns.value for ns in Namespace]:
+        raise OpError(f"there is no plugin component {ref!r} to copy")
+    if library.plugin_of(qualified) is None:
+        raise OpError(f"{ref!r} is not a plugin's component; edit it where it is")
+    if section == Namespace.STEERING.value:
+        found = library.steering.get(qualified)
+        body = None if found is None else found.model_dump(mode="json", exclude_unset=True)
+    else:
+        raw = library.component(Namespace(section), qualified)
+        body = None if raw is None else plain(raw.data)
+    if body is None:
+        raise OpError(f"there is no plugin component {ref!r} to copy")
+    if not isinstance(d.library.get(section), dict):
+        authored.put(d.library, "", section, {}, file=authored.LIBRARY)
+    entries = d.library[section]
+    _check_id(name, entries)
+    entries[name] = body
+    d.dirty.add(LIBRARY_FILE)
+    return {"path": _join(section, name)}
+
+
 #: Every op by name.
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
@@ -918,7 +970,20 @@ OPS: dict[str, Callable[..., dict | None]] = {
     "set_fragment": set_fragment,
     "add_component": add_component,
     "move_to_library": move_to_library,
+    "copy_component": copy_component,
 }
+
+
+def _refuse_plugin_address(d: Draft, path: object) -> None:
+    """An op that addresses a plugin's own component (`tasks.release:base`) is
+    refused: a plugin's content is read-only. Extending or selecting one is
+    not an address."""
+    library = getattr(d.st, "library", None)
+    if library is None or not isinstance(path, str):
+        return
+    for segment in path.split(PATH_SEPARATOR):
+        if why := catalogue.read_only_message(library, segment):
+            raise PluginReadOnly(why)
 
 
 def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict]:
@@ -932,6 +997,7 @@ def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict
                 raise OpError(f"no op {name!r}")
             fn = table[op["op"]]
             fields = {k: v for k, v in op.items() if k != "op"}
+            _refuse_plugin_address(d, fields.get("path"))
             try:
                 inspect.signature(fn).bind(d, **fields)
             except TypeError as exc:
