@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import plistlib
 import sys
+import time
 
 import pytest
 import yaml
@@ -121,6 +122,10 @@ def test_reload_that_adds_a_storage_limit_measures_at_once(client, templates_dir
     assert client.post("/api/apply/reload").status_code == 200
 
     assert client.app.state.policy.storage_limit_bytes == 10 * 1024**3
+    # The reload only starts the walk (`storage.kick`); it lands a moment later.
+    deadline = time.monotonic() + 5
+    while not walks and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert walks
 
 
