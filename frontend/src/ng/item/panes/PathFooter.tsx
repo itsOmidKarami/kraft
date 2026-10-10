@@ -81,12 +81,13 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
     );
   if (confirm === "retry") {
     const steerable = item.steerable !== false;
-    // The pane reads an earlier pass of its node (`asOfPass`), and a retry is of the node as it stands.
-    const earlier = item.earlier_pass?.pass;
+    // The pane reads an earlier pass of the node (`asOfPass`), and a retry runs on the node as it stands. A link can
+    // select another node's path under that node's view: the pass is not that path's.
+    const earlier = item.earlier_pass?.node === path.split(".")[0] ? item.earlier_pass.pass : null;
     return (
       <div className="ip-confirm" role="group" aria-label={`Retry ${path}`} onKeyDown={onKey}>
         <p className="ip-confirm-q">Retry <code>{path}</code></p>
-        {earlier && <p className="item-muted">You are reading pass {earlier}. The retry runs from where the node stands now, and pass {earlier} stays as it is.</p>}
+        {earlier && <p className="item-muted">You are reading pass {earlier}. The retry runs on the node as it stands now, and pass {earlier} stays as it is.</p>}
         {steerable && <textarea autoFocus aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(retry, !busy)} />}
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
