@@ -24,7 +24,7 @@ import uvicorn
 import yaml
 
 from kraft import client, config, permission_hooks, pidfile, render
-from kraft.cli import common, templates
+from kraft.cli import common, plugin, templates
 from kraft.paths import (
     BUNDLED,
     LEGACY_CONFIG_DIR_VAR,
@@ -1626,6 +1626,7 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reload_p.set_defaults(func=_cmd_reload)
 
     templates.add(subs, common)
+    plugin.add(subs, common)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"

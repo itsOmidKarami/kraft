@@ -41,3 +41,81 @@ origin: src/kraft/plugins/load.py §qualify
 WHEN a plugin's task names a harness or a bare agent profile, the system SHALL resolve it against the instance's `harnesses.yaml`.
 enforced-by: tests/templates/test_library_plugins.py::test_plugin_layer_resolution[plugin-bare-profile-is-instance]
 origin: src/kraft/plugins/load.py §qualify
+
+## REQ plugin-cannot-define-harness-profiles
+
+IF a plugin's profiles file contains a `harnesses` section, THEN the system SHALL refuse the plugin.
+enforced-by: tests/plugins/test_manifest.py::test_a_plugin_is_refused[harnesses-section]
+origin: src/kraft/plugins/manifest.py §check_plugin
+
+## REQ extraction-takes-only-regular-layout-files
+
+WHEN the system extracts a plugin, it SHALL extract only the fixed layout's files, and SHALL refuse the plugin IF one of them is a symlink, a submodule, an LFS pointer, larger than its limit, or carries a control, bidi or format character.
+enforced-by: tests/plugins/test_fetch.py::test_extraction_refuses[symlink], tests/plugins/test_fetch.py::test_extraction_refuses[submodule], tests/plugins/test_fetch.py::test_extraction_refuses[lfs-pointer], tests/plugins/test_fetch.py::test_extraction_refuses[oversized-yaml], tests/plugins/test_fetch.py::test_extraction_refuses[oversized-plugin], tests/plugins/test_fetch.py::test_extraction_refuses[too-many-files], tests/plugins/test_fetch.py::test_extraction_refuses[format-character], tests/plugins/test_fetch.py::test_only_the_layout_is_extracted
+origin: src/kraft/plugins/fetch.py §extract_git
+
+## REQ fetch-runs-no-repository-code
+
+WHEN the system fetches a collection, it SHALL NOT check out a working tree or run a hook.
+enforced-by: tests/plugins/test_fetch.py::test_fetch_never_checks_out_or_runs_hooks
+origin: src/kraft/plugins/fetch.py §fetch
+
+## REQ namespace-kraft-is-reserved
+
+IF a plugin is named `kraft` or installed under the alias `kraft`, THEN the system SHALL refuse it.
+enforced-by: tests/plugins/test_manifest.py::test_a_plugin_is_refused[kraft-name], tests/plugins/test_config.py::test_plugins_yaml_is_refused[kraft-alias]
+origin: src/kraft/plugins/config.py §PluginsConfig
+
+## REQ plugin-namespaces-are-unique
+
+IF a plugin's namespace equals another installed plugin's namespace or a `repos.yaml` entry's `id`, THEN the system SHALL refuse the install.
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[duplicate-namespace]
+origin: src/kraft/plugins/config.py §PluginsConfig
+
+## REQ a-plugin-runs-on-one-kraft-major
+
+IF the running Kraft's release is below a plugin's `requires.kraft` version or in a different major, THEN the system SHALL refuse the plugin at validate, install and update, and SHALL leave it out at load.
+enforced-by: tests/plugins/test_manifest.py::test_kraft_compatibility[below-minimum], tests/plugins/test_manifest.py::test_kraft_compatibility[next-major], tests/plugins/test_manifest.py::test_kraft_compatibility[earlier-major], tests/plugins/test_manifest.py::test_kraft_compatibility[release-candidate]
+origin: src/kraft/plugins/manifest.py §kraft_compatible
+
+## REQ unknown-manifest-keys-are-ignored
+
+The system SHALL ignore a top-level `collection.json` or `plugin.json` key it does not read, and SHALL refuse an unknown key inside `requires`.
+enforced-by: tests/plugins/test_manifest.py::test_unknown_keys_are_ignored[collection], tests/plugins/test_manifest.py::test_unknown_keys_are_ignored[plugin], tests/plugins/test_manifest.py::test_unknown_keys_are_ignored[claude-code-keys], tests/plugins/test_manifest.py::test_a_plugin_is_refused[unknown-requires-key]
+origin: src/kraft/plugins/manifest.py §PluginManifest
+
+## REQ validate-warns-about-unknown-keys
+
+WHEN `validate` reads a manifest key Kraft does not read, the system SHALL list it as a warning.
+enforced-by: tests/cli/test_plugin.py::test_validate[unknown-key-warning]
+origin: src/kraft/cli/plugin.py §validate
+
+## REQ plugins-yaml-refuses-unknown-keys
+
+IF `plugins.yaml` has a key the system does not read, at any level, THEN the system SHALL refuse the file and name the key.
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[unknown-key], tests/plugins/test_config.py::test_plugins_yaml_is_refused[as-by-field-name]
+origin: src/kraft/plugins/config.py §PluginsConfig
+
+## REQ a-collection-source-is-explicit
+
+IF a `plugins.yaml` collection has both or neither of `git` and `path`, a `git` that is not a full https, ssh, file or scp-like URL, a `git` with credentials or a leading `-`, a `path` that is not absolute and normal, or a `ref` git would read as an option, THEN the system SHALL refuse the file.
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[git-and-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[neither], tests/plugins/test_config.py::test_plugins_yaml_is_refused[owner-repo], tests/plugins/test_config.py::test_plugins_yaml_is_refused[http], tests/plugins/test_config.py::test_plugins_yaml_is_refused[credentials], tests/plugins/test_config.py::test_plugins_yaml_is_refused[leading-dash], tests/plugins/test_config.py::test_plugins_yaml_is_refused[relative-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[ref-option]
+origin: src/kraft/plugins/config.py §CollectionConfig
+
+## REQ a-collection-auto-update-has-no-exceptions
+
+IF a plugin entry sets `auto_update` while its collection sets `auto_update: true`, THEN the system SHALL refuse `plugins.yaml`.
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[opt-out-under-auto-collection]
+origin: src/kraft/plugins/config.py §PluginsConfig
+
+## REQ a-directory-collection-never-auto-updates
+
+IF a directory collection sets `auto_update: true`, or a plugin from one sets `auto_update` at all, THEN the system SHALL refuse `plugins.yaml`.
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[directory-auto-update], tests/plugins/test_config.py::test_plugins_yaml_is_refused[directory-plugin-auto-update]
+origin: src/kraft/plugins/config.py §CollectionConfig
+
+## REQ validate-runs-the-install-checks
+
+WHEN an author validates a local collection or plugin, the system SHALL run the same extraction checks, plugin checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
+enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json
+origin: src/kraft/cli/plugin.py §validate
