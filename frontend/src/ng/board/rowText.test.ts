@@ -83,6 +83,8 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("done"))).toMatchObject({ state: "done", icon: "check" });
     expect(glyphOf(row("archived"))).toMatchObject({ state: "done", icon: "check" });
     expect(glyphOf(row("paused", { current_node_id: null })).state).toBe("todo");
+    expect(glyphOf(row("blocked", { current_node_id: null })).state).toBe("todo");
+    expect(glyphOf(row("blocked")).state).toBe("current");
   });
 
   it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, its nodes between gates one dash", () => {

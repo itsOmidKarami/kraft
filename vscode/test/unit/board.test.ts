@@ -9,6 +9,7 @@ describe("groupItems", () => {
     item("run"),
     item("gate", { status: "needs_human", pending_gate: "spec" }),
     item("new", { status: "paused", current_node_id: null }),
+    item("after", { status: "blocked", current_node_id: null }),
     item("done", { status: "completed" }),
     item("arch", { status: "completed", archived_at: "2026-09-01" }),
     item("other", { repo: "/elsewhere" }),
@@ -18,6 +19,7 @@ describe("groupItems", () => {
     const groups = groupItems(items, "all");
     expect(groups.map((g) => g.id)).toEqual(["needs", "running", "not_started", "done"]);
     expect(groups.flatMap((g) => g.items.map((i) => i.id))).not.toContain("arch");
+    expect(groups.find((g) => g.id === "not_started")!.items.map((i) => i.id)).toEqual(["new", "after"]);
   });
 
   it("scopes to the workspace's repos", () => {
@@ -36,6 +38,7 @@ describe("actionsFor", () => {
     [{ status: "active" }, ["pause", "cancel"]],
     [{ status: "paused" }, ["resume", "cancel"]],
     [{ status: "paused", current_node_id: null }, ["resume", "cancel"]],
+    [{ status: "blocked", current_node_id: null }, ["pause", "cancel"]],
     [{ status: "needs_human", pending_gate: "spec" }, ["skip", "cancel"]],
     [{ status: "needs_human" }, ["retry", "skip", "escalate", "cancel"]],
     [{ status: "completed" }, ["archive"]],

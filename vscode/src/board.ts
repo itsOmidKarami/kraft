@@ -14,7 +14,7 @@ type Node =
   | { kind: "down" };
 
 const ICONS: Record<string, string> = {
-  gate: "pass", paused: "debug-pause", not_started: "circle-outline", running: "sync~spin",
+  gate: "pass", paused: "debug-pause", not_started: "circle-outline", blocked: "watch", running: "sync~spin",
   rate_limited: "watch", waiting: "watch", escalating: "comment-discussion", escalated: "comment",
   capped: "error", question: "question", budget: "credit-card", done: "check", abandoned: "circle-slash",
 };

@@ -9,7 +9,7 @@ import { backdropProps, useModal } from "../../useModal";
 import { groupOf } from "../board/model";
 import { termsOf } from "../item/DocViewer";
 import { gateWords, reasonTail } from "../board/rowText";
-import { headerState } from "../item/status";
+import { headerState, neverStarted } from "../item/status";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
@@ -58,7 +58,7 @@ function Marked({ text, query }: { text: string; query: string }) {
 }
 
 /** What the board's row says of an item, not its stored status: "not started", "approve spec", "failed at plan". */
-const stateWords = (i: WorkItem) => (groupOf(i) === "not_started" ? "not started" : reasonTail(i));
+const stateWords = (i: WorkItem) => (neverStarted(i) ? "not started" : reasonTail(i));
 
 const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => void): Row =>
   // An item waiting at a gate is an action: review that gate.

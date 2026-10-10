@@ -11,6 +11,7 @@ const ACTIONS: Record<ItemDisplayState, Action[]> = {
   escalating: ["cancel"],
   paused: ["resume", "cancel"],
   not_started: ["resume", "cancel"],
+  blocked: ["pause", "cancel"],
   gate: ["skip", "cancel"],
   capped: ["retry", "skip", "escalate", "cancel"],
   question: ["retry", "skip", "escalate", "cancel"],
