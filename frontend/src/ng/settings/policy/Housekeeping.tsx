@@ -13,6 +13,7 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
     </div>
   );
   const max = p.housekeeping.max_concurrent.value;
+  const cleanup = p.housekeeping.storage_auto_cleanup?.value ?? null;
   const num = (v: unknown) => (typeof v === "number" ? v : null);
   return (
     <>
@@ -29,8 +30,9 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
       </section>
       <section className="pol-card" aria-label="Storage">
         <h2 className="pol-h2">Storage</h2>
-        {row("storageLimit", "limit", p.housekeeping.storage_limit?.value ?? null, "The most disk worktrees may use, as a size: 1000M, 10G, 1T. Over it, a start that needs a new worktree waits until you make room; Kraft deletes nothing on its own. Blank is no limit.", false, "no limit")}
+        {row("storageLimit", "limit", p.housekeeping.storage_limit?.value ?? null, "The most disk worktrees may use, as a size: 1000M, 10G, 1T. Over it, a start that needs a new worktree waits until you make room; Kraft deletes nothing on its own unless automatic clean-up is on. Blank is no limit.", false, "no limit")}
         {row("storageQuota", "quota", p.housekeeping.storage_quota?.value ?? null, "Over this, Kraft warns. Blank is 80% of the limit.", false, p.housekeeping.storage_quota_default ?? "not set")}
+        {row("storageCleanup", "automatic clean-up", cleanup, cleanup ? `On: over the limit, Kraft archives completed and abandoned items that ended ${cleanup} ago or more, oldest first, down to the quota. Their worktrees and any uncommitted changes go; a branch with unpushed commits is kept. Blank turns it off.` : "Off: over the limit, starts wait until you make room. Enter an age in hours or days (24h, 2d) to have Kraft archive finished items at least that old.", false, "off")}
       </section>
     </>
   );

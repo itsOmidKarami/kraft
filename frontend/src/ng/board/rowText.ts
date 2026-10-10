@@ -117,10 +117,8 @@ export function ticksOf(i: Row): Tick[] {
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
   const hot = groupOf(i) === "needs" || i.display_status === "escalated";
-  const ticks: Tick[] = nodes.map((n, k) => ({
+  return nodes.map((n, k) => ({
     gate: n.kind === "gate",
     state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",
   }));
-  // An ended item reads as finished at a glance: the nodes between two gates are one dash (BD-6).
-  return ended ? ticks.filter((t, k) => t.gate || !ticks[k - 1] || ticks[k - 1].gate) : ticks;
 }

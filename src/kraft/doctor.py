@@ -121,7 +121,14 @@ def _storage_line(payload: dict) -> tuple[str, str] | None:
     used = f"worktrees use {size(s['used_bytes'])} of {size(s['limit_bytes'])}"
     free = "kraft view storage lists it by item; kraft item archive --reclaimable makes room"
     if s["state"] == "held":
-        return "held", f"{used}: starts that need a new worktree are held; {free}"
+        recent = s.get("too_recent") or 0
+        waited = (
+            f"; {recent} finished item{'' if recent == 1 else 's'} ended too recently "
+            "for automatic clean-up"
+            if recent
+            else ""
+        )
+        return "held", f"{used}: starts that need a new worktree are held{waited}; {free}"
     if s["state"] == "over_quota":
         return "over_quota", f"{used}, over the {size(s['quota_bytes'])} quota; {free}"
     return "ok", f"{used}; kraft view storage lists it by item"

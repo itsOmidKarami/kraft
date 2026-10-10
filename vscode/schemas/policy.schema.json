@@ -19,6 +19,19 @@
       "title": "ArchiveInput",
       "type": "object"
     },
+    "AutoCleanupInput": {
+      "additionalProperties": false,
+      "description": "`storage.worktrees.auto_cleanup`: its presence lets Kraft archive\nfinished items for the limit without a person (`kraft.storage.tick`),\nnever one that ended less than `min_age` ago.",
+      "properties": {
+        "min_age": {
+          "default": "24h",
+          "title": "Min Age",
+          "type": "string"
+        }
+      },
+      "title": "AutoCleanupInput",
+      "type": "object"
+    },
     "Budget": {
       "description": "Spend caps, in dollars. `None` is \"no cap\", never \"zero\".\n\nNot a field on `Cap`: a `Cap` is per-loop and is snapshotted per\n`(work_item_id, key)` row in `retry_counters`, while a budget is per work\nitem and per day and spans every loop in the chain.",
       "properties": {
@@ -367,6 +380,17 @@
       "additionalProperties": false,
       "description": "`storage.worktrees`: over `limit`, a start that needs a new worktree\nwaits until a person cleans up; over `quota` Kraft only warns. `quota`\ndefaults to 80% of `limit`.",
       "properties": {
+        "auto_cleanup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutoCleanupInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "limit": {
           "anyOf": [
             {

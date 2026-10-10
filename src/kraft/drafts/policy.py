@@ -38,6 +38,7 @@ HOUSEKEEPING = (
     "archive.after_days",
     "storage.worktrees.limit",
     "storage.worktrees.quota",
+    "storage.worktrees.auto_cleanup.min_age",
 )
 FINDINGS = ("findings.loop_severities",)
 SECTION_FIELDS = ("max_attempts", "timeout_minutes")
@@ -342,6 +343,14 @@ def resolve(st, key, raw, files, published) -> dict:
                 render.human_size(policy.storage_quota_bytes)
                 if policy.storage_limit_bytes is not None and not (worktrees and worktrees.quota)
                 else None
+            ),
+            # The age floor in force, or null: automatic clean-up is off.
+            "storage_auto_cleanup": _leaf(
+                data,
+                worktrees.auto_cleanup.min_age if worktrees and worktrees.auto_cleanup else None,
+                "storage",
+                "worktrees",
+                "auto_cleanup",
             ),
         },
         "findings": {
