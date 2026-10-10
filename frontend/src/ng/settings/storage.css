@@ -1,0 +1,12 @@
+/* Settings › Storage. Colours only through theme.css tokens. */
+.set-st-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-st-bar { position: relative; height: 10px; border-radius: 5px; background: var(--line); }
+.set-st-fill { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--text-sub); }
+.set-st-bar.is-over_quota .set-st-fill { background: var(--warn); }
+.set-st-bar.is-held .set-st-fill { background: var(--bad); }
+.set-st-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.set-st-note { margin: 0; font-size: 12px; }
+.set-st-note:empty { display: none; }
+.set-st-note.is-warn { color: var(--warn); }
+.set-st-note.is-held { color: var(--bad); }
+.set-st-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
