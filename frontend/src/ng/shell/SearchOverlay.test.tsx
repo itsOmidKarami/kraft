@@ -118,8 +118,9 @@ describe("SearchOverlay", () => {
 
   it("says what the board says of an item, and puts a failed one under Needs you with the gates", async () => {
     const FRESH = item({ id: "wi_new", title: "Fresh work", status: "paused", display_status: "paused", current_node_id: null, repo: "/r/beta" });
+    const BLOCKED = item({ id: "wi_after", title: "Later work", status: "blocked", display_status: "blocked", current_node_id: null, repo: "/r/beta" });
     const FAILED = item({ id: "wi_fail", title: "Failed work", status: "needs_human", display_status: "failed", current_node_id: "plan", repo: "/r/beta" });
-    useStore.setState({ workItems: { wi_gate: GATED, wi_plain: PLAIN, wi_new: FRESH, wi_fail: FAILED } } as never);
+    useStore.setState({ workItems: { wi_gate: GATED, wi_plain: PLAIN, wi_new: FRESH, wi_after: BLOCKED, wi_fail: FAILED } } as never);
     mount();
     const { user, input } = await open();
     await user.type(input, "work");
@@ -139,6 +140,7 @@ describe("SearchOverlay", () => {
     expect(within(section("Needs you")).getByTitle("Failed work")).toBeInTheDocument();
     expect(says("Failed work")).toEqual(["failed at plan", "beta"]);
     expect(says("Fresh work")).toEqual(["not started", "beta"]);
+    expect(says("Later work")).toEqual(["waiting on another item", "beta"]);
     expect(says("Plain work")).toEqual(["implementation", "beta"]);
     expect(screen.getByRole("listbox")).not.toHaveTextContent(/needs_human|· paused|· active/);
   });
