@@ -306,13 +306,19 @@ def test_a_lock_that_does_not_parse_is_an_issue(with_release):
             lambda d: d["profiles"].pop("extra"),
             "would leave plugin release@acme out: requires agent profile 'extra'",
         ),
+        (
+            "repos.yaml",
+            lambda d: d.setdefault("repos", []).append({"path": "/r", "id": "release"}),
+            "would leave plugin release@acme out: its namespace 'release' is now a repository id",
+        ),
     ],
-    ids=["maxima-lowered", "required-profile-removed"],
+    ids=["maxima-lowered", "required-profile-removed", "namespace-becomes-a-repo-id"],
 )
 def test_an_edit_that_drops_a_plugin_is_reported(with_release, file, edit, says):
     """Reported on the pending reload, before it is applied."""
     st = with_release
-    data = yaml.safe_load((st.templates_dir / file).read_text())
+    written = st.templates_dir / file
+    data = (yaml.safe_load(written.read_text()) if written.is_file() else None) or {}
     assert config_check.check(file, yaml.safe_dump(data), config_check.context(st)) == []
     edit(data)
 

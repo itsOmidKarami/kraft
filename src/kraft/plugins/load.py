@@ -244,19 +244,25 @@ def limits_problem(plugin: InstalledPlugin, instance_policy) -> str | None:
 
 
 def instance_problem(
-    namespace: str, requires, config_dir: Path, harnesses: Mapping | None = None
+    namespace: str,
+    requires,
+    config_dir: Path,
+    harnesses: Mapping | None = None,
+    repos: Mapping | None = None,
 ) -> str | None:
     """Why this instance cannot hold a plugin under `namespace` that declares
     `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
     does not define, or a repository whose id is the namespace. None when it
     can. Asked at load and of every install or update candidate. `harnesses`
-    is a `harnesses.yaml` to judge in place of the file: an edit not saved yet."""
+    is a `harnesses.yaml` to judge in place of the file, `repos` likewise a
+    `repos.yaml`: an edit not saved yet."""
     from kraft.config import ConfigError, read_yaml
 
     try:
         if harnesses is None:
             harnesses = read_yaml(config_dir / "harnesses.yaml")
-        repos = read_yaml(config_dir / "repos.yaml")
+        if repos is None:
+            repos = read_yaml(config_dir / "repos.yaml")
     except ConfigError:
         return None  # that file's own check says why
     for section, what, wanted in (

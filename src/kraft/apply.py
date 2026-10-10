@@ -58,12 +58,18 @@ def record(st, *names: str) -> None:
         set_loaded(st, name, _digest(st.templates_dir / name))
 
 
-def record_library(st) -> None:
-    """The library file, the plugin files it is built with and every chain
-    file, and none that has since gone."""
+def record_library(st, *, plugin_files: bool = True) -> None:
+    """The library file, the plugin files it is built with (unless
+    `plugin_files` is False: they were refused) and every chain file, and none
+    that has since gone."""
     for name in [n for n in getattr(st, "loaded_hashes", {}) if n.startswith("chains/")]:
         del st.loaded_hashes[name]
-    record(st, "library.yaml", *PLUGIN_FILES, *(n for n in _names(st) if n.startswith("chains/")))
+    record(
+        st,
+        "library.yaml",
+        *(PLUGIN_FILES if plugin_files else ()),
+        *(n for n in _names(st) if n.startswith("chains/")),
+    )
 
 
 def _restart_items(st) -> list[dict]:

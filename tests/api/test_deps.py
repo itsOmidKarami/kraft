@@ -473,16 +473,17 @@ def _break_plugins_yaml(st, store):
 
 
 @pytest.mark.parametrize(
-    ("change", "key", "why"),
+    ("change", "key", "why", "kept"),
     [
-        (_edit_a_stored_file, "plugin release@acme", "do not match the locked digest"),
-        (_delete_the_store, "plugin release@acme", "store is missing"),
-        (_disable, None, None),
-        (_break_plugins_yaml, "plugins.yaml", "plugins.yaml"),
+        (_edit_a_stored_file, "plugin release@acme", "do not match the locked digest", False),
+        (_delete_the_store, "plugin release@acme", "store is missing", False),
+        (_disable, None, None, False),
+        # A file that does not read is refused: what is running stays.
+        (_break_plugins_yaml, "plugins.yaml", "plugins.yaml", True),
     ],
     ids=["store-edited", "store-deleted", "disabled-is-no-fault", "plugins-yaml-unreadable"],
 )
-def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, why):
+def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, why, kept):
     """A plugin left out at load degrades health like a chain that does not
     resolve: the instance is not running what its lock says."""
     store = _install_release(client, tmp_path)
@@ -490,7 +491,7 @@ def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, 
     change(st, store)
     deps._reload_templates(st)
     body = client.get("/api/health").json()
-    assert "release:ship" not in st.library.chain_ids
+    assert ("release:ship" in st.library.chain_ids) is kept
     assert body["status"] == ("degraded" if key else "ok")
     if key:
         assert why in body["invalid_templates"][key]
@@ -523,5 +524,35 @@ def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_
     assert r.status_code == 200 and "release:ship" in r.json()["valid"]
     assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
     assert client.post("/api/templates/reload", json={"only": ["policy.yaml"]}).status_code == 422
+    client.post("/api/templates/reload")
+    assert client.get("/api/apply").json()["reload"] == []
+
+
+@pytest.mark.parametrize("file", ["plugins.yaml", "plugins.lock"])
+def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, file):
+    """The running instance keeps its plugins, and the file stays pending with
+    the reason, until it reads again."""
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": release}),
+        "release",
+    )
+    client.post("/api/templates/reload")
+    assert "release:ship" in st.library.chain_ids
+    path = st.templates_dir / file
+    good = path.read_text()
+    path.write_text("not_a_key: 1\n")
+
+    body = client.post("/api/templates/reload").json()
+
+    assert "release:ship" in body["valid"]
+    assert "plugins.yaml" in body["invalid_templates"]
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [file]
+    path.write_text(good)
     client.post("/api/templates/reload")
     assert client.get("/api/apply").json()["reload"] == []

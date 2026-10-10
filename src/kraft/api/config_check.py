@@ -662,12 +662,16 @@ def _check_harnesses(path, data, ctx):
     return [
         TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
         for plugin in ctx.plugins
-        if plugin.left_out is None and (why := _unmet_requires(plugin, data, ctx)) is not None
+        if plugin.left_out is None
+        and (why := _unmet_requires(plugin, ctx, harnesses=data)) is not None
     ]
 
 
-def _unmet_requires(plugin, harnesses: dict, ctx: CheckContext) -> str | None:
-    """Why `plugin` would not load once `harnesses` is saved as harnesses.yaml."""
+def _unmet_requires(
+    plugin, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
+) -> str | None:
+    """Why `plugin` would not load once `harnesses` is saved as harnesses.yaml,
+    or `repos` as repos.yaml."""
     try:
         declared = plugin_manifest.plugin(
             plugin_manifest.parse(
@@ -678,7 +682,7 @@ def _unmet_requires(plugin, harnesses: dict, ctx: CheckContext) -> str | None:
     except (OSError, ValueError, plugin_manifest.ManifestError):
         return None  # already not loading; the load says why
     return plugins_load.instance_problem(
-        plugin.namespace, declared.requires, ctx.templates_dir, harnesses
+        plugin.namespace, declared.requires, ctx.templates_dir, harnesses, repos
     )
 
 
@@ -740,7 +744,11 @@ def _check_repos(path, data, ctx):
                 loc = loc or _first_loc(config_mod.RepoEntry, entry, ("repos", index))
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
-    return []
+    return [
+        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
+        for plugin in ctx.plugins
+        if plugin.left_out is None and (why := _unmet_requires(plugin, ctx, repos=data)) is not None
+    ]
 
 
 _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] = {

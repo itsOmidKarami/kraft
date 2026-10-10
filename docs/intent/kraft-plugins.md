@@ -254,6 +254,12 @@ origin: src/kraft/api/config_check.py §_check_plugins
 
 ## REQ an-edit-that-drops-a-plugin-is-reported
 
-IF an edit of `policy.yaml` or `harnesses.yaml` would leave a loaded plugin out, THEN the system SHALL report the plugin and the reason before the edit is applied.
-enforced-by: tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[maxima-lowered], tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[required-profile-removed]
+IF an edit of `policy.yaml`, `harnesses.yaml` or `repos.yaml` would leave a loaded plugin out, THEN the system SHALL report the plugin and the reason before the edit is applied.
+enforced-by: tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[maxima-lowered], tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[required-profile-removed], tests/api/test_config_check.py::test_an_edit_that_drops_a_plugin_is_reported[namespace-becomes-a-repo-id]
 origin: src/kraft/api/config_check.py §_check_policy
+
+## REQ a-reload-refuses-a-plugin-file-that-does-not-read
+
+IF `plugins.yaml` or `plugins.lock` does not read, THEN a reload SHALL keep the plugins the running instance has and SHALL leave the file pending with the reason.
+enforced-by: tests/api/test_deps.py::test_a_reload_refuses_a_plugin_file_that_does_not_read[plugins.yaml], tests/api/test_deps.py::test_a_reload_refuses_a_plugin_file_that_does_not_read[plugins.lock]
+origin: src/kraft/api/deps.py §_reload_templates
