@@ -657,3 +657,16 @@ def test_a_captured_reference_the_plugin_does_not_provide_is_refused(tmp_path):
     assert result.outcome == "refused"
     assert "chain mine would stop resolving" in result.problems[0]
     assert not (home[0] / "plugins.lock").exists()
+
+
+@pytest.mark.parametrize("plugin_id", ["tools@acme", "tools"], ids=["not-installed", "not-an-id"])
+def test_an_id_that_is_not_installed_is_refused(acme, plugin_id):
+    _repo, home = acme
+    _run(home, install=[ID])
+
+    result = _run(home, [plugin_id])[plugin_id]
+
+    assert (result.outcome, result.problems) == (
+        "refused",
+        ("is not in plugins.yaml; install it first",),
+    )

@@ -316,22 +316,20 @@ def _references(config_dir: Path) -> Iterator[tuple[str, str, str, str]]:
                     yield f"{rel}: {at}" if at else rel, key, kind, value
 
 
-def _breaks(before: _State, after: _State, config_dir: Path, namespace: str, own: str) -> list[str]:
-    """Why loading the candidate would break what works now. `own` is the
-    namespace the plugin is locked under: its own chains may come and go."""
+def _breaks(before: _State, after: _State, config_dir: Path, namespace: str) -> list[str]:
+    """Why loading the candidate under `namespace` would break what works now."""
     out = (
         [f"harnesses.yaml: {after.table_error}"]
         if after.table_error and not before.table_error
         else []
     )
-    kept = {chain for chain in before.chains if not chain.startswith(f"{own}:")}
     for chain, message in sorted(after.issues - before.issues, key=str):
         if chain is None:
             out.append(message)
-        elif chain in kept:
-            out.append(f"chain {chain} would stop resolving: {message}")
         elif chain.startswith(f"{namespace}:"):
             out.append(f"its chain {chain} does not resolve: {message}")
+        elif chain in before.chains:
+            out.append(f"chain {chain} would stop resolving: {message}")
     for where, key, kind, value in _references(config_dir):
         if kind and before.resolves(kind, value) and not after.resolves(kind, value):
             out.append(f"{where}: {key} {value!r} would stop resolving")
@@ -402,7 +400,9 @@ def update(
     written = read_yaml(files[0], {})
     lock = PluginsLock.load(files[1])
     new_entries = {
-        plugin_id: e if isinstance(e, bool) else e.model_dump(by_alias=True, exclude_defaults=True)
+        plugin_id: e
+        if isinstance(e, bool)
+        else e.model_dump(by_alias=True, exclude_defaults=True) or True
         for plugin_id, e in (entries or {}).items()
     }
     try:
@@ -420,12 +420,12 @@ def update(
         loaded = list(load.installed(config_dir, plugins_root))
         state = _state(config_dir, loaded)
         for plugin_id in ids if ids is not None else list(config.plugins):
-            name, collection_name = plugin_id.split("@", 1)
             if plugin_id not in config.plugins:
                 results[plugin_id] = Result(
                     plugin_id, "refused", problems=("is not in plugins.yaml; install it first",)
                 )
                 continue
+            name, collection_name = plugin_id.split("@", 1)
             collection = config.collections[collection_name]
             locked = lock.plugins.get(plugin_id)
             namespace = config.namespace(plugin_id)
@@ -536,8 +536,7 @@ def update(
             candidate = load.InstalledPlugin(plugin_id, name, namespace, found.version, root)
             would_load = [p for p in loaded if p.id != plugin_id] + [candidate]
             after = _state(config_dir, would_load)
-            own = locked.namespace if locked else namespace
-            if broken := _breaks(state, after, config_dir, namespace, own):
+            if broken := _breaks(state, after, config_dir, namespace):
                 results[plugin_id] = Result(
                     plugin_id,
                     "refused",

@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from kraft import config as config_mod
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 WATCH_INTERVAL_S = 5
 CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml")
+#: What `kraft admin plugin` writes; a reload of only these touches nothing else.
+PLUGIN_FILES = ("plugins.yaml", "plugins.lock")
 
 
 def _digest(path: Path) -> str | None:
@@ -137,13 +140,21 @@ async def watcher(app) -> None:
             logger.exception("apply check failed")
 
 
-async def reload(app) -> str | None:
+async def reload(app, only: Sequence[str] | None = None) -> str | None:
     """`policy.yaml`, the library and `intake.yaml` reread into the running server,
     the poller replaced. A policy that does not validate is refused and the
     running one kept (its reason is returned); so is an `intake.yaml` that
     does not load, its reason kept as `st.invalid_intake` for the caller,
-    `/health` and doctor. Either stays pending."""
+    `/health` and doctor. Either stays pending.
+
+    `only` the plugin files rebuilds the library from the lock and leaves a
+    pending hand edit of `policy.yaml` or `intake.yaml` pending: a plugin verb
+    applies its own change, not the operator's."""
     st = app.state
+    if only is not None and set(only) <= set(PLUGIN_FILES):
+        deps._reload_templates(st)
+        notify(app)
+        return None
     refused = deps.reload_policy(st)
     deps._reload_templates(st)
     digest = _digest(st.templates_dir / "intake.yaml")
