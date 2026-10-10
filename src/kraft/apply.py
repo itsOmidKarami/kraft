@@ -25,9 +25,9 @@ from kraft.api import config_check, deps
 logger = logging.getLogger(__name__)
 
 WATCH_INTERVAL_S = 5
-CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml")
 #: What `kraft admin plugin` writes; a reload of only these touches nothing else.
 PLUGIN_FILES = ("plugins.yaml", "plugins.lock")
+CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml", *PLUGIN_FILES)
 
 
 def _digest(path: Path) -> str | None:
@@ -59,10 +59,11 @@ def record(st, *names: str) -> None:
 
 
 def record_library(st) -> None:
-    """The library file and every chain file, and none that has since gone."""
+    """The library file, the plugin files it is built with and every chain
+    file, and none that has since gone."""
     for name in [n for n in getattr(st, "loaded_hashes", {}) if n.startswith("chains/")]:
         del st.loaded_hashes[name]
-    record(st, "library.yaml", *(n for n in _names(st) if n.startswith("chains/")))
+    record(st, "library.yaml", *PLUGIN_FILES, *(n for n in _names(st) if n.startswith("chains/")))
 
 
 def _restart_items(st) -> list[dict]:

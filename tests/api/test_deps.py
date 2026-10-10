@@ -511,7 +511,12 @@ def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_
     )
     policy = st.templates_dir / "policy.yaml"
     policy.write_text(policy.read_text() + "\n# edited by hand\n")
-    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
+    # A lock a teammate's pull brought in is a pending reload like any hand edit.
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [
+        "policy.yaml",
+        "plugins.yaml",
+        "plugins.lock",
+    ]
 
     r = client.post("/api/templates/reload", json={"only": ["plugins.yaml", "plugins.lock"]})
 

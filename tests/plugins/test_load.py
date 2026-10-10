@@ -224,3 +224,21 @@ def test_offline_lint_says_which_chains_it_did_not_check(process, capsys):
     out = capsys.readouterr().out
     assert "1 chain(s), no errors" not in out and "0 chain(s), no errors" in out
     assert "not checked (plugin)" in out
+
+
+def test_a_limit_above_a_lowered_maximum_leaves_the_plugin_out(tmp_path):
+    """The operator lowered `maxima:` after the plugin was installed: the
+    plugin drops out, named, and is not run past the new ceiling."""
+    config = home(tmp_path)
+    plugins = tmp_path / "run" / "plugins"
+    capped = {**AGENT, "policy": {"budget_usd": 8}}
+    release = {"library": {"tasks": {"base": capped}}, "chains": {"ship": chain("base")}}
+    install(config, plugins, make_collection(tmp_path, {"release": release}), "release")
+    shipped = read_yaml(Path(kraft.__file__).resolve().parents[2] / "config" / "policy.yaml")
+    write_yaml(config / "policy.yaml", {**shipped, "maxima": {"tasks": {"budget_usd": 9}}})
+    assert _one(config, plugins).left_out is None
+
+    write_yaml(config / "policy.yaml", {**shipped, "maxima": {"tasks": {"budget_usd": 5}}})
+
+    found = _one(config, plugins)
+    assert "sets budget_usd 8 > the administrator maximum 5" in found.left_out and not found.quiet
