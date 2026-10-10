@@ -46,6 +46,29 @@ def _refusals_reach_the_agent(fn: Callable[..., Awaitable[Any]]) -> Callable[...
     return tool
 
 
+def _answers_as_get_work_item_does(
+    fn: Callable[..., Awaitable[Any]],
+) -> Callable[..., Awaitable[Any]]:
+    """`fn`, its answer cut to what `get_work_item` hands an agent when the
+    route echoed the item's whole row.
+
+    The gate and lifecycle routes answer with the `work_items` row, which holds
+    the frozen chain (`materialized_chain`): some 25 KB, doubled by the JSON
+    escaping, that an agent deciding a gate never reads and pays for in
+    context every time. The REST answer and `--json` keep the
+    row; only this door trims it.
+    """
+
+    @functools.wraps(fn)
+    async def tool(*args: Any, **kwargs: Any) -> Any:
+        answer = await fn(*args, **kwargs)
+        if isinstance(answer, dict) and "materialized_chain" in answer:
+            return await client.get_work_item(answer["id"])
+        return answer
+
+    return tool
+
+
 class _Server(MCPServer):
     """`MCPServer`, with every tool it registers wrapped by
     `_refusals_reach_the_agent`, so no tool can be added without it."""
@@ -204,6 +227,7 @@ def build() -> MCPServer:
         )
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def approve_gate(
         gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
     ) -> dict:
@@ -216,6 +240,7 @@ def build() -> MCPServer:
         return await client.approve_gate(gate, work_item_id, digest=digest)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def reject_gate(
         note: str,
         gate: str | None = None,
@@ -261,6 +286,7 @@ def build() -> MCPServer:
         return await client.reply_to_thread(thread_id, body, claim)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def resume_work_item(
         steer: str | None = None,
         work_item_id: str | None = None,
@@ -276,6 +302,7 @@ def build() -> MCPServer:
         return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def retry_work_item(
         steer: str | None = None,
         work_item_id: str | None = None,
@@ -293,6 +320,7 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
         """Raise the dollar cap that stopped a Kraft work item and retry it,
         the board's Raise budget button. `budget_usd` is the new cap in
@@ -305,6 +333,7 @@ def build() -> MCPServer:
         return await client.raise_budget(budget_usd, work_item_id)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def skip_work_item(
         note: str | None = None, work_item_id: str | None = None, path: str | None = None
     ) -> dict:
@@ -316,6 +345,7 @@ def build() -> MCPServer:
         return await client.skip(note, work_item_id, path=path)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def complete_work_item(
         reason: str, work_item_id: str | None = None, close_beads: bool = False
     ) -> dict:
@@ -325,6 +355,7 @@ def build() -> MCPServer:
         return await client.complete(reason, work_item_id, close_beads=close_beads)
 
     @server.tool()
+    @_answers_as_get_work_item_does
     async def cancel_work_item(reason: str, work_item_id: str | None = None) -> dict:
         """Cancel a Kraft work item, stopping anything running; its worktree
         stays. The reason is required and recorded. Only a human should decide

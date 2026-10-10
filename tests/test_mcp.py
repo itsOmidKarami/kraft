@@ -521,3 +521,35 @@ def test_get_attachment_reads_what_the_item_was_filed_with(monkeypatch):
     monkeypatch.setattr(mcp.client, "attachment", fake)
     asyncio.run(mcp.build().call_tool("get_attachment", {"kind": "plan", "work_item_id": "w1"}))
     assert seen == {"kind": "plan", "work_item_id": "w1"}
+
+
+@pytest.mark.parametrize(
+    "tool, client_fn, args",
+    [
+        ("approve_gate", "approve_gate", {}),
+        ("reject_gate", "reject_gate", {"note": "no"}),
+        ("resume_work_item", "resume", {}),
+        ("retry_work_item", "retry", {}),
+        ("raise_budget", "raise_budget", {"budget_usd": 5.0}),
+        ("skip_work_item", "skip", {}),
+        ("complete_work_item", "complete", {"reason": "done"}),
+        ("cancel_work_item", "cancel", {"reason": "no"}),
+    ],
+)
+def test_an_action_tool_does_not_hand_the_agent_the_frozen_chain(
+    monkeypatch, tool, client_fn, args
+):
+    """The route echoes the item's row, `materialized_chain` and
+    all (~25 KB an agent pays for per decision). The tool answers as
+    `get_work_item` does."""
+
+    async def echo(*_a, **_kw):
+        return {"id": "w1", "status": "active", "materialized_chain": "{" + "x" * 25_000 + "}"}
+
+    async def trimmed(work_item_id=None, **_kw):
+        return {"id": work_item_id, "status": "active", "next_node_id": "plan"}
+
+    monkeypatch.setattr(mcp.client, client_fn, echo)
+    monkeypatch.setattr(mcp.client, "get_work_item", trimmed)
+    out = json.loads(asyncio.run(mcp.build().call_tool(tool, args)).content[0].text)
+    assert out == {"id": "w1", "status": "active", "next_node_id": "plan"}
