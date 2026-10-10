@@ -97,6 +97,24 @@ def test_validate(tmp_path, capsys, monkeypatch, plugins, sub, running, code, sa
     assert got == code and says in out, out
 
 
+@pytest.mark.parametrize(
+    "manifest_path",
+    [
+        pytest.param(".kraft/collection.json", id="collection"),
+        pytest.param("plugins/release/.kraft/plugin.json", id="plugin"),
+    ],
+)
+def test_validate_names_a_broken_manifest_once(tmp_path, capsys, manifest_path):
+    collection = make_collection(tmp_path, GOOD)
+    broken = collection / manifest_path
+    assert broken.is_file()
+    broken.write_text("{")
+
+    code, out = _run(capsys, "validate", str(collection))
+
+    assert code == 1 and f"error: {broken}: " in out and out.count(str(broken)) == 1, out
+
+
 def test_validate_writes_nothing_and_prints_json(tmp_path, capsys, monkeypatch):
     """`validate` installs nothing: the instance's home is not touched, with a
     home or without one. `--json` is the report itself."""

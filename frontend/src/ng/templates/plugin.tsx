@@ -8,4 +8,4 @@ import "../library/library.css";
 export const ReadOnly = createContext(false);
 
 /** `release@acme 1.4.0`, on whatever a plugin ships. */
-export const PluginBadge = ({ plugin }: { plugin: Plugin }) => <span className="lib-chip" title="From a plugin: read-only">{pluginLabel(plugin)}</span>;
+export const PluginBadge = ({ plugin }: { plugin: Plugin }) => <span className="lib-chip" data-allow-ellipsis title={`From plugin ${pluginLabel(plugin)}: read-only`}>{pluginLabel(plugin)}</span>;

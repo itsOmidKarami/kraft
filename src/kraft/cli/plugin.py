@@ -128,6 +128,11 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
     collection_name = None
 
     def problem(file: Path, message: str) -> None:
+        # A manifest error already starts with the file it is about, which can
+        # be one inside `file`: that file is the one to name, once.
+        head, sep, rest = message.partition(": ")
+        if sep and head.startswith(str(file)):
+            file, message = Path(head), rest
         report["problems"].append({"file": str(file), "message": message})
 
     collection_file = path / manifest.COLLECTION_JSON

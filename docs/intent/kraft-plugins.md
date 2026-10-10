@@ -296,8 +296,8 @@ origin: src/kraft/api/deps.py §collect_plugin_stores
 
 ## REQ auto-update-is-opt-in
 
-WHERE a plugin's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that plugin in the background after the server starts, and SHALL NOT fetch a collection none of whose installed plugins auto-update, except to restore a missing store.
-enforced-by: tests/plugins/test_auto_update.py::test_who_auto_updates[plugin-on], tests/plugins/test_auto_update.py::test_who_auto_updates[collection-on], tests/plugins/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it
+WHERE a plugin's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that plugin in the background after the server starts and once a day while it runs, and SHALL NOT fetch a collection none of whose installed plugins auto-update, except to restore a missing store.
+enforced-by: tests/plugins/test_auto_update.py::test_who_auto_updates[plugin-on], tests/plugins/test_auto_update.py::test_who_auto_updates[collection-on], tests/plugins/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it, tests/api/test_deps.py::test_a_running_server_checks_for_auto_updates_again
 origin: src/kraft/plugins/update.py §auto_update
 
 ## REQ auto-update-holds-what-widens-a-run
