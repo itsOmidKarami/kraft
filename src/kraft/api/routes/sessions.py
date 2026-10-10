@@ -167,6 +167,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
         skills_dir=launch.skills_dir,
         steering=snapshot.chain.steering,
         repository_steering=snapshot.repository_steering,
+        plugins=snapshot.chain.plugins,
         # The item's own repo as recorded at intake (Kraft-jzdyp): the tool
         # lists reported here are the item's own launch's, never a fanned-out
         # member's.

@@ -17,6 +17,8 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -637,7 +639,26 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
+            plugins=self._pins(id, resolved),
         )
+
+    def _pins(self, id: str, resolved: ResolvedChain) -> dict[str, dict[str, str | None]]:
+        """The loaded plugins chain `id` reads anything from: the chain itself,
+        a component it extends or selects, or a skill or agent profile one of
+        its tasks names."""
+        named = " ".join(
+            [
+                f"{id} ",
+                *(name for names in self.references(id).values() for name in names),
+                json.dumps(resolved.chain.model_dump(mode="json")),
+            ]
+        )
+        return {
+            plugin.namespace: plugin.pin
+            for plugin in self.plugins
+            if plugin.left_out is None
+            and re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", named)
+        }
 
 
 @dataclass(frozen=True)
