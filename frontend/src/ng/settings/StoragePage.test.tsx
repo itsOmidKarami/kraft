@@ -92,7 +92,7 @@ describe("Settings › Storage, usage", () => {
   });
 });
 
-describe("Settings › Storage, worktrees", () => {
+describe("Settings › Storage worktrees", () => {
   beforeEach(() => {
     vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
   });

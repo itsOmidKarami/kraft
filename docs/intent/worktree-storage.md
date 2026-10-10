@@ -98,3 +98,17 @@ IF `storage.worktrees.auto_cleanup` is set without `limit`, THEN the system
 SHALL refuse the policy.
 enforced-by: tests/test_policy_storage.py::test_storage_worktrees_refuses[auto-cleanup-without-limit]
 origin: src/kraft/policy.py §StorageWorktreesInput
+
+## REQ storage-page-removes-nothing-without-a-preview
+
+IF the preview of a clean-up fails, THEN the Storage page SHALL NOT archive
+anything and SHALL say that nothing was removed.
+enforced-by: frontend/src/ng/settings/CleanupDialog.test.tsx::CleanupDialog
+origin: frontend/src/ng/settings/CleanupDialog.tsx
+
+## REQ storage-page-cleans-up-only-what-the-server-marks-reclaimable
+
+The Storage page SHALL offer a clean-up only for the items the server marks
+reclaimable.
+enforced-by: frontend/src/ng/settings/StoragePage.test.tsx::Settings › Storage worktrees
+origin: frontend/src/ng/settings/StoragePage.tsx
