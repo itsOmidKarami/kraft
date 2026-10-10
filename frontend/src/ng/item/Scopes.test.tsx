@@ -52,6 +52,14 @@ describe("an open changed-test-scope task", () => {
     ]);
   });
 
+  it("draws an item of one repository as its chips alone: no ring, no name, no note, and no word about repos", async () => {
+    mount(`${AT}?sel=${SCOPE_PATH}`, scoped([scopeRun(null, "just test-a", 0, "running")], { chain_definition: { template_id: "default", nodes } }));
+    const f = await screen.findByRole("group", { name: /repositories and scopes/ });
+    expect(within(f).getByText("round 1 · scopes in order")).toBeInTheDocument();
+    expect(f.querySelectorAll(".scope-row.is-solo .scope-chip")).toHaveLength(1);
+    expect(f.querySelector(".scope-ring, .scope-rail, .scope-name, .scope-note")).toBeNull();
+  });
+
   it("shows a repository after the first failure as not reached, with no chips", async () => {
     mount(`${AT}?sel=${SCOPE_PATH}`);
     await userEvent.click(await screen.findByRole("button", { name: /round 2 of 3/ }));

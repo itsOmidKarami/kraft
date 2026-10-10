@@ -122,13 +122,16 @@ describe("scopesView", () => {
 
 describe("frameWidth", () => {
   const chip = (name: string, meta: string, state: Chip["state"] = "done"): Chip => ({ key: name, name, command: name, state, meta });
-  const of = (chips: Chip[], execution: ScopesView["execution"] = "sequential"): ScopesView => ({ path: "p", round: 1, execution, rows: [{ id: null, name: "r", state: "running", note: "", chips }] });
+  const row = (chips: Chip[]): ScopesView["rows"][number] => ({ id: null, name: "r", state: "running", note: "", chips });
+  const of = (chips: Chip[], execution: ScopesView["execution"] = "sequential", repos = 2): ScopesView => ({ path: "verification.tests.test_changed_scopes", round: 1, execution, rows: [row(chips), ...(repos > 1 ? [row([])] : [])] });
   const long = [chip("pnpm --dir docsite '&&' npm…", "0s"), chip("just test-vscode", "2s"), chip("just ci-test", "running · 5s", "running")];
 
   it.each([
-    ["a short row keeps the least width", of([chip("a/**", "1s")]), (w: number) => w === 760],
-    ["a row of chips longer than that widens it", of(long), (w: number) => w > 760],
-    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === 760],
+    ["a short row is as wide as the header", of([chip("a/**", "1s")]), (w: number) => w === 480],
+    ["a row of chips longer than that widens it", of(long), (w: number) => w > 480],
+    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w < frameWidth(of(long))],
+    ["one repository's header says less, so a short row is narrower still", of([chip("a/**", "1s")], "sequential", 1), (w: number) => w === 400],
+    ["one repository's long row is its chips, without the repository column", of(long, "sequential", 1), (w: number) => w > 400 && w < frameWidth(of(long))],
   ])("%s", (_, view, ok) => expect(ok(frameWidth(view))).toBe(true));
 
   it("does not widen as a waiting chip starts, nor as a running chip's clock ticks", () => {
