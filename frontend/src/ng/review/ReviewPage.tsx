@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isTextField } from "../keys";
-import type { ReviewOutcome } from "../../types";
+import type { ReviewOutcome, ReviewThread } from "../../types";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
@@ -26,6 +26,8 @@ import { useArtifact, useCompare, useExpanded, useThreads, useViewed } from "./u
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
 import "./review.css";
+
+const NO_THREADS: ReviewThread[] = [];
 
 /** `/work-items/:id/review`: the changes of one item, its threads, and the
  *  review that sends them (W8, spec §6.4). */
@@ -83,9 +85,9 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const files = byNodes(all, place.nodes);
   const diffText = compare.state === "ready" ? compare.data.diff : "";
   const parsed = useMemo(() => new Map(parsePatch(diffText).map((f) => [f.path, f])), [diffText]);
-  const { patch, expand } = useExpanded(item.id, place.from, place.to, !diff.prefs.show_whitespace, parsed);
+  const threadList = threads.state === "ready" ? threads.data : NO_THREADS;
+  const { patch, expand } = useExpanded(item.id, place.from, place.to, !diff.prefs.show_whitespace, parsed, threadList);
   const notShown = new Set(compare.state === "ready" && compare.data.truncated ? all.filter((f) => !patch.has(f.path)).map((f) => f.path) : []);
-  const threadList = threads.state === "ready" ? threads.data : [];
   // With no file chosen, the tree's first: what one-file mode shows.
   const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
   const comments = useComments({

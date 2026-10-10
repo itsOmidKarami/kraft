@@ -126,9 +126,12 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const canExpand = !!p.onExpand && pf.status !== "added" && pf.status !== "deleted";
   const gaps = useMemo(() => gapsOf(pf), [pf]);
   // An arrow that showed the last of its lines is gone, and the focus with it: the line group takes it.
+  // Only after an arrow: lines drawn for a thread as the page loads take no focus.
   const group = useRef<HTMLDivElement>(null);
+  const pressed = useRef(false);
   useEffect(() => {
-    if (pf.rest !== undefined && document.activeElement === document.body) group.current?.focus({ preventScroll: true });
+    if (pressed.current && document.activeElement === document.body) group.current?.focus({ preventScroll: true });
+    pressed.current = false;
   }, [pf]);
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
@@ -257,7 +260,10 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    const onExpand = (gap: number, how: Grow) => () => live.current.p.onExpand?.(path, gap, how);
+    const onExpand = (gap: number, how: Grow) => () => {
+      pressed.current = true;
+      live.current.p.onExpand?.(path, gap, how);
+    };
     return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null), onExpand };
   }, [file.path]);
   const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean; edit: boolean } | null>(null);

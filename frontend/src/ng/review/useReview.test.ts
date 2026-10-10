@@ -1,11 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
-import type { CompareTarget, KraftEvent } from "../../types";
+import type { CompareTarget, KraftEvent, ReviewThread } from "../../types";
 import type { EventType } from "../../types/vocab.generated";
 import * as http from "../http";
 import { COALESCE_MS } from "../item/useItem";
-import { THREADS_POLL_MS, useCompare, useThreads } from "./useReview";
+import { parsePatch } from "./patch";
+import { THREADS_POLL_MS, useCompare, useExpanded, useThreads } from "./useReview";
 
 const ev = (work_item_id: string, seq: number, type: EventType): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
 const calls = (part: string) => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes(part)).map(([p]) => String(p));
@@ -18,6 +19,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("useExpanded", () => {
+  it("reads a file for its thread once a comparison, however often the threads are read again", async () => {
+    // The read comes back cut at the size cap, so nothing is kept of it: only the memory of having tried.
+    vi.mocked(http.request).mockResolvedValue({ status: 200, body: { diff: "", truncated: true } });
+    const patch = new Map(parsePatch("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -4,3 +4,4 @@\n d = 4\n+e = 5\n f = 6\n g = 7\n").map((f) => [f.path, f]));
+    const thread = { id: "t1", file_path: "a.py", side: "new", start_line: 2, end_line: 2 } as ReviewThread;
+    const { rerender } = renderHook((p: { threads: ReviewThread[] }) => useExpanded("w1", "base", "latest", false, patch, p.threads), { initialProps: { threads: [thread] } });
+    await act(async () => {});
+    rerender({ threads: [thread] });
+    await act(async () => {});
+    expect(calls("context=")).toEqual(["/work-items/w1/compare?from=base&to=latest&file=a.py&context=1000000"]);
+  });
 });
 
 describe("useCompare", () => {
