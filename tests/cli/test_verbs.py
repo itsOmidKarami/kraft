@@ -646,6 +646,7 @@ GROUPS = {
         "docs",
         "doc",
         "artifact",
+        "storage",
     ],
     "repo": ["list", "connect", "disconnect", "path", "cd", "open"],
     "admin": ["start", "stop", "health", "doctor", "reindex", "init", "mcp", "update"],

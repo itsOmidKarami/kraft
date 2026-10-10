@@ -420,6 +420,10 @@ def _cmd_artifact(ns: argparse.Namespace) -> None:
     render.page(render.artifact_body(payload), force_plain=ns.no_pager)
 
 
+def _cmd_storage(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.storage_usage()), render.storage_block, ns.json)
+
+
 def _add_view(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that only read: the board, one item, its documents and its streams."""
     listing = subs.add_parser("list", parents=[common], help="the board")
@@ -540,3 +544,8 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     artifact.add_argument("id", nargs="?")
     artifact.add_argument("--no-pager", action="store_true")
     artifact.set_defaults(func=_cmd_artifact)
+
+    storage = subs.add_parser(
+        "storage", parents=[common], help="what the worktrees use against the quota and limit"
+    )
+    storage.set_defaults(func=_cmd_storage)
