@@ -476,18 +476,27 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
     `PermissionError` for a zombie-only group instead, which is why this
     passed locally and failed pause/resume, SIGTERM shutdown and the e2e
     pause flow in CI (Kraft-rki).
+
+    The first liveness check is a second SIGTERM instead. The wrapper `sh`
+    forks its command while the first one is being delivered, so a child
+    forked in that window is in the group but was never signalled: it
+    survived, and the cancel paid the whole `grace` (measured: 2 in 300
+    kills of `sh -c '"$@"' sleep 30`). By 0.2s the leader is dead and the
+    group is fixed, so one repeat reaches every member.
     """
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         return
     deadline = time.monotonic() + grace
+    probe = signal.SIGTERM  # sent once, then 0: only a liveness check
     while time.monotonic() < deadline:
         await asyncio.sleep(0.2)
         if reap is not None:
             reap()
         try:
-            os.killpg(pgid, 0)
+            os.killpg(pgid, probe)
+            probe = 0
         except (ProcessLookupError, PermissionError):
             return
     try:
