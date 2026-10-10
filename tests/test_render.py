@@ -346,3 +346,12 @@ def test_diff_without_commits_keeps_a_single_unlabelled_block(monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     out = render.diff_body({**_DIFF, "landed": {"commits": [], "files": [], "diff": ""}})
     assert "uncommitted" not in out and "the change under review" not in out
+
+
+@pytest.mark.parametrize(
+    ("n", "text"),
+    [(0, "0K"), (512 * 1024, "512K"), (10 * 1024**3, "10G"), (int(12.1 * 1024**3), "12.1G")],
+    ids=["zero", "K", "whole-G", "fraction-G"],
+)
+def test_human_size(n, text):
+    assert render.human_size(n) == text
