@@ -632,6 +632,8 @@ GROUPS = {
         "resume",
         "retry",
         "abandon",
+        "archive",
+        "restore",
         "complete",
         "cancel",
     ],
