@@ -35,12 +35,12 @@ describe("NodeGraph with a task open", () => {
     expect(px(frame()!, "width")).toBe(44);
     expect(px(frame()!, "height")).toBe(44);
     expect(frame()).not.toHaveClass("is-on");
-    await waitFor(() => expect(px(frame()!, "width")).toBe(760));
+    await waitFor(() => expect(px(frame()!, "width")).toBe(frameWidth(view)));
     expect(px(frame()!, "height")).toBe(frameHeight(view));
     expect(frame()).toHaveClass("is-on");
     // Later steps, and the world they sit in, moved right by the frame and its 12px less the column.
-    expect(px(world(), "width")).toBe(before.W + 668);
-    expect(px(screen.getByRole("button", { name: /^code_review/ }), "left")).toBe(before.review + 668);
+    expect(px(world(), "width")).toBe(before.W + frameWidth(view) - 92);
+    expect(px(screen.getByRole("button", { name: /^code_review/ }), "left")).toBe(before.review + frameWidth(view) - 92);
     expect(world()).toHaveClass("is-glide");
     await waitFor(() => expect(world()).not.toHaveClass("is-glide"));
   });
@@ -51,7 +51,7 @@ describe("NodeGraph with a task open", () => {
     const before = px(render(<NodeGraph name="v" steps={steps} />).container.querySelector<HTMLElement>(".canvas-world")!, "width");
     document.body.innerHTML = "";
     render(<NodeGraph name="v" steps={steps} expand={{ ...expand, view: wide }} />);
-    expect(frameWidth(wide)).toBeGreaterThan(760);
+    expect(frameWidth(wide)).toBeGreaterThan(frameWidth(view));
     expect(px(frame()!, "width")).toBe(frameWidth(wide));
     expect(px(world(), "width")).toBe(before + frameWidth(wide) - 92);
   });
@@ -69,7 +69,7 @@ describe("NodeGraph with a task open", () => {
     const { rerender } = render(<NodeGraph name="v" steps={steps} />);
     const held = world().style.transform;
     rerender(<NodeGraph name="v" steps={steps} expand={expand} />);
-    await waitFor(() => expect(px(frame()!, "width")).toBe(760));
+    await waitFor(() => expect(px(frame()!, "width")).toBe(frameWidth(view)));
     expect(world()).toHaveClass("is-glide");
     expect(world().style.transform).toBe(held);
     await waitFor(() => expect(world()).not.toHaveClass("is-glide"));
@@ -79,11 +79,11 @@ describe("NodeGraph with a task open", () => {
   it("fades the rows first on closing, then moves everything back and takes the frame away", async () => {
     const { rerender } = render(<NodeGraph name="v" steps={steps} expand={expand} />);
     // Open on load: no animation.
-    expect(px(frame()!, "width")).toBe(760);
+    expect(px(frame()!, "width")).toBe(frameWidth(view));
     expect(world()).not.toHaveClass("is-glide");
     rerender(<NodeGraph name="v" steps={steps} />);
     expect(frame()).not.toHaveClass("is-on");
-    expect(px(frame()!, "width")).toBe(760);
+    expect(px(frame()!, "width")).toBe(frameWidth(view));
     await waitFor(() => expect(px(frame()!, "width")).toBe(44));
     expect(frame()).toHaveClass("is-out");
     await waitFor(() => expect(frame()).toBeNull(), { timeout: 2000 });
@@ -93,7 +93,7 @@ describe("NodeGraph with a task open", () => {
     reduce(true);
     const { rerender } = render(<NodeGraph name="v" steps={steps} />);
     rerender(<NodeGraph name="v" steps={steps} expand={expand} />);
-    expect(px(frame()!, "width")).toBe(760);
+    expect(px(frame()!, "width")).toBe(frameWidth(view));
     expect(frame()).toHaveClass("is-on");
     expect(world()).not.toHaveClass("is-glide");
     expect(document.querySelector(".canvas")).toHaveClass("is-calm");
