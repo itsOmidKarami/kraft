@@ -90,18 +90,21 @@ def render(review: Review) -> str:
     return escape("\n".join(lines))
 
 
-def _flatten(value: object, at: str, out: dict[str, object]) -> None:
+def _flatten(value: object, at: str, out: dict[str, object], lists: dict[str, list[str]]) -> None:
+    """Facts go to `out`; the order of each id-keyed list, which a fact keyed
+    by id cannot show, goes to `lists`."""
     if isinstance(value, Mapping):
         for key, item in value.items():
             if key != "id":
-                _flatten(item, f"{at}.{key}", out)
+                _flatten(item, f"{at}.{key}", out, lists)
     elif (
         isinstance(value, list)
         and value
         and all(isinstance(item, Mapping) and "id" in item for item in value)
     ):
+        lists[at] = [str(item["id"]) for item in value]
         for item in value:
-            _flatten(item, f"{at}[{item['id']}]", out)
+            _flatten(item, f"{at}[{item['id']}]", out, lists)
     elif value is not None and value != [] and value != {}:
         out[at] = value
 
@@ -128,6 +131,7 @@ class _Facts:
     requires: dict
     #: Every resolved chain, flattened; and each chain's gates in node order.
     chains: dict[str, object]
+    lists: dict[str, list[str]]
     order: dict[str, list[tuple[str, str]]]
     components: dict[str, object]
     steering: dict[str, object]
@@ -137,11 +141,12 @@ class _Facts:
 
 def _facts(extracted: Extracted | None) -> _Facts:
     if extracted is None:
-        return _Facts("", {}, {}, {}, {}, {}, {}, {})
+        return _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
     declared = json.loads(extracted.files[manifest.PLUGIN_JSON][1])
     name = declared.get("name", "plugin")
     library = _yaml(extracted, "library.yaml")
     chains: dict[str, object] = {}
+    lists: dict[str, list[str]] = {}
     order: dict[str, list[tuple[str, str]]] = {}
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -160,12 +165,13 @@ def _facts(extracted: Extracted | None) -> _Facts:
                 dumped = loaded.resolve_chain(chain_id).chain.model_dump(mode="json")
             except TemplateLibraryError:
                 continue
-            _flatten(dumped, chain_id, chains)
+            _flatten(dumped, chain_id, chains, lists)
             order[chain_id] = [(node["id"], node["kind"]) for node in dumped["nodes"]]
     return _Facts(
         version=str(declared.get("version", "")),
         requires=declared.get("requires") if isinstance(declared.get("requires"), dict) else {},
         chains=chains,
+        lists=lists,
         order=order,
         components={
             f"{section}.{key}": body
@@ -245,6 +251,27 @@ def _chain_change(
     return "content", f"{path}: {_how(old, new)}"
 
 
+def _reordered(path: str, before: list[str], after: list[str], now: _Facts) -> tuple[str, str]:
+    """`(section, line)` for an id-keyed list whose common entries changed
+    order. Only nodes can put a gate on the other side of a merge."""
+    chain_id = path.removesuffix(".nodes")
+    kinds = dict(now.order.get(chain_id, ()))
+
+    def guards(ids: list[str]) -> list[str]:
+        return [
+            i
+            for i in ids
+            if kinds.get(i) == "gate"
+            or any(
+                p.startswith(f"{path}[{i}].") and p.endswith(".target") and v in _MERGES
+                for p, v in now.chains.items()
+            )
+        ]
+
+    section = "reach" if path.endswith(".nodes") and guards(before) != guards(after) else "content"
+    return section, f"{path}: order changed, {before} -> {after}"
+
+
 def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
     """What replacing `old` (None on install) with `new` would change."""
     was, now = _facts(old), _facts(new)
@@ -262,6 +289,13 @@ def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
         before, after = was.chains.get(path), now.chains.get(path)
         if before != after:
             section, line = _chain_change(path, before, after, was, now, name)
+            (reach if section == "reach" else content).append(line)
+    for path in sorted(was.lists.keys() & now.lists.keys()):
+        common = set(was.lists[path]) & set(now.lists[path])
+        before = [i for i in was.lists[path] if i in common]
+        after = [i for i in now.lists[path] if i in common]
+        if before != after:
+            section, line = _reordered(path, before, after, now)
             (reach if section == "reach" else content).append(line)
     for label, before_map, after_map in (
         ("component", was.components, now.components),

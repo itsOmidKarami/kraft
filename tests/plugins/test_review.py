@@ -54,6 +54,16 @@ def _merge_step(spec):
     )
 
 
+def _gate_after_merge(spec):
+    nodes = _nodes(spec)
+    nodes.append(nodes.pop(1))
+
+
+def _build_after_gate(spec):
+    nodes = _nodes(spec)
+    nodes.insert(1, nodes.pop(0))
+
+
 def _forge_target(spec):
     spec["library"]["tasks"]["open"]["target"] = "mr.sync"
 
@@ -137,6 +147,23 @@ def test_review_calls_out(change, section, says):
     # A change to what a run does is never filed under the wrong heading.
     other = found.content if section == "reach" else found.reach
     assert says not in "\n".join(other)
+
+
+@pytest.mark.parametrize(
+    ("change", "section"),
+    [(_gate_after_merge, "reach"), (_build_after_gate, "content")],
+    ids=["gate-after-merge", "unguarded-nodes-swapped"],
+)
+def test_a_reordered_chain_is_reviewed(change, section):
+    """Nodes keyed by id show no changed fact when they only move, so the
+    order is compared on its own."""
+    base = copy.deepcopy(BASE)
+    _merge_step(base)
+    candidate = copy.deepcopy(base)
+    change(candidate)
+    found = review.review("release@acme", extracted(**base), extracted(**candidate))
+    assert "order changed" in "\n".join(getattr(found, section))
+    assert found.changed
 
 
 def test_a_merge_with_no_gate_before_it_says_so():
