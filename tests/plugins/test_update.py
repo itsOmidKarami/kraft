@@ -136,8 +136,8 @@ def test_a_plugins_profiles_are_checked_like_its_tasks(fallback, why):
     # A profile named like a field is still a profile.
     profiles = {"profiles": {"deep": {"fallback": [fallback]}, "policy": {"model": {"codex": "m"}}}}
     files["profiles.yaml"] = ("100644", yaml.safe_dump(profiles).encode())
-    with pytest.raises(update.Refused, match=why):
-        update.check(_manifest(), files)
+    (found,) = update.problems(_manifest(), files)
+    assert why in found and found.startswith("profiles.yaml: profiles.deep")
 
 
 def test_a_file_nested_too_deep_is_refused_like_any_other():
