@@ -16,7 +16,7 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
 from kraft.templates.retry import validate_retry_override
-from kraft.templates.revision import ChangeSet, Override, revise
+from kraft.templates.revision import Add, AddedNode, ChangeSet, Override, revise
 
 ID = "release@acme"
 
@@ -223,3 +223,35 @@ async def test_an_unrestorable_pin_stops_the_launch_and_says_why(home):
         stop.value
     )
     assert "could not be fetched" in str(stop.value)
+
+
+@pytest.mark.parametrize(
+    "extends, pinned",
+    [("release:base", ["release"]), ("tools:base", ["release", "tools"])],
+    ids=["through-a-pinned-plugin", "through-a-plugin-not-touched-yet"],
+)
+def test_a_revision_resolves_against_pinned_plugins(home, extends, pinned):
+    """A node a revision adds runs on the versions the item runs on; a plugin
+    the item had not read from yet joins its pins at the lock's version."""
+    repo, config_dir, plugins_dir = home
+    library = {
+        "tasks": {"base": AGENT},
+        "nodes": {"extra": {"kind": "exec", "tasks": [{"id": "t", "extends": extends}]}},
+    }
+    (config_dir / "library.yaml").write_text(json.dumps(library))
+    snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, plugins_dir, "mine")))
+    newer = _release("1.1.0", "o3")
+    newer["library"]["tasks"]["base"]["prompt"] = "the 1.1.0 prompt"
+    publish(repo, "release", **newer)
+    _update(config_dir, plugins_dir, [ID])
+    live = TemplateLibrary.from_yaml_dir(
+        config_dir, plugins=load.installed(config_dir, plugins_dir)
+    )
+    add = Add(after="n", node=AddedNode(id="x", extends="extra"), evidence="e")
+
+    revised = revise(snapshot, ChangeSet(rationale="r", add=[add]), at=None, library=live)
+
+    # 1.0.0's task, like `tools`', carries the fixture prompt; 1.1.0's does not.
+    assert revised.chain.chain.nodes[1].tasks[0].prompt == AGENT["prompt"]
+    assert sorted(revised.chain.plugins) == pinned
+    assert revised.chain.plugins["release"]["version"] == "1.0.0"

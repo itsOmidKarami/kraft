@@ -410,6 +410,26 @@ class TemplateLibrary:
             plugins=self.plugins,
         )
 
+    def with_plugins(self, plugins: Sequence[InstalledPlugin]) -> TemplateLibrary:
+        """This library's own components and chains with `plugins` in place of
+        the plugins it was built with: what a work item that pinned other
+        versions resolves against (`plugins.load.for_item`). `self` is not
+        changed."""
+        built = TemplateLibrary(
+            {
+                ns: {name: raw for name, raw in entries.items() if ":" not in name}
+                for ns, entries in self._components.items()
+            },
+            {id: raw for id, raw in self._chains.items() if ":" not in id},
+            {name: profile for name, profile in self.steering.items() if ":" not in name},
+            self.skills_dir,
+            plugins,
+        )
+        for plugin in plugins:
+            if plugin.left_out is None:
+                built._add_plugin(plugin)
+        return built
+
     def with_chain(
         self, chain_path: Path, body: Mapping[str, object]
     ) -> tuple[TemplateLibrary, str]:

@@ -397,15 +397,49 @@ async def restore_plugins(app) -> None:
 
     st = app.state
     missing = tuple(p for p in installed_plugins(st) if not p.quiet and not p.root.is_dir())
-    if not missing:
-        return
-    failed = await asyncio.to_thread(
-        plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+    if missing:
+        failed = await asyncio.to_thread(
+            plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+        )
+        _reload_templates(st)
+        apply.notify(app)
+        if failed:
+            logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+    # After the restore, and after every reload: what nothing reads any more goes.
+    collect_plugin_stores(st)
+
+
+def collect_plugin_stores(st) -> list[str]:
+    """Delete each plugin store that none of these names: the lock, the
+    library this server has loaded, or the snapshot of a work item that has
+    not ended (a paused or stopped one can still be retried onto it). A
+    directory collection's store is the lock's, so it stays while installed.
+    Nothing is deleted while the lock cannot be read or another plugin change
+    is running."""
+    from kraft.plugins import update as plugin_update
+    from kraft.plugins.config import PluginsLock
+
+    try:
+        locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
+    except config_mod.ConfigError:
+        return []
+    keep = {entry.digest.removeprefix("sha256:") for entry in locked}
+    keep |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+    ended = sorted(ENDED)
+    rows = st.db.read(
+        lambda c: c.execute(
+            "SELECT materialized_chain FROM work_items WHERE materialized_chain IS NOT NULL "
+            f"AND status NOT IN ({', '.join('?' * len(ended))})",
+            ended,
+        ).fetchall()
     )
-    _reload_templates(st)
-    apply.notify(app)
-    if failed:
-        logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+    for (stored,) in rows:
+        for pin in (json.loads(stored).get("plugins") or {}).values():
+            keep.add(str(pin["digest"]).removeprefix("sha256:"))
+    try:
+        return plugins_load.gc(keep, st.run_dirs.plugins)
+    except plugin_update.Busy:
+        return []
 
 
 def load_library(
