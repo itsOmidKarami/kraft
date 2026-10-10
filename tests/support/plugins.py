@@ -3,12 +3,13 @@ plugin's store directory, as the library and the profile table read them."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
 
 from kraft.plugins.load import InstalledPlugin
-from support.harness import write
+from support.harness import commit_all, make_repo, write
 
 #: The smallest agent task the V1 schema accepts.
 AGENT = {"kind": "agent", "harness": "codex", "prompt": "local base"}
@@ -56,3 +57,45 @@ def installed(
     return InstalledPlugin(
         id=f"{name}@acme", name=name, namespace=alias or name, version="1.0.0", root=root
     )
+
+
+def plugin_json(name: str, **over) -> dict:
+    """A valid `.kraft/plugin.json` for `name`."""
+    return {"name": name, "version": "1.0.0", "requires": {"kraft": "2"}, **over}
+
+
+def make_collection(tmp_path: Path, plugins: dict[str, dict], *, name: str = "acme") -> Path:
+    """A committed git repository that is a collection named `name`, with one
+    plugin per entry of `plugins` at `plugins/<plugin>/`. Each spec may give
+    `library`, `chains`, `skills`, `profiles` (as `installed` takes them),
+    `manifest` (keys laid over `plugin_json`) and `files` (relative path to raw
+    text, for anything else). A directory collection is the same path."""
+    repo = make_repo(tmp_path, f"{name}-kraft")
+    entries = []
+    for plugin, spec in plugins.items():
+        base = f"plugins/{plugin}"
+        write(
+            repo,
+            f"{base}/.kraft/plugin.json",
+            json.dumps(plugin_json(plugin, **spec.get("manifest", {}))),
+        )
+        if "library" in spec:
+            write(repo, f"{base}/library.yaml", yaml.safe_dump(spec["library"]))
+        for chain_name, body in spec.get("chains", {}).items():
+            write(repo, f"{base}/chains/{chain_name}.yaml", yaml.safe_dump(body))
+        for skill_name, text in spec.get("skills", {}).items():
+            write(repo, f"{base}/skills/{skill_name}/SKILL.md", text)
+        if "profiles" in spec:
+            write(repo, f"{base}/profiles.yaml", yaml.safe_dump({"profiles": spec["profiles"]}))
+        for rel, text in spec.get("files", {}).items():
+            write(repo, f"{base}/{rel}", text)
+        entries.append({"name": plugin, "source": f"./{base}"})
+    write(
+        repo,
+        ".kraft/collection.json",
+        json.dumps(
+            {"name": name, "owner": {"name": "ACME", "email": "p@acme.dev"}, "plugins": entries}
+        ),
+    )
+    commit_all(repo, "collection")
+    return repo
