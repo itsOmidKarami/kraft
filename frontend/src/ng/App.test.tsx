@@ -4,10 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import * as api from "../api";
 import * as session from "./session";
+import { stubFetch } from "./item/testkit";
+import { storageUsage } from "./settings/testkit";
 
 vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents: vi.fn() }));
 
-afterEach(() => window.history.pushState({}, "", "/"));
+afterEach(() => {
+  window.history.pushState({}, "", "/");
+  vi.unstubAllGlobals();
+});
 
 describe("ng App", () => {
   it("renders the board at the root", () => {
@@ -46,6 +51,14 @@ describe("ng App", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review changes: Cache embeddings" })).toBeInTheDocument();
     vi.restoreAllMocks();
+  });
+
+  it("routes /settings/storage to the Storage page, not the placeholder", async () => {
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    window.history.pushState({}, "", "/settings/storage");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Storage" })).toBeInTheDocument();
+    expect(screen.queryByText("There is no page at this address.")).toBeNull();
   });
 });
 

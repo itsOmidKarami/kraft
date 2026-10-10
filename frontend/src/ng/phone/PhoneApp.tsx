@@ -77,6 +77,8 @@ export function PhoneApp() {
           <Route path="/settings/access" element={<AccessScreen />} />
           <Route path="/settings/appearance" element={<AppearanceScreen />} />
           <Route path="/settings/about" element={<AboutScreen />} />
+          {/* A desktop-only page (Storage; its phone screen is Kraft-ipokh): the address opens More, never Not found. */}
+          <Route path="/settings/storage" element={<Navigate to="/more" replace />} />
           <Route path="/settings/*" element={<NotFound />} />
           {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
           {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}

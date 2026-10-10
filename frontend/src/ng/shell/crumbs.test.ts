@@ -13,6 +13,7 @@ describe("crumbsFor", () => {
     expect(texts("/templates/chains")).toEqual(["Templates", "Chains"]);
     expect(texts("/settings/auto-intake")).toEqual(["Settings", "Auto-intake"]);
     expect(texts("/settings/about")).toEqual(["Settings", "About"]);
+    expect(texts("/settings/storage")).toEqual(["Settings", "Storage"]);
     const head = crumbsFor("/settings/policy", none)[0];
     expect(head.to).toBeUndefined();
     expect(head.href).toBeUndefined();

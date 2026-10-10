@@ -104,6 +104,15 @@ describe("one address space across a resize", () => {
     expect(await screen.findByRole("link", { name: /Cache embeddings/ })).toHaveAttribute("href", "/work-items/w1");
   });
 
+  it("sends the desktop's Storage address to More: the phone has no Storage screen", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/storage");
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe("/more"));
+    expect(notFound()).toEqual([]);
+  });
+
   it("lands the desktop's /settings/intake on Auto-intake", async () => {
     width(true);
     stubFetch();

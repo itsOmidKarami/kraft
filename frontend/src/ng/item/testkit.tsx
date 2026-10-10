@@ -99,6 +99,7 @@ function emptyAnswer(path: string): [number, unknown] {
   if (/\/documents$/.test(path)) return [200, { work_item_id: "w1", documents: [] }];
   if (/\/log$/.test(path)) return [200, { session_id: "", status: "done", lines: [] }];
   if (path === "/editors") return [200, { available: [], system: false, default: null }];
+  if (path === "/apply") return [200, { restart: [], reload: [], managed: false }];
   return [200, {}];
 }
 
