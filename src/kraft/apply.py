@@ -161,7 +161,7 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
     if only is not None and set(only) <= set(PLUGIN_FILES):
         deps._reload_templates(st)
         notify(app)
-        await deps.restore_plugins(app)
+        deps.in_background(app, deps.restore_plugins)
         return None
     refused = deps.reload_policy(st)
     deps._reload_templates(st)
@@ -177,7 +177,8 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
     await intake_mod.restart(app)
     notify(app)
     # A lock pulled into config/ may name a store this machine does not have.
-    await deps.restore_plugins(app)
+    # In the background: a restore may fetch for longer than a caller waits.
+    deps.in_background(app, deps.restore_plugins)
     return refused
 
 

@@ -212,12 +212,13 @@ class Result:
 
 
 @contextmanager
-def write_lock(plugins_dir: Path) -> Iterator[None]:
+def write_lock(plugins_dir: Path, wait: float | None = None) -> Iterator[None]:
     """The update lock: held by every write to `plugins.yaml`, the lock file
-    or the store. A second writer waits `LOCK_WAIT_S`, then raises `Busy`."""
+    or the store. A second writer waits `wait` seconds (`LOCK_WAIT_S` when
+    None), then raises `Busy`."""
     plugins_dir.mkdir(parents=True, exist_ok=True)
     with open(plugins_dir / ".lock", "w") as fh:
-        deadline = time.monotonic() + LOCK_WAIT_S
+        deadline = time.monotonic() + (LOCK_WAIT_S if wait is None else wait)
         while True:
             try:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
