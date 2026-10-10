@@ -99,7 +99,10 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
       case "archived": return i.status === "abandoned" ? "ghost" : "done";
       case "running": case "waiting": return "current";
       case "paused": return i.current_node_id ? "amber" : "todo";
-      default: return groupOf(i) === "needs" ? "amber" : "current";
+      default: {
+        const g = groupOf(i);
+        return g === "needs" ? "amber" : g === "not_started" ? "todo" : "current";
+      }
     }
   })();
   return { kind, icon, state };

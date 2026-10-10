@@ -11,6 +11,7 @@ export type ItemDisplayState =
   | "question"
   | "budget"
   | "not_started"
+  | "blocked"
   | "done"
   | "abandoned"
   | "paused"
@@ -64,6 +65,10 @@ export function deriveState(
     state = "waiting";
   } else if (notStarted(item)) {
     state = "not_started";
+  } else if (item.status === "blocked" && item.current_node_id === null) {
+    // Waiting on another item before its first node: not started, and it
+    // starts by itself. Blocked mid-chain it stays with the running, below.
+    state = "blocked";
   } else if (item.status === "paused") {
     state = "paused";
   } else if (item.status === "needs_human") {
