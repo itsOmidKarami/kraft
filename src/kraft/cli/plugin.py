@@ -128,7 +128,8 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
     collection_name = None
 
     def problem(file: Path, message: str) -> None:
-        report["problems"].append({"file": str(file), "message": message})
+        # A manifest error already starts with its file.
+        report["problems"].append({"file": str(file), "message": message.removeprefix(f"{file}: ")})
 
     collection_file = path / manifest.COLLECTION_JSON
     if collection_file.is_file():

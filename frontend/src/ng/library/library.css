@@ -58,7 +58,10 @@
 .lib-use-chain { font: 12px ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .lib-use-path { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
-.lib-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; font-size: 10.5px; color: var(--text-sub); }
+.lib-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; font-size: 10.5px; color: var(--text-sub); white-space: nowrap; }
+/* In the list the name already carries the namespace: the badge gives way first, whole in its title. */
+.lib-row .lib-chip { flex: 0 100 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.lib-row > svg { flex: none; }
 
 /* A task on the canvas: its one glyph, centred in what the pane leaves. */
 .lib-glyph-area { position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
