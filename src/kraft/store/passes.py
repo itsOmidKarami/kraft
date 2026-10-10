@@ -32,7 +32,9 @@ def _started_by(event: dict, node: str, order: Sequence[str]) -> dict | None:
 
     if event["type"] == GateEvent.REJECTED:
         covered = before(payload.get("node")) and after(payload.get("gate"))
-        return {"reason": "reject", "gate": payload.get("gate")} if covered else None
+        # A reviewer that repaired the work itself is recorded as a rejection, and is not one.
+        reason = "fixed" if payload.get("verdict") == "fixed" else "reject"
+        return {"reason": reason, "gate": payload.get("gate")} if covered else None
     if event["type"] == ChainEvent.RUN_FORKED:
         target = (payload.get("path") or "").split(".")[0] or None
         inside = target == node and payload.get("scope") in ("step", "task")
@@ -83,7 +85,11 @@ def number_passes(
             for e in boundaries:
                 if last[node] < e["created_at"] <= s["created_at"]:
                     why = _started_by(e, node, order) or why
-                    retried = retried or e["type"] == ChainEvent.RUN_FORKED
+                    # A retry of a step or task of this node: what starts its rounds over.
+                    retried = retried or (
+                        e["type"] == ChainEvent.RUN_FORKED
+                        and (e["payload"].get("path") or "").split(".")[0] == node
+                    )
         counts = s["round"] >= 0 and not hook.startswith(f"{node}.fix_loop.")
         if why is None and counts and s["round"] < top.get(node, -1):
             why = {"reason": "retry"} if retried else {}
