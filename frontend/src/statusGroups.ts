@@ -13,7 +13,7 @@ export const STATUS_GROUPS: { id: string; label: string; test: (d: DerivedState)
     // an agent at work too, until it posts its message (W11 · J.1).
     test: (d) => ["running", "rate_limited", "waiting", "escalating"].includes(d.state),
   },
-  { id: "not_started", label: "Not started", test: (d) => d.state === "not_started" },
+  { id: "not_started", label: "Not started", test: (d) => ["not_started", "blocked"].includes(d.state) },
   {
     id: "done",
     label: "Done",

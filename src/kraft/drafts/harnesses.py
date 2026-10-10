@@ -15,6 +15,7 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import harness as harness_mod
+from kraft import storage
 from kraft.api import config_check
 from kraft.drafts import authored, config, store
 from kraft.drafts import resolve as resolve_mod
@@ -605,6 +606,7 @@ async def after_publish(app, written) -> None:
     # The profile table is read from disk per use; only the policy is loaded.
     if "policy.yaml" in written:
         config.reload_policy(app.state)
+        storage.kick(app)
 
 
 AREA = store.Area(

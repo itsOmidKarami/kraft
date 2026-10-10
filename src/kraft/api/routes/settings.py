@@ -18,7 +18,7 @@ from kraft import harness as harness_mod
 from kraft import intake as intake_mod
 from kraft import policy as policy_mod
 from kraft import skill as skill_mod
-from kraft import store
+from kraft import storage, store
 from kraft.adapters import agent, beads
 from kraft.api import api_router, config_check, deps, perimeter
 from kraft.api.config_check import IntakeBody
@@ -524,6 +524,7 @@ async def put_policy(body: PolicyBody, request: Request):
         raise HTTPException(422, str(exc)) from exc
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     deps.apply_policy(st, policy_obj, parsed.instance_policy())
+    storage.kick(request.app)
     deps.lint_loaded(st)
     return data
 

@@ -533,3 +533,10 @@ async def harnesses() -> dict:
 async def harness(profile_id: str) -> dict:
     """One harness profile."""
     return await transport._get(f"/harnesses/profiles/{transport.segment(profile_id)}")
+
+
+async def storage_usage() -> dict:
+    """What the worktrees use against the quota and limit, item by item
+    (`GET /storage`). Answers from the last measurement; measures first when
+    there is none."""
+    return await transport._get("/storage")

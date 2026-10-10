@@ -206,6 +206,13 @@ The pages can change in any release. A script that must keep working calls the [
 | [`POST /api/work-items/{id}/artifacts/{kind}/open`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidartifactskindopen) | Opens a task's document. |
 | [`POST /api/work-items/{id}/open-worktree`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidopen-worktree) | Opens the item's worktree. |
 
+### Storage
+
+| Route | What it does |
+|---|---|
+| [`GET /api/storage`](/reference/http-api/repos-chains-harnesses-and-server#get-apistorage) | Answers the disk the worktrees use, item by item. |
+| [`POST /api/storage/preview`](/reference/http-api/repos-chains-harnesses-and-server#post-apistoragepreview) | Shows what archiving some items would free and lose. |
+
 ### Repos
 
 | Route | What it does |

@@ -131,6 +131,7 @@ async def lifespan(app: FastAPI):
     # The app object outlives a lifespan in tests: a measurement from one
     # start must not be read by the next.
     app.state.storage_usage = None
+    app.state.storage_kick = None
     #: Whether auto-intake and intake.yaml's schedules are off for it: only a
     #: start on a bad file. A reload that refuses one keeps what was running.
     #: A trigger left in policy.yaml fires either way (`triggers.schedules`).
@@ -370,6 +371,9 @@ async def lifespan(app: FastAPI):
         app.state.archive_task.cancel()
         await asyncio.gather(app.state.archive_task, return_exceptions=True)
         storage.stop(app.state)
+        if app.state.storage_kick is not None:
+            app.state.storage_kick.cancel()
+            await asyncio.gather(app.state.storage_kick, return_exceptions=True)
         app.state.storage_task.cancel()
         await asyncio.gather(app.state.storage_task, return_exceptions=True)
         app.state.mr_poller_task.cancel()

@@ -79,6 +79,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     search,
     sessions,
     settings,
+    storage,
     work_items,
 )
 

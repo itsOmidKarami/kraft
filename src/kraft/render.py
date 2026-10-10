@@ -519,7 +519,8 @@ def health_block(payload: dict) -> str:
             (
                 "storage",
                 f"{human_size(stored['used_bytes'])} of "
-                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')})",
+                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')}); "
+                "kraft view storage",
             )
         )
     for error in index.get("errors") or []:
@@ -563,3 +564,107 @@ def doctor_block(rows: list[dict]) -> str:
     else:
         out.append(f"all {len(rows)} checks passed")
     return "\n".join(out)
+
+
+def storage_block(payload: dict) -> str:
+    """`GET /storage`, readable: the figure against quota and limit, the totals
+    per category, then one line per worktree (largest first) and per orphan."""
+    used, limit = human_size(payload["used_bytes"]), payload["limit_bytes"]
+    pairs = [
+        (
+            "worktrees",
+            f"{used} of {human_size(limit)} ({payload['state'].replace('_', ' ')})"
+            if limit is not None
+            else f"{used} (no limit set)",
+        )
+    ]
+    if payload["quota_bytes"] is not None:
+        pairs.append(("quota", human_size(payload["quota_bytes"])))
+    pairs += [
+        ("reclaimable", human_size(payload["reclaimable_bytes"])),
+        ("measured", relative_time(payload["measured_at"])),
+    ]
+    categories = [
+        {"name": name, "size": human_size(size)} for name, size in payload["categories"].items()
+    ]
+    rows = [
+        {
+            "id": item["id"],
+            "status": "archived" if item["archived"] else item["status"],
+            "size": human_size(item["bytes"]),
+            "age": relative_time(item["updated_at"]),
+            "reclaimable": "yes" if item["reclaimable"] else "",
+            "title": item["title"],
+        }
+        for item in payload["items"]
+    ] + [
+        {
+            "id": orphan["name"],
+            "status": "orphan",
+            "size": human_size(orphan["bytes"]),
+            "age": "",
+            "reclaimable": "",
+            "title": "no work item",
+        }
+        for orphan in payload["orphans"]
+    ]
+    return "\n\n".join(
+        [
+            kv(pairs),
+            table(categories, [("CATEGORY", "name"), ("SIZE", "size")]),
+            table(
+                rows,
+                [
+                    ("ID", "id"),
+                    ("STATUS", "status"),
+                    ("SIZE", "size"),
+                    ("AGE", "age"),
+                    ("RECLAIMABLE", "reclaimable"),
+                    ("TITLE", "title"),
+                ],
+            ),
+        ]
+    )
+
+
+def storage_preview(payload: dict) -> str:
+    """`POST /storage/preview`, readable: per item what archiving loses and
+    keeps, then the total freed and where usage would land."""
+    rows = [
+        {
+            "id": item["id"],
+            "size": human_size(item["bytes"]),
+            "lost": item["uncommitted_files"],
+            "branch": ("stays" if item["branch_kept"] else "goes") if item["archivable"] else None,
+            "title": f"{item['title'] or '-'} (not archived: {item['refusal']})"
+            if item["refusal"]
+            else item["title"],
+        }
+        for item in payload["items"]
+    ]
+    state = payload["state_after"]
+    return "\n".join(
+        [
+            table(
+                rows,
+                [
+                    ("ID", "id"),
+                    ("SIZE", "size"),
+                    ("UNCOMMITTED", "lost"),
+                    ("BRANCH", "branch"),
+                    ("TITLE", "title"),
+                ],
+            ),
+            f"archiving frees {human_size(payload['freed_bytes'])}; worktrees would use "
+            f"{human_size(payload['used_after_bytes'])}"
+            + (f" ({state.replace('_', ' ')})" if state else ""),
+        ]
+    )
+
+
+def archive_results(payload: dict) -> str:
+    """`POST /work-items/bulk`, one line per id."""
+    return "\n".join(
+        f"archived {r['id']}" if r["ok"] else f"not archived {r['id']}: {r['error']}"
+        for r in payload["results"]
+    )

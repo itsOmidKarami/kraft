@@ -296,6 +296,27 @@ async def abandon(work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{transport.segment(target)}/abandon")
 
 
+async def storage_preview(ids: list[str]) -> dict:
+    """What archiving `ids` would free and lose (`POST /storage/preview`).
+    Changes nothing."""
+    return await transport._act("/storage/preview", {"ids": ids})
+
+
+async def archive(ids: list[str]) -> dict:
+    """Archive completed or abandoned items, each in its own write
+    (`POST /work-items/bulk`): one `{id, ok, ...}` result per id. Removes each
+    worktree, uncommitted changes included. The caller resolves `ids` through
+    `_forbid_self_action` first, as `cli.item._archive_ids` does."""
+    return await transport._act("/work-items/bulk", {"action": "archive", "ids": ids})
+
+
+async def restore(work_item_id: str | None = None) -> dict:
+    """Put an archived item back under Done. The worktree archive removed does
+    not come back."""
+    target = context._forbid_self_action(work_item_id)
+    return await transport._act(f"/work-items/{transport.segment(target)}/restore")
+
+
 async def resume(
     steer: str | None = None,
     work_item_id: str | None = None,

@@ -46,6 +46,7 @@ Each command links to its entry.
 | Watch the board live | [`kraft view watch`](/reference/cli/view#following-a-running-item) |
 | See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#what-repo-list-prints) |
 | Go to an item's worktree | [`kraft repo path`](/reference/cli/repo) or [`kraft repo open`](/reference/cli/repo) |
+| See what the worktrees use, item by item | [`kraft view storage`](/reference/cli/view#worktree-disk-use) |
 
 ### At a gate
 
@@ -84,6 +85,8 @@ Each command links to its entry.
 
 | I want to | Command |
 |---|---|
+| Archive finished items and free their worktrees | [`kraft item archive`](/reference/cli/item#archive-and-restore-finished-items) |
+| Bring an archived item back under Done | [`kraft item restore`](/reference/cli/item#archive-and-restore-finished-items) |
 | Check that the server is up | [`kraft admin health`](/reference/cli/admin#what-health-prints) |
 | Check the whole install | [`kraft admin doctor`](/reference/cli/admin#what-doctor-checks) |
 | Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/admin#run-the-server) |
@@ -129,6 +132,8 @@ These verbs do not print the payload:
 | `kraft item review request-changes` or `comment`, with no gate pending | The review's fields as `key  value` lines. |
 | `kraft item abandon`, and every `set-*` verb except `set-chain` | The same `key  value` lines. |
 | `kraft item set-chain` | The chain the item now runs. |
+| `kraft item archive` | The preview as a table with a total, then one line per item. |
+| `kraft item restore` | One line saying what was restored. |
 | `kraft item comment`, `resolve`, `reopen` | The thread and where it sits. |
 
 The item itself is in `--json`, or in `kraft view show`.

@@ -173,3 +173,47 @@ def test_show_prints_what_a_task_flagged_about_its_own_work(monkeypatch, capsys)
     assert "concerns" in out and "Failure not reproducible locally; fix is inferred." in out
     assert "['" not in out  # the text, not a Python list
     assert "\x1b" not in out  # an agent wrote it: no escape reaches the terminal
+
+
+_HELD = {
+    "measured_at": None,
+    "state": "held",
+    "used_bytes": 12 * 1024**3,
+    "quota_bytes": 8 * 1024**3,
+    "limit_bytes": 10 * 1024**3,
+    "reclaimable_bytes": 0,
+    "categories": {"worktrees": 12 * 1024**3},
+    "items": [],
+    "orphans": [],
+}
+
+
+def test_storage_reads_and_exits_zero_even_when_held(monkeypatch, capsys):
+    """A read: it reports a held instance, it does not fail on one."""
+
+    async def storage_usage():
+        return _HELD
+
+    monkeypatch.setattr("kraft.client.storage_usage", storage_usage)
+
+    cli.main(["view", "storage"])
+
+    assert "12G of 10G (held)" in capsys.readouterr().out
+
+
+def test_storage_json_is_the_api_payload(app, capsys):
+    cli.main(["view", "storage", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload) == {
+        "measured_at",
+        "state",
+        "used_bytes",
+        "quota_bytes",
+        "limit_bytes",
+        "reclaimable_bytes",
+        "categories",
+        "items",
+        "orphans",
+    }
+    assert (payload["state"], payload["items"]) == (None, [])

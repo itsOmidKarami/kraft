@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from kraft import render
+from kraft import render, storage
 from kraft.api import config_check
 from kraft.cap_levels import CAP_LEVELS, SCOPE_CAP_FIELDS
 from kraft.drafts import config, harnesses, policy_caps, store
@@ -367,6 +367,7 @@ def resolve(st, key, raw, files, published) -> dict:
 
 async def after_publish(app, written) -> None:
     config.reload_policy(app.state)
+    storage.kick(app)
 
 
 AREA = store.Area(

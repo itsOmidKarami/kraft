@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from pathlib import Path
 
 import yaml
@@ -191,6 +192,70 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
             f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
     common.emit(asyncio.run(client.abandon(ns.id)), common.item_action("abandoned {id}"), ns.json)
+
+
+#: What the preview and bulk archive routes accept in one call.
+_ARCHIVE_MAX = 200
+
+
+def _archive_ids(ns: argparse.Namespace) -> tuple[list[str], int]:
+    """Who `item archive` takes, and how many it found: the largest
+    `_ARCHIVE_MAX` of the items the Storage view marks reclaimable
+    (`--reclaimable`, listed largest first), else the IDs given, else the item
+    you are standing in. Each explicit one goes through the worker self-action
+    guard, as `item abandon` does."""
+    if ns.reclaimable:
+        if ns.ids:
+            raise ValueError("give IDs or --reclaimable, not both")
+        found = [i["id"] for i in asyncio.run(client.storage_usage())["items"] if i["reclaimable"]]
+        return found[:_ARCHIVE_MAX], len(found)
+    ids = [client.context._forbid_self_action(i) for i in ns.ids or [None]]
+    return ids, len(ids)
+
+
+def _cmd_archive(ns: argparse.Namespace) -> None:
+    ids, found = _archive_ids(ns)
+    if not ids:
+        common.emit({"results": []}, lambda _: "nothing to archive", ns.json)
+        return
+    preview = asyncio.run(client.storage_preview(ids))
+    # With --json --yes stdout is the one bulk payload, nothing else.
+    if not (ns.json and ns.yes):
+        common.emit(preview, render.storage_preview, ns.json)
+    if not ns.yes:
+        raise ValueError(
+            "nothing was archived. Archiving deletes each worktree and the uncommitted "
+            "changes in it; a branch with commits nothing else holds stays. "
+            "To go ahead, pass --yes"
+        )
+    # Only what the preview called archivable is sent: the bulk route answers ok
+    # for an already-archived id, which would print "archived" over a preview
+    # that said it was not.
+    refused = {i["id"]: i["refusal"] for i in preview["items"] if not i["archivable"]}
+    sent = [i for i in ids if i not in refused]
+    out = asyncio.run(client.archive(sent)) if sent else {"results": []}
+    out["results"] += [{"id": i, "ok": False, "error": why} for i, why in refused.items()]
+    out["results"].sort(key=lambda r: ids.index(r["id"]))
+    common.emit(out, render.archive_results, ns.json)
+    if found > len(ids):
+        # stderr under --json, so stdout stays the one payload.
+        print(
+            f"archived the {len(ids)} largest of {found} reclaimable items; "
+            "run it again for the rest",
+            file=sys.stderr if ns.json else sys.stdout,
+        )
+    failed = sum(1 for r in out["results"] if not r["ok"])
+    if failed:
+        # A script must be able to tell: the bulk route answers 200 either way.
+        raise ValueError(f"{failed} of {len(ids)} not archived")
+
+
+def _cmd_restore(ns: argparse.Namespace) -> None:
+    common.emit(
+        asyncio.run(client.restore(ns.id)),
+        lambda r: f"restored {r['id']}: back under Done, without its worktree",
+        ns.json,
+    )
 
 
 def _cmd_resume(ns: argparse.Namespace) -> None:
@@ -887,3 +952,27 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="required: uncommitted work and unpushed commits are lost",
     )
     abandon.set_defaults(func=_cmd_abandon)
+
+    archive = subs.add_parser(
+        "archive",
+        parents=[common],
+        help="archive finished items, deleting their worktrees (previews first)",
+    )
+    archive.add_argument("ids", nargs="*", metavar="ID", help="default: the item you are in")
+    archive.add_argument(
+        "--reclaimable",
+        action="store_true",
+        help="the 200 largest completed or abandoned items not archived yet (run again for more)",
+    )
+    archive.add_argument(
+        "--yes",
+        action="store_true",
+        help="required: uncommitted changes in each worktree are lost",
+    )
+    archive.set_defaults(func=_cmd_archive)
+
+    restore = subs.add_parser(
+        "restore", parents=[common], help="put an archived item back under Done"
+    )
+    restore.add_argument("id", nargs="?")
+    restore.set_defaults(func=_cmd_restore)

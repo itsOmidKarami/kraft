@@ -42,11 +42,12 @@ item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
 ### The `kraft` command
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
-non-MCP agent gets the same surface; `item abandon` is the one `item` verb with
-no tool. `--json` prints the raw API payload on every verb except `view watch`,
-`repo path`, and the `admin` ones that manage the server process (`start`,
-`stop`, `restart`, the service verbs, `update`, `mcp`, `permission-hook`),
-`admin plugin enable` and `disable`, and `admin init` (it accepts `--json` and
+non-MCP agent gets the same surface; `item abandon`, `item archive` and
+`item restore` are the `item` verbs with no tool. `--json` prints the raw API
+payload on every verb except `view watch`, `repo path`, and the `admin` ones
+that manage the server process (`start`, `stop`, `restart`, the service verbs,
+`update`, `mcp`, `permission-hook`), `admin plugin enable` and `disable`, and
+`admin init` (it accepts `--json` and
 ignores it).
 
 ```bash
@@ -63,6 +64,8 @@ kraft item skip [ID] [--note "..."]         # advance past the current node or g
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --yes               # drop an item, deleting its worktree and branch
+kraft item archive [ID ...] [--reclaimable] [--yes]  # archive finished items, deleting their worktrees; previews, then needs --yes
+kraft item restore [ID]                     # put an archived item back under Done
 kraft item set-chain [ID] --chain C      # a not-yet-started item's chain
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
@@ -77,6 +80,7 @@ kraft item resolve THREAD / kraft item reopen THREAD
 kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N]
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
+kraft view storage                          # worktree disk use against the quota and limit, item by item
 kraft view events [ID] [--after N] [--type T]
 kraft view watch                            # live board, needs a terminal
 kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown

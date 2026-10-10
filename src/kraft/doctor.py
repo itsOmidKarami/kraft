@@ -119,12 +119,12 @@ def _storage_line(payload: dict) -> tuple[str, str] | None:
         return None
     size = render.human_size
     used = f"worktrees use {size(s['used_bytes'])} of {size(s['limit_bytes'])}"
-    free = "archive finished items to make room (the board's Done group, or Settings › Storage)"
+    free = "kraft view storage lists it by item; kraft item archive --reclaimable makes room"
     if s["state"] == "held":
         return "held", f"{used}: starts that need a new worktree are held; {free}"
     if s["state"] == "over_quota":
         return "over_quota", f"{used}, over the {size(s['quota_bytes'])} quota; {free}"
-    return "ok", used
+    return "ok", f"{used}; kraft view storage lists it by item"
 
 
 def _health_checks(payload: dict) -> list[dict]:

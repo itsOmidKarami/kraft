@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kraft.store import _now
+from kraft.vocab import Verb, admitting
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,17 @@ async def tick(app) -> None:
     await refresh(app)
 
 
+def kick(app) -> None:
+    """Start a `tick` without waiting for it, and keep the task on `app.state`:
+    asyncio holds a task only weakly, so one nobody references can be collected
+    before its walk ends. A kick during a kick starts nothing; `refresh` is
+    single-flight, so the one running already measures what the caller changed."""
+    st = app.state
+    task = getattr(st, "storage_kick", None)
+    if task is None or task.done():
+        st.storage_kick = asyncio.ensure_future(tick(app))
+
+
 async def poller(app) -> None:
     """`tick` at startup and every ten minutes until cancelled."""
     while True:
@@ -208,3 +220,64 @@ def stop(st) -> None:
     event = getattr(st, "_storage_stop", None)
     if event is not None:
         event.set()
+
+
+def refusal(row) -> str | None:
+    """Why `row` cannot be archived, or None: the archive route's own two checks
+    (`lifecycle.archive_work_item`), asked without archiving. `row` is None for
+    an id that names no work item."""
+    if row is None:
+        return "unknown work item"
+    if row["archived_at"]:
+        return "already archived"
+    if row["status"] not in admitting(Verb.ARCHIVE):
+        return "only a completed or abandoned item can be archived"
+    return None
+
+
+def reclaimable(row) -> bool:
+    """Whether archiving `row` would free its worktree: completed or abandoned,
+    and not archived yet."""
+    return refusal(row) is None
+
+
+def report(policy, used: Usage, rows: dict) -> dict:
+    """`GET /storage`'s answer: the cached measurement joined to the work item
+    `rows` (by id). An id with a row is an item, largest first; an id without
+    one is an orphan, which the page lists read-only."""
+    items = [
+        {
+            "id": wid,
+            "title": row["title"],
+            "status": row["status"],
+            "archived": bool(row["archived_at"]),
+            "bytes": size,
+            "updated_at": row["updated_at"],
+            "reclaimable": reclaimable(row),
+        }
+        for wid, size in used.items.items()
+        if (row := rows.get(wid)) is not None
+    ]
+    items.sort(key=lambda item: -item["bytes"])
+    return {
+        "measured_at": used.measured_at,
+        "state": state_of(policy, used),
+        "used_bytes": used.governed,
+        "quota_bytes": policy.storage_quota_bytes if policy else None,
+        "limit_bytes": policy.storage_limit_bytes if policy else None,
+        "reclaimable_bytes": sum(item["bytes"] for item in items if item["reclaimable"]),
+        "categories": used.categories,
+        "items": items,
+        "orphans": [
+            {"name": name, "bytes": size}
+            for name, size in sorted(used.items.items(), key=lambda kv: -kv[1])
+            if name not in rows
+        ],
+    }
+
+
+def after(policy, used: Usage, freed: int) -> tuple[int, str | None]:
+    """The governed figure with `freed` bytes taken off, and the state it would
+    be in; None without a limit. What a clean-up's confirmation says."""
+    left = max(0, used.governed - freed)
+    return left, state_of(policy, dataclasses.replace(used, governed=left))

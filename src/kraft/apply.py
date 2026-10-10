@@ -20,6 +20,7 @@ from pathlib import Path
 
 from kraft import config as config_mod
 from kraft import intake as intake_mod
+from kraft import storage
 from kraft.api import config_check, deps
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,9 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
         deps.in_background(app, deps.restore_plugins)
         return None
     refused = deps.reload_policy(st)
+    # A limit added by this reload is judged against a stale measurement until
+    # the next tick: measure now, without holding the reload.
+    storage.kick(app)
     deps._reload_templates(st)
     digest = _digest(st.templates_dir / "intake.yaml")
     try:

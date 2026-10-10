@@ -25,6 +25,8 @@ describe("deriveState", () => {
     ["waiting (ci_wait) → waiting", { status: "waiting" }, "waiting", false],
     ["paused with no current node → not_started", { status: "paused", current_node_id: null }, "not_started", false],
     ["mid-chain pause → paused", { status: "paused" }, "paused", true],
+    ["blocked with no current node → blocked", { status: "blocked", current_node_id: null }, "blocked", false],
+    ["blocked mid-chain → running", { status: "blocked" }, "running", false],
     ["pending gate → gate", { status: "needs_human", pending_gate: "human_review" }, "gate", true],
     ["capped-out stop → capped", { status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }, "capped", true],
     ["budget stop → budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, "budget", true],

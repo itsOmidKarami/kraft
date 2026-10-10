@@ -370,3 +370,118 @@ def test_health_block_shows_storage():
         }
     )
     assert "12G of 10G" in block and "held" in block
+    assert "kraft view storage" in block
+
+
+def test_storage_block_shows_usage_categories_and_each_worktree():
+    payload = {
+        "measured_at": None,
+        "state": "held",
+        "used_bytes": 12 * 1024**3,
+        "quota_bytes": 8 * 1024**3,
+        "limit_bytes": 10 * 1024**3,
+        "reclaimable_bytes": 2 * 1024**3,
+        "categories": {"worktrees": 11 * 1024**3, "logs": 512 * 1024},
+        "items": [
+            {
+                "id": "aaa",
+                "title": "Old work",
+                "status": "completed",
+                "archived": False,
+                "bytes": 2 * 1024**3,
+                "updated_at": None,
+                "reclaimable": True,
+            },
+            {
+                "id": "bbb",
+                "title": "Live work",
+                "status": "completed",
+                "archived": True,
+                "bytes": 1024**3,
+                "updated_at": None,
+                "reclaimable": False,
+            },
+        ],
+        "orphans": [{"name": "ccc", "bytes": 1024**2}],
+    }
+
+    rows = [line.split() for line in render.strip_ansi(render.storage_block(payload)).splitlines()]
+
+    assert ["worktrees", "12G", "of", "10G", "(held)"] in rows
+    assert ["quota", "8G"] in rows
+    assert ["reclaimable", "2G"] in rows
+    assert ["worktrees", "11G"] in rows and ["logs", "512K"] in rows
+    assert ["aaa", "completed", "2G", "-", "yes", "Old", "work"] in rows
+    assert ["bbb", "archived", "1G", "-", "-", "Live", "work"] in rows
+    assert ["ccc", "orphan", "1M", "-", "-", "no", "work", "item"] in rows
+    assert rows.index(["aaa", "completed", "2G", "-", "yes", "Old", "work"]) < rows.index(
+        ["bbb", "archived", "1G", "-", "-", "Live", "work"]
+    )
+
+
+def test_storage_block_without_a_limit_says_so():
+    payload = {
+        "measured_at": None,
+        "state": None,
+        "used_bytes": 1024**3,
+        "quota_bytes": None,
+        "limit_bytes": None,
+        "reclaimable_bytes": 0,
+        "categories": {"worktrees": 1024**3},
+        "items": [],
+        "orphans": [],
+    }
+
+    block = render.strip_ansi(render.storage_block(payload))
+
+    rows = [line.split() for line in block.splitlines()]
+    assert ["worktrees", "1G", "(no", "limit", "set)"] in rows
+    assert "quota" not in block
+
+
+def test_storage_preview_says_what_each_archive_loses_and_the_total():
+    payload = {
+        "freed_bytes": 1024**3,
+        "used_after_bytes": 11 * 1024**3,
+        "state_after": "over_quota",
+        "items": [
+            {
+                "id": "aaa",
+                "title": "Fix",
+                "bytes": 1024**3,
+                "archivable": True,
+                "refusal": None,
+                "uncommitted_files": 3,
+                "unpushed_commits": 2,
+                "branch_kept": True,
+            },
+            {
+                "id": "bbb",
+                "title": "Live",
+                "bytes": 2 * 1024**3,
+                "archivable": False,
+                "refusal": "already archived",
+                "uncommitted_files": None,
+                "unpushed_commits": 0,
+                "branch_kept": False,
+            },
+        ],
+    }
+
+    lines = render.strip_ansi(render.storage_preview(payload)).splitlines()
+    rows = [line.split() for line in lines]
+
+    assert ["ID", "SIZE", "UNCOMMITTED", "BRANCH", "TITLE"] in rows
+    assert ["aaa", "1G", "3", "stays", "Fix"] in rows
+    assert ["bbb", "2G", "-", "-", "Live", "(not", "archived:", "already", "archived)"] in rows
+    assert lines[-1] == "archiving frees 1G; worktrees would use 11G (over quota)"
+
+
+def test_archive_results_has_one_line_per_id():
+    payload = {
+        "results": [
+            {"id": "w1", "ok": True, "status": "completed"},
+            {"id": "w2", "ok": False, "error": "not found"},
+        ]
+    }
+    assert render.archive_results(payload) == "archived w1\nnot archived w2: not found"

@@ -130,6 +130,8 @@ describe("the item screen (C)", () => {
     expect(await screen.findByText("Schema first")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Unblock" }));
     await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/unblock"]));
+    await userEvent.click(screen.getByRole("button", { name: "Schema first" }));
+    expect(where()).toBe("/work-items/a1");
   });
 
   it("opens a node on a tap of its row", async () => {

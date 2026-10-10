@@ -28,3 +28,4 @@ def test_doctor_says_where_storage_stands(state, ok, warn, says):
     }
     line = next(c for c in doctor._health_checks(payload) if says in c["detail"])
     assert (line["ok"], line["warn"]) == (ok, warn)
+    assert "kraft view storage" in line["detail"]
