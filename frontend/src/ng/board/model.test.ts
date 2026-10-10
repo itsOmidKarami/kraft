@@ -26,6 +26,8 @@ describe("groupOf", () => {
   it("tells a never-started item from one paused mid-chain by its current node", () => {
     expect(groupOf({ display_status: "paused", current_node_id: null })).toBe("not_started");
     expect(groupOf({ display_status: "paused", current_node_id: "implement" })).toBe("needs");
+    expect(groupOf({ display_status: "blocked", current_node_id: null })).toBe("not_started");
+    expect(groupOf({ display_status: "blocked", current_node_id: "implement" })).toBe("running");
   });
 });
 
