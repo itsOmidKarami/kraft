@@ -19,9 +19,22 @@ import pytest
 import yaml
 from fastapi import HTTPException
 from support import permissions
+from support.plugins import (
+    AGENT,
+    chain,
+    drop_store,
+    extracted,
+    install,
+    make_collection,
+    publish,
+)
+from support.store_fixtures import mk_item
 
+from kraft import config as config_mod
 from kraft import store
 from kraft.api import deps
+from kraft.plugins import fetch
+from kraft.plugins import update as plugin_update
 
 
 def _app():
@@ -61,8 +74,6 @@ def test_launch_on_a_malformed_repos_yaml_fails_the_dispatch_that_reads_it(tmp_p
     """The bare-metal fallback this closes: a broken `repos.yaml` must not let
     a dispatch quietly resolve `repo_entry` to `{}` and run unsandboxed --
     every real reader hits `.get(...)`, which is where this raises."""
-    from kraft import config as config_mod
-
     st = _st(tmp_path)
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - path: /work/repo\n    sandbox:\n      kind: podman\n      image: x\n"
@@ -257,8 +268,6 @@ def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
     """Kraft-vhcop: a chain's `skill:` is checked when the chain resolves, so
     the app's library must know the operator's overlay -- or a method only the
     operator ships makes every chain selecting it unresolvable."""
-    import yaml
-
     templates = tmp_path / "templates"
     (templates / "chains").mkdir(parents=True)
     task = {"kind": "agent", "harness": "codex", "prompt": "p", "skill": "house"}
@@ -430,8 +439,6 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
 
 
 def _install_release(client, tmp_path, **spec):
-    from support.plugins import AGENT, chain, install, make_collection
-
     st = client.app.state
     plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}, **spec}
     store = install(
@@ -501,8 +508,6 @@ def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, 
 def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
     """A plugin verb applies its own change: an unsaved-to-the-server edit of
     `policy.yaml` is not taken along."""
-    from support.plugins import AGENT, chain, install, make_collection
-
     st = client.app.state
     release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
     install(
@@ -533,8 +538,6 @@ def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_
 def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, file):
     """The running instance keeps its plugins, and the file stays pending with
     the reason, until it reads again."""
-    from support.plugins import AGENT, chain, install, make_collection
-
     st = client.app.state
     release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
     install(
@@ -561,8 +564,6 @@ def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, fil
 
 def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client, tmp_path):
     """A config directory copied to a new machine, or a teammate's lock pulled in."""
-    from support.plugins import drop_store
-
     store = _install_release(client, tmp_path)
     drop_store(store)
     deps._reload_templates(client.app.state)
@@ -590,15 +591,26 @@ def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path,
 
     assert "release:ship" in st.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
+
+    def no_reload(st):
+        pytest.fail("reloaded")
+
+    plugins_yaml = st.templates_dir / "plugins.yaml"  # disabled, then enabled by hand
+    listed = yaml.safe_load(plugins_yaml.read_text())
+    listed["plugins"]["release@acme"] = {"enabled": False}
+    plugins_yaml.write_text(yaml.safe_dump(listed))
+    deps._reload_templates(st)
+    plugins_yaml.write_text(yaml.safe_dump(listed).replace("false", "true"))
+    with monkeypatch.context() as held:
+        held.setattr(deps, "_reload_templates", no_reload)
+        client.portal.call(deps.restore_plugins, client.app)
     _edit_a_stored_file(st, store)  # left out for another reason, its store present
     deps._reload_templates(st)
-    monkeypatch.setattr(deps, "_reload_templates", lambda st: pytest.fail("reloaded"))
+    monkeypatch.setattr(deps, "_reload_templates", no_reload)
     client.portal.call(deps.restore_plugins, client.app)
 
 
 def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
-    from support.plugins import drop_store
-
     st = client.app.state
     store = _install_release(client, tmp_path)
     with pytest.raises(HTTPException) as no_such_chain:
@@ -633,10 +645,6 @@ def _plugin_task_done(client):
 
 def _other_version(st, tmp_path):
     """A second extracted plugin in the store that the lock does not name."""
-    from support.plugins import extracted
-
-    from kraft.plugins import fetch
-
     return fetch.write_store(st.run_dirs.plugins, extracted(skills={"old": "an older method"}))
 
 
@@ -660,8 +668,6 @@ def _other_version(st, tmp_path):
 def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     client, tmp_path, status, pinned, kept
 ):
-
-    from support.store_fixtures import mk_item
 
     st = client.app.state
     locked = _install_release(client, tmp_path)
@@ -714,8 +720,6 @@ def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, t
 def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
     """It runs on the event loop: a lock someone holds is skipped, and the
     next collection takes what this one left."""
-    from kraft.plugins import update as plugin_update
-
     st = client.app.state
     _install_release(client, tmp_path)
     old = _other_version(st, tmp_path)
@@ -767,8 +771,6 @@ def test_a_running_server_checks_for_auto_updates_again(client, monkeypatch):
 def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
     """After a start: the update is applied, the library is rebuilt on it, the
     old store goes, and health reports the outcome without being degraded."""
-    from support.plugins import publish
-
     st = client.app.state
     old = _install_release(client, tmp_path)
     written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
@@ -788,8 +790,6 @@ def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
 
 
 def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
-    from kraft.plugins import update as plugin_update
-
     st = client.app.state
     _install_release(client, tmp_path)
     held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
