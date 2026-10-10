@@ -184,6 +184,8 @@ describe("a node the chain ran again", () => {
     // Round 1 is no round of this pass: it is not listed, and picking it shows the newest.
     expect(nodeGraph(resumed, node, NOW, [], 1).rounds).toMatchObject({ selected: 2, rows: [{ n: 2 }] });
     expect(roundShown(resumed, node, 1)).toBe(2);
+    // It has measured once and repaired nothing: no loop to draw yet, whatever its round is called.
+    expect(nodeGraph(resumed, node, NOW, []).loop).toBeUndefined();
   });
 
   it("shows an earlier pass whole, with nothing of it in flight", () => {

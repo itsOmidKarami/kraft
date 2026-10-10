@@ -160,8 +160,10 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   const inLoop = passOf(item, node.id).some((s) => s.hook_point.startsWith(`${node.id}.${FIX_LOOP}.`));
   // The arc is drawn once the loop did something: a second round, or a repair or judge that ran.
   // Red while the newest round is shown and the loop stopped; amber while it runs on past its first round.
-  const tone = stopped && shown === rounds?.latest ? "red" : rounds && rounds.latest > 1 && item.current_node_id === node.id ? "active" : "idle";
-  const loop = node.fix_loop && rounds && (rounds.latest > 1 || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
+  // A pass that resumed at a later round (`first`) has not looped until it goes past that one, or its limit stops it.
+  const looped = !!rounds && (rounds.latest > (rounds.first ?? 1) || stopped);
+  const tone = stopped && shown === rounds?.latest ? "red" : looped && item.current_node_id === node.id ? "active" : "idle";
+  const loop = node.fix_loop && rounds && (looped || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
   const onFailure = node.on_failure?.length ? node.on_failure.map(taskName).join(", ") : undefined;
   return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
 }
