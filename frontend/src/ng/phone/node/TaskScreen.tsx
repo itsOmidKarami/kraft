@@ -80,7 +80,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
         )}
         {view && tab === "overview" && (
           <Block title="Scopes">
-            <p className="ph-note">{roundWords(view).scopes}{!solo && ` · ${roundWords(view).repos}`}</p>
+            {chips.length > 0 && <p className="ph-note">{roundWords(view).scopes}{!solo && ` · ${roundWords(view).repos}`}</p>}
             {view.rows.map((row) => (
               <div key={row.name} className="ph-scope-repo">
                 {/* With no scopes the note is all a lone repository has to say: waiting, or not reached. */}

@@ -391,9 +391,11 @@ describe("the task screen (E)", () => {
       expect(screen.getByRole("button", { name: "Task" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("tab", { name: "Log" }));
       await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
-      // The task fact goes back to the task, on the scope's screen no longer.
-      await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
-      await userEvent.click(screen.getByRole("button", { name: "test_changed_scopes" }));
+      await userEvent.click(screen.getByRole("button", { name: "Task" }));
+      await waitFor(() => expect(where()).toBe(TESTS));
+      // The task fact is the same way back.
+      await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "test_changed_scopes" }));
       await waitFor(() => expect(where()).toBe(TESTS));
     });
 
@@ -407,21 +409,37 @@ describe("the task screen (E)", () => {
       expect(within(document.querySelector(".ph-facts") as HTMLElement).getByText("repo").nextElementSibling).toHaveTextContent("pkg");
     });
 
+    const several = () => scoped([scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { chain_definition: { template_id: "default", nodes }, materialized_chain: scopeChain("sequential", WORKSPACE) });
     it.each([
-      ["one that waits has no log to read", "just test-e2e", "test scope · round 1 · waiting", null],
-      ["one the round did not pick says so", "just test-gone", "test scope · round 1 · not picked", "Not picked: no changed path reaches it this round."],
-    ])("opens a scope with no run: %s", async (_n, command, sub, body) => {
-      mount(it0(), `${TESTS}&${key(command)}`);
+      ["one that waits has no log to read", it0, ":just test-e2e", "test scope · round 1 · waiting", null],
+      ["one its repository ran without says it was not picked", it0, ":just test-gone", "test scope · round 1 · not picked", "Not picked: no changed path reaches it this round."],
+      ["one in a repository the round did not get to says so", several, "web:just test-c", "test scope · round 1 · not reached", "Its repository was not reached this round."],
+    ])("opens a scope with no run: %s", async (_n, of, scope, sub, body) => {
+      mount(of(), `${TESTS}&scope=${encodeURIComponent(scope).replace(/%20/g, "+")}`);
       expect(await screen.findByText(sub)).toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Log" })).toBeNull();
       if (body) expect(screen.getByText(body)).toBeInTheDocument();
     });
+
+    it("a scope the round dropped opens in that round, and says how the round before treated it", async () => {
+      const looped = nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n));
+      const runs = [scopeRun(null, "just test-api", 0, "done"), scopeRun(null, "just test-web", 0, "done"), scopeRun(null, "just test-api", 1, "done")];
+      mount(scoped(runs, { chain_definition: { template_id: "default", nodes: looped } }), TESTS);
+      // Round 2 ran one scope and dropped the other; the row still opens.
+      await userEvent.click(await screen.findByRole("button", { name: /just test-web/ }));
+      expect(await screen.findByText("test scope · round 2 of 3 · not picked")).toBeInTheDocument();
+      const facts = document.querySelector(".ph-facts") as HTMLElement;
+      const row = (k: string) => within(facts).getByText(k).nextElementSibling!.textContent;
+      expect([row("status"), row("other rounds")]).toEqual(["not picked · no changed path reaches it this round", "1: passed"]);
+    });
   });
 
-  it("keeps an ordinary task on its own screen when the URL names a scope", async () => {
+  it("keeps an ordinary task on its own screen when the URL names a scope, and drops the scope so Back is the node", async () => {
     mount(item("running"), `${TASK}&scope=%3Ajust+test-api`);
     expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
     expect(screen.getByText(/agent task · running now/)).toBeInTheDocument();
+    expect(where()).toBe(TASK);
+    expect(screen.getByRole("button", { name: "Node" })).toBeInTheDocument();
   });
 
   it.each([
@@ -434,6 +452,8 @@ describe("the task screen (E)", () => {
     mount(scoped(runs(), { chain_definition: { template_id: "default", nodes }, ...over }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
     const scopes = (await screen.findByText("Scopes")).closest("section")!;
     expect([...scopes.querySelectorAll(".ph-scope-repo > p")].map((p) => p.textContent)).toEqual(lines);
+    // A round with no scopes yet has nothing to sum up.
+    expect(scopes.textContent).not.toContain("0 of 0");
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {

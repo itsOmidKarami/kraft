@@ -54,6 +54,8 @@ export function NodeRoute() {
   type OfTask = Place & { sel: { kind: "task"; node: string; step: string; task: string } };
   // A scope of a changed-test-scope task has its own screen; on any other task `scope` names nothing.
   if (place.sel.kind === "task" && place.scope && isScopeTask(loaded.item, selPath(place.sel)!)) return <ScopeScreen {...props} place={place as OfTask & { scope: string }} />;
+  // On any other task a `scope` would only make Back name a screen that is not there: drop it.
+  if (place.sel.kind === "task" && place.scope) return <Navigate to={placeUrl(id, { ...place, scope: undefined })} replace />;
   if (place.sel.kind === "task") return <TaskScreen {...props} place={place as OfTask} />;
   return <NodeScreen {...props} />;
 }

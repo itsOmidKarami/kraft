@@ -30,7 +30,7 @@ export function parentOf(href: string): string | null {
     if (seg[2] === "nodes") {
       // A task is the node route with `sel` naming a task (node.step.task); anything else is the node.
       // A scope of a changed-test-scope task is a screen over that task.
-      if (q.has("sel") && q.has("scope")) {
+      if (q.has("sel") && q.get("scope")) {
         q.delete("scope");
         q.delete("tab");
         return join(pathname, q);
@@ -38,6 +38,7 @@ export function parentOf(href: string): string | null {
       if (q.has("sel")) {
         q.delete("sel");
         q.delete("attempt");
+        q.delete("scope");
         q.delete("tab");
         return join(pathname, q);
       }
@@ -64,7 +65,7 @@ export function backLabel(href: string): string {
   if (q.has("doc") || q.has("attached") || q.has("yaml") || q.has("compose")) return "Back";
   if (parent === "/") return "Board";
   if (parent === "/more") return "More";
-  if (pathname.includes("/nodes/")) return q.has("sel") ? (q.has("scope") ? "Task" : "Node") : "Chain";
+  if (pathname.includes("/nodes/")) return q.has("sel") ? (q.get("scope") ? "Task" : "Node") : "Chain";
   if (pathname.endsWith("/review")) return "Back";
   if (parent && AREA.test(parent) && parent !== pathname) return parent.split("/").filter(Boolean).at(-1)!.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
   return "Back";

@@ -49,6 +49,9 @@ describe("backLabel", () => {
     expect(backLabel("/work-items/a/nodes/n")).toBe("Chain");
     expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("Node");
     expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).toBe("Task");
+    // An empty `scope` names nothing: the screen is the task.
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("Node");
+    expect(parentOf("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("/work-items/a/nodes/n");
     expect(backLabel("/work-items/a/review")).toBe("Back");
     expect(backLabel("/work-items/a?doc=x")).toBe("Back");
     expect(backLabel("/work-items/a?attached=spec")).toBe("Back");
@@ -73,5 +76,6 @@ describe("screenKey", () => {
     expect(screenKey("/work-items/a/nodes/n?tab=log")).toBe(screenKey("/work-items/a/nodes/n"));
     expect(screenKey("/work-items/a/nodes/n?sel=n.s.t")).not.toBe(screenKey("/work-items/a/nodes/n"));
     expect(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).not.toBe(screenKey("/work-items/a/nodes/n?sel=n.s.t"));
+    expect(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).not.toBe(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+lint"));
   });
 });

@@ -2,6 +2,7 @@ import { loopRounds, roundShown } from "../../item/nodeGraph";
 import { otherRounds, scopesView, stateWords, statusWords } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { useBack } from "../nav/trail";
 import { Facts, TabStrip } from "../ui/Rows";
 import type { PlaceProps } from "./NodeScreen";
 import { TaskLog } from "./TaskScreen";
@@ -26,7 +27,8 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
   const several = view.rows.length > 1;
   const s = hit?.chip.session;
   const tab = s && place.tab === "log" ? "log" : "overview";
-  const toTask = () => setPlace({ scope: undefined, tab: undefined });
+  // The task fact is Back: a second entry for the task would bring the phone's own back gesture to it twice.
+  const toTask = useBack().go;
   const mono = (v: string) => <span className="ph-mono">{v}</span>;
   const others = hit ? otherRounds(item, path, place.scope, round) : [];
   return (
