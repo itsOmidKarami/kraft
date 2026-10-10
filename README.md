@@ -140,7 +140,7 @@
 | src/kraft/store/forks.py                     |       44 |        0 |    100% |           |
 | src/kraft/store/gates.py                     |       52 |        0 |    100% |           |
 | src/kraft/store/intake.py                    |       14 |        0 |    100% |           |
-| src/kraft/store/passes.py                    |       55 |        0 |    100% |           |
+| src/kraft/store/passes.py                    |       56 |        0 |    100% |           |
 | src/kraft/store/repos.py                     |       19 |        0 |    100% |           |
 | src/kraft/store/review.py                    |      181 |        4 |     98% |212, 217, 224-225 |
 | src/kraft/store/sessions.py                  |      161 |        0 |    100% |           |
@@ -196,7 +196,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       82 |        9 |     89% |45, 96, 142-144, 147-151, 159-160 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **32062** | **1472** | **95%** |           |
+| **TOTAL**                                    | **32063** | **1472** | **95%** |           |
 
 
 ## Setup coverage badge
