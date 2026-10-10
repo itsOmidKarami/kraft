@@ -593,7 +593,16 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if not ns.check:
         _not_a_worker()
     results = _run_update(ns, ns.plugins or None, check=ns.check)
-    common.emit([_result_view(r) for r in results], _render_results, ns.json)
+    views = [_result_view(r) for r in results]
+    # Nobody was asked under `--check`: "declined" is an update that is waiting.
+    waiting = {"declined": "update waiting"} if ns.check else {}
+    common.emit(
+        views,
+        lambda v: _render_results(
+            [{**x, "outcome": waiting.get(x["outcome"], x["outcome"])} for x in v]
+        ),
+        ns.json,
+    )
     outcomes = {r.outcome for r in results}
     if ns.check:
         raise SystemExit(next((code for outcome, code in _CHECK_CODES if outcome in outcomes), 0))
@@ -685,6 +694,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
             write_yaml(lock_file, current)
 
     _edit(change, drop_lock_entry)
+    plugin_update.clear_status(_plugins_dir, {ns.plugin})
     _reload()
     common.emit({"uninstalled": ns.plugin}, lambda v: f"uninstalled {ns.plugin}", ns.json)
 

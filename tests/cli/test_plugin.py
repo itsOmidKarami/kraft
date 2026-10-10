@@ -387,7 +387,7 @@ def _an_unreachable_collection(home):
     "happens, code, says",
     [
         (None, 0, "release@acme: current"),
-        (_a_new_version, 1, "release@acme 1.0.0 -> 1.1.0"),
+        (_a_new_version, 1, "release@acme: update waiting"),
         (_a_refused_version, 2, "release@acme: refused"),
         (_an_unreachable_collection, 3, "release@acme: failed"),
     ],
@@ -611,3 +611,14 @@ def test_validate_against_a_kraft_home(installed, capsys, tmp_path, collection, 
     assert got == code and says in out, out
     assert "no Kraft home was used" not in out
     assert installed.written() == before and installed.reloads == []
+
+
+def test_uninstall_forgets_the_plugins_last_auto_update(installed, capsys):
+    from kraft.plugins import update as plugin_update
+
+    status = installed.plugins / plugin_update.STATUS_FILE
+    status.write_text(json.dumps({ID: {"outcome": "held"}, "other@acme": {"outcome": "failed"}}))
+
+    assert _run(capsys, "uninstall", ID)[0] == 0
+
+    assert plugin_update.read_status(installed.plugins) == {"other@acme": {"outcome": "failed"}}

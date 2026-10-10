@@ -314,8 +314,8 @@ origin: src/kraft/plugins/update.py §auto_update
 
 ## REQ failed-auto-update-keeps-the-locked-version
 
-IF an auto-update fails or is held, THEN the system SHALL keep serving the locked version and SHALL report the outcome in `/health` and `kraft admin doctor` without marking health degraded.
-enforced-by: tests/plugins/test_auto_update.py::test_a_failed_auto_update_keeps_the_lock_and_records_why, tests/api/test_deps.py::test_a_held_or_failed_auto_update_is_reported_and_not_degraded, tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[held], tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[failed-auth]
+IF an auto-update fails or is held, THEN the system SHALL keep serving the locked version and SHALL report the outcome in `/health` and `kraft admin doctor` without marking health degraded, until a person applies the update or uninstalls the plugin.
+enforced-by: tests/plugins/test_auto_update.py::test_a_failed_auto_update_keeps_the_lock_and_records_why, tests/api/test_deps.py::test_a_held_or_failed_auto_update_is_reported_and_not_degraded, tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[held], tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[failed-auth], tests/plugins/test_auto_update.py::test_a_person_taking_a_held_update_clears_its_warning, tests/cli/test_plugin.py::test_uninstall_forgets_the_plugins_last_auto_update
 origin: src/kraft/plugins/update.py §auto_update
 
 ## REQ a-major-update-names-the-plugins-it-drops
