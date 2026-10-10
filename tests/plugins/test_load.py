@@ -341,3 +341,19 @@ def test_a_directory_store_is_restored_only_if_unchanged(tmp_path, changed):
         assert "kraft admin plugin update" in failed["release@acme"]
     else:
         assert failed == {} and _one(config, plugins, verify=True).left_out is None
+
+
+def test_a_store_that_cannot_be_written_is_a_failed_restore_not_a_crash(tmp_path, monkeypatch):
+    """A full disk or a read-only run directory: the background task goes on
+    to the other plugins and says why this one is still out."""
+    repo, config, plugins, found, _publish = _locked(tmp_path)
+    drop_store(found.root)
+
+    def full(*_a):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(fetch, "write_store", full)
+
+    failed = load.restore_missing((found,), config, plugins)
+
+    assert "No space left on device" in failed["release@acme"]

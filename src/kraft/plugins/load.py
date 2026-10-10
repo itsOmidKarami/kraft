@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -420,7 +420,7 @@ def _restore(plugin: InstalledPlugin, config_dir: Path, root: Path) -> Path:
     try:
         with update.write_lock(root):
             return fetch.write_store(root, extracted)
-    except update.Busy as exc:
+    except (update.Busy, OSError) as exc:  # a full disk or a read-only run directory
         raise RestoreError(f"{what}: {exc}") from exc
 
 
@@ -442,23 +442,26 @@ def restore_missing(
     return failed
 
 
-def gc(keep: Collection[str], plugins_root: Path | None = None) -> list[str]:
-    """Delete every extracted plugin whose digest is not in `keep` (hex, as a
-    store directory is named), and whatever an interrupted write left in
-    `staging/`. Under the update lock, so no install is writing meanwhile.
-    Returns the digests deleted. Only the daemon calls this: it alone knows
-    what its loaded library and its unfinished work items still read."""
+def gc(keep: Callable[[], Collection[str]], plugins_root: Path | None = None) -> list[str]:
+    """Delete every extracted plugin whose digest is not in `keep()` (hex, as
+    a store directory is named), and whatever an interrupted write left in
+    `staging/`. `keep` is asked under the update lock, so a store an install
+    finished a moment ago is already in its answer; a lock someone else holds
+    is not waited for (raises `update.Busy`): the next collection takes what
+    this one left. Returns the digests deleted. Only the daemon calls this:
+    it alone knows what its loaded library and its unfinished work items read."""
     import shutil
 
     from kraft.plugins import update
 
     root = Path(plugins_root) if plugins_root is not None else plugins_dir()
     removed: list[str] = []
-    with update.write_lock(root):
+    with update.write_lock(root, wait=0):
+        kept = keep()
         shutil.rmtree(root / "staging", ignore_errors=True)
         stores = sorted((root / "store").iterdir()) if (root / "store").is_dir() else []
         for store in stores:
-            if store.name in keep:
+            if store.name in kept:
                 continue
             for path in [store, *store.rglob("*")]:
                 if path.is_dir():
@@ -466,3 +469,27 @@ def gc(keep: Collection[str], plugins_root: Path | None = None) -> list[str]:
             shutil.rmtree(store)
             removed.append(store.name)
     return removed
+
+
+def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
+    """Each loaded plugin a Kraft `version` would leave out, with why: its
+    `requires.kraft` names another major. What `kraft admin update` lists
+    before it installs a release."""
+    from kraft.plugins import manifest
+
+    out = []
+    for plugin in installed(config_dir):
+        if plugin.left_out is not None:
+            continue
+        try:
+            declared = manifest.plugin(
+                manifest.parse(
+                    (plugin.root / manifest.PLUGIN_JSON).read_text(), manifest.PLUGIN_JSON
+                ),
+                manifest.PLUGIN_JSON,
+            )
+        except (OSError, ValueError, manifest.ManifestError):
+            continue
+        if why := manifest.kraft_compatible(declared.requires.kraft, version):
+            out.append(f"{plugin.id} {plugin.version} {why}")
+    return out

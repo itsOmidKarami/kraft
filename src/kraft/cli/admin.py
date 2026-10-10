@@ -1467,6 +1467,26 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
         )
 
 
+def _confirm_dropped_plugins(version: str, assume_yes: bool) -> None:
+    """Name the installed plugins `version` would stop loading and ask before
+    installing it; exit 1 having installed nothing on a no."""
+    from kraft.plugins import load as plugins_load
+
+    dropped = plugins_load.left_out_by(version)
+    if not dropped:
+        return
+    print(
+        f"kraft {version} would stop loading these plugins until each publishes a version "
+        "for it:\n  " + "\n  ".join(dropped),
+        file=sys.stderr,
+    )
+    # No terminal to ask on is a refusal, never a default yes.
+    if not assume_yes and not (
+        sys.stdin.isatty() and input("Install it anyway? [y/N] ").strip().lower() in ("y", "yes")
+    ):
+        raise SystemExit("kraft admin update: nothing installed. Pass -y to install anyway.")
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
     from kraft import update
     from kraft.templates.library import is_pre_v1
@@ -1506,6 +1526,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         # Before installing, so answering no leaves nothing half done.
         _confirm_running_agents(ns, "restarting", ask=True, declined="nothing installed or stopped")
     print(f"kraft {here} -> {release.tag}")
+    _confirm_dropped_plugins(release.tag.removeprefix("v"), ns.yes)
     code = update.perform(release)
     if code != 0:
         raise SystemExit(code)

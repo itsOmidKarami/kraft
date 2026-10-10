@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import json
 import os
 import sqlite3
+import time
 import warnings
 from contextlib import closing
 from pathlib import Path
@@ -567,9 +569,10 @@ def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client,
     deps._reload_templates(client.app.state)
     assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
 
-    r = client.post("/api/templates/reload")
+    client.post("/api/templates/reload")
+    _plugin_task_done(client)
 
-    assert "release:ship" in r.json()["valid"] and store.is_dir()
+    assert store.is_dir() and "release:ship" in client.app.state.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
 
 
@@ -594,6 +597,15 @@ def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, t
         "plugin release@acme is being restored; retry",
     )
     assert unknown.value.status_code == 422
+
+
+def _plugin_task_done(client):
+    """Wait for the server's background plugin task: a reload starts one."""
+
+    async def done():
+        await client.app.state.restore_task
+
+    client.portal.call(done)
 
 
 def _other_version(st, tmp_path):
@@ -623,7 +635,6 @@ def _other_version(st, tmp_path):
 def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     client, tmp_path, status, pinned, kept
 ):
-    import json
 
     from support.store_fixtures import mk_item
 
@@ -659,13 +670,83 @@ def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, t
     good = lock.read_text()
     lock.write_text("plugins: [\n")
     client.post("/api/templates/reload")
+    _plugin_task_done(client)
     assert old.is_dir()
 
     lock.write_text(good)
     client.post("/api/templates/reload")
+    _plugin_task_done(client)
 
     assert not old.exists()
     # No library is loaded to say what it reads: the lock alone keeps its stores.
     (st.templates_dir / "library.yaml").write_text("tasks: [\n")
     client.post("/api/templates/reload")
+    _plugin_task_done(client)
     assert st.library is None and locked.is_dir()
+
+
+def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
+    """It runs on the event loop: a lock someone holds is skipped, and the
+    next collection takes what this one left."""
+    from kraft.plugins import update as plugin_update
+
+    st = client.app.state
+    _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+
+    started = time.monotonic()
+    with plugin_update.write_lock(st.run_dirs.plugins):
+        assert client.portal.call(deps.collect_plugin_stores, st) == []
+    assert old.is_dir() and time.monotonic() - started < plugin_update.LOCK_WAIT_S / 2
+
+    assert client.portal.call(deps.collect_plugin_stores, st) == [old.name]
+
+
+def test_a_plugin_background_task_that_fails_says_so(client, caplog):
+    """Nobody awaits it: what it raises is logged, not dropped."""
+
+    async def breaks(app):
+        raise OSError("disk full")
+
+    async def run():
+        await deps.in_background(client.app, breaks)
+
+    client.portal.call(run)
+
+    assert "plugin background task failed" in caplog.text and "disk full" in caplog.text
+
+
+def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
+    """After a start: the update is applied, the library is rebuilt on it, the
+    old store goes, and health reports the outcome without being degraded."""
+    from support.plugins import publish
+
+    st = client.app.state
+    old = _install_release(client, tmp_path)
+    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
+    written["plugins"]["release@acme"] = {"auto_update": True}
+    (st.templates_dir / "plugins.yaml").write_text(yaml.safe_dump(written))
+    repo = Path(written["collections"]["acme"]["git"].removeprefix("file://"))
+    publish(repo, "release", version="1.1.0", skills={"notes": "new in 1.1.0"})
+
+    client.portal.call(deps.auto_update_plugins, client.app)
+
+    assert [p.version for p in st.library.plugins] == ["1.1.0"] and not old.exists()
+    health = client.get("/api/health").json()
+    assert (health["status"], health["plugin_updates"]["release@acme"]["outcome"]) == (
+        "ok",
+        "applied",
+    )
+
+
+def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
+    from kraft.plugins import update as plugin_update
+
+    st = client.app.state
+    _install_release(client, tmp_path)
+    held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
+    (st.run_dirs.plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held}))
+
+    health = client.get("/api/health").json()
+
+    assert (health["status"], health["plugin_updates"]) == ("ok", {"release@acme": held})

@@ -212,12 +212,13 @@ class Result:
 
 
 @contextmanager
-def write_lock(plugins_dir: Path) -> Iterator[None]:
+def write_lock(plugins_dir: Path, wait: float | None = None) -> Iterator[None]:
     """The update lock: held by every write to `plugins.yaml`, the lock file
-    or the store. A second writer waits `LOCK_WAIT_S`, then raises `Busy`."""
+    or the store. A second writer waits `wait` seconds (`LOCK_WAIT_S` when
+    None), then raises `Busy`."""
     plugins_dir.mkdir(parents=True, exist_ok=True)
     with open(plugins_dir / ".lock", "w") as fh:
-        deadline = time.monotonic() + LOCK_WAIT_S
+        deadline = time.monotonic() + (LOCK_WAIT_S if wait is None else wait)
         while True:
             try:
                 fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -623,3 +624,115 @@ def update(
                     results[done.plugin_id], outcome="failed", problems=(str(exc),), kind="busy"
                 )
     return list(results.values())
+
+
+#: Where each plugin's last auto-update is recorded, under `run/plugins/`:
+#: `/health` and doctor both read it, so it survives a restart and doctor sees
+#: it with the server down.
+STATUS_FILE = "status.json"
+
+
+def may_apply_unattended(review: Review) -> str | None:
+    """Why an auto-update holds this review for a person; None when it may
+    apply it on its own. Any reach call-out holds it, and a downgrade and a
+    move onto a pre-release are reach call-outs themselves (`review.review`).
+    `update` only asks about a version that differs, so what is left is a
+    newer release that widens nothing."""
+    if review.old_version is None:
+        return "it is not installed"
+    if review.reach:
+        lines = [entry.splitlines()[0] for entry in review.reach]
+        more = f"; and {len(lines) - 3} more" if len(lines) > 3 else ""
+        return "; ".join(lines[:3]) + more
+    return None
+
+
+def read_status(plugins_root: Path) -> dict[str, dict]:
+    """Plugin id to its last auto-update `{at, outcome, kind, message}`; empty
+    when none has run or the file does not read."""
+    import json
+
+    try:
+        data = json.loads((Path(plugins_root) / STATUS_FILE).read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def auto_update(
+    config_dir: Path | None = None, plugins_root: Path | None = None
+) -> dict[str, dict]:
+    """Update every locked plugin whose auto-update is on (its collection's, or
+    its own), applying only what `may_apply_unattended` allows, and record
+    each one's outcome in `status.json`: `applied`, `up to date`, `held` or
+    `failed` (with `kind`: `network`, `auth`, `refused` or `busy`). Never
+    installs, never re-installs, and never applies a ref or alias changed by
+    hand: those wait for a person's `update`. A collection none of whose
+    plugins auto-update is not fetched."""
+    import json
+
+    from kraft import paths
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    plugins_root = Path(plugins_root) if plugins_root is not None else load.plugins_dir()
+    try:
+        config = PluginsConfig.load(config_dir / PluginsConfig.FILE)
+        lock = PluginsLock.load(config_dir / PluginsLock.FILE)
+    except ConfigError:
+        return {}  # the load says why
+    outcomes: dict[str, dict] = {}
+    ids = []
+    for plugin_id, locked in lock.plugins.items():
+        if plugin_id not in config.plugins:
+            continue
+        collection = config.collections[plugin_id.split("@", 1)[1]]
+        if not (collection.auto_update or config.entry(plugin_id).auto_update):
+            continue
+        pending = [
+            what
+            for what, changed in (
+                ("ref", collection.ref != locked.ref),
+                ("alias", config.namespace(plugin_id) != locked.namespace),
+            )
+            if changed
+        ]
+        if pending:
+            outcomes[plugin_id] = {
+                "outcome": "held",
+                "message": f"{pending[0]} change pending; run kraft admin plugin update",
+            }
+        else:
+            ids.append(plugin_id)
+    held: dict[str, str] = {}
+
+    def accept(review: Review) -> bool:
+        why = may_apply_unattended(review)
+        if why is not None:
+            held[review.plugin_id] = why
+        return why is None
+
+    results = (
+        update(ids, accept=accept, config_dir=config_dir, plugins_root=plugins_root) if ids else []
+    )
+    for result in results:
+        said = "; ".join(result.problems)
+        outcomes[result.plugin_id] = {
+            "applied": {"outcome": "applied"},
+            "current": {"outcome": "up to date"},
+            "unpublished": {"outcome": "up to date", "message": said},
+            "declined": {
+                "outcome": "held",
+                "message": f"{held.get(result.plugin_id)}; run kraft admin plugin update",
+            },
+            "refused": {"outcome": "failed", "kind": "refused", "message": said},
+            "failed": {"outcome": "failed", "kind": result.kind, "message": said},
+        }[result.outcome]
+    if outcomes:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        status = read_status(plugins_root) | {
+            plugin_id: {"at": now, "kind": None, "message": None, **outcome}
+            for plugin_id, outcome in outcomes.items()
+        }
+        plugins_root.mkdir(parents=True, exist_ok=True)
+        write_text(plugins_root / STATUS_FILE, json.dumps(status, indent=2) + "\n")
+    return outcomes

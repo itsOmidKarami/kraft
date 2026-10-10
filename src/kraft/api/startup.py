@@ -328,7 +328,7 @@ async def lifespan(app: FastAPI):
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
     # After the library is loaded from the lock: a start never waits on the network.
-    app.state.restore_task = asyncio.ensure_future(deps.restore_plugins(app))
+    deps.in_background(app, deps.auto_update_plugins)
     try:
         yield
     finally:

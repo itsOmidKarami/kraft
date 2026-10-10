@@ -208,3 +208,10 @@ def drop_store(store: Path) -> None:
         if path.is_dir():
             path.chmod(0o755)
     shutil.rmtree(store)
+
+
+def edit_plugins_yaml(config_dir: Path, change) -> None:
+    """A hand edit: `change(parsed plugins.yaml)`, written back."""
+    written = read_yaml(config_dir / "plugins.yaml")
+    change(written)
+    write_yaml(config_dir / "plugins.yaml", written)

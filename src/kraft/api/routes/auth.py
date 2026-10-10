@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from kraft import auth as auth_mod
 from kraft import update as update_mod
 from kraft.api import api_router, deps
+from kraft.plugins import update as plugin_update
 from kraft.worker import reattach as reattach_mod
 
 #: Failed logins one address may make within `LOGIN_WINDOW_S` before it is
@@ -122,6 +123,9 @@ async def health(request: Request):
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
+        # Each auto-updating plugin's last outcome. A held or failed one is
+        # not degraded: the locked version still serves.
+        "plugin_updates": plugin_update.read_status(st.run_dirs.plugins),
         # True when the server started on that file, so auto-intake and its
         # schedules are off (a trigger left in policy.yaml still fires); False
         # when a reload refused it and the running ones are kept.

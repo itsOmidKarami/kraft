@@ -226,6 +226,8 @@ def _config_checks() -> list[dict]:
             _check("capabilities", True, "skipped: no config dir", skipped=True),
             _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _check("notify.yaml", True, "skipped: no config dir", skipped=True),
+            _check("plugins", True, "skipped: no config dir", skipped=True),
+            _check("plugin updates", True, "skipped: no config dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -264,6 +266,7 @@ def _config_checks() -> list[dict]:
     checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
+    checks += _plugin_checks(templates)
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
@@ -481,6 +484,93 @@ def _chains_check(templates: Path) -> dict:
     if report.valid:
         return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
     return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
+
+
+def _plugin_checks(templates: Path) -> list[dict]:
+    """The installed plugins as the files say, with no server running: what
+    does not load and why, what waits for a person, and each auto-updating
+    plugin's last outcome."""
+    from kraft.plugins import fetch
+    from kraft.plugins import update as plugin_update
+    from kraft.plugins.config import PluginsConfig, PluginsLock
+
+    if why := plugins_load.config_problem(templates):
+        return [
+            _check("plugins", False, why),
+            _check("plugin updates", True, "skipped: the plugin files do not read", skipped=True),
+        ]
+    root = plugins_load.plugins_dir()
+    listed = PluginsConfig.load(templates / PluginsConfig.FILE)
+    lock = PluginsLock.load(templates / PluginsLock.FILE)
+    found = plugins_load.installed(templates, root, verify=True)
+    broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
+    notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
+    auto = []
+    for plugin_id, locked in lock.plugins.items():
+        if plugin_id not in listed.plugins:
+            continue
+        name = plugin_id.split("@", 1)[1]
+        collection = listed.collections[name]
+        if listed.namespace(plugin_id) != locked.namespace:
+            notes.append(f"{plugin_id}: alias change pending; run kraft admin plugin update")
+        if collection.ref != locked.ref:
+            notes.append(f"{plugin_id}: ref change pending; run kraft admin plugin update")
+        if collection.auto_update or listed.entry(plugin_id).auto_update:
+            auto.append(plugin_id)
+        if collection.git is not None and locked.commit is not None:
+            mirror = fetch.mirror_path(root, name, collection.git)
+            try:
+                fetch._git("cat-file", "-e", f"{locked.commit}^{{commit}}", git_dir=mirror)
+            except (fetch.FetchError, OSError):
+                notes.append(
+                    f"{plugin_id}: locked commit {locked.commit[:12]} is not in the local "
+                    "mirror; a restore would have to fetch it"
+                )
+    notes += [
+        f"collection {name} is a local directory: not reproducible on other machines "
+        "(publish it as a git collection to share it)"
+        for name, collection in listed.collections.items()
+        if collection.path is not None
+    ]
+    if broken:
+        plugins = _check("plugins", False, "; ".join(broken + notes))
+    elif notes:
+        plugins = _check("plugins", True, "; ".join(notes), warn=True)
+    else:
+        loaded = sum(1 for p in found if p.left_out is None)
+        plugins = _check("plugins", True, f"{loaded} plugin(s) load")
+
+    status = plugin_update.read_status(root)
+    waiting = [
+        f"{plugin_id}: {entry.get('outcome')}"
+        + (f" ({entry['kind']})" if entry.get("kind") else "")
+        + (f": {entry['message']}" if entry.get("message") else "")
+        + (
+            "; a server run by launchd or systemd may lack the SSH agent or credential "
+            "helper your shell has"
+            if entry.get("kind") == "auth"
+            else ""
+        )
+        for plugin_id, entry in status.items()
+        if plugin_id in auto and entry.get("outcome") in ("held", "failed")
+    ]
+    try:
+        policy = config.read_yaml(templates / "policy.yaml")
+    except config.ConfigError:
+        policy = {}
+    defaults = policy.get("defaults") if isinstance(policy.get("defaults"), dict) else {}
+    if auto and not (
+        policy.get("maxima") or defaults.get("allowed_tools") or defaults.get("sandbox")
+    ):
+        waiting.append(
+            f"{', '.join(auto)} auto-update(s) on an instance with no allowed_tools, sandbox "
+            "or maxima: in policy.yaml: an update can change what a run does unattended"
+        )
+    if waiting:
+        updates = _check("plugin updates", True, "; ".join(waiting), warn=True)
+    else:
+        updates = _check("plugin updates", True, f"{len(auto)} plugin(s) auto-update")
+    return [plugins, updates]
 
 
 def _capabilities_check() -> dict:
