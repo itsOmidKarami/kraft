@@ -163,6 +163,30 @@ async def refresh(app) -> Usage:
     return st.storage_usage
 
 
+_INTERVAL_S = 600
+
+
+async def tick(app) -> None:
+    """Measure, when a limit is set. Nothing else: Kraft never archives for the
+    limit, a person does (the spec's "Clean-up is a person's")."""
+    st = app.state
+    if st.policy is None or st.policy.storage_limit_bytes is None:
+        return
+    await refresh(app)
+
+
+async def poller(app) -> None:
+    """`tick` at startup and every ten minutes until cancelled."""
+    while True:
+        try:
+            await tick(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- a bad tick must not end the poller
+            logger.exception("storage tick failed")
+        await asyncio.sleep(_INTERVAL_S)
+
+
 def stop(st) -> None:
     """End a walk in flight. A walk takes many seconds and runs in a thread the
     event loop joins at close, so shutdown would wait for it."""

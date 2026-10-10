@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, node_runs, start_queue, store
+from kraft import escalate, events, executor, node_runs, start_queue, storage, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -472,6 +472,8 @@ async def abandon_work_item(wid: str, request: Request):
     removed = await _remove_worktree(
         Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
     )
+    if not worktree.exists():
+        storage.forget(st, wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
@@ -517,6 +519,10 @@ async def _archive_one(app, row, by: str) -> dict:
     removed = await _remove_worktree(
         repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
     )
+    # The directory, not `worktree_removed`: that flag also goes False when the
+    # worktree went but deleting its branch or a ref failed (`_remove_worktree`).
+    if not worktree.exists():
+        storage.forget(st, wid)
     return {**removed, **extra}
 
 

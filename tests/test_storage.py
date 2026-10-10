@@ -152,3 +152,23 @@ def test_a_stopped_walk_returns_early(tmp_path):
     stopped = threading.Event()
     stopped.set()
     assert storage.measure(tmp_path, stopped).governed == 0
+
+
+async def test_tick_measures_when_a_limit_is_set(tmp_path, stub_app, monkeypatch):
+    app = stub_app(policy=_policy(100, 80))
+    monkeypatch.setattr(storage, "measure", lambda base, stop=None: _usage(120))
+
+    await storage.tick(app)
+
+    assert storage.state_of(app.state.policy, storage.usage(app.state)) == "held"
+
+
+async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatch):
+    app = stub_app(policy=_policy())
+    monkeypatch.setattr(
+        storage, "measure", lambda base, stop=None: pytest.fail("walked with no limit set")
+    )
+
+    await storage.tick(app)
+
+    assert storage.usage(app.state) is None
