@@ -11,7 +11,7 @@ import yaml
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import fetch, manifest
 from kraft.plugins.load import InstalledPlugin
-from support.harness import commit_all, make_repo, write
+from support.harness import commit_all, git, make_repo, write
 
 #: The smallest agent task the V1 schema accepts.
 AGENT = {"kind": "agent", "harness": "codex", "prompt": "local base"}
@@ -67,32 +67,36 @@ def plugin_json(name: str, **over) -> dict:
     return {"name": name, "version": "1.0.0", "requires": requires, **over}
 
 
+def _write_plugin(repo: Path, plugin: str, spec: dict) -> None:
+    base = f"plugins/{plugin}"
+    fields = {"version": spec["version"]} if "version" in spec else {}
+    write(
+        repo,
+        f"{base}/.kraft/plugin.json",
+        json.dumps(plugin_json(plugin, **fields, **spec.get("manifest", {}))),
+    )
+    if "library" in spec:
+        write(repo, f"{base}/library.yaml", yaml.safe_dump(spec["library"]))
+    for chain_name, body in spec.get("chains", {}).items():
+        write(repo, f"{base}/chains/{chain_name}.yaml", yaml.safe_dump(body))
+    for skill_name, text in spec.get("skills", {}).items():
+        write(repo, f"{base}/skills/{skill_name}/SKILL.md", text)
+    if "profiles" in spec:
+        write(repo, f"{base}/profiles.yaml", yaml.safe_dump({"profiles": spec["profiles"]}))
+    for rel, text in spec.get("files", {}).items():
+        write(repo, f"{base}/{rel}", text)
+
+
 def make_collection(tmp_path: Path, plugins: dict[str, dict], *, name: str = "acme") -> Path:
     """A committed git repository that is a collection named `name`, with one
     plugin per entry of `plugins` at `plugins/<plugin>/`. Each spec may give
-    `library`, `chains`, `skills`, `profiles` (as `installed` takes them),
-    `manifest` (keys laid over `plugin_json`) and `files` (relative path to raw
-    text, for anything else). A directory collection is the same path."""
+    `version`, `library`, `chains`, `skills`, `profiles` (as `installed` takes
+    them), `manifest` (keys laid over `plugin_json`) and `files` (relative path
+    to raw text, for anything else). A directory collection is the same path."""
     repo = make_repo(tmp_path, f"{name}-kraft")
-    entries = []
     for plugin, spec in plugins.items():
-        base = f"plugins/{plugin}"
-        write(
-            repo,
-            f"{base}/.kraft/plugin.json",
-            json.dumps(plugin_json(plugin, **spec.get("manifest", {}))),
-        )
-        if "library" in spec:
-            write(repo, f"{base}/library.yaml", yaml.safe_dump(spec["library"]))
-        for chain_name, body in spec.get("chains", {}).items():
-            write(repo, f"{base}/chains/{chain_name}.yaml", yaml.safe_dump(body))
-        for skill_name, text in spec.get("skills", {}).items():
-            write(repo, f"{base}/skills/{skill_name}/SKILL.md", text)
-        if "profiles" in spec:
-            write(repo, f"{base}/profiles.yaml", yaml.safe_dump({"profiles": spec["profiles"]}))
-        for rel, text in spec.get("files", {}).items():
-            write(repo, f"{base}/{rel}", text)
-        entries.append({"name": plugin, "source": f"./{base}"})
+        _write_plugin(repo, plugin, spec)
+    entries = [{"name": plugin, "source": f"./plugins/{plugin}"} for plugin in plugins]
     write(
         repo,
         ".kraft/collection.json",
@@ -102,6 +106,27 @@ def make_collection(tmp_path: Path, plugins: dict[str, dict], *, name: str = "ac
     )
     commit_all(repo, "collection")
     return repo
+
+
+def publish(repo: Path, plugin: str, **spec) -> str:
+    """Commit a new state of `plugin` to the collection at `repo`: the files
+    `spec` names (as `make_collection` takes them) are rewritten, the rest
+    kept. Returns the new commit."""
+    _write_plugin(repo, plugin, spec)
+    commit_all(repo, f"{plugin} {spec.get('version', '')}")
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def instance(
+    tmp_path: Path, collections: dict[str, dict] | None = None, **local
+) -> tuple[Path, Path]:
+    """A Kraft home with no plugin installed: `(config directory, run/plugins)`.
+    `local` is what `home` takes; `collections` is `plugins.yaml`'s section.
+    Its `harnesses.yaml` defines the harness the fixture plugins require."""
+    config_dir = home(tmp_path, **local)
+    write_yaml(config_dir / "harnesses.yaml", {"harnesses": {"codex": {"provider": "codex"}}})
+    write_yaml(config_dir / "plugins.yaml", {"collections": collections or {}, "plugins": {}})
+    return config_dir, tmp_path / "run" / "plugins"
 
 
 def install(
