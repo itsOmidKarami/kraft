@@ -391,8 +391,9 @@ def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.Install
 async def restore_plugins(app) -> None:
     """Put back every locked store that is gone (a config directory copied to
     a new machine, a cleared run directory, a teammate's newer lock), then
-    load what came back. Off the event loop: it may fetch. One that cannot be
-    restored stays left out, with the reason under `invalid_templates`."""
+    load what came back and collect what nothing reads. Off the event loop:
+    it may fetch. One that cannot be restored stays left out, with the reason
+    under `invalid_templates`."""
     from kraft import apply
 
     st = app.state
@@ -405,7 +406,6 @@ async def restore_plugins(app) -> None:
         apply.notify(app)
         if failed:
             logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
-    # After the restore, and after every reload: what nothing reads any more goes.
     collect_plugin_stores(st)
 
 
@@ -427,36 +427,51 @@ async def auto_update_plugins(app) -> None:
         collect_plugin_stores(st)
 
 
+def in_background(app, work) -> asyncio.Task:
+    """Run `work(app)` (one of the two above) as the server's plugin task.
+    Nobody awaits it, so what it raises is logged here, never dropped."""
+
+    async def logged() -> None:
+        try:
+            await work(app)
+        except Exception:  # noqa: BLE001 -- a background task must say why it died
+            logger.exception("plugin background task failed")
+
+    app.state.restore_task = asyncio.ensure_future(logged())
+    return app.state.restore_task
+
+
 def collect_plugin_stores(st) -> list[str]:
     """Delete each plugin store that none of these names: the lock, the
     library this server has loaded, or the snapshot of a work item that has
     not ended (a paused or stopped one can still be retried onto it). A
     directory collection's store is the lock's, so it stays while installed.
-    Nothing is deleted while the lock cannot be read or another plugin change
-    is running."""
+    Nothing is deleted while the lock cannot be read, while another plugin
+    change is running, or when the store cannot be written."""
     from kraft.plugins import update as plugin_update
     from kraft.plugins.config import PluginsLock
 
-    try:
+    def keep() -> set[str]:
+        # Asked under the update lock: an install that just finished is in the lock.
         locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
-    except config_mod.ConfigError:
-        return []
-    keep = {entry.digest.removeprefix("sha256:") for entry in locked}
-    keep |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
-    ended = sorted(ENDED)
-    rows = st.db.read(
-        lambda c: c.execute(
-            "SELECT materialized_chain FROM work_items WHERE materialized_chain IS NOT NULL "
-            f"AND status NOT IN ({', '.join('?' * len(ended))})",
-            ended,
-        ).fetchall()
-    )
-    for (stored,) in rows:
-        for pin in (json.loads(stored).get("plugins") or {}).values():
-            keep.add(str(pin["digest"]).removeprefix("sha256:"))
+        kept = {entry.digest.removeprefix("sha256:") for entry in locked}
+        kept |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+        ended = sorted(ENDED)
+        rows = st.db.read(
+            lambda c: c.execute(
+                "SELECT materialized_chain FROM work_items WHERE materialized_chain IS NOT NULL "
+                f"AND status NOT IN ({', '.join('?' * len(ended))})",
+                ended,
+            ).fetchall()
+        )
+        for (stored,) in rows:
+            for pin in (json.loads(stored).get("plugins") or {}).values():
+                kept.add(str(pin["digest"]).removeprefix("sha256:"))
+        return kept
+
     try:
         return plugins_load.gc(keep, st.run_dirs.plugins)
-    except plugin_update.Busy:
+    except (config_mod.ConfigError, plugin_update.Busy, OSError):
         return []
 
 
