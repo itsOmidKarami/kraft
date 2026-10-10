@@ -97,7 +97,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
   return (
     <>
       <ScreenHeader id={item.bead_id ?? item.id.slice(0, 8)} />
-      <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined, round: undefined })} />
+      <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
       <div className="ph-content">
         <div className="ph-node-head">
           <h1 className="ph-node-title">{nodeId}</h1>

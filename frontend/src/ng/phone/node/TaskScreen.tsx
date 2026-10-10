@@ -102,7 +102,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
               <div className="ph-attempts" role="group" aria-label="Earlier runs this round">
                 {earlier.map((s, i) => (
                   <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s.attempt })}>
-                    earlier run {i + 1} · {lookWord(sessionLook(s, now))}
+                    earlier run {i + 1}{s.command ? ` · ${s.command}` : ""} · {lookWord(sessionLook(s, now))}
                   </button>
                 ))}
               </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { rowHeight, type Chip, type ScopesView } from "../item/scopeView";
+import { rowHeight, subtitle, type Chip, type ScopesView } from "../item/scopeView";
 import "./graph.css";
 
 type Rove = { ref: (key: string) => (el: HTMLElement | null) => void; tabIndex: (key: string) => number; go: (key: string | undefined) => void; onFocus: (key: string, el: HTMLElement) => void };
@@ -59,26 +59,32 @@ export function ScopeFrame({ view, width, step, task, rect, on, full, out, selec
     if (selectedScope && !(e.target as Element).closest("button")) onTask();
   };
   const parallel = view.execution === "parallel";
+  // One repository: nothing to tell apart or put in order, so its row is its chips alone.
+  const solo = view.rows.length === 1;
   return (
     <div role="group" aria-label={`${task}, repositories and scopes`} className={`scope-frame${full ? " is-full" : ""}${out ? " is-out" : ""}${on ? " is-on" : ""}`} style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onClick={background}>
       {/* The contents keep the frame's full width while it grows from the box, so nothing reflows on the way. */}
       <div className="scope-inner" style={{ width }}>
         <div className="scope-head">
           <button ref={rove.ref(taskKey)} type="button" tabIndex={rove.tabIndex(taskKey)} className="scope-task" aria-pressed={!selectedScope} onFocus={(e) => rove.onFocus(taskKey, e.currentTarget)} onClick={onTask}>{task}</button>
-          <span className="scope-sub">round {view.round} · repos in order · scopes {parallel ? "in parallel" : "in order"}</span>
+          <span className="scope-sub">{subtitle(view)}</span>
           {/* Out of the Tab order, which the canvas keeps to one stop: Esc closes it from the keys. */}
           <button type="button" tabIndex={-1} className="scope-close" onClick={onClose}>close ✕</button>
         </div>
         <div className="scope-body">
-          <span className="scope-rail" aria-hidden="true" />
+          {!solo && <span className="scope-rail" aria-hidden="true" />}
           {view.rows.map((r, i) => (
-            <div key={r.id ?? "·"} className={`scope-row${parallel ? " is-fork" : ""}`} style={{ minHeight: rowHeight(r, view.execution) }}>
-              <span className={`scope-ring is-${r.state}`} aria-hidden="true">{i + 1}</span>
-              <div className="scope-repo">
-                <span className={`scope-name${r.state === "unreached" ? " is-off" : ""}`}>{r.name}</span>
-                <span className={`scope-note is-${r.state}`}>{r.note}</span>
-              </div>
+            <div key={r.id ?? "·"} className={`scope-row${parallel ? " is-fork" : ""}${solo ? " is-solo" : ""}`} style={{ minHeight: rowHeight(r, view.execution) }}>
+              {!solo && <span className={`scope-ring is-${r.state}`} aria-hidden="true">{i + 1}</span>}
+              {!solo && (
+                <div className="scope-repo">
+                  <span className={`scope-name${r.state === "unreached" ? " is-off" : ""}`}>{r.name}</span>
+                  <span className={`scope-note is-${r.state}`}>{r.note}</span>
+                </div>
+              )}
               <ChipRow fork={parallel}>
+                {/* With no chips the note is all the row has to say: waiting, or not reached. */}
+                {solo && !r.chips.length && <span className={`scope-note is-${r.state}`}>{r.note}</span>}
                 {r.chips.map((c, j) => {
                   const key = chipKey(step, task, c.key);
                   return (

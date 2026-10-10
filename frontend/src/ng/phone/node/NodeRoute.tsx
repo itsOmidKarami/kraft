@@ -30,7 +30,8 @@ export function NodeRoute() {
   const nodes = loaded.state === "ready" ? loaded.item.chain_definition.nodes : [];
   const place = readPlace(nodeParam, params, nodes);
   // A node change inside the screen is not history; entering the screen was.
-  const setPlace = useCallback((patch: Partial<Place>) => navigate(placeUrl(id, { ...place, ...patch }), { replace: true }), [navigate, id, place]);
+  // The fix-loop round is one node's: any way to another node leaves it behind.
+  const setPlace = useCallback((patch: Partial<Place>) => navigate(placeUrl(id, { ...place, ...(patch.node && patch.node !== place.node ? { round: undefined } : {}), ...patch }), { replace: true }), [navigate, id, place]);
   if (params.get("doc")) return <Doc id={params.get("doc")!} />;
   if (loaded.state === "loading")
     return (
