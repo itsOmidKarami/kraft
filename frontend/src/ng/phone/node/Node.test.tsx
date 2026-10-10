@@ -192,6 +192,13 @@ describe("the node screen (D)", () => {
     await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/plan"));
   });
 
+  it("drops the round when the node's own link leads to the next node", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification?round=1");
+    await screen.findByRole("group", { name: "Fix loop rounds" });
+    await userEvent.click(within(document.querySelector(".ph-facts") as HTMLElement).getByRole("button", { name: "merge_request" }));
+    await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/merge_request"));
+  });
+
   it("reads the log of the round picked", async () => {
     const calls = mount(looped(), "/work-items/w1/nodes/verification?tab=log&round=1");
     await screen.findByText(/loaded review_package/);
@@ -361,20 +368,32 @@ describe("the task screen (E)", () => {
     const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
     const [api, web] = [scopeRun(null, "just test-api", 0, "done", { order: 0 }), scopeRun(null, "just test-web", 0, "failed", { order: 1 })];
     // A run the round made of a scope before its newest one: no `scope_runs` entry names it any more.
-    const earlier = { ...web[1], id: "old", attempt: 7, created_at: "2026-09-13T10:00:00Z" };
+    const earlier = { ...web[1], id: "old", attempt: 1, created_at: "2026-09-13T10:00:00Z" };
+    Object.assign(api[1], { attempt: 2 });
+    Object.assign(web[1], { attempt: 3 });
     const it = scoped([api, web], { chain_definition: { template_id: "default", nodes }, worker_sessions: [earlier, api[1], web[1]] });
     const calls = mount(it, `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
     const scopes = (await screen.findByText("Scopes")).closest("section")!;
-    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "earlier run 1 · failed"]);
+    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "earlier run 1 · just test-web · failed"]);
     expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
     await userEvent.click(within(scopes).getByRole("button", { name: /just test-api/ }));
-    expect(where()).toContain(`scope=${encodeURIComponent(":just test-api").replace(/%20/g, "+")}`);
+    expect(where()).toContain("scope=%3Ajust+test-api");
     await userEvent.click(screen.getByRole("tab", { name: "Log" }));
     await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
     await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
     await userEvent.click(screen.getByRole("button", { name: /earlier run 1/ }));
-    expect(where()).toContain("attempt=7");
+    expect(where()).toContain("attempt=1");
     expect(where()).not.toContain("scope=");
+  });
+
+  it("a scope the round did not pick is a line, not a way into the round before's run", async () => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop", tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    const runs = [scopeRun(null, "just test-api", 0, "done"), scopeRun(null, "just test-web", 0, "done"), scopeRun(null, "just test-api", 1, "done")];
+    mount(scoped(runs, { chain_definition: { template_id: "default", nodes } }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    expect(await screen.findByText(/task · round 2 of 3 · done/)).toBeInTheDocument();
+    const scopes = screen.getByText("Scopes").closest("section")!;
+    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s"]);
+    expect(within(scopes).getByText("just test-web").closest(".ph-row")).toHaveTextContent("just test-webnot picked");
   });
 
   it.each([

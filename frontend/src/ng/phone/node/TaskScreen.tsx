@@ -91,10 +91,11 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
                         <span className="ph-row-hint">{c.state === "done" ? ["done", c.meta].filter(Boolean).join(" · ") : c.meta || c.state}{c.fresh ? " · new this round" : ""}</span>
                       </span>
                     );
-                    // A scope with no run yet (waiting, or not picked this round) has nothing to open.
-                    return c.session
-                      ? <button key={c.key} type="button" className="ph-row" aria-pressed={c.session === at} onClick={() => setPlace({ scope: c.key, attempt: undefined })}>{text}</button>
-                      : <div key={c.key} className="ph-row">{text}</div>;
+                    // A scope with no run this round has nothing to open: it waits, or the round did not pick it
+                    // (its chip then carries the round before's run, which is not this round's to show).
+                    return c.session && c.state !== "skipped"
+                      ? <button key={c.key} type="button" className="ph-row" aria-pressed={c.session.id === at?.id} onClick={() => setPlace({ scope: c.key, attempt: undefined })}>{text}</button>
+                      : <div key={c.key} className="ph-row ph-row-static">{text}</div>;
                   })}
                 </div>
               </div>
@@ -103,7 +104,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
               <div className="ph-attempts" role="group" aria-label="Earlier runs this round">
                 {earlier.map((s, i) => (
                   <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s.attempt, scope: undefined })}>
-                    earlier run {i + 1} · {lookWord(sessionLook(s, now))}
+                    earlier run {i + 1}{s.command ? ` · ${s.command}` : ""} · {lookWord(sessionLook(s, now))}
                   </button>
                 ))}
               </div>
