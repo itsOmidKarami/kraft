@@ -51,7 +51,7 @@ describe("CleanupDialog", () => {
     [null, "9G used afterwards."],
   ] as const)("says where usage lands when the state after is %s", async (state_after, text) => {
     mount({ "POST /storage/preview": [200, storagePreview({ state_after })] });
-    expect(await screen.findByText(new RegExp(text.replace(/\./g, "\\.")))).toBeInTheDocument();
+    expect(await screen.findByText((content) => content.includes(text))).toBeInTheDocument();
   });
 
   it("archives the previewed ids on confirm, then reports back", async () => {
