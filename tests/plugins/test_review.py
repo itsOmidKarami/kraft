@@ -14,16 +14,25 @@ BASE = {
         "tasks": {
             "base": {**AGENT, "steering": ["house"], "policy": {"time_cap_minutes": 30}},
             "open": {"kind": "forge", "target": "mr.open_draft"},
+            "sync": {"kind": "forge", "target": "mr.sync"},
         },
     },
     "chains": {
         "ship": {
             "nodes": [
-                {"id": "build", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]},
+                {
+                    "id": "build",
+                    "kind": "exec",
+                    "tasks": [{"id": "t", "extends": "base"}, {"id": "u", "extends": "base"}],
+                },
                 {"id": "approve", "kind": "gate"},
                 {"id": "land", "kind": "exec", "tasks": [{"id": "open", "extends": "open"}]},
             ]
-        }
+        },
+        # Its target is `ship`'s only by a string prefix of the chain id.
+        "ship2": {
+            "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "s", "extends": "sync"}]}]
+        },
     },
     "skills": {"deploy-review": "Check the rollout.\n"},
     "profiles": {"deep": {"model": {"codex": "m1"}}},
@@ -64,8 +73,16 @@ def _build_after_gate(spec):
     nodes.insert(1, nodes.pop(0))
 
 
+def _tasks_swapped(spec):
+    _nodes(spec)[0]["tasks"].reverse()
+
+
 def _forge_target(spec):
     spec["library"]["tasks"]["open"]["target"] = "mr.sync"
+
+
+def _target_used_by_a_sibling(spec):
+    _nodes(spec)[2]["tasks"][0]["target"] = "mr.sync"
 
 
 def _harness(spec):
@@ -112,6 +129,12 @@ def _downgrade(spec):
         (_auto_review, "reach", "a gate's own agent review changed"),
         (_merge_step, "reach", "mr.merge step set to 'mr.merge'; a gate comes before it"),
         (_forge_target, "reach", "forge target 'mr.sync', which this chain did not use before"),
+        (
+            _target_used_by_a_sibling,
+            "reach",
+            "release:ship.nodes[land].tasks[open]: forge target 'mr.sync', "
+            "which this chain did not use before",
+        ),
         (_harness, "reach", "harness 'codex' -> 'claude'"),
         (_limit_raised, "reach", "limit time_cap_minutes raised, 30 -> 90"),
         (_requires, "reach", "requires changed"),
@@ -128,6 +151,7 @@ def _downgrade(spec):
         "auto-review",
         "merge-step",
         "forge-target",
+        "target-used-by-a-sibling-chain",
         "harness",
         "limit-raised",
         "requires",
@@ -151,8 +175,8 @@ def test_review_calls_out(change, section, says):
 
 @pytest.mark.parametrize(
     ("change", "section"),
-    [(_gate_after_merge, "reach"), (_build_after_gate, "content")],
-    ids=["gate-after-merge", "unguarded-nodes-swapped"],
+    [(_gate_after_merge, "reach"), (_build_after_gate, "reach"), (_tasks_swapped, "content")],
+    ids=["gate-after-merge", "work-moved-past-a-gate", "tasks-swapped-in-a-node"],
 )
 def test_a_reordered_chain_is_reviewed(change, section):
     """Nodes keyed by id show no changed fact when they only move, so the

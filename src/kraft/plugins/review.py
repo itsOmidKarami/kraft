@@ -212,7 +212,9 @@ def _chain_change(
     if last == "target":
         chain_id = path.split(".nodes[", 1)[0]
         used = {
-            v for p, v in was.chains.items() if p.startswith(chain_id) and p.endswith(".target")
+            v
+            for p, v in was.chains.items()
+            if p.startswith(f"{chain_id}.") and p.endswith(".target")
         }
         if new in _MERGES:
             node = _NODE.search(path)
@@ -251,24 +253,11 @@ def _chain_change(
     return "content", f"{path}: {_how(old, new)}"
 
 
-def _reordered(path: str, before: list[str], after: list[str], now: _Facts) -> tuple[str, str]:
+def _reordered(path: str, before: list[str], after: list[str]) -> tuple[str, str]:
     """`(section, line)` for an id-keyed list whose common entries changed
-    order. Only nodes can put a gate on the other side of a merge."""
-    chain_id = path.removesuffix(".nodes")
-    kinds = dict(now.order.get(chain_id, ()))
-
-    def guards(ids: list[str]) -> list[str]:
-        return [
-            i
-            for i in ids
-            if kinds.get(i) == "gate"
-            or any(
-                p.startswith(f"{path}[{i}].") and p.endswith(".target") and v in _MERGES
-                for p, v in now.chains.items()
-            )
-        ]
-
-    section = "reach" if path.endswith(".nodes") and guards(before) != guards(after) else "content"
+    order. A moved node runs its work on the other side of a gate or a merge;
+    tasks and steps stay inside their node."""
+    section = "reach" if path.endswith(".nodes") else "content"
     return section, f"{path}: order changed, {before} -> {after}"
 
 
@@ -295,7 +284,7 @@ def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
         before = [i for i in was.lists[path] if i in common]
         after = [i for i in now.lists[path] if i in common]
         if before != after:
-            section, line = _reordered(path, before, after, now)
+            section, line = _reordered(path, before, after)
             (reach if section == "reach" else content).append(line)
     for label, before_map, after_map in (
         ("component", was.components, now.components),
