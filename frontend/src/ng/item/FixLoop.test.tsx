@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChainNode, WorkerSession } from "../../types";
 import { detail, LOOPED, stubFetch, V1 } from "./testkit";
@@ -26,10 +26,12 @@ const mount = (path: string, it = item()) => {
   stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", payload: { node_id: "verification", cycle: 1, verdict: "continue" }, created_at: "2026-09-13T09:30:00Z" }]], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [] }] });
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes><Route path="/work-items/:id/nodes/:node" element={<Workspace item={it} version="1" reload={() => {}} />} /></Routes>
+      <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} version="1" reload={() => {}} /><Where /></>} /><Route path="*" element={<Where />} /></Routes>
     </MemoryRouter>,
   );
 };
+function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname + l.search}</output>; }
+const where = () => screen.getByTestId("where").textContent;
 const pane = (name: string) => screen.getByRole("complementary", { name: `${name} pane` });
 const sub = (name: string) => pane(name).querySelector(".pane-sub")!.textContent;
 const canvas = () => screen.getByRole("group", { name: "verification" });
@@ -210,6 +212,53 @@ describe("a node the chain ran again", () => {
     await pickPass(1);
     await userEvent.click(within(pane("plan")).getByRole("button", { name: "Retry" }));
     expect(within(screen.getByRole("group", { name: "Retry plan.write.plan" })).queryByText(/You are reading pass/)).toBeNull();
+  });
+
+  it("opens on the pass and the round its link names, as a link from the phone has them", () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&round=1&pass=1", twice());
+    expect(screen.getByRole("button", { name: /^pass 1 of 2$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^round 1 of 3$/ })).toBeInTheDocument();
+    expect(sub("code_review")).toBe("agent task · round 1 of 3 · done 4m");
+  });
+
+  it("opens on the newest when its link names a pass or a round the node does not have", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.checks.lint&round=7&pass=9", twice());
+    expect(screen.getByRole("button", { name: "pass 2 of 2 · latest" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "round 1 of 3 · latest" })).toBeInTheDocument();
+    // Nothing offers a way "back to the latest" from it, and the next pick writes what it is, not what the link said.
+    expect(screen.queryByRole("button", { name: /latest ↩/ })).toBeNull();
+    await pickPass(1);
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.checks.lint&pass=1");
+  });
+
+  it("keeps the pass and the round across a tab of the pane, and drops them back on the chain", async () => {
+    const AT = "/work-items/w1/nodes/verification";
+    mount(`${AT}?sel=verification.review.code_review&round=1&pass=1`, twice());
+    await userEvent.click(within(pane("code_review")).getByRole("tab", { name: "Log" }));
+    expect(where()).toBe(`${AT}?sel=verification.review.code_review&tab=log&round=1&pass=1`);
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    expect(where()).toBe("/work-items/w1");
+  });
+
+  it("keeps the pass and the round picked in the URL: there while the selection moves, gone on the newest and on another node", async () => {
+    const AT = "/work-items/w1/nodes/verification";
+    mount(`${AT}?sel=verification.review.code_review`, twice());
+    await pickPass(1);
+    expect(where()).toBe(`${AT}?sel=verification.review.code_review&pass=1`);
+    await pickRound(1);
+    expect(where()).toBe(`${AT}?sel=verification.review.code_review&round=1&pass=1`);
+    await userEvent.click(within(canvas()).getByRole("button", { name: /^lint/ }));
+    expect(where()).toBe(`${AT}?sel=verification.checks.lint&round=1&pass=1`);
+    // The newest round of the pass is no round in the URL; another pass has its own rounds.
+    await userEvent.click(screen.getAllByRole("button", { name: /latest ↩/ }).at(-1)!);
+    expect(where()).toBe(`${AT}?sel=verification.checks.lint&pass=1`);
+    await pickRound(1);
+    await pickPass(2);
+    expect(where()).toBe(`${AT}?sel=verification.checks.lint`);
+    // Another node's view starts on its own newest.
+    await pickPass(1);
+    await userEvent.click(within(screen.getByRole("group", { name: "Chain" })).getAllByRole("button")[0]);
+    expect(where()).toBe("/work-items/w1/nodes/plan");
   });
 
   it("names the pass in the node's own pane, and offers no setting of a node that has run", async () => {

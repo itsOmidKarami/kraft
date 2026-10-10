@@ -50,7 +50,7 @@ export function NodeRoute() {
   if (!place.node) return <Navigate to={`/work-items/${encodeURIComponent(id)}`} replace />;
   // A fix loop's own step is the desktop canvas's frame of its tasks: the phone has no screen for it, so its address opens the node.
   if (place.sel.kind === "task" && place.sel.step === FIX_LOOP && loopStepPaths(materialized(loaded.item), place.node, place.sel.task).length)
-    return <Navigate to={placeUrl(id, { node: place.node, sel: { kind: "node", node: place.node } })} replace />;
+    return <Navigate to={placeUrl(id, { node: place.node, sel: { kind: "node", node: place.node }, round: place.round, pass: place.pass })} replace />;
   // An earlier pass of the node is read off the item as that pass left it. A task and a scope are all of one pass;
   // the node screen keeps the item as it stands for its strip, its state and its buttons.
   const seen = asOfPass(loaded.item, place.node, place.pass);

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario } from "./mocks/fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withStop, withTestResult } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
@@ -221,6 +221,34 @@ const ROWS: Row[] = [
       await expect(card.getByText("continues thread 1 (turn 3)", { exact: false })).toBeVisible();
       await card.getByRole("checkbox", { name: /new thread/i }).check();
       await expect(card.getByText("starts thread 2", { exact: false })).toBeVisible();
+    },
+  },
+  {
+    name: "item page: a link opens a node on the pass it names, and the pickers keep the pass and the round in the address [decided]",
+    run: async (p) => {
+      const query = () => new URL(p.url()).search;
+      // The node ran twice; a link from a phone names the earlier pass.
+      await app(p, item("running", "/nodes/verification?pass=1"), { tweak: withScopes });
+      await expect(p.getByRole("button", { name: /^pass 1 of 2$/ })).toBeVisible();
+      await p.getByRole("button", { name: /latest ↩/ }).click();
+      await expect(p.getByRole("button", { name: "pass 2 of 2 · latest" })).toBeVisible();
+      expect(query()).toBe("");
+      await p.getByRole("button", { name: /^round \d/ }).click();
+      await p.getByRole("menuitemradio", { name: /^Round 1/ }).click();
+      await expect.poll(query).toBe("?round=1");
+      // Picking is not a step in history: Back leaves the node, it does not walk the picks.
+      await p.goBack();
+      await expect.poll(() => new URL(p.url()).pathname).not.toMatch(/nodes\/verification/);
+    },
+  },
+  {
+    name: "item page: a link opens a node on the round it names [decided]",
+    run: async (p) => {
+      await app(p, item("running", "/nodes/verification?round=1"), { tweak: withScopes });
+      await expect(p.getByRole("button", { name: /^round 1( of \d+)?$/ })).toBeVisible();
+      await p.getByRole("button", { name: /latest ↩/ }).click();
+      await expect(p.getByRole("button", { name: /^round 2.* · latest$/ })).toBeVisible();
+      expect(new URL(p.url()).search).toBe("");
     },
   },
   {
