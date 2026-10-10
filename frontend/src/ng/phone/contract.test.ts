@@ -28,6 +28,7 @@ const ALLOWED = [
   "item/chainName",
   "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
+  "item/scopeView", // isScopeTask and scopesView: a changed-test-scope task's scopes in a round, as the desktop's frame reads them
   "item/graph",
   "item/cause", // failedFix, the forge login words and the work-kept line: a failed card says one thing on both layouts (R15b-01)
   "item/TestsLine", // the gate's last test run, one line, as the desktop's gate pane reads it (R15b-01)

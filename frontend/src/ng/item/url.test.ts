@@ -43,6 +43,13 @@ describe("item URL", () => {
     expect(readPlace("verification", q("sel=verification.escalation.escalation&tab=thread"), nodes).sel).toEqual({ kind: "task", node: "verification", step: "escalation", task: "escalation" });
   });
 
+  it("round-trips the fix-loop round a node view shows, and reads no round that is not a count", () => {
+    const sel = { kind: "task", node: "verification", step: "checks", task: "lint" } as const;
+    expect(readPlace("verification", q("sel=verification.checks.lint&round=2"), nodes)).toMatchObject({ sel, round: 2 });
+    expect(placeUrl("w1", { node: "verification", sel, round: 2 })).toBe("/work-items/w1/nodes/verification?sel=verification.checks.lint&round=2");
+    expect(readPlace("verification", q("round=0"), nodes).round).toBeUndefined();
+  });
+
   it("round-trips a gate's reviewer as <gate>.auto_review, and reads it on no other node", () => {
     const sel = { kind: "task", node: "final_review", step: "auto_review", task: "auto_review" } as const;
     expect(readPlace("final_review", q("sel=final_review.auto_review&tab=log&attempt=2"), gated)).toMatchObject({ sel, tab: "log", attempt: 2 });

@@ -32,6 +32,7 @@ export function parentOf(href: string): string | null {
       if (q.has("sel")) {
         q.delete("sel");
         q.delete("attempt");
+        q.delete("scope");
         q.delete("tab");
         return join(pathname, q);
       }
