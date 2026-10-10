@@ -224,7 +224,7 @@ const ROWS: Row[] = [
     },
   },
   {
-    name: "item page: a link opens a node on the pass and the round it names, and the pickers keep them in the address [decided]",
+    name: "item page: a link opens a node on the pass it names, and the pickers keep the pass and the round in the address [decided]",
     run: async (p) => {
       const query = () => new URL(p.url()).search;
       // The node ran twice; a link from a phone names the earlier pass.
@@ -239,6 +239,16 @@ const ROWS: Row[] = [
       // Picking is not a step in history: Back leaves the node, it does not walk the picks.
       await p.goBack();
       await expect.poll(() => new URL(p.url()).pathname).not.toMatch(/nodes\/verification/);
+    },
+  },
+  {
+    name: "item page: a link opens a node on the round it names [decided]",
+    run: async (p) => {
+      await app(p, item("running", "/nodes/verification?round=1"), { tweak: withScopes });
+      await expect(p.getByRole("button", { name: /^round 1( of \d+)?$/ })).toBeVisible();
+      await p.getByRole("button", { name: /latest ↩/ }).click();
+      await expect(p.getByRole("button", { name: /^round 2.* · latest$/ })).toBeVisible();
+      expect(new URL(p.url()).search).toBe("");
     },
   },
   {

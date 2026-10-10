@@ -153,9 +153,10 @@ describe("the node screen (D)", () => {
   it("opens the node for a link to a fix loop's own step, which only the desktop canvas draws", async () => {
     const V = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n));
     // LOOPED's loop is written as tasks, so its one step is `main`.
-    mount(item("running", null, { materialized_chain: LOOPED, chain_definition: { template_id: "default", nodes: V } }), "/work-items/w1/nodes/verification?sel=verification.fix_loop.main");
+    mount(item("running", null, { materialized_chain: LOOPED, chain_definition: { template_id: "default", nodes: V } }), "/work-items/w1/nodes/verification?sel=verification.fix_loop.main&tab=log&round=1&pass=1");
     await screen.findByRole("heading", { level: 1, name: "verification" });
-    expect(where()).toBe("/work-items/w1/nodes/verification");
+    // The round and the pass a desktop link names are the node's too: they stay.
+    expect(where()).toBe("/work-items/w1/nodes/verification?round=1&pass=1");
   });
 
   it("reads a looping node in words: the round of its attempts, the wall clock, and named recovery", async () => {

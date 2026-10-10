@@ -869,11 +869,14 @@ function scoped(b: ItemBundle) {
     b.logs[s.id] = b.logs[of.id];
     return s;
   };
-  const api = copy(tests.at(-1), 1, { command: "just test-api" });
-  const old = copy(tests[0], 2, { pass: 1, status: "failed", attempt: 0, created_at: new Date(Date.parse(tests[0].created_at) - 3_600_000).toISOString() });
+  const later = (of: any, ms: number) => new Date(Date.parse(of.created_at) + ms).toISOString();
+  // Attempts count up per hook point over every pass and round, as the server numbers them.
+  const old = copy(tests[0], 2, { pass: 1, status: "failed", attempt: 1, created_at: later(tests[0], -3_600_000) });
+  tests.forEach((s: any, i: number) => { s.attempt = i + 2; });
+  const api = copy(tests.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(tests.at(-1), 1000) });
   b.item.scope_runs = [old, ...tests, api].map((s: any) => ({
     session_id: s.id, node_id: "verification", hook_point: path, repository: null, round: s.round, pass: s.pass, command: s.command,
-    passed: s.status === "done", scope: s.command === "just test-api" ? "api/**" : "tests/**", order: s.command === "just test-api" ? 1 : 0,
+    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true, scope: s.command === "just test-api" ? "api/**" : "tests/**", order: s.command === "just test-api" ? 1 : 0,
   }));
   b.item.node_passes = { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] };
 }

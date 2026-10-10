@@ -26,7 +26,7 @@ const mount = (path: string, it = item()) => {
   stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", payload: { node_id: "verification", cycle: 1, verdict: "continue" }, created_at: "2026-09-13T09:30:00Z" }]], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [] }] });
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} version="1" reload={() => {}} /><Where /></>} /></Routes>
+      <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} version="1" reload={() => {}} /><Where /></>} /><Route path="*" element={<Where />} /></Routes>
     </MemoryRouter>,
   );
 };
@@ -221,10 +221,23 @@ describe("a node the chain ran again", () => {
     expect(sub("code_review")).toBe("agent task · round 1 of 3 · done 4m");
   });
 
-  it("opens on the newest when its link names a pass or a round the node does not have", () => {
+  it("opens on the newest when its link names a pass or a round the node does not have", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.checks.lint&round=7&pass=9", twice());
     expect(screen.getByRole("button", { name: "pass 2 of 2 · latest" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "round 1 of 3 · latest" })).toBeInTheDocument();
+    // Nothing offers a way "back to the latest" from it, and the next pick writes what it is, not what the link said.
+    expect(screen.queryByRole("button", { name: /latest ↩/ })).toBeNull();
+    await pickPass(1);
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.checks.lint&pass=1");
+  });
+
+  it("keeps the pass and the round across a tab of the pane, and drops them back on the chain", async () => {
+    const AT = "/work-items/w1/nodes/verification";
+    mount(`${AT}?sel=verification.review.code_review&round=1&pass=1`, twice());
+    await userEvent.click(within(pane("code_review")).getByRole("tab", { name: "Log" }));
+    expect(where()).toBe(`${AT}?sel=verification.review.code_review&tab=log&round=1&pass=1`);
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    expect(where()).toBe("/work-items/w1");
   });
 
   it("keeps the pass and the round picked in the URL: there while the selection moves, gone on the newest and on another node", async () => {

@@ -112,8 +112,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     const next = paneReducer(state, a);
     setPane({ open: next.open, userCollapsed: next.userCollapsed });
     const moved = JSON.stringify(next.sel) !== JSON.stringify(place.sel) || next.node !== place.node;
-    // The pass and the fix-loop round shown are the node view's: they stay while the selection moves inside it, and another node has its own.
-    const stays = next.level === "node" && next.node === place.node;
+    // The pass and the fix-loop round shown are the node view's: they stay while the selection moves inside it, and
+    // another node has its own. The chain view has neither: `placeUrl` writes them only with a node.
+    const stays = next.node === place.node;
     go({ node: next.level === "node" ? next.node : undefined, sel: next.sel, tab: moved ? undefined : place.tab, attempt: moved ? undefined : place.attempt, round: stays ? place.round : undefined, pass: stays ? place.pass : undefined, ...extra });
   };
   // One Escape for the whole page (WI-1, the prototype's `key()`): what is open over the page takes
