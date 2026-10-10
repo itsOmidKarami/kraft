@@ -30,7 +30,7 @@ export const RESOLVED = {
   },
   escalation: { auto_escalate_stuck: leaf(true), auto_escalate_stuck_cap: leaf(3), auto_escalate_delay_s: leaf(0), auto_review_attempts: leaf(1) },
   retries: { rate_limit_retries: leaf(5), forge_cli_timeout_s: leaf(120) },
-  housekeeping: { max_concurrent: leaf(5), archive_after_days: leaf(30), storage_limit: leaf(null), storage_quota: leaf(null), storage_quota_default: null },
+  housekeeping: { max_concurrent: leaf(5), archive_after_days: leaf(30), storage_limit: leaf(null), storage_quota: leaf(null), storage_quota_default: null, storage_auto_cleanup: leaf(null) },
   findings: { loop_severities: leaf(["critical", "important"]) },
 } as unknown as PolicyResolved;
 

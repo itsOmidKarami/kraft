@@ -225,6 +225,22 @@ describe("Policy page: Housekeeping", () => {
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "housekeeping", key: "storage.worktrees.quota", value: "5G" }));
   });
 
+  it("reads automatic clean-up as off, or as its age and what it does, and sends an age", async () => {
+    mount("/settings/policy/housekeeping");
+    await screen.findByRole("region", { name: "Storage" });
+    expect(screen.getByRole("button", { name: /^automatic clean-up, off/ })).toBeInTheDocument();
+    await edit(/^automatic clean-up, off/, "2D");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "housekeeping", key: "storage.worktrees.auto_cleanup.min_age", value: "2d" }));
+  });
+
+  it("says what an age of 24h means", async () => {
+    const on = { ...RESOLVED, housekeeping: { ...RESOLVED.housekeeping, storage_auto_cleanup: { value: "24h", source: "policy" } } };
+    vi.spyOn(d, "getDraft").mockImplementation(() => ok(policyView({}, on as never)));
+    mount("/settings/policy/housekeeping");
+    expect(await screen.findByRole("button", { name: /^automatic clean-up, 24h/ })).toBeInTheDocument();
+    expect(screen.getByText(/ended 24h ago or more/)).toBeInTheDocument();
+  });
+
   it("says how many slots are in use, from the count the server gives", async () => {
     mount("/settings/policy/housekeeping");
     expect(await screen.findByText(/3 of 5 slots in use now/)).toBeInTheDocument();

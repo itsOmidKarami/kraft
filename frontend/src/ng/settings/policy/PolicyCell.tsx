@@ -3,7 +3,7 @@ import type { Change, Problem } from "../../templates/draft/types";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { ValueCell } from "../../templates/draft/ValueCell";
 import type { KeySpec } from "./keys";
-import { parse, parseSize, raw, show } from "./units";
+import { parse, parseAge, parseSize, raw, show } from "./units";
 
 /** `set_value` for one key; null on success, the server's refusal's message otherwise.
  *  A problem the value creates is not a refusal: the draft holds it, the page shows it
@@ -23,7 +23,7 @@ export function PolicyCell({ draft, k, label, value, bound, placeholder, change,
   draft: ConfigDraft;
   k: KeySpec;
   label: string;
-  /** A size (`10G`) is text; every other unit is a number. */
+  /** A size (`10G`) or an age (`24h`) is text; every other unit is a number. */
   value: number | string | null;
   /** An unset value reads "no bound", not "not set". */
   bound?: boolean;
@@ -33,9 +33,9 @@ export function PolicyCell({ draft, k, label, value, bound, placeholder, change,
   problem?: Problem;
   inherited?: string | null;
 }) {
-  const size = k.unit === "size";
+  const size = k.unit === "size" || k.unit === "age";
   const commit = (text: string) => {
-    const p = size ? parseSize(text) : parse(k.unit, text, k.zero);
+    const p = k.unit === "size" ? parseSize(text) : k.unit === "age" ? parseAge(text) : parse(k.unit, text, k.zero);
     return "error" in p ? p.error : setValue(draft, k, p.value);
   };
   const num = typeof value === "number" ? value : null;

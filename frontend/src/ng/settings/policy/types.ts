@@ -45,7 +45,7 @@ export interface PolicyResolved {
   };
   escalation: Record<string, Leaf>;
   retries: Record<string, Leaf>;
-  housekeeping: { max_concurrent: Leaf<number>; archive_after_days: Leaf<number>; storage_limit: Leaf<string>; storage_quota: Leaf<string>; storage_quota_default: string | null };
+  housekeeping: { max_concurrent: Leaf<number>; archive_after_days: Leaf<number>; storage_limit: Leaf<string>; storage_quota: Leaf<string>; storage_quota_default: string | null; storage_auto_cleanup: Leaf<string> };
   findings: { loop_severities: Leaf<string[]> };
 }
 
@@ -69,4 +69,4 @@ export const CAP_LABEL: Record<string, { name: string; unit: Unit }> = {
   budget_usd: { name: "dollars", unit: "usd" },
   token_budget: { name: "tokens", unit: "tok" },
 };
-export type Unit = "min" | "usd" | "tok" | "days" | "s" | "count" | "s-as-min" | "size";
+export type Unit = "min" | "usd" | "tok" | "days" | "s" | "count" | "s-as-min" | "size" | "age";

@@ -37,6 +37,13 @@ export function parse(unit: Unit, text: string, zero = false): { value: number |
   return Number.isInteger(n) ? { value: n } : { error: "Enter a whole number." };
 }
 
+/** A clean-up age as `policy.yaml` writes it (`24h`, `2d`): blank turns it off. */
+export function parseAge(text: string): { value: string | null } | { error: string } {
+  const typed = text.trim();
+  if (!typed) return { value: null };
+  return /^(0|[1-9]\d*)[hd]$/i.test(typed) ? { value: typed.toLowerCase() } : { error: "Enter hours or days: 12h, 24h, 2d." };
+}
+
 /** A storage size as `policy.yaml` writes it (`10G`): blank clears; anything else needs a whole number and a unit. */
 export function parseSize(text: string): { value: string | null } | { error: string } {
   const typed = text.trim();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { capKey, KEYS, SEVERITY_KEY, STUCK_KEY } from "./keys";
 import { sectionOfKey, sectionOfProblem, SECTIONS } from "./sections";
-import { parse, parseSize, raw, show } from "./units";
+import { parse, parseAge, parseSize, raw, show } from "./units";
 
 describe("Policy sections", () => {
   it("puts every key the page edits in exactly one section", () => {
@@ -62,6 +62,18 @@ describe("Policy numbers", () => {
     expect(parse("min", "1.5")).toEqual({ error: "Enter a whole number." });
     expect(parse("s-as-min", "2")).toEqual({ value: 120 });
     expect(raw("s-as-min", 3600)).toBe("60");
+  });
+});
+
+describe("a clean-up age", () => {
+  it.each([["24H", "24h"], [" 2d ", "2d"], ["0h", "0h"]])("%s is sent as %s", (typed, sent) => {
+    expect(parseAge(typed)).toEqual({ value: sent });
+  });
+  it("blank turns automatic clean-up off", () => {
+    expect(parseAge("")).toEqual({ value: null });
+  });
+  it.each(["24", "1w", "90m", "1.5d"])("%s is refused with the fix", (typed) => {
+    expect(parseAge(typed)).toEqual({ error: "Enter hours or days: 12h, 24h, 2d." });
   });
 });
 
