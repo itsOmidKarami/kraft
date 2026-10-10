@@ -555,13 +555,17 @@ def update(
                 reviewed = review_mod.review(plugin_id, None, extracted)
             if old is None and locked is not None:
                 # Still an update, and one nobody can compare: said first, and held.
-                unread = f"the installed {locked.version} could not be read to compare with"
+                said = [f"the installed {locked.version} could not be read to compare with"]
+                # The lock still knows the version: a step back is said as ever.
+                if review_mod.precedence(found.version) < review_mod.precedence(locked.version):
+                    said.append(f"downgrade: {locked.version} -> {found.version}")
                 reviewed = replace(
-                    reviewed, old_version=locked.version, reach=(unread, *reviewed.reach)
+                    reviewed, old_version=locked.version, reach=(*said, *reviewed.reach)
                 )
             if locked is not None and _moved(collection, locked):
                 was = fetch.redact(locked.git) if locked.git else "a local directory"
-                moved = f"collection URL changed: {was} -> " + (fetch.redact(collection.git or ""))
+                now = fetch.redact(collection.git) if collection.git else "a local directory"
+                moved = f"collection URL changed: {was} -> {now}"
                 reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
             root = Path(scratch) / digest.removeprefix("sha256:")

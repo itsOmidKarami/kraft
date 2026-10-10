@@ -291,8 +291,12 @@ def test_a_lock_that_recorded_no_url_is_not_a_moved_collection(acme):
     assert _run(home)[ID].outcome == "current"
 
 
-@pytest.mark.parametrize("stored", ["{", "[]", None], ids=["not-json", "not-an-object", "gone"])
-def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme, stored):
+@pytest.mark.parametrize(
+    ("stored", "version"),
+    [("{", "1.1.0"), ("[]", "1.1.0"), (None, "1.1.0"), ("{", "0.9.0")],
+    ids=["not-json", "not-an-object", "gone", "a-step-back"],
+)
+def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme, stored, version):
     """Everything is then shown as new: the review says the comparison is
     missing, as its first line, and that line is why an auto-update holds."""
     repo, home = acme
@@ -305,11 +309,12 @@ def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme, stored
         manifest_file.parent.chmod(0o755)
         manifest_file.chmod(0o644)
         manifest_file.write_text(stored)
-    publish(repo, "release", version="1.1.0", library={"tasks": {"base": AGENT, "more": AGENT}})
+    publish(repo, "release", version=version, library={"tasks": {"base": AGENT, "more": AGENT}})
 
     found = _run(home)[ID].review
 
     unread = "the installed 1.0.0 could not be read to compare with"
+    assert ("downgrade: 1.0.0 -> 0.9.0" in found.reach) is (version == "0.9.0")
     assert (found.old_version, found.reach[0]) == ("1.0.0", unread)
     assert update.may_apply_unattended(found).startswith(unread)
 
