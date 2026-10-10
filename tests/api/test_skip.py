@@ -264,6 +264,38 @@ def _stopped_in_verification(client, repo):
     return wid
 
 
+def _park_two(client, wid):
+    """Two sessions of `verification` parked on an external wait: `s-in` under
+    the `review` step, `s-out` under `tests`."""
+    from kraft import store
+
+    db = client.app.state.db
+
+    async def park():
+        for sid, hook in (
+            ("s-in", "verification.review.code_review"),
+            ("s-out", "verification.tests.test_changed_scopes"),
+        ):
+            await db.write(
+                lambda c, sid=sid, hook=hook: store.create_session(
+                    c,
+                    id=sid,
+                    work_item_id=wid,
+                    node_id="verification",
+                    hook_point=hook,
+                    log_path="/l",
+                    result_path="/r",
+                )
+            )
+            await db.write(
+                lambda c, sid=sid: c.execute(
+                    "UPDATE worker_sessions SET status = 'waiting' WHERE id = ?", (sid,)
+                )
+            )
+
+    client.portal.call(park)
+
+
 @pytest.fixture
 def walked(monkeypatch):
     """What `executor.run` was handed, instead of walking it."""
@@ -287,8 +319,10 @@ def test_skipping_a_task_or_step_records_it_and_walks_on_from_the_cursor(
 ):
     """A stopped item is walked again from where it stands, the skipped scope
     now counted done (tests/executor/test_skip_scopes.py). The node itself is
-    not skipped."""
+    not skipped. A session the scope left parked on an external wait is closed
+    with it, and a sibling's is not: nothing will ever settle that wait now."""
     wid = _stopped_in_verification(client, repo)
+    _park_two(client, wid)
 
     r = client.post(f"/api/work-items/{wid}/skip", json={"path": path, "note": "known"})
 
@@ -303,6 +337,24 @@ def test_skipping_a_task_or_step_records_it_and_walks_on_from_the_cursor(
         {"path": path, "note": "known"}
     ]
     assert not [e for e in evts if e["type"] == "node_skipped"]
+    item = client.get(f"/api/work-items/{wid}").json()
+    sessions = {s["id"]: (s["status"], s["skipped"]) for s in item["worker_sessions"]}
+    assert sessions == {"s-in": ("paused", True), "s-out": ("waiting", False)}
+    assert item["skipped_paths"] == [path]
+
+
+def test_skipping_a_node_closes_the_sessions_it_left_parked(client, repo, walked):
+    """A node skipped while parked on an external wait: no walk observes that
+    wait again, so its sessions are closed and read as skipped."""
+    wid = _stopped_in_verification(client, repo)
+    _park_two(client, wid)
+
+    r = client.post(f"/api/work-items/{wid}/skip", json={})
+
+    assert r.status_code == 200, r.text
+    item = client.get(f"/api/work-items/{wid}").json()
+    sessions = {s["id"]: (s["status"], s["skipped"]) for s in item["worker_sessions"]}
+    assert sessions == {"s-in": ("paused", True), "s-out": ("paused", True)}
 
 
 def test_skipping_a_task_stops_only_its_own_session(client, repo, monkeypatch):

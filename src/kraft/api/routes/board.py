@@ -1017,6 +1017,27 @@ def budget_cap(st, row) -> dict:
     }
 
 
+def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> list[dict]:
+    """The item's sessions as the API gives them. `skipped` marks the newest
+    session of a task under a skipped path, or of a node skipped after it
+    began, unless it had already finished: its stored status is only where the
+    skip found it."""
+    newest = {s["hook_point"]: s["id"] for s in sessions}
+
+    def cut_short(s) -> bool:
+        hook = s["hook_point"]
+        return (
+            newest[hook] == s["id"]
+            and not s["status"].startswith("done")
+            and (
+                any(hook == p or hook.startswith(p + ".") for p in skipped)
+                or s["created_at"] < nodes.get(s["node_id"], "")
+            )
+        )
+
+    return [{**{k: s[k] for k in s.keys()}, "skipped": cut_short(s)} for s in sessions]
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -1028,6 +1049,8 @@ async def get_work_item(wid: str, request: Request):
             "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
         ).fetchall()
     )
+    skipped = st.db.read(lambda c: store.skipped_paths(c, wid))
+    skipped_nodes = st.db.read(lambda c: store.skipped_nodes(c, wid))
     pending = _pending_gate(st, wid)
     stop_payload, escalated = _stop_episode(st, wid)
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
@@ -1062,7 +1085,10 @@ async def get_work_item(wid: str, request: Request):
         "running_time": st.db.read(lambda c: caps.running_time(c, row)),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
-        "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
+        "worker_sessions": _sessions_out(sessions, skipped, skipped_nodes),
+        # Every task or step path a person skipped in this run: a task under
+        # one that never ran has no session to carry `skipped`.
+        "skipped_paths": sorted(skipped),
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), kept once it
         # stops on the implementation node or finishes it; None before that node

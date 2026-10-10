@@ -298,6 +298,8 @@ export interface WorkItem {
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
    *  from `deferred_findings`: these are critical/important, not minor ones
    *  that never entered the loop. Only on the detail endpoint. */
+  /** Task and step paths skipped in this run. */
+  skipped_paths?: string[];
   judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
   /** `done_with_concerns` text from every session that reported one; only on the detail endpoint. */
   concerns?: string[];
@@ -418,6 +420,8 @@ export interface WorkerSession {
   node_id: string;
   hook_point: string;
   status: SessionStatus;
+  /** A person skipped its task before it finished: `status` is only where the skip found it. */
+  skipped?: boolean;
   attempt: number;
   /** 1-based; restarts only across a `new_thread` escalation (Kraft-dkb6g).
    *  Every non-escalation session is implicitly thread 1 for its whole life. */
