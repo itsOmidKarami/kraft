@@ -178,6 +178,29 @@ describe("a node the chain ran again", () => {
     expect(screen.getByRole("button", { name: "round 2 of 3 · latest" })).toBeInTheDocument();
   });
 
+  it("says in a retry's confirm that it is not the earlier pass on screen that runs again", async () => {
+    const stopped = { ...twice(), display_status: "needs_you" as const, stop: { kind: "stuck" as const, node: "verification", resume_at: null, reason: null }, worker_sessions: twice().worker_sessions.map((x) => ({ ...x, status: x.status === "running" ? ("failed" as const) : x.status })) };
+    mount("/work-items/w1/nodes/verification", stopped);
+    const confirm = async () => {
+      await userEvent.click(within(pane("verification")).getByRole("button", { name: "Retry" }));
+      return screen.getByRole("group", { name: "Retry verification" });
+    };
+    // On the pass the node is on there is nothing to say.
+    expect(within(await confirm()).queryByText(/You are reading pass/)).toBeNull();
+    await userEvent.click(within(screen.getByRole("group", { name: "Retry verification" })).getByRole("button", { name: "Cancel" }));
+    await pickPass(1);
+    expect(within(await confirm()).getByText("You are reading pass 1. The retry runs on the node as it stands now, and pass 1 stays as it is.")).toBeInTheDocument();
+  });
+
+  it("says nothing of a pass in the retry of another node's task, which a link can select under this node's view", async () => {
+    const base = twice();
+    const stopped = { ...base, display_status: "needs_you" as const, stop: { kind: "stuck" as const, node: "verification", resume_at: null, reason: null }, worker_sessions: [sess("plan.write.plan", { node_id: "plan" }), ...base.worker_sessions.map((x) => ({ ...x, status: x.status === "running" ? ("failed" as const) : x.status }))] };
+    mount("/work-items/w1/nodes/verification?sel=plan.write.plan", stopped);
+    await pickPass(1);
+    await userEvent.click(within(pane("plan")).getByRole("button", { name: "Retry" }));
+    expect(within(screen.getByRole("group", { name: "Retry plan.write.plan" })).queryByText(/You are reading pass/)).toBeNull();
+  });
+
   it("names the pass in the node's own pane, and offers no setting of a node that has run", async () => {
     mount("/work-items/w1/nodes/verification?tab=config", twice());
     expect(sub("verification")).toMatch(/^exec node · running/);
