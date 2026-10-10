@@ -15,3 +15,12 @@
 .set-st-list { margin: 0 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
 .set-st-li { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
 .set-st-li-title { font-weight: 500; }
+.set-st-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.set-st-table th { padding: 4px 8px; text-align: left; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+.set-st-table .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.set-st-table tr.is-orphan td { color: var(--text-muted); }
+.set-st-title { color: var(--text); text-decoration: none; }
+.set-st-title:hover { text-decoration: underline; }
+.set-st-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.set-st-tag { font-size: 10.5px; color: var(--text-muted); }

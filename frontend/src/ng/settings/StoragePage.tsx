@@ -1,10 +1,11 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ago } from "../../format";
+import { ago, plural } from "../../format";
 import { humanSize } from "../../sizes";
 import type { StorageUsage } from "../../types";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
+import { CleanupDialog } from "./CleanupDialog";
 import { Block } from "./parts";
 import "./settings.css";
 import "./storage.css";
@@ -28,23 +29,42 @@ export function StoragePage() {
   const [data, setData] = useState<StorageUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [measuring, setMeasuring] = useState(true);
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [cleaning, setCleaning] = useState<string[] | null>(null);
+  const refreshBtn = useRef<HTMLButtonElement>(null);
+  const rescueFocus = useRef(false);
 
-  const load = useCallback(async (refresh: boolean) => {
-    setMeasuring(true);
+  // `quiet`: the re-read after a clean-up. The server answers from its cache, so
+  // nothing says "measuring" and Refresh stays a button focus can return to.
+  const load = useCallback(async (refresh: boolean, quiet = false) => {
+    if (!quiet) setMeasuring(true);
     const r = await request<StorageUsage>(`/storage${refresh ? "?refresh=1" : ""}`);
     setMeasuring(false);
     // A failed read keeps the last figures: they are older, not wrong.
     if (r.status !== 200) return setError(detailOf(r.body));
     setError(null);
     setData(r.body);
+    // A row that stopped being reclaimable (archived here or elsewhere) cannot stay ticked.
+    const open = new Set(r.body.items.filter((i) => i.reclaimable).map((i) => i.id));
+    setChecked((c) => new Set([...c].filter((id) => open.has(id))));
   }, []);
   useEffect(() => void load(false), [load]);
+  // The dialog hands focus back to the button that opened it, and the re-read after
+  // a clean-up then disables that button (its rows are archived): Refresh takes it.
+  useEffect(() => {
+    const at = document.activeElement as HTMLButtonElement | null;
+    if (rescueFocus.current && (!at || at === document.body || at.disabled)) refreshBtn.current?.focus();
+    rescueFocus.current = false;
+  }, [data]);
 
   const used = data?.used_bytes ?? 0;
   const limit = data?.limit_bytes ?? null;
   // The bar runs to whichever is larger, so a figure over the limit still fits with the limit marked inside it.
   const scale = Math.max(used, limit ?? 0) || 1;
   const pct = (n: number) => `${Math.min(100, Math.round((n / scale) * 1000) / 10)}%`;
+
+  const reclaimable = data?.items.filter((i) => i.reclaimable) ?? [];
+  const toggle = (id: string) => setChecked((c) => { const n = new Set(c); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // One live region, always mounted: a screen reader hears a change in it, not a relabelled button.
   const note =
@@ -84,7 +104,7 @@ export function StoragePage() {
             )}
             <p className={`set-st-note${!measuring && data?.state === "held" ? " is-held" : !measuring && data?.state === "over_quota" ? " is-warn" : ""}`} role="status">{note}</p>
             <div className="set-st-actions">
-              <Button disabled={measuring} onClick={() => void load(true)}>{measuring ? "Measuring…" : "Refresh"}</Button>
+              <Button ref={refreshBtn} disabled={measuring} onClick={() => void load(true)}>{measuring ? "Measuring…" : "Refresh"}</Button>
             </div>
           </div>
         </Block>
@@ -101,6 +121,54 @@ export function StoragePage() {
             </dl>
           </Block>
         )}
+
+        {data && (
+          <Block id="set-st-worktrees" title="Worktrees" card aside={plural(data.items.length, "item")}>
+            <div className="set-st-body">
+              <div className="set-st-actions">
+                <Button disabled={!checked.size} onClick={() => setCleaning([...checked])}>Clean up selected</Button>
+                <Button disabled={!reclaimable.length} onClick={() => setCleaning(reclaimable.map((i) => i.id))}>
+                  Clean up all reclaimable ({reclaimable.length}, {humanSize(data.reclaimable_bytes)})
+                </Button>
+                <span className="set-hint">{checked.size} selected</span>
+              </div>
+              {!reclaimable.length && <p className="set-hint">Nothing to clean up: no finished item holds a worktree. A running item is paused or abandoned from its own page.</p>}
+              <table className="set-st-table" aria-label="Worktrees by size">
+                <thead>
+                  <tr>
+                    <th scope="col"><span className="adr-sr">Select</span></th>
+                    <th scope="col">Work item</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="is-num">Size</th>
+                    <th scope="col">Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((i) => (
+                    <tr key={i.id}>
+                      <td>{i.reclaimable && <input type="checkbox" className="board-check" checked={checked.has(i.id)} onChange={() => toggle(i.id)} aria-label={`Select ${i.title}`} />}</td>
+                      <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
+                      <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> reclaimable</span>}</td>
+                      <td className="is-num">{humanSize(i.bytes)}</td>
+                      <td>{ago(i.updated_at)}</td>
+                    </tr>
+                  ))}
+                  {data.orphans.map((o) => (
+                    <tr key={`orphan-${o.name}`} className="is-orphan">
+                      <td />
+                      <td className="set-mono">{o.name}</td>
+                      <td>no work item</td>
+                      <td className="is-num">{humanSize(o.bytes)}</td>
+                      <td />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {data.orphans.length > 0 && <p className="set-hint">A folder with no work item is listed so you can see where the space went. Kraft removes nothing here for it.</p>}
+            </div>
+          </Block>
+        )}
+        {cleaning && data && <CleanupDialog ids={cleaning} usage={data} onClose={() => setCleaning(null)} onDone={() => { rescueFocus.current = true; void load(false, true); }} />}
       </div>
     </div>
   );

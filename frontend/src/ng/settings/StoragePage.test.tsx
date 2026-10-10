@@ -1,10 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../../api";
 import { holdFetch, stubFetch } from "../item/testkit";
 import { StoragePage } from "./StoragePage";
-import { GB, storageUsage } from "./testkit";
+import { bulkOk, GB, storagePreview, storageUsage } from "./testkit";
 
 const mount = () =>
   render(
@@ -88,5 +89,102 @@ describe("Settings › Storage, usage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("the walk failed");
     expect(screen.getByText(/12G used/)).toBeInTheDocument();
+  });
+});
+
+describe("Settings › Storage, worktrees", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const rows = () => within(screen.getByRole("table", { name: "Worktrees by size" })).getAllByRole("row").slice(1);
+
+  it("lists one row per worktree in the server's order, then the orphans, each item linking to its page", async () => {
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    mount();
+    await screen.findByRole("table");
+    expect(rows().map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["Rate limiter", "Cache embeddings", "Old spike", "7f3a"]);
+    const [live, finished] = rows();
+    expect(within(live).getAllByRole("cell").map((c) => c.textContent)).toEqual(["", "Rate limiter", "active", "6G", "1d ago"]);
+    expect(within(finished).getByText(/completed/)).toHaveTextContent(/completed.*reclaimable/);
+    expect(screen.getByRole("link", { name: "Rate limiter" })).toHaveAttribute("href", "/work-items/w3");
+  });
+
+  it("lets only reclaimable rows be selected and lists an orphan read-only", async () => {
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    mount();
+    await screen.findByRole("table");
+    expect(screen.getAllByRole("checkbox").map((c) => c.getAttribute("aria-label"))).toEqual(["Select Cache embeddings", "Select Old spike"]);
+    const orphan = rows().at(-1) as HTMLElement;
+    expect(orphan).toHaveTextContent("7f3a");
+    expect(orphan).toHaveTextContent("no work item");
+    expect(orphan).toHaveTextContent("512M");
+    expect(within(orphan).queryByRole("checkbox")).toBeNull();
+    expect(within(orphan).queryByRole("link")).toBeNull();
+  });
+
+  it("enables Clean up selected once something is ticked, and counts what Clean up all would take", async () => {
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    mount();
+    const selected = await screen.findByRole("button", { name: "Clean up selected" });
+    expect(selected).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clean up all reclaimable (2, 3G)" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Old spike" }));
+    expect(selected).toBeEnabled();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+  });
+
+  it("has nothing to clean up when no finished item holds a worktree", async () => {
+    const live = storageUsage().items.filter((i) => !i.reclaimable);
+    stubFetch({ "GET /storage": [200, storageUsage({ items: live, reclaimable_bytes: 0 })] });
+    mount();
+    const all = await screen.findByRole("button", { name: "Clean up all reclaimable (0, 0K)" });
+    expect(all).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clean up selected" })).toBeDisabled();
+    expect(screen.getByText(/Nothing to clean up: no finished item holds a worktree/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
+  it("drops a ticked row that a refresh no longer shows as reclaimable", async () => {
+    const answers: Record<string, [number, unknown]> = { "GET /storage": [200, storageUsage()] };
+    stubFetch(answers);
+    mount();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Select Cache embeddings" }));
+    expect(screen.getByRole("button", { name: "Clean up selected" })).toBeEnabled();
+    const after = storageUsage();
+    after.items[1] = { ...after.items[1], archived: true, reclaimable: false };
+    answers["GET /storage"] = [200, after];
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.queryByRole("checkbox", { name: "Select Cache embeddings" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Clean up selected" })).toBeDisabled();
+  });
+
+  it("previews the ticked rows, archives them on confirm, reads the page again and keeps focus on the page", async () => {
+    const answers: Record<string, [number, unknown]> = { "GET /storage": [200, storageUsage()], "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": bulkOk("w1", "w4") };
+    const calls = stubFetch(answers);
+    mount();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Select Cache embeddings" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Old spike" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clean up selected" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(calls.find((c) => c.path === "/storage/preview")?.body).toEqual({ ids: ["w1", "w4"] });
+    expect(calls.filter((c) => c.path === "/work-items/bulk")).toEqual([]);
+    const after = storageUsage();
+    answers["GET /storage"] = [200, storageUsage({ items: [after.items[0]], reclaimable_bytes: 0, used_bytes: 9 * GB, state: "over_quota" })];
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Archive 2 items and free 3G" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.filter((c) => c.path === "/work-items/bulk").map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1", "w4"] }]);
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/storage")).toHaveLength(2);
+    // The button that opened the dialog is disabled now: Refresh takes focus rather than the body.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus());
+  });
+
+  it("sends every reclaimable id from Clean up all", async () => {
+    const calls = stubFetch({ "GET /storage": [200, storageUsage()], "POST /storage/preview": [200, storagePreview()] });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Clean up all reclaimable (2, 3G)" }));
+    await screen.findByRole("dialog");
+    expect(calls.find((c) => c.path === "/storage/preview")?.body).toEqual({ ids: ["w1", "w4"] });
   });
 });
