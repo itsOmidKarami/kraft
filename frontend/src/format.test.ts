@@ -145,8 +145,9 @@ describe("tokens / usd", () => {
     ["live", { tokens_in: 28, tokens_out: null, tokens_cache_write: 40_000, tokens_cache_read: 900_000 }, "40k new + 900k cached", "28 in · 40k cache write · 900k cache read · out not known yet"],
     ["exited", { tokens_in: 28, tokens_out: 7_700, tokens_cache_write: 40_000, tokens_cache_read: 900_000 }, "47.7k new + 900k cached", "28 in · 40k cache write · 900k cache read · 7.7k out"],
     ["nothing cached", { tokens_in: 100, tokens_out: 50, tokens_cache_write: 0, tokens_cache_read: 0 }, "150", "100 in · 0 cache write · 0 cache read · 50 out"],
-    ["a session from before the split", { tokens_in: 100, tokens_out: 50 }, "150", "100 in · (cache not split on older sessions) · 50 out"],
-    ["a rollup holding one", { tokens_in: 5_000, tokens_out: 50, tokens_cache_write: 10, tokens_cache_read: 2_000, split_complete: false }, "7.1k", "5k in · (cache not split on older sessions) · 50 out"],
+    ["a session from before the split", { tokens_in: 100, tokens_out: 50 }, "150", "100 in (cache not split on older sessions) · 50 out"],
+    ["a rollup holding one", { tokens_in: 5_000, tokens_out: 50, tokens_cache_write: 10, tokens_cache_read: 2_000, split_complete: false }, "7.1k", "5k in · 10 cache write · 2k cache read · 50 out (cache not split on older sessions)"],
+    ["a rollup whose session is still running", { tokens_in: 28, tokens_out: 0, tokens_cache_write: 40_000, tokens_cache_read: 900_000, split_complete: true }, "40k new + 900k cached", "28 in · 40k cache write · 900k cache read · out not known yet"],
   ])("tokenText / tokenTip: %s", (_id, u, text, tipText) => {
     expect(tokenText(u)).toBe(text);
     expect(tokenTip(u)).toBe(tipText);

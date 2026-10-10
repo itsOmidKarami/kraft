@@ -262,13 +262,15 @@ export function tokenText(u: TokenUse): string {
   return `${tokens(tokenTotal(u) - cached)} new + ${tokens(cached)} cached`;
 }
 
-/** Every kind apart, as `kraft view show` words it: what the figure's tooltip reads. */
+/** Every kind apart, as `kraft view show` words it: what the figure's tooltip reads.
+ *  No output beside tokens spent is a session still running (a rollup sums its
+ *  unknown as 0), so it reads as not known rather than as a false zero. */
 export function tokenTip(u: TokenUse): string {
-  const out = u.tokens_out == null ? "out not known yet" : `${tokens(u.tokens_out)} out`;
-  const cache = unsplit(u)
-    ? "(cache not split on older sessions)"
-    : `${tokens(u.tokens_cache_write ?? 0)} cache write · ${tokens(u.tokens_cache_read ?? 0)} cache read`;
-  return `${tokens(u.tokens_in ?? 0)} in · ${cache} · ${out}`;
+  const out = u.tokens_out ? `${tokens(u.tokens_out)} out` : "out not known yet";
+  const old = "cache not split on older sessions";
+  if (u.tokens_cache_read == null) return `${tokens(u.tokens_in ?? 0)} in (${old}) · ${out}`;
+  const all = `${tokens(u.tokens_in ?? 0)} in · ${tokens(u.tokens_cache_write ?? 0)} cache write · ${tokens(u.tokens_cache_read)} cache read · ${out}`;
+  return u.split_complete === false ? `${all} (${old})` : all;
 }
 
 /** USD, with enough places to be useful at agent-run scale.
