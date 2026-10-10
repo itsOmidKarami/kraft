@@ -18,7 +18,6 @@
 .ph-fact { display: contents; }
 .ph-fact dt { color: var(--text-muted); }
 .ph-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.ph-fact dd button { color: inherit; font: inherit; text-align: left; }
 
 .ph-tabstrip { display: flex; overflow-x: auto; border-bottom: 1px solid var(--line); }
 .ph-tabstrip-tab { flex: none; min-height: 44px; padding: 0 16px; border: 0; background: transparent; font-size: 14px; color: var(--text-muted); cursor: pointer; }
