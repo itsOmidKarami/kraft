@@ -79,8 +79,6 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     useBudgetEditor.setState({ id: null, at: 0 });
     setEditBudget(true);
   }, [asked]);
-  // The pass of the node and the fix-loop round the canvas shows: picked in this node view (undefined: the newest). Leaving the node drops both.
-  const [picked, setPicked] = useState<{ node: string; round?: number; pass?: number } | null>(null);
   // The selection (its path) whose open frame the person closed: it opens again once they pick anything.
   const [shut, setShutState] = useState<string | null>(null);
   // Esc can come twice before the router renders the first one's move (it navigates in a transition): `back` reads
@@ -114,7 +112,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     const next = paneReducer(state, a);
     setPane({ open: next.open, userCollapsed: next.userCollapsed });
     const moved = JSON.stringify(next.sel) !== JSON.stringify(place.sel) || next.node !== place.node;
-    go({ node: next.level === "node" ? next.node : undefined, sel: next.sel, tab: moved ? undefined : place.tab, attempt: moved ? undefined : place.attempt, ...extra });
+    // The pass and the fix-loop round shown are the node view's: they stay while the selection moves inside it, and another node has its own.
+    const stays = next.level === "node" && next.node === place.node;
+    go({ node: next.level === "node" ? next.node : undefined, sel: next.sel, tab: moved ? undefined : place.tab, attempt: moved ? undefined : place.attempt, round: stays ? place.round : undefined, pass: stays ? place.pass : undefined, ...extra });
   };
   // One Escape for the whole page (WI-1, the prototype's `key()`): what is open over the page takes
   // it first (the review, a picker, the escalation card, the full-screen log, a document: each a
@@ -147,7 +147,6 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   useEffect(() => {
     if (lastNode.current === place.node) return;
     lastNode.current = place.node;
-    setPicked(null);
     setShut(null);
     const f = requestAnimationFrame(() => areaRef.current?.querySelector<HTMLElement>('[role="group"] [tabindex="0"]')?.focus());
     return () => cancelAnimationFrame(f);
@@ -172,11 +171,11 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   };
   const tab = place.tab ?? "";
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
-  const here = viewing && picked?.node === viewing.id ? picked : null;
-  // An earlier pass of the node is read off the item as that pass left it: its canvas, its panes and their logs.
-  const passes = viewing && passList(item, viewing.id, here?.pass);
+  // The pass of the node and the fix-loop round the canvas shows are in the URL (`?pass=`, `?round=`; neither: the
+  // newest), as on the phone, so a link opens on them. An earlier pass is read off the item as that pass left it.
+  const passes = viewing && passList(item, viewing.id, place.pass);
   const shown = viewing ? asOfPass(item, viewing.id, passes?.selected) : item;
-  const round = viewing ? roundShown(shown, viewing, here?.round) : undefined;
+  const round = viewing ? roundShown(shown, viewing, place.round) : undefined;
   // A changed-test-scope task opens as a frame of its repositories and scopes while it, or one of its scopes, is the selection.
   const scopeAt = (p: Place) => {
     const task = p.sel.kind === "task" ? p.sel : null;
@@ -207,7 +206,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     canEdit: draft?.editable,
     applied,
   });
-  const plain = viewing && nodeGraph(shown, viewing, now, events, here?.round);
+  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round);
   const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
@@ -228,10 +227,10 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             side={inside.side}
             loop={inside.loop}
             rounds={inside.rounds}
-            onRound={(r) => setPicked({ node: viewing.id, pass: here?.pass, round: r })}
+            onRound={(r) => go({ ...place, round: r })}
             passes={passes}
             // Another pass has its own rounds: the round picked does not carry over.
-            onPass={(n) => setPicked({ node: viewing.id, pass: n })}
+            onPass={(n) => go({ ...place, pass: n, round: undefined })}
             onFailure={inside.onFailure}
             reserve={reserve}
             selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}

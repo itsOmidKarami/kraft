@@ -11,7 +11,7 @@ import { STATES } from "./screens";
 const SIZES = { default: [1280, 800], phone: [390, 844] } as const;
 
 /** Screens with no icon-only control at all. Any other that finds none did not render, and must not pass for it. */
-const NO_ICONS = new Set(["sign-in/idle", "sign-in/error", "sign-in/locked", "phone/node", "phone/gate-node", "phone/gate-review", "phone/new-item", "phone/search", "phone/analytics", "phone/more", "phone/chains", "phone/policy", "phone/sign-in", "phone/node-yaml"]);
+const NO_ICONS = new Set(["sign-in/idle", "sign-in/error", "sign-in/locked", "phone/node", "phone/node-earlier-pass", "phone/scope", "phone/gate-node", "phone/gate-review", "phone/new-item", "phone/search", "phone/analytics", "phone/more", "phone/chains", "phone/policy", "phone/sign-in", "phone/node-yaml"]);
 
 interface Hit { label: string | null; tip: string | null; title: string | null; html: string }
 

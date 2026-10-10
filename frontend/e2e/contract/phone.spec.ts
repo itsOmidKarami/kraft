@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { SCREENS, type Card, type Tap } from "../../src/ng/phone/screens";
 import { app, item } from "./kit";
+import { withScopes } from "./mocks/fixtures";
 
 /**
  * The phone: every screen whose taps need seeded data (a card, a row) is reached by tapping from the board.
@@ -11,6 +12,9 @@ import { app, item } from "./kit";
 /** A board card is found by the bead of the board fixture it stands for. */
 const CARD: Record<Card, string> = { running: "kraft-91bc", capped: "kraft-7d21", gate: "kraft-cb59", escalated: "kraft-2c77" };
 
+/** The data a screen needs beyond the default seed, by the name its entry gives it. */
+const SEED = { scopes: withScopes };
+
 async function tap(p: Page, t: Tap) {
   if ("role" in t) return void (await p.getByRole(t.role, { name: new RegExp(t.name, "i") }).first().click());
   const loc = t.card ? p.locator(t.css).filter({ hasText: CARD[t.card] }) : p.locator(t.css);
@@ -20,10 +24,11 @@ async function tap(p: Page, t: Tap) {
 for (const s of SCREENS.filter((s) => s.data)) {
   test(`phone: ${s.id} is reached by tapping from the board`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await app(page, "/", { noShell: true, mock: { harnesses: "floor", ngLibrary: "draft" } });
+    await app(page, "/", { noShell: true, mock: { harnesses: "floor", ngLibrary: "draft" }, tweak: s.seed && SEED[s.seed] });
     for (const t of s.taps) await tap(page, t);
     const want = new RegExp(`^${s.route.replace(/:[^/]+/g, "[^/]+")}/?$`);
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 6000 }).toMatch(want);
+    if (s.query) await expect.poll(() => new URL(page.url()).searchParams.has(s.query!), { timeout: 6000 }).toBe(true);
     await expect(page.locator("main h1").first()).toBeVisible();
     if (s.heading) await expect(page.getByRole("heading", { level: 1, name: s.heading })).toBeVisible();
   });
