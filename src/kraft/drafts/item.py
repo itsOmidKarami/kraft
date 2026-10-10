@@ -101,7 +101,9 @@ def _override(chain: MaterializedChain, op: OverrideOp) -> MaterializedChain:
         # `revise` keeps it for a skip or an add.
         whole = replace(
             chain,
-            chain=ResolvedChain.from_chain(chain.untrimmed, steering=chain.chain.steering),
+            chain=ResolvedChain.from_chain(
+                chain.untrimmed, steering=chain.chain.steering, plugins=chain.chain.plugins
+            ),
             untrimmed=None,
         )
         revised = replace(revised, untrimmed=one(whole).chain)

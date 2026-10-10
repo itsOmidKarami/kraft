@@ -14,6 +14,8 @@ from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
+from kraft.templates.retry import validate_retry_override
+from kraft.templates.revision import ChangeSet, Override, revise
 
 ID = "release@acme"
 
@@ -109,6 +111,25 @@ def test_a_resolved_chain_pins_the_plugins_it_reads(home, chain_id):
     assert locked.commit and locked.tree
     snapshot = MaterializedChain.from_json(_stored(resolved))
     assert snapshot.chain.plugins == resolved.plugins
+
+
+@pytest.mark.parametrize("rebuild", ["retry-override", "chain-revision"])
+def test_a_rebuilt_snapshot_keeps_the_items_pins(home, rebuild):
+    """A retry override and an approved revision rebuild the persisted chain;
+    neither may drop the pins and put the item back on the lock's versions."""
+    repo, config_dir, plugins_dir = home
+    resolved = _resolved(config_dir, plugins_dir, "mine")
+    snapshot = MaterializedChain.from_json(_stored(resolved))
+    path = resolved.task_paths[0]
+
+    if rebuild == "retry-override":
+        rebuilt = validate_retry_override(snapshot, path, task_config={"model": "gpt-5"}).chain
+    else:
+        changes = ChangeSet(rationale="r", overrides={path: Override(model="gpt-5", evidence="e")})
+        rebuilt = revise(snapshot, changes, at=None, library=None)
+
+    assert resolved.plugins
+    assert rebuilt.chain.plugins == resolved.plugins
 
 
 def test_a_chain_that_reads_no_plugin_stores_no_pins(home):
