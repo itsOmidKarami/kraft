@@ -466,3 +466,27 @@ def gc(keep: Collection[str], plugins_root: Path | None = None) -> list[str]:
             shutil.rmtree(store)
             removed.append(store.name)
     return removed
+
+
+def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
+    """Each loaded plugin a Kraft `version` would leave out, with why: its
+    `requires.kraft` names another major. What `kraft admin update` lists
+    before it installs a release."""
+    from kraft.plugins import manifest
+
+    out = []
+    for plugin in installed(config_dir):
+        if plugin.left_out is not None:
+            continue
+        try:
+            declared = manifest.plugin(
+                manifest.parse(
+                    (plugin.root / manifest.PLUGIN_JSON).read_text(), manifest.PLUGIN_JSON
+                ),
+                manifest.PLUGIN_JSON,
+            )
+        except (OSError, ValueError, manifest.ManifestError):
+            continue
+        if why := manifest.kraft_compatible(declared.requires.kraft, version):
+            out.append(f"{plugin.id} {plugin.version} {why}")
+    return out

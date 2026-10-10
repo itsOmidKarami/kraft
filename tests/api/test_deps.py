@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import json
 import os
 import sqlite3
 import warnings
@@ -623,7 +624,6 @@ def _other_version(st, tmp_path):
 def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     client, tmp_path, status, pinned, kept
 ):
-    import json
 
     from support.store_fixtures import mk_item
 
@@ -669,3 +669,39 @@ def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, t
     (st.templates_dir / "library.yaml").write_text("tasks: [\n")
     client.post("/api/templates/reload")
     assert st.library is None and locked.is_dir()
+
+
+def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
+    """After a start: the update is applied, the library is rebuilt on it, the
+    old store goes, and health reports the outcome without being degraded."""
+    from support.plugins import publish
+
+    st = client.app.state
+    old = _install_release(client, tmp_path)
+    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
+    written["plugins"]["release@acme"] = {"auto_update": True}
+    (st.templates_dir / "plugins.yaml").write_text(yaml.safe_dump(written))
+    repo = Path(written["collections"]["acme"]["git"].removeprefix("file://"))
+    publish(repo, "release", version="1.1.0", skills={"notes": "new in 1.1.0"})
+
+    client.portal.call(deps.auto_update_plugins, client.app)
+
+    assert [p.version for p in st.library.plugins] == ["1.1.0"] and not old.exists()
+    health = client.get("/api/health").json()
+    assert (health["status"], health["plugin_updates"]["release@acme"]["outcome"]) == (
+        "ok",
+        "applied",
+    )
+
+
+def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
+    from kraft.plugins import update as plugin_update
+
+    st = client.app.state
+    _install_release(client, tmp_path)
+    held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
+    (st.run_dirs.plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held}))
+
+    health = client.get("/api/health").json()
+
+    assert (health["status"], health["plugin_updates"]) == ("ok", {"release@acme": held})
