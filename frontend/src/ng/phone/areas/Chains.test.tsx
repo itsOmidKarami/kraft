@@ -9,7 +9,7 @@ const NODES = [
   { id: "spec_approval", kind: "gate", tasks: [], steps: [], gate_after: null, reject_to: "spec", auto_escalate: true },
   { id: "verification", kind: "exec", tasks: ["verification.checks.lint", "verification.review.code_review"], steps: [["verification.checks.lint"], ["verification.review.code_review"]], gate_after: null, fix_loop: "verification_fix_loop", on_failure: ["verification.repair.fix"] },
 ];
-const CHAINS = [{ id: "default", nodes: NODES, gates: 1 }, { id: "docs_only", nodes: [NODES[0]], gates: 0 }, { id: "broken", nodes: [], gates: 0, error: "no such library node" }];
+const CHAINS = [{ id: "default", nodes: NODES, gates: 1 }, { id: "docs_only", nodes: [NODES[0]], gates: 0, plugin: { id: "release@acme", version: "1.0.0" } }, { id: "broken", nodes: [], gates: 0, error: "no such library node" }];
 const answers = (more: Record<string, [number, unknown]> = {}) => ({ "GET /templates/chains": [200, CHAINS] as [number, unknown], "GET /templates/chains/default": [200, { id: "default", text: "id: default\nnodes: []\n" }] as [number, unknown], ...more });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,6 +18,9 @@ describe("Chains, read only (L.1)", () => {
     const { calls } = mountAt(<ChainsList />, "/templates/chains", "/templates/chains", answers());
     expect(await screen.findByRole("link", { name: /^default/ })).toHaveTextContent("3 nodes · 1 gate");
     expect(screen.getByRole("link", { name: /^docs_only/ })).toHaveTextContent("1 nodes · 0 gates");
+    // A plugin's chain says so; a local one does not.
+    expect(screen.getByRole("link", { name: /^docs_only/ })).toHaveTextContent("release@acme 1.0.0");
+    expect(screen.getByRole("link", { name: /^default/ })).not.toHaveTextContent("release@acme");
     expect(screen.getByText(/The graph canvas, drag to reorder, adding steps, drafts and publish are on desktop/)).toBeInTheDocument();
     expect(screen.getByText("no such library node")).toBeInTheDocument();
     expect(posts(calls)).toEqual([]);

@@ -10,6 +10,7 @@ import { loadHidden, saveHidden } from "./kinds";
 import { shownRows, type Row } from "./rows";
 import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
+import { PluginBadge } from "../templates/plugin";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -157,6 +158,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
                 >
                   <RowGlyph row={row} />
                   <span className="lib-name" data-allow-ellipsis title={row.name}>{row.name}</span>
+                  {row.plugin && <PluginBadge plugin={row.plugin} />}
                   {row.problem && <span className="lib-prob" role="img" aria-label="has a problem" />}
                   {row.mark && <span className={`lib-mark is-${row.mark}`} role="img" aria-label={row.mark === "add" ? "added in the draft" : "changed in the draft"} />}
                   <span className="lib-used">{usedWord(row)}</span>

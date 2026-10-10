@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request
 from kraft import config as config_mod
 from kraft import harness as harness_mod
 from kraft.api import api_router, config_check, deps
+from kraft.templates import catalogue
 from kraft.templates.environment import (
     HarnessProfileTable,
     TemplateEnvironmentError,
@@ -70,6 +71,8 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
     return [
         {
             "id": p.id,
+            # The plugin a qualified profile comes from; None for the instance's own.
+            "plugin": catalogue.plugin_view(library, p.id) if library is not None else None,
             "effort": p.effort,
             "model": p.model,
             "providers": {

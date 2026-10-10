@@ -410,6 +410,17 @@ class TemplateLibrary:
             plugins=self.plugins,
         )
 
+    def plugin_of(self, name: str) -> InstalledPlugin | None:
+        """The loaded plugin a qualified chain or component name comes from
+        (`release:ship`, or the `release:base` of `tasks.release:base`); None
+        for a local name. A plugin's declarations are read-only."""
+        qualifier, colon, _ = name.rpartition(".")[2].partition(":")
+        if not colon:
+            return None
+        return next(
+            (p for p in self.plugins if p.left_out is None and p.namespace == qualifier), None
+        )
+
     def with_plugins(self, plugins: Sequence[InstalledPlugin]) -> TemplateLibrary:
         """This library's own components and chains with `plugins` in place of
         the plugins it was built with: what a work item that pinned other
