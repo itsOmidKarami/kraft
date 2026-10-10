@@ -60,7 +60,7 @@
 | src/kraft/cli/repo.py                        |      294 |       11 |     96% |139, 147, 162, 175-176, 231, 233, 333, 364, 452-453 |
 | src/kraft/cli/templates.py                   |       71 |        1 |     99% |        98 |
 | src/kraft/cli/verify.py                      |      154 |        5 |     97% |133, 211-214 |
-| src/kraft/cli/view.py                        |      290 |       10 |     97% |78, 269-270, 292, 302, 352-353, 389-395 |
+| src/kraft/cli/view.py                        |      293 |       10 |     97% |82, 273-274, 296, 306, 356-357, 393-399 |
 | src/kraft/client/\_\_init\_\_.py             |        5 |        0 |    100% |           |
 | src/kraft/client/actions.py                  |      200 |       25 |     88% |64, 167, 184, 203, 271, 295-296, 314, 336, 338, 364, 371-375, 453-454, 476, 502, 514, 549, 564, 588, 650 |
 | src/kraft/client/context.py                  |       49 |        2 |     96% |     44-45 |
@@ -108,7 +108,7 @@
 | src/kraft/index/db.py                        |       68 |        5 |     93% |151-152, 161-163 |
 | src/kraft/index/embed.py                     |       63 |       13 |     79% |37-38, 68, 73, 78-84, 104-106 |
 | src/kraft/index/ingest.py                    |      225 |        9 |     96% |152-153, 267, 357-359, 469-471 |
-| src/kraft/index/service.py                   |      383 |       27 |     93% |141-143, 237-239, 275, 294-296, 349-350, 355, 358-359, 481, 486, 517-518, 534, 552, 556-557, 744, 747, 753, 815 |
+| src/kraft/index/service.py                   |      383 |       26 |     93% |141-143, 237-239, 275, 294-296, 350, 355, 358-359, 481, 486, 517-518, 534, 552, 556-557, 744, 747, 753, 815 |
 | src/kraft/init.py                            |       51 |        2 |     96% |     62-64 |
 | src/kraft/intake.py                          |      127 |       12 |     91% |94-96, 112, 155-156, 190-192, 211-216, 252 |
 | src/kraft/intent.py                          |      198 |        9 |     95% |91-92, 186, 203, 264-265, 321-322, 339 |
@@ -133,7 +133,7 @@
 | src/kraft/start\_queue.py                    |       75 |        5 |     93% |100, 165-168 |
 | src/kraft/store/\_\_init\_\_.py              |       12 |        0 |    100% |           |
 | src/kraft/store/\_common.py                  |       46 |        2 |     96% |  126, 143 |
-| src/kraft/store/budget.py                    |       66 |        0 |    100% |           |
+| src/kraft/store/budget.py                    |       69 |        0 |    100% |           |
 | src/kraft/store/chain.py                     |      199 |        4 |     98% |354, 444-446 |
 | src/kraft/store/counters.py                  |       47 |        0 |    100% |           |
 | src/kraft/store/forks.py                     |       44 |        0 |    100% |           |
@@ -194,7 +194,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       82 |        9 |     89% |45, 96, 142-144, 147-151, 159-160 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **31787** | **1462** | **95%** |           |
+| **TOTAL**                                    | **31793** | **1461** | **95%** |           |
 
 
 ## Setup coverage badge
