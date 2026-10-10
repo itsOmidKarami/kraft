@@ -997,7 +997,9 @@ def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict
                 raise OpError(f"no op {name!r}")
             fn = table[op["op"]]
             fields = {k: v for k, v in op.items() if k != "op"}
-            _refuse_plugin_address(d, fields.get("path"))
+            # Every way an op names where it acts.
+            for address in ("path", "container", "node"):
+                _refuse_plugin_address(d, fields.get(address))
             try:
                 inspect.signature(fn).bind(d, **fields)
             except TypeError as exc:

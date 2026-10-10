@@ -623,6 +623,9 @@ def update(
                 results[done.plugin_id] = replace(
                     results[done.plugin_id], outcome="failed", problems=(str(exc),), kind="busy"
                 )
+        else:
+            # `auto_update` records its own outcome after this.
+            clear_status(plugins_root, {done.plugin_id for done in accepted})
     return list(results.values())
 
 
@@ -645,6 +648,18 @@ def may_apply_unattended(review: Review) -> str | None:
         more = f"; and {len(lines) - 3} more" if len(lines) > 3 else ""
         return "; ".join(lines[:3]) + more
     return None
+
+
+def clear_status(plugins_root: Path, plugin_ids: Collection[str]) -> None:
+    """Forget the last auto-update outcome of `plugin_ids`: a person has just
+    acted on them (applied the update, uninstalled the plugin), so "held" or
+    "failed" no longer says anything true."""
+    import json
+
+    status = read_status(plugins_root)
+    left = {plugin_id: entry for plugin_id, entry in status.items() if plugin_id not in plugin_ids}
+    if left != status:
+        write_text(Path(plugins_root) / STATUS_FILE, json.dumps(left, indent=2) + "\n")
 
 
 def read_status(plugins_root: Path) -> dict[str, dict]:

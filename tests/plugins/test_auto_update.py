@@ -171,3 +171,16 @@ def test_a_newer_pre_release_follows_a_pre_release(home):
 
     assert update.auto_update(config_dir, plugins_dir)[ID]["outcome"] == "applied"
     assert _versions(config_dir)[ID] == "1.1.0-rc.2"
+
+
+def test_a_person_taking_a_held_update_clears_its_warning(home):
+    """Health and doctor stop saying "held" once the update it named is applied."""
+    repo, config_dir, plugins_dir = home
+    publish(repo, "release", version="1.1.0", chains={"ship": chain("base")})
+    assert update.auto_update(config_dir, plugins_dir)[ID]["outcome"] == "held"
+    publish(repo, "tools", version="1.1.0", chains={"ship": chain("base")})
+
+    update.update([ID], accept=lambda r: True, config_dir=config_dir, plugins_root=plugins_dir)
+
+    assert update.read_status(plugins_dir) == {}
+    assert _versions(config_dir)[ID] == "1.1.0"
