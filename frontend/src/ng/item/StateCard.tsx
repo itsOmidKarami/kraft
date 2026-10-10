@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
 import { ago, plural, until, usd } from "../../format";
+import { humanSize } from "../../sizes";
 import type { ChainNode, DiffFile, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
@@ -175,6 +176,14 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
         retryFrom(item, node, run),
         { label: "Escalate…", run: h.onEscalate },
       ],
+    };
+  }
+  if (status === "queued" && item.queued?.storage) {
+    const s = item.queued.storage;
+    return {
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued",
+      text: `Waiting for space: worktrees use ${humanSize(s.used_bytes)} of the ${humanSize(s.limit_bytes)} storage limit. It starts when space frees.`,
+      facts: [], actions: [],
     };
   }
   if (status === "cancelled") {

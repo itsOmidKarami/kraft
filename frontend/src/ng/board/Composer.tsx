@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
+import { humanSize } from "../../sizes";
 import { useStore } from "../../store";
 import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
@@ -26,7 +27,7 @@ export function createBody(d: Draft, autostart: boolean) {
 }
 
 /** What `POST /work-items` answers. `slots` comes with an autostart the server queued because every slot was busy. */
-export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number }; waiting_on?: { id: string; title: string; status: string }[] };
+export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number; storage?: { used_bytes: number; limit_bytes: number } }; waiting_on?: { id: string; title: string; status: string }[] };
 
 /** Create and start that found every slot busy says so, rather than leaving a
  *  row to explain itself: the server queues the item and Kraft starts it when
@@ -37,6 +38,11 @@ export function sayIfFiledPaused(autostart: boolean, body: Created): void {
     return;
   }
   if (!autostart || (body.status !== "paused" && body.status !== "queued")) return;
+  const held = body.slots?.storage;
+  if (body.status === "queued" && held) {
+    showToast(`Queued: worktrees use ${humanSize(held.used_bytes)} of the ${humanSize(held.limit_bytes)} storage limit. It starts when space frees.`, 8000);
+    return;
+  }
   const s = body.slots;
   const busy = `${s ? `${s.busy} of ${s.limit} slots are` : "every slot is"} busy`;
   showToast(body.status === "queued" ? `Queued: ${busy}. It starts when one frees.` : `Filed paused: ${busy}. Start it when one frees.`, 8000);

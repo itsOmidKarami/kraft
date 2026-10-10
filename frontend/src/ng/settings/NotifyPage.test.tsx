@@ -213,7 +213,7 @@ describe("ng NotifyPage", () => {
     const put = setup();
     await open("This browser");
     await userEvent.click(screen.getByRole("switch", { name: "gate_requested (this browser)" }));
-    expect(browserNotify.enabledEvents()).toEqual(["work_item_needs_human"]);
+    expect(browserNotify.enabledEvents()).toEqual(["work_item_needs_human", "work_item_storage_held"]);
     expect(within(card("This browser")).queryByText("gate_requested")).toBeNull();
     expect(within(card("Webhook")).getByText("gate_requested")).toBeInTheDocument();
     expect(put).not.toHaveBeenCalled();

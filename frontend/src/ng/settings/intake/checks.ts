@@ -7,6 +7,7 @@ const REASON: Record<string, (n: number, ceiling: number) => string> = {
   epic: (n) => `${n} ${n === 1 ? "epic" : "epics"}`,
   max_concurrent: (n) => `${n} left: max at a time reached`,
   daily_budget: (n) => `${n} left: daily budget spent`,
+  storage: (n) => `${n} left: worktrees over the storage limit`,
   invalid_config: (n) => `${n} left: invalid config`,
 };
 
