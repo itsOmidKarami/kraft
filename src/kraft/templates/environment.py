@@ -656,7 +656,8 @@ class HarnessProfileTable:
                 raise TemplateEnvironmentError(f"{path}: {exc}") from exc
         agent_profiles = _agent_profiles(_section(data, "profiles", path), path, harnesses)
         for plugin in plugins:
-            agent_profiles |= _plugin_profiles(plugin, harnesses)
+            if plugin.left_out is None:
+                agent_profiles |= _plugin_profiles(plugin, harnesses)
         for p in agent_profiles.values():
             for n, entry in enumerate(p.fallback):
                 if entry.profile is not None and entry.profile not in agent_profiles:

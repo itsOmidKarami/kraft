@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from kraft.config import read_yaml, write_yaml
+from kraft.plugins import fetch, manifest
 from kraft.plugins.load import InstalledPlugin
 from support.harness import commit_all, make_repo, write
 
@@ -99,3 +101,44 @@ def make_collection(tmp_path: Path, plugins: dict[str, dict], *, name: str = "ac
     )
     commit_all(repo, "collection")
     return repo
+
+
+def install(
+    config_dir: Path,
+    plugins_dir: Path,
+    collection: Path,
+    plugin: str,
+    *,
+    alias: str | None = None,
+    ref: str | None = None,
+) -> Path:
+    """What `kraft admin plugin install` leaves behind, without its review:
+    the plugin extracted from `collection` into `plugins_dir/store/`, an entry
+    in `config_dir/plugins.yaml` and one in `plugins.lock`. Returns the store
+    directory."""
+    url = collection.as_uri()
+    mirror, commit = fetch.fetch(plugins_dir, "fixture", url, ref)
+    where = manifest.COLLECTION_JSON
+    text = fetch.read_file(mirror, commit, where, fetch.MAX_JSON).decode()
+    listed = manifest.collection(manifest.parse(text, where), where)
+    source = next(e.source for e in listed.plugins if e.name == plugin)
+    extracted = fetch.extract_git(mirror, commit, source)
+    store = fetch.write_store(plugins_dir, extracted)
+    plugin_id = f"{plugin}@{listed.name}"
+    config = read_yaml(config_dir / "plugins.yaml", {"collections": {}, "plugins": {}})
+    config["collections"][listed.name] = {"git": url, **({"ref": ref} if ref else {})}
+    config["plugins"][plugin_id] = {"as": alias} if alias else True
+    lock = read_yaml(config_dir / "plugins.lock", {"lock_version": 1, "plugins": {}})
+    lock["plugins"][plugin_id] = {
+        "namespace": alias or plugin,
+        "ref": ref,
+        "commit": commit,
+        "source": source,
+        "tree": extracted.tree,
+        "digest": fetch.digest(extracted.files),
+        "version": json.loads(extracted.files[manifest.PLUGIN_JSON][1])["version"],
+        "updated_at": "2026-10-08T12:00:00Z",
+    }
+    write_yaml(config_dir / "plugins.yaml", config)
+    write_yaml(config_dir / "plugins.lock", lock)
+    return store

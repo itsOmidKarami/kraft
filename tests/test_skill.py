@@ -44,8 +44,14 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
         ("release:deploy-review", "plugin method", None),
         ("release:nope", None, "kraft:nope"),
         ("release:../deploy-review", None, "bare directory name"),
+        ("legacy:deploy-review", None, "installed but not loaded"),
     ],
-    ids=["loaded-plugin-is-read", "missing-in-loaded-plugin", "escaping-name"],
+    ids=[
+        "loaded-plugin-is-read",
+        "missing-in-loaded-plugin",
+        "escaping-name",
+        "unloaded-plugin-is-an-error",
+    ],
 )
 def test_plugin_skill_references(tmp_path, ref, text, error):
     """A `<namespace>:<name>` whose namespace is a loaded Kraft plugin is that
@@ -53,7 +59,7 @@ def test_plugin_skill_references(tmp_path, ref, text, error):
     agent as another tool's skill."""
     store = tmp_path / "store"
     write(store, "skills/deploy-review/SKILL.md", "plugin method")
-    dirs = {"release": store}
+    dirs = {"release": store, "legacy": None}
     if error is not None:
         with pytest.raises(skill.SkillError, match=error):
             skill.validate(tmp_path, ref, where="library.yaml", plugin_dirs=dirs)

@@ -26,6 +26,7 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters.forge import git as forge_git
 from kraft.config import RepoEntry
+from kraft.plugins import load as plugins_load
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -317,7 +318,10 @@ def _reload_templates(st) -> None:
     from kraft import apply
 
     apply.record_library(st)
-    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
+    st.library, st.invalid_library = load_library(
+        st.templates_dir, st.skills_dir, installed_plugins(st, verify=True)
+    )
+    st.plugins_problem = plugins_load.config_problem(st.templates_dir)
     lint_loaded(st)
 
 
@@ -367,11 +371,25 @@ def invalid_templates(st) -> dict[str, str]:
     invalid = {LIBRARY_FILE: "; ".join(st.invalid_library)} if st.invalid_library else {}
     for id, message in (getattr(st, "invalid_chains", None) or {}).items():
         invalid[f"chain {id}"] = message
+    # The instance is not running what its lock says: degraded, like a chain
+    # that does not resolve. A plugin left out on purpose is no fault.
+    for plugin in st.library.plugins if st.library else ():
+        if plugin.left_out is not None and not plugin.quiet:
+            invalid[f"plugin {plugin.id}"] = plugin.left_out
+    if why := getattr(st, "plugins_problem", None):
+        invalid["plugins.yaml"] = why
     return invalid
 
 
+def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.InstalledPlugin, ...]:
+    """The plugins this instance has installed, loadable or not."""
+    return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
+
+
 def load_library(
-    templates_dir: Path, skills_dir: Path | None = None
+    templates_dir: Path,
+    skills_dir: Path | None = None,
+    plugins: tuple[plugins_load.InstalledPlugin, ...] = (),
 ) -> tuple[TemplateLibrary | None, list[str]]:
     """The V1 template library for `templates_dir`, and why it is missing.
 
@@ -381,7 +399,10 @@ def load_library(
     for `None`; nothing falls back to the legacy loader.
     """
     try:
-        return TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir), []
+        library = TemplateLibrary.from_yaml_dir(
+            templates_dir, skills_dir=skills_dir, plugins=plugins
+        )
+        return library, []
     except TemplateLibraryError as exc:
         logger.warning("template library unreadable: %s", exc)
         return None, [str(exc)]

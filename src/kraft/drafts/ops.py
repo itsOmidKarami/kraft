@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 from yaml import YAMLError
 
 from kraft.drafts import authored, resolve, store
+from kraft.plugins import load as plugins_load
 from kraft.templates import positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import (
@@ -290,7 +291,9 @@ def _expand_library(raw: object, path) -> object:
     # Steering expands nothing; an unwritten profile must not stop the rest.
     components = {k: v for k, v in raw.items() if k != Namespace.STEERING}
     try:
-        library = TemplateLibrary.from_mappings(components, (), library_path=path)
+        library = TemplateLibrary.from_mappings(
+            components, (), library_path=path, plugins=plugins_load.installed(path.parent)
+        )
     except TemplateLibraryError:
         return raw
     out = dict(raw)

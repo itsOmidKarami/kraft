@@ -182,6 +182,7 @@ async def lint_templates(request: Request):
         st.templates_dir,
         skills_dir=st.skills_dir,
         instance_policy=getattr(st, "instance_policy", None),
+        plugins=deps.installed_plugins(st),
     )
 
 
@@ -308,6 +309,7 @@ async def resolve_templates(body: ResolveBody, request: Request):
                 [(_unsaved_chain_path(c, i), c) for i, c in enumerate(body.chains)],
                 library_path=_UNSAVED / LIBRARY_FILE,
                 skills_dir=st.skills_dir,
+                plugins=getattr(st.library, "plugins", ()),
             )
             ids = list(library.chain_ids)
     except TemplateLibraryError as exc:

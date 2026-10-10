@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kraft import harness as _harness
 from kraft.paths import config_dir
+from kraft.plugins import load as plugins_load
 from kraft.templates.environment import (
     HarnessProfile,
     HarnessProfileTable,
@@ -37,7 +38,10 @@ def harness_table(harnesses: _harness.HarnessSet) -> tuple[HarnessProfileTable, 
     `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch."""
     path = config_dir() / "harnesses.yaml"
     try:
-        return HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid), path
+        table = HarnessProfileTable.from_yaml(
+            path, harnesses=harnesses.valid, plugins=plugins_load.installed(path.parent)
+        )
+        return table, path
     except TemplateEnvironmentError as exc:
         raise HarnessUnavailable(str(exc)) from exc
 
