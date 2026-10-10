@@ -235,6 +235,8 @@ export interface TokenUse {
   tokens_cache_read?: number | null;
   /** False on a rollup holding a session from before cache was counted apart. */
   split_complete?: boolean;
+  /** False on a rollup missing a session's output count: tokens_out is a floor. */
+  out_complete?: boolean;
 }
 
 /** Every token a run was billed for: cache reads and writes are input too, and
@@ -263,10 +265,13 @@ export function tokenText(u: TokenUse): string {
 }
 
 /** Every kind apart, as `kraft view show` words it: what the figure's tooltip reads.
- *  No output beside tokens spent is a session still running (a rollup sums its
- *  unknown as 0), so it reads as not known rather than as a false zero. */
+ *  An output count a session has not reported (null on its own row,
+ *  `out_complete: false` on a sum) reads as a floor or as not known, never as
+ *  a number it is not. */
 export function tokenTip(u: TokenUse): string {
-  const out = u.tokens_out ? `${tokens(u.tokens_out)} out` : "out not known yet";
+  const told = u.tokens_out ?? 0;
+  const whole = u.tokens_out != null && u.out_complete !== false;
+  const out = whole ? `${tokens(told)} out` : told ? `at least ${tokens(told)} out` : "out not known";
   const old = "cache not split on older sessions";
   if (u.tokens_cache_read == null) return `${tokens(u.tokens_in ?? 0)} in (${old}) · ${out}`;
   const all = `${tokens(u.tokens_in ?? 0)} in · ${tokens(u.tokens_cache_write ?? 0)} cache write · ${tokens(u.tokens_cache_read)} cache read · ${out}`;
