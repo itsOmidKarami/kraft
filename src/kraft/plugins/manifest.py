@@ -213,7 +213,8 @@ class PluginManifest(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
 
     name: Name
-    version: Annotated[StrictStr, Field(pattern=_SEMVER)]
+    # Capped: a version is compared as numbers, and one of thousands of digits is not one.
+    version: Annotated[StrictStr, Field(pattern=_SEMVER, max_length=64)]
     description: StrictStr | None = None
     author: Contact | None = None
     homepage: StrictStr | None = None

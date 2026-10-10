@@ -15,6 +15,7 @@ import functools
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -397,7 +398,10 @@ async def restore_plugins(app) -> None:
     from kraft import apply
 
     st = app.state
-    missing = tuple(p for p in installed_plugins(st) if not p.quiet and not p.root.is_dir())
+    # `verify`, as the library load reads: a store edited in place stays left
+    # out here too, so it never counts as "loads now".
+    fresh = await asyncio.to_thread(installed_plugins, st, verify=True)
+    missing = tuple(p for p in fresh if not p.quiet and not p.root.is_dir())
     if missing:
         failed = await asyncio.to_thread(
             plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
@@ -406,6 +410,15 @@ async def restore_plugins(app) -> None:
         apply.notify(app)
         if failed:
             logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+    elif {p.id for p in fresh if p.left_out is None} & {
+        p.id
+        for p in (st.library.plugins if st.library is not None else ())
+        if p.left_out is not None
+    }:
+        # A launch put the store back (`dispatch.restore_pins`): the fresh read
+        # loads a plugin the running library left out. Load it.
+        _reload_templates(st)
+        apply.notify(app)
     collect_plugin_stores(st)
 
 
@@ -583,7 +596,8 @@ def resolve_chain_or_422(st, chain_template: str | None):
         for plugin in library.plugins:
             # Not "unknown chain": its plugin is installed and its store is on the way back.
             away = not plugin.quiet and not plugin.root.is_dir()
-            if away and f"{plugin.namespace}:" in f"{name} {exc}":
+            named = re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", f"{name} {exc}")
+            if away and named:
                 raise HTTPException(503, f"plugin {plugin.id} is being restored; retry") from exc
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 

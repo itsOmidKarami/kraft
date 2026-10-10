@@ -727,6 +727,8 @@ def _cmd_list(ns: argparse.Namespace) -> None:
             pending.append("alias change pending")
         if collection and locked and collection.ref != locked.ref:
             pending.append("ref change pending")
+        if collection and locked and plugin_update._moved(collection, locked):
+            pending.append("collection URL change pending")
         auto = None
         if collection is not None and collection.auto_update:
             auto = "collection"

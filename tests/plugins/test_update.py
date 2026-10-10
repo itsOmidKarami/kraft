@@ -133,10 +133,11 @@ def test_a_skill_may_not_reach_into_another_kraft_plugin(skill, installed, refus
 )
 def test_a_plugins_profiles_are_checked_like_its_tasks(fallback, why):
     files = _files({"tasks": {"base": AGENT}}, {"ship": chain("base")})
-    profiles = {"profiles": {"deep": {"fallback": [fallback]}}}
+    # A profile named like a field is still a profile.
+    profiles = {"profiles": {"deep": {"fallback": [fallback]}, "policy": {"model": {"codex": "m"}}}}
     files["profiles.yaml"] = ("100644", yaml.safe_dump(profiles).encode())
-    with pytest.raises(update.Refused, match=why):
-        update.check(_manifest(), files)
+    (found,) = update.problems(_manifest(), files)
+    assert why in found and found.startswith("profiles.yaml: profiles.deep")
 
 
 def test_a_file_nested_too_deep_is_refused_like_any_other():
@@ -270,6 +271,34 @@ def test_a_collection_moved_to_another_url_is_reviewed_as_reach(tmp_path):
     assert result.outcome == "applied" and _locked(home).git == fork.as_uri()
     assert result.review.reach[0] == f"collection URL changed: {repo.as_uri()} -> {fork.as_uri()}"
     assert _run(home)[ID].outcome == "current"
+
+
+def test_a_lock_that_recorded_no_url_is_not_a_moved_collection(acme):
+    repo, home = acme
+    _run(home, install=[ID])
+    lock = read_yaml(home[0] / "plugins.lock")
+    del lock["plugins"][ID]["git"]
+    write_yaml(home[0] / "plugins.lock", lock)
+
+    assert _run(home)[ID].outcome == "current"
+
+
+def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme):
+    """Everything is then shown as new: the review says the comparison is
+    missing, and that line holds an auto-update."""
+    repo, home = acme
+    _run(home, install=[ID])
+    store = home[1] / "store" / _locked(home).digest.removeprefix("sha256:")
+    manifest_file = store / ".kraft" / "plugin.json"
+    manifest_file.parent.chmod(0o755)
+    manifest_file.chmod(0o644)
+    manifest_file.write_text("{")
+    publish(repo, "release", version="1.1.0", library={"tasks": {"base": AGENT, "more": AGENT}})
+
+    found = _run(home)[ID].review
+
+    assert found.reach[0] == "the installed 1.0.0 could not be read to compare with"
+    assert update.may_apply_unattended(found) is not None
 
 
 def test_re_install_takes_the_newest_commit(acme):

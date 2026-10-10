@@ -104,8 +104,18 @@ def _components(rel: str, data: object) -> Iterator[tuple[str, Mapping]]:
             entries = data.get(section)
             for name, body in entries.items() if isinstance(entries, Mapping) else ():
                 yield from _mappings(body, f"{section}.{name}")
+    elif rel == "profiles.yaml":
+        entries = data.get("profiles")
+        for name, body in entries.items() if isinstance(entries, Mapping) else ():
+            yield from _mappings(body, f"profiles.{name}")
     else:
         yield from _mappings(data, "")
+
+
+def _moved(collection: CollectionConfig, locked: LockEntry) -> bool:
+    """Whether the collection's URL is another than the one locked. A lock
+    that recorded none says nothing: the next update records it."""
+    return locked.git is not None and collection.git != locked.git
 
 
 def _qualifier(value: object) -> str | None:
@@ -512,7 +522,7 @@ def update(
                 or re_install
                 or found.version != locked.version
                 or collection.ref != locked.ref
-                or collection.git != locked.git
+                or _moved(collection, locked)
                 or namespace != locked.namespace
                 or (mirror is None and digest != locked.digest)
             )
@@ -533,9 +543,13 @@ def update(
                 old = fetch.extract_dir(store) if store is not None and store.is_dir() else None
                 reviewed = review_mod.review(plugin_id, old, extracted)
             except (fetch.PluginRefused, manifest.ManifestError, OSError, KeyError, ValueError):
-                # An edited or damaged store: everything in the candidate is shown as new.
+                # An edited or damaged store: everything in the candidate is shown
+                # as new, and the review says the comparison is missing.
                 reviewed = review_mod.review(plugin_id, None, extracted)
-            if locked is not None and collection.git != locked.git:
+                if locked is not None:
+                    unread = f"the installed {locked.version} could not be read to compare with"
+                    reviewed = replace(reviewed, reach=(unread, *reviewed.reach))
+            if locked is not None and _moved(collection, locked):
                 moved = f"collection URL changed: {fetch.redact(locked.git or '')} -> " + (
                     fetch.redact(collection.git or "")
                 )
@@ -715,7 +729,7 @@ def auto_update(
             what
             for what, changed in (
                 ("ref", collection.ref != locked.ref),
-                ("collection URL", collection.git != locked.git),
+                ("collection URL", _moved(collection, locked)),
                 ("alias", config.namespace(plugin_id) != locked.namespace),
             )
             if changed
