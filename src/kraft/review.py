@@ -339,8 +339,18 @@ def renamed_from(worktree: Path, base: str, head: str | None, path: str) -> str 
     """The path `path` had at `base`, when `base..head` renamed it there;
     `head` None is the working tree."""
     rev = [base] + ([head] if head else [])
+    # With no `head` this reads the working tree: never inside a nested
+    # repository, as `read_change` never does (Kraft-nx4id).
     out = _config.git_read(
-        worktree, "diff", "-M", "--name-status", "-z", "--diff-filter=R", *rev, strip=False
+        worktree,
+        "diff",
+        _sandbox.SUBMODULES_UNENTERED,
+        "-M",
+        "--name-status",
+        "-z",
+        "--diff-filter=R",
+        *rev,
+        strip=False,
     )
     tokens = (out or "").split("\0")
     # `R<score>`, the old path, the new path, per rename.

@@ -207,6 +207,9 @@ async def _every_host_call(wt: Path) -> None:
 
     review.read_change(wt, "HEAD")
     review.read_change(wt, "HEAD~1", head="HEAD")
+    # One file's read (`/compare?file=`): its rename lookup, then the diff by path.
+    review.renamed_from(wt, "HEAD", None, "f")
+    review.read_change(wt, "HEAD", paths=["f"])
     for call in (
         forge.commit_stragglers(wt, branch="kraft/w1", base="main", message="wip"),
         forge.assert_clean(wt, "main"),
