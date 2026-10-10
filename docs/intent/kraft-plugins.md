@@ -267,7 +267,7 @@ origin: src/kraft/api/deps.py §_reload_templates
 ## REQ running-item-keeps-its-plugin-versions
 
 WHILE a work item is not terminal, the system SHALL read its plugin skills and plugin agent profiles from the plugin versions its chain was materialized with, and SHALL refuse a skill of a pinned version whose store is gone instead of handing it to the agent.
-enforced-by: tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[local-chain], tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[plugin-chain], tests/plugins/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[retry-override], tests/plugins/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[chain-revision], tests/plugins/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/plugins/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/plugins/test_pins.py::test_every_launch_is_handed_the_items_pins
+enforced-by: tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[local-chain], tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[plugin-chain], tests/plugins/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[retry-override], tests/plugins/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[chain-revision], tests/plugins/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/plugins/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/plugins/test_pins.py::test_every_launch_is_handed_the_items_pins, tests/plugins/test_pins.py::test_a_revision_resolves_against_pinned_plugins[through-a-pinned-plugin], tests/plugins/test_pins.py::test_a_revision_resolves_against_pinned_plugins[through-a-plugin-not-touched-yet]
 origin: src/kraft/adapters/agent.py §resolve_agent_task
 
 ## REQ a-missing-store-is-restored-from-its-commit
@@ -287,3 +287,9 @@ origin: src/kraft/plugins/load.py §restore
 IF a work item's pinned plugin store cannot be restored, THEN the system SHALL stop the launch as a configuration error and name the plugin, its version and why.
 enforced-by: tests/plugins/test_pins.py::test_an_unrestorable_pin_stops_the_launch_and_says_why, tests/plugins/test_load.py::test_a_store_that_cannot_be_restored_says_why[commit-not-on-the-remote], tests/plugins/test_load.py::test_a_store_that_cannot_be_restored_says_why[collection-removed]
 origin: src/kraft/adapters/agent.py §resolve_agent_task
+
+## REQ gc-keeps-what-an-item-pins
+
+The system SHALL NOT delete a plugin store that the lock, the loaded library or any work item that has not ended names, and SHALL delete no store while the lock cannot be read.
+enforced-by: tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-paused-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-stopped-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-ended-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-nothing], tests/api/test_deps.py::test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read
+origin: src/kraft/api/deps.py §collect_plugin_stores
