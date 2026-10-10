@@ -9,7 +9,7 @@ import type { ItemDetail } from "../useItem";
 export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail; node: ChainNode; onStep: (step: string) => void; onNode: (node: string) => void }) {
   const { steps } = stepsOf(node);
   const paths = steps.flatMap((s) => s.tasks);
-  const done = paths.filter((p) => settled(sessionsOf(item, p).at(-1))).length;
+  const done = paths.filter((p) => settled(item, p)).length;
   const nodes = item.chain_definition.nodes;
   const next = nodes[nodes.findIndex((n) => n.id === node.id) + 1];
   const rounds = loopRounds(item, node);
@@ -29,7 +29,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
           <ul className="ip-list">
             {steps.map((s) => {
               const last = s.tasks.map((p) => sessionsOf(item, p).at(-1));
-              const mark = last.every(settled) ? "✓" : last.some((x) => x && ["running", "pending", "paused"].includes(x.status)) ? "●" : "○";
+              const mark = s.tasks.every((p) => settled(item, p)) ? "✓" : last.some((x) => x && ["running", "pending", "paused"].includes(x.status)) ? "●" : "○";
               return (
                 <li key={s.id}>
                   <button type="button" className="ip-row" onClick={() => onStep(s.id)}>

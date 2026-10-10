@@ -80,8 +80,11 @@ const SKIPPED: Look = { state: "done", meta: "skipped" };
 /** Whether `path` is, or is under, a task or step skipped in this run. */
 const skippedAt = (item: ItemDetail, path: string) => !!item.skipped_paths?.some((p) => path === p || path.startsWith(`${p}.`));
 
-/** Whether a task's newest session leaves it settled: it finished, or a person skipped it. */
-export const settled = (s: WorkerSession | undefined) => !!s && (!!s.skipped || s.status.startsWith("done"));
+/** Whether the task at `path` is settled: its newest session finished, or a person skipped it, run or not. */
+export const settled = (item: ItemDetail, path: string) => {
+  const s = sessionsOf(item, path).at(-1);
+  return s ? !!s.skipped || s.status.startsWith("done") : skippedAt(item, path);
+};
 /** A session's status as a fact row's words. */
 export const statusWords = (s: WorkerSession) => (s.skipped ? "skipped" : s.status.replaceAll("_", " "));
 

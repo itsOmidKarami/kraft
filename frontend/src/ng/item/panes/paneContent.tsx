@@ -163,7 +163,7 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const step = steps[k];
   if (!step) return { crumbs, title: stepId, body: <p className="item-muted">This step is not in the item's chain.</p> };
   const latest = step.tasks.map((p) => sessionsOf(item, p).at(-1));
-  const status = stepStatus(latest);
+  const status = step.tasks.every((p) => settled(item, p)) ? "done" : stepStatus(latest);
   const sessions = step.tasks.flatMap((p) => sessionsOf(item, p));
   return {
     crumbs,
@@ -196,7 +196,7 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
 
 type Latest = ReturnType<typeof sessionsOf>[number] | undefined;
 /** What a step's tasks came to, from the newest session of each. */
-const stepStatus = (latest: Latest[]) => (latest.every(settled) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started");
+const stepStatus = (latest: Latest[]) => (latest.every((x) => x && (x.skipped || x.status.startsWith("done"))) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started");
 
 /** A step's tasks as rows, each opening its task. */
 function StepTasks({ paths, latest, now, onTask }: { paths: string[]; latest: Latest[]; now: number; onTask: (path: string) => void }) {

@@ -1021,17 +1021,22 @@ def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> l
     """The item's sessions as the API gives them. `skipped` marks the newest
     session of a task under a skipped path, or of a node skipped after it
     began, unless it had already finished: its stored status is only where the
-    skip found it."""
-    newest = {s["hook_point"]: s["id"] for s in sessions}
+    skip found it. A fanned-out task has a newest session per repository, and
+    an escalation turn is no task of the node: a node skip does not mark it."""
+    newest = {(s["hook_point"], s["repository"]): s["id"] for s in sessions}
 
     def cut_short(s) -> bool:
         hook = s["hook_point"]
         return (
-            newest[hook] == s["id"]
+            newest[hook, s["repository"]] == s["id"]
             and not s["status"].startswith("done")
             and (
                 any(hook == p or hook.startswith(p + ".") for p in skipped)
-                or s["created_at"] < nodes.get(s["node_id"], "")
+                or (
+                    hook.startswith(s["node_id"] + ".")
+                    and not hook.endswith(".escalation")
+                    and s["created_at"] < nodes.get(s["node_id"], "")
+                )
             )
         )
 

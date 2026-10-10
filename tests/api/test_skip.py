@@ -264,9 +264,9 @@ def _stopped_in_verification(client, repo):
     return wid
 
 
-def _park_two(client, wid):
+def _park_two(client, wid, *more):
     """Two sessions of `verification` parked on an external wait: `s-in` under
-    the `review` step, `s-out` under `tests`."""
+    the `review` step, `s-out` under `tests`. `more` adds `(id, hook_point)`."""
     from kraft import store
 
     db = client.app.state.db
@@ -275,6 +275,7 @@ def _park_two(client, wid):
         for sid, hook in (
             ("s-in", "verification.review.code_review"),
             ("s-out", "verification.tests.test_changed_scopes"),
+            *more,
         ):
             await db.write(
                 lambda c, sid=sid, hook=hook: store.create_session(
@@ -345,16 +346,21 @@ def test_skipping_a_task_or_step_records_it_and_walks_on_from_the_cursor(
 
 def test_skipping_a_node_closes_the_sessions_it_left_parked(client, repo, walked):
     """A node skipped while parked on an external wait: no walk observes that
-    wait again, so its sessions are closed and read as skipped."""
+    wait again, so its sessions are closed and read as skipped. An escalation
+    turn there is closed too, but it is no task of the node: not skipped."""
     wid = _stopped_in_verification(client, repo)
-    _park_two(client, wid)
+    _park_two(client, wid, ("s-esc", "escalation"))
 
     r = client.post(f"/api/work-items/{wid}/skip", json={})
 
     assert r.status_code == 200, r.text
     item = client.get(f"/api/work-items/{wid}").json()
     sessions = {s["id"]: (s["status"], s["skipped"]) for s in item["worker_sessions"]}
-    assert sessions == {"s-in": ("paused", True), "s-out": ("paused", True)}
+    assert sessions == {
+        "s-in": ("paused", True),
+        "s-out": ("paused", True),
+        "s-esc": ("paused", False),
+    }
 
 
 def test_skipping_a_task_stops_only_its_own_session(client, repo, monkeypatch):
