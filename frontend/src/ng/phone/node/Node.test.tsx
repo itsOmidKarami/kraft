@@ -417,6 +417,7 @@ describe("the task screen (E)", () => {
   ])("says of the newest round's %s what its row on the node says: it may yet run", async (sel, want) => {
     mount(looped(), `/work-items/w1/nodes/verification?sel=${sel}`);
     expect(await screen.findByText(want)).toBeInTheDocument();
+    expect(screen.getByText("Not yet.")).toBeInTheDocument();
   });
 
   it("says a fix-loop task did not run in the round shown", async () => {

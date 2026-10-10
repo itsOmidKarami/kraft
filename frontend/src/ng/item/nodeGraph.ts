@@ -199,6 +199,13 @@ export function loopIdle(node: ApiNode, loop: "repair" | "judge", round: number,
   return loop === "judge" ? "not yet" : repairIdle(round, rounds.total, verdictOf(events, node.id, round - 1)?.startsWith("stop"));
 }
 
+/** The same as the sentence an empty pane or screen says. The judge that skipped the first repair did not run in
+ *  that round, whatever comes after. */
+export function loopIdleSentence(node: ApiNode, loop: "repair" | "judge", round: number, rounds: { latest: number; total?: number }, events?: KraftEvent[]): string {
+  const words = loop === "judge" && round === 1 ? "not run in this round" : loopIdle(node, loop, round, rounds, events);
+  return `${words[0].toUpperCase()}${words.slice(1)}.`;
+}
+
 export const repairIdle = (round: number, total: number | undefined, judgeStopped: boolean | undefined) =>
   judgeStopped ? "stopped by judge" : round >= (total ?? Infinity) ? "last round" : "not yet";
 
