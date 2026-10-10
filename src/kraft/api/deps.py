@@ -409,6 +409,24 @@ async def restore_plugins(app) -> None:
     collect_plugin_stores(st)
 
 
+async def auto_update_plugins(app) -> None:
+    """What the server does about plugins once it is up, in the background so
+    a start never waits on the network: restore what is missing, then take
+    the updates that plugins set to auto-update may take on their own."""
+    from kraft import apply
+    from kraft.plugins import update as plugin_update
+
+    st = app.state
+    await restore_plugins(app)
+    outcomes = await asyncio.to_thread(
+        plugin_update.auto_update, st.templates_dir, st.run_dirs.plugins
+    )
+    if any(o["outcome"] == "applied" for o in outcomes.values()):
+        _reload_templates(st)
+        apply.notify(app)
+        collect_plugin_stores(st)
+
+
 def collect_plugin_stores(st) -> list[str]:
     """Delete each plugin store that none of these names: the lock, the
     library this server has loaded, or the snapshot of a work item that has

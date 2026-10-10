@@ -293,3 +293,33 @@ origin: src/kraft/adapters/agent.py §resolve_agent_task
 The system SHALL NOT delete a plugin store that the lock, the loaded library or any work item that has not ended names, and SHALL delete no store while the lock cannot be read.
 enforced-by: tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-paused-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-stopped-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-ended-item], tests/api/test_deps.py::test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read[pinned-by-nothing], tests/api/test_deps.py::test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read
 origin: src/kraft/api/deps.py §collect_plugin_stores
+
+## REQ auto-update-is-opt-in
+
+WHERE a plugin's auto-update is on, through its collection's `auto_update: true` or its own, the system SHALL update that plugin in the background after the server starts, and SHALL NOT fetch a collection none of whose installed plugins auto-update, except to restore a missing store.
+enforced-by: tests/plugins/test_auto_update.py::test_who_auto_updates[plugin-on], tests/plugins/test_auto_update.py::test_who_auto_updates[collection-on], tests/plugins/test_auto_update.py::test_who_auto_updates[neither-is-not-fetched], tests/api/test_deps.py::test_the_server_takes_an_auto_update_and_loads_it
+origin: src/kraft/plugins/update.py §auto_update
+
+## REQ auto-update-holds-what-widens-a-run
+
+IF an auto-update is a downgrade, a move onto a pre-release, or has a review call-out about what a run can reach, THEN the system SHALL hold it for a person and keep the locked version.
+enforced-by: tests/plugins/test_auto_update.py::test_auto_update_holds[gate-removed], tests/plugins/test_auto_update.py::test_auto_update_holds[limit-raised], tests/plugins/test_auto_update.py::test_auto_update_holds[requires], tests/plugins/test_auto_update.py::test_auto_update_holds[downgrade], tests/plugins/test_auto_update.py::test_auto_update_holds[pre-release], tests/plugins/test_auto_update.py::test_a_newer_pre_release_follows_a_pre_release
+origin: src/kraft/plugins/update.py §may_apply_unattended
+
+## REQ auto-update-never-installs-or-re-installs
+
+The system SHALL NOT auto-update a plugin that has no lock entry, to a newer commit at an unchanged version, or to a changed alias or ref.
+enforced-by: tests/plugins/test_auto_update.py::test_auto_update_never[installs], tests/plugins/test_auto_update.py::test_auto_update_never[re-installs], tests/plugins/test_auto_update.py::test_auto_update_never[applies-a-ref-change]
+origin: src/kraft/plugins/update.py §auto_update
+
+## REQ failed-auto-update-keeps-the-locked-version
+
+IF an auto-update fails or is held, THEN the system SHALL keep serving the locked version and SHALL report the outcome in `/health` and `kraft admin doctor` without marking health degraded.
+enforced-by: tests/plugins/test_auto_update.py::test_a_failed_auto_update_keeps_the_lock_and_records_why, tests/api/test_deps.py::test_a_held_or_failed_auto_update_is_reported_and_not_degraded, tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[held], tests/test_doctor_plugins.py::test_the_plugin_updates_row_warns_and_never_fails[failed-auth]
+origin: src/kraft/plugins/update.py §auto_update
+
+## REQ a-major-update-names-the-plugins-it-drops
+
+WHEN `kraft admin update` would install a release whose major leaves a loaded plugin's `requires.kraft` unmet, the system SHALL list those plugins and ask before installing.
+enforced-by: tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[next-major-asks], tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[next-major-accepted], tests/cli/test_admin_update.py::test_a_major_update_lists_the_plugins_it_would_drop[same-major-says-nothing]
+origin: src/kraft/cli/admin.py §_confirm_dropped_plugins
