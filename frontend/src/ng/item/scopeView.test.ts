@@ -157,9 +157,19 @@ describe("a scope the round has no chip for", () => {
     ["a scope another round ran", () => three(), ":just test-b", 3, "not picked", "Not picked: no changed path reaches it this round.", "just test-b"],
     ["a command no round ran", () => three(), ":just test-gone", 3, "not found", "Not found: this task ran no scope with this command.", "just test-gone"],
     ["a key with no repository part", () => three(), "just test-a", 3, "not found", "Not found: this task ran no scope with this command.", "just test-a"],
+    // Another test task of the chain ran it: it is that task's scope, not this one's.
+    ["a scope of another task", () => { const it = three(); it.scope_runs!.push({ ...run(null, "just test-z", 0, "done")[0], hook_point: "verification.other.tests" }); return it; }, ":just test-z", 3, "not found", "Not found: this task ran no scope with this command.", "just test-z"],
+    // A repository the item no longer names has no row to have run without it.
+    ["a scope of a repository the item no longer names", () => { const it = three(); it.scope_runs!.push(run("gone", "just test-g", 0, "done")[0]); return it; }, "gone:just test-g", 3, "not reached", "Not reached: the task did not run it this round.", "just test-g"],
     // Round 2 runs on and has recorded no picks: what it dropped is not known yet.
     ["a round still choosing", () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done"), run(null, "just test-a", 1, "running")]), ":just test-b", 2, "still choosing", "Still choosing: this round has not picked its scopes yet.", "just test-b"],
     ["a repository the round did not reach", () => item([run("ws", "just test-a", 0, "done"), run("pkg", "just test-p", 0, "done"), run("ws", "just test-a", 1, "failed")], { materialized_chain: chain("sequential", WORKSPACE) }), "pkg:just test-p", 2, "not reached", "Its repository was not reached this round.", "just test-p"],
+    // The node runs on (its repair): the repository after the one that failed is still not reached, as its row says.
+    ["a repository after a failure, while the round's repair runs", () => item([run("ws", "just test-a", 0, "done"), run("pkg", "just test-p", 0, "done"), run("ws", "just test-a", 1, "failed")], { materialized_chain: chain("sequential", WORKSPACE), display_status: "running" }), "pkg:just test-p", 2, "not reached", "Its repository was not reached this round.", "just test-p"],
+    // One repository is not passed over: the task did not get to the scope.
+    ["a round the task did not run in, in the item's one repository", () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 2, "done")]), ":just test-a", 2, "not reached", "Not reached: the task did not run it this round.", "just test-a"],
+    // Another pass of the node ran it: it is a scope of the task, which this pass's round ran without.
+    ["a scope only another pass ran", () => { const [a, b] = [run(null, "just test-a", 0, "done", { pass: 1 }), run(null, "just test-b", 0, "done", { pass: 2 })]; return item([[a[0], { ...a[1], pass: 1 }], [b[0], { ...b[1], pass: 2 }]], { node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] } }); }, ":just test-a", 1, "not picked", "Not picked: no changed path reaches it this round.", "just test-a"],
   ])("says why: %s", (_n, of, key, round, want, why, command) => {
     expect(miss(of(), key, round)).toEqual([want, why, command]);
   });

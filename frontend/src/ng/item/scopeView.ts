@@ -198,8 +198,9 @@ export function otherRounds(item: ItemDetail, path: string, key: string, round: 
   return out;
 }
 
-/** The session that speaks for a changed-test-scope task in a round: a scope that failed, else one still going. The
- *  task is not done while one of its scopes is not, whichever ran last; undefined when every scope passed. */
+/** The session that speaks for a changed-test-scope task in a round: a scope that failed, else one still going,
+ *  whichever ran last; undefined when neither, and the task reads as its last run. A scope picked and not started
+ *  has no session to speak with (Kraft-9d8b2.159). */
 export function scopeLead(view: ScopesView): WorkerSession | undefined {
   const ran = view.rows.flatMap((r) => r.chips).filter((c) => c.session);
   return (ran.find((c) => c.state === "failed") ?? ran.find((c) => c.state === "running" || c.state === "waiting"))?.session;
@@ -228,10 +229,16 @@ export function scopeAt(item: ItemDetail, path: string, key: string, view: Scope
     if (chip) return { row, chip, command };
   }
   const row = view.rows.find((r) => (r.id ?? "") === repo);
-  if (!runsOf(item, path).some((r) => scopeKey(r.repository, r.command) === key)) return { row, command, miss: "not found", why: "Not found: this task ran no scope with this command." };
+  // In any pass of the node: a scope another pass ran is a scope of the task.
+  const known = (item.scope_runs ?? []).some((r) => r.hook_point === path && scopeKey(r.repository, r.command) === key);
+  if (!known) return { row, command, miss: "not found", why: "Not found: this task ran no scope with this command." };
+  // One repository: it is the task that did not get to it, not a repository that was passed over.
+  const unreached = { row, command, miss: "not reached" as const, why: view.rows.length > 1 ? "Its repository was not reached this round." : "Not reached: the task did not run it this round." };
+  // A repository after one that failed is not reached, however long the round runs on.
+  if (row?.state === "unreached") return unreached;
   if (row?.choosing) return { row, command, miss: "still choosing", why: "Still choosing: this round has not picked its scopes yet." };
-  if (row && row.chips.length > 0) return { row, command, miss: "not picked", why: "Not picked: no changed path reaches it this round." };
-  return { row, command, miss: "not reached", why: "Its repository was not reached this round." };
+  // Its repository ran this round, without it. A repository the item no longer names was not reached.
+  return row ? { row, command, miss: "not picked", why: "Not picked: no changed path reaches it this round." } : unreached;
 }
 
 /** A chip's state in the words a scope's subtitle uses: "passed 24s", "failed 1m", "running", "not picked". */

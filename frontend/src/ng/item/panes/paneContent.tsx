@@ -274,7 +274,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const scopes = !esc && !rev && !loop && isScopeTask(item, path);
   const view = scopes ? scopesView(item, path, a.round ?? 1, a.now) : null;
   // Such a task is all of its scopes: one that failed, or still runs, speaks for it, whichever ran last.
-  const at = sessions.find((s) => s.attempt === a.attempt) ?? ((view && scopeLead(view)) || sessions.at(-1));
+  // A run pinned in one of its scopes' panes is that scope's: this pane has no menu to pick one, or to let it go.
+  const at = view ? scopeLead(view) || sessions.at(-1) : sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
   const frozen = materialized(item);
   const kind = esc ? "agent" : taskKindAt(frozen, path) ?? (at?.model ? "agent" : undefined);

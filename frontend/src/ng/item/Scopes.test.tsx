@@ -152,6 +152,9 @@ describe("an open changed-test-scope task", () => {
     expect(where()).toContain("attempt=2");
     expect(scope().querySelector(".pane-sub")).toHaveTextContent(/^test scope · round 2 of 3 · attempt 1 of 2▾ · failed 9s$/);
     expect(within(scope()).getByText("status").nextElementSibling).toHaveTextContent("failed · 9s");
+    // The run picked is this scope's. Back on the task, the pane is the task's again: it has no menu to let a run go.
+    await userEvent.click(within(scope()).getAllByRole("button", { name: "test_changed_scopes" })[0]);
+    expect(sub("test_changed_scopes")).toMatch(/· done 24s$/);
     // A scope the round ran once has no runs to pick between, and the run picked is not another scope's.
     const f = await screen.findByRole("group", { name: /repositories and scopes/ });
     await userEvent.click(within(f).getByRole("button", { name: /^just test-c/ }));

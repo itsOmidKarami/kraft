@@ -190,7 +190,6 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
 }
 
-/** Why a round has no repair after it (yet). */
 /** Why a fix loop's repair or judge has no run in the round shown, as its pane and its screen say it: the words of
  *  its row on the node (`loopOf`) while the round is the newest, and that a round which is over did not run it. */
 export function loopIdle(node: ApiNode, loop: "repair" | "judge", round: number, rounds: { latest: number; total?: number }, events?: KraftEvent[]): string {
@@ -206,6 +205,7 @@ export function loopIdleSentence(node: ApiNode, loop: "repair" | "judge", round:
   return `${words[0].toUpperCase()}${words.slice(1)}.`;
 }
 
+/** Why a round has no repair after it (yet). */
 export const repairIdle = (round: number, total: number | undefined, judgeStopped: boolean | undefined) =>
   judgeStopped ? "stopped by judge" : round >= (total ?? Infinity) ? "last round" : "not yet";
 
