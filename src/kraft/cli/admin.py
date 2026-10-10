@@ -551,7 +551,7 @@ def _holds_config(directory: Path) -> bool:
 
 #: Config files a templates directory can hold that are neither bundled nor
 #: carried across a major update: read when present, never seeded.
-CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml"})
+CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml", "plugins.yaml", "plugins.lock"})
 
 
 def _operators_alone(root: Path) -> None:

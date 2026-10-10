@@ -15,7 +15,7 @@ origin: src/kraft/templates/library.py §TemplateLibrary.from_yaml_dir
 ## REQ an-alias-becomes-the-namespace
 
 WHERE a plugin is installed under an alias, the system SHALL address its components, chains, skills and agent profiles by the alias, including the references the plugin makes to its own name.
-enforced-by: tests/templates/test_library_plugins.py::test_plugin_layer_resolution[alias-from-outside], tests/templates/test_library_plugins.py::test_plugin_layer_resolution[alias-own-qualified-ref]
+enforced-by: tests/templates/test_library_plugins.py::test_plugin_layer_resolution[alias-from-outside], tests/templates/test_library_plugins.py::test_plugin_layer_resolution[alias-own-qualified-ref], tests/cli/test_plugin.py::test_install_as_alias
 origin: src/kraft/plugins/load.py §qualify
 
 ## REQ a-bare-local-name-is-local
@@ -99,13 +99,13 @@ origin: src/kraft/plugins/config.py §PluginsConfig
 ## REQ a-collection-source-is-explicit
 
 IF a `plugins.yaml` collection has both or neither of `git` and `path`, a `git` that is not a full https, ssh, file or scp-like URL, a `git` with credentials or a leading `-`, a `path` that is not absolute and normal, or a `ref` git would read as an option, THEN the system SHALL refuse the file.
-enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[git-and-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[neither], tests/plugins/test_config.py::test_plugins_yaml_is_refused[owner-repo], tests/plugins/test_config.py::test_plugins_yaml_is_refused[http], tests/plugins/test_config.py::test_plugins_yaml_is_refused[credentials], tests/plugins/test_config.py::test_plugins_yaml_is_refused[leading-dash], tests/plugins/test_config.py::test_plugins_yaml_is_refused[relative-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[ref-option]
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[git-and-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[neither], tests/plugins/test_config.py::test_plugins_yaml_is_refused[owner-repo], tests/plugins/test_config.py::test_plugins_yaml_is_refused[http], tests/plugins/test_config.py::test_plugins_yaml_is_refused[credentials], tests/plugins/test_config.py::test_plugins_yaml_is_refused[leading-dash], tests/plugins/test_config.py::test_plugins_yaml_is_refused[relative-path], tests/plugins/test_config.py::test_plugins_yaml_is_refused[ref-option], tests/cli/test_plugin.py::test_collection_add_writes_a_full_source[owner-repo], tests/cli/test_plugin.py::test_collection_add_writes_a_full_source[directory], tests/cli/test_plugin.py::test_collection_add_writes_a_full_source[ref]
 origin: src/kraft/plugins/config.py §CollectionConfig
 
 ## REQ a-collection-auto-update-has-no-exceptions
 
 IF a plugin entry sets `auto_update` while its collection sets `auto_update: true`, THEN the system SHALL refuse `plugins.yaml`.
-enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[opt-out-under-auto-collection]
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[opt-out-under-auto-collection], tests/cli/test_plugin.py::test_auto_update_verbs[plugin-on-under-auto-collection-refused], tests/cli/test_plugin.py::test_auto_update_verbs[collection-on-with-plugin-settings-refused]
 origin: src/kraft/plugins/config.py §PluginsConfig
 
 ## REQ a-directory-collection-never-auto-updates
@@ -201,13 +201,13 @@ origin: src/kraft/plugins/update.py §update
 ## REQ re-install-takes-the-newest-commit
 
 WHEN an operator re-installs a plugin, the system SHALL resolve its collection's `ref` again even if the version is unchanged, and SHALL review it like any update.
-enforced-by: tests/plugins/test_update.py::test_re_install_takes_the_newest_commit
+enforced-by: tests/plugins/test_update.py::test_re_install_takes_the_newest_commit, tests/cli/test_plugin.py::test_install_re_install[refused-without-flag], tests/cli/test_plugin.py::test_install_re_install[takes-newest-commit]
 origin: src/kraft/plugins/update.py §update
 
 ## REQ update-requires-acceptance
 
-IF an install or update is declined or refused, THEN the system SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
-enforced-by: tests/plugins/test_update.py::test_a_declined_update_writes_nothing[install], tests/plugins/test_update.py::test_a_declined_update_writes_nothing[update], tests/plugins/test_update.py::test_a_batch_continues_past_a_refused_plugin
+IF an install or update is declined, refused, or run with `--check`, THEN the system SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
+enforced-by: tests/plugins/test_update.py::test_a_declined_update_writes_nothing[install], tests/plugins/test_update.py::test_a_declined_update_writes_nothing[update], tests/plugins/test_update.py::test_a_batch_continues_past_a_refused_plugin, tests/cli/test_plugin.py::test_a_refused_install_writes_nothing, tests/cli/test_plugin.py::test_update_check_exit_codes[update-waiting], tests/cli/test_plugin.py::test_no_terminal_without_yes_declines
 origin: src/kraft/plugins/update.py §update
 
 ## REQ update-refuses-a-change-that-breaks-a-chain
@@ -221,3 +221,27 @@ origin: src/kraft/plugins/update.py §_breaks
 WHILE one process writes plugin state, the system SHALL make a second writer wait, then fail, and SHALL write nothing IF the plugin files changed since the review was built.
 enforced-by: tests/plugins/test_update.py::test_a_second_writer_waits_then_fails, tests/plugins/test_update.py::test_a_lock_changed_during_review_writes_nothing
 origin: src/kraft/plugins/update.py §write_lock
+
+## REQ update-check-exit-codes
+
+WHEN `update --check` finishes, the system SHALL exit 0 when every plugin is current, 1 when an update is waiting, 2 when an update would be refused, and 3 when it could not check.
+enforced-by: tests/cli/test_plugin.py::test_update_check_exit_codes[up-to-date], tests/cli/test_plugin.py::test_update_check_exit_codes[update-waiting], tests/cli/test_plugin.py::test_update_check_exit_codes[refused], tests/cli/test_plugin.py::test_update_check_exit_codes[cannot-check]
+origin: src/kraft/cli/plugin.py §_cmd_update
+
+## REQ removing-a-referenced-plugin-is-refused
+
+IF local configuration (`library.yaml`, `chains/`, `repos.yaml`, `intake.yaml`, `policy.yaml` triggers or `harnesses.yaml` fallbacks) references the namespace of a plugin being uninstalled or disabled, THEN the system SHALL refuse and list each reference.
+enforced-by: tests/cli/test_plugin.py::test_removing_a_referenced_plugin_is_refused[uninstall], tests/cli/test_plugin.py::test_removing_a_referenced_plugin_is_refused[disable]
+origin: src/kraft/cli/plugin.py §_still_referenced
+
+## REQ a-worker-does-not-change-plugins
+
+WHILE `KRAFT_WORK_ITEM_ID` is set, the system SHALL refuse every mutating `kraft admin plugin` verb.
+enforced-by: tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[collection-add], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[collection-auto-update], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[collection-remove], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[install], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[update], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[auto-update], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[enable], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[disable], tests/cli/test_plugin.py::test_a_worker_cannot_change_plugins[uninstall]
+origin: src/kraft/cli/plugin.py §_not_a_worker
+
+## REQ a-plugin-verb-reloads-only-the-plugins
+
+WHEN a `kraft admin plugin` verb changes what loads, the system SHALL rebuild the running server's library from the new lock and SHALL NOT apply a pending edit of another config file.
+enforced-by: tests/api/test_deps.py::test_a_plugin_reload_leaves_the_operators_pending_edits_pending, tests/cli/test_plugin.py::test_install_as_alias
+origin: src/kraft/apply.py §reload

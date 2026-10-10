@@ -494,3 +494,29 @@ def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, 
     assert body["status"] == ("degraded" if key else "ok")
     if key:
         assert why in body["invalid_templates"][key]
+
+
+def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
+    """A plugin verb applies its own change: an unsaved-to-the-server edit of
+    `policy.yaml` is not taken along."""
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": release}),
+        "release",
+    )
+    policy = st.templates_dir / "policy.yaml"
+    policy.write_text(policy.read_text() + "\n# edited by hand\n")
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
+
+    r = client.post("/api/templates/reload", json={"only": ["plugins.yaml", "plugins.lock"]})
+
+    assert r.status_code == 200 and "release:ship" in r.json()["valid"]
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
+    assert client.post("/api/templates/reload", json={"only": ["policy.yaml"]}).status_code == 422
+    client.post("/api/templates/reload")
+    assert client.get("/api/apply").json()["reload"] == []
