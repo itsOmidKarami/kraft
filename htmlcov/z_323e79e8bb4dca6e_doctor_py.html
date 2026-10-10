@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_3dd491eceeebc981_areas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-10 19:27 +0000
+            created at 2026-10-10 20:06 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -200,12 +200,12 @@
     <p class="run"><span class="n"><a id="t118" href="#t118">118</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t119" href="#t119">119</a></span><span class="t">    <span class="nam">size</span> <span class="op">=</span> <span class="nam">render</span><span class="op">.</span><span class="nam">human_size</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t120" href="#t120">120</a></span><span class="t">    <span class="nam">used</span> <span class="op">=</span> <span class="fst">f&quot;</span><span class="fst">worktrees use </span><span class="op">{</span><span class="nam">size</span><span class="op">(</span><span class="nam">s</span><span class="op">[</span><span class="str">&#x27;used_bytes&#x27;</span><span class="op">]</span><span class="op">)</span><span class="op">}</span><span class="fst"> of </span><span class="op">{</span><span class="nam">size</span><span class="op">(</span><span class="nam">s</span><span class="op">[</span><span class="str">&#x27;limit_bytes&#x27;</span><span class="op">]</span><span class="op">)</span><span class="op">}</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t121" href="#t121">121</a></span><span class="t">    <span class="nam">free</span> <span class="op">=</span> <span class="str">&quot;archive finished items to make room (the board&#x27;s Done group, or Settings &#8250; Storage)&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t121" href="#t121">121</a></span><span class="t">    <span class="nam">free</span> <span class="op">=</span> <span class="str">&quot;kraft view storage lists it by item; kraft item archive --reclaimable makes room&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t122" href="#t122">122</a></span><span class="t">    <span class="key">if</span> <span class="nam">s</span><span class="op">[</span><span class="str">&quot;state&quot;</span><span class="op">]</span> <span class="op">==</span> <span class="str">&quot;held&quot;</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t123" href="#t123">123</a></span><span class="t">        <span class="key">return</span> <span class="str">&quot;held&quot;</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">used</span><span class="op">}</span><span class="fst">: starts that need a new worktree are held; </span><span class="op">{</span><span class="nam">free</span><span class="op">}</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t124" href="#t124">124</a></span><span class="t">    <span class="key">if</span> <span class="nam">s</span><span class="op">[</span><span class="str">&quot;state&quot;</span><span class="op">]</span> <span class="op">==</span> <span class="str">&quot;over_quota&quot;</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t125" href="#t125">125</a></span><span class="t">        <span class="key">return</span> <span class="str">&quot;over_quota&quot;</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">used</span><span class="op">}</span><span class="fst">, over the </span><span class="op">{</span><span class="nam">size</span><span class="op">(</span><span class="nam">s</span><span class="op">[</span><span class="str">&#x27;quota_bytes&#x27;</span><span class="op">]</span><span class="op">)</span><span class="op">}</span><span class="fst"> quota; </span><span class="op">{</span><span class="nam">free</span><span class="op">}</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t126" href="#t126">126</a></span><span class="t">    <span class="key">return</span> <span class="str">&quot;ok&quot;</span><span class="op">,</span> <span class="nam">used</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t126" href="#t126">126</a></span><span class="t">    <span class="key">return</span> <span class="str">&quot;ok&quot;</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">used</span><span class="op">}</span><span class="fst">; kraft view storage lists it by item</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t127" href="#t127">127</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t128" href="#t128">128</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t129" href="#t129">129</a></span><span class="t"><span class="key">def</span> <span class="nam">_health_checks</span><span class="op">(</span><span class="nam">payload</span><span class="op">:</span> <span class="nam">dict</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">list</span><span class="op">[</span><span class="nam">dict</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -1510,7 +1510,7 @@
             <a class="nav" href="z_3dd491eceeebc981_areas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-10 19:27 +0000
+            created at 2026-10-10 20:06 +0000
         </p>
     </div>
 </footer>

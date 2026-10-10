@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">177 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">164<span class="text"> run</span></button>
+            <span class="text">178 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">165<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">13<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_3dd491eceeebc981_policy_caps_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-10 19:27 +0000
+            created at 2026-10-10 20:06 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -91,7 +91,7 @@
     <p class="pln"><span class="n"><a id="t9" href="#t9">9</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t10" href="#t10">10</a></span><span class="t"><span class="key">import</span> <span class="nam">re</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t11" href="#t11">11</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t12" href="#t12">12</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span> <span class="key">import</span> <span class="nam">render</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t12" href="#t12">12</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span> <span class="key">import</span> <span class="nam">render</span><span class="op">,</span> <span class="nam">storage</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t13" href="#t13">13</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">api</span> <span class="key">import</span> <span class="nam">config_check</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t14" href="#t14">14</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">cap_levels</span> <span class="key">import</span> <span class="nam">CAP_LEVELS</span><span class="op">,</span> <span class="nam">SCOPE_CAP_FIELDS</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t15" href="#t15">15</a></span><span class="t"><span class="key">from</span> <span class="nam">kraft</span><span class="op">.</span><span class="nam">drafts</span> <span class="key">import</span> <span class="nam">config</span><span class="op">,</span> <span class="nam">harnesses</span><span class="op">,</span> <span class="nam">policy_caps</span><span class="op">,</span> <span class="nam">store</span>&nbsp;</span><span class="r"></span></p>
@@ -449,15 +449,16 @@
     <p class="pln"><span class="n"><a id="t367" href="#t367">367</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t368" href="#t368">368</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">after_publish</span><span class="op">(</span><span class="nam">app</span><span class="op">,</span> <span class="nam">written</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t369" href="#t369">369</a></span><span class="t">    <span class="nam">config</span><span class="op">.</span><span class="nam">reload_policy</span><span class="op">(</span><span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t370" href="#t370">370</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t370" href="#t370">370</a></span><span class="t">    <span class="nam">storage</span><span class="op">.</span><span class="nam">kick</span><span class="op">(</span><span class="nam">app</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t371" href="#t371">371</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t372" href="#t372">372</a></span><span class="t"><span class="nam">AREA</span> <span class="op">=</span> <span class="nam">store</span><span class="op">.</span><span class="nam">Area</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t373" href="#t373">373</a></span><span class="t">    <span class="nam">valid</span><span class="op">=</span><span class="key">lambda</span> <span class="nam">key</span><span class="op">:</span> <span class="nam">key</span> <span class="op">==</span> <span class="nam">NAME</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t374" href="#t374">374</a></span><span class="t">    <span class="nam">files</span><span class="op">=</span><span class="key">lambda</span> <span class="nam">key</span><span class="op">:</span> <span class="nam">FILES</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t375" href="#t375">375</a></span><span class="t">    <span class="nam">working</span><span class="op">=</span><span class="nam">working</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t376" href="#t376">376</a></span><span class="t">    <span class="nam">ops</span><span class="op">=</span><span class="nam">OPS</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t377" href="#t377">377</a></span><span class="t">    <span class="nam">after_publish</span><span class="op">=</span><span class="nam">after_publish</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t378" href="#t378">378</a></span><span class="t"><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t372" href="#t372">372</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t373" href="#t373">373</a></span><span class="t"><span class="nam">AREA</span> <span class="op">=</span> <span class="nam">store</span><span class="op">.</span><span class="nam">Area</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t374" href="#t374">374</a></span><span class="t">    <span class="nam">valid</span><span class="op">=</span><span class="key">lambda</span> <span class="nam">key</span><span class="op">:</span> <span class="nam">key</span> <span class="op">==</span> <span class="nam">NAME</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t375" href="#t375">375</a></span><span class="t">    <span class="nam">files</span><span class="op">=</span><span class="key">lambda</span> <span class="nam">key</span><span class="op">:</span> <span class="nam">FILES</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t376" href="#t376">376</a></span><span class="t">    <span class="nam">working</span><span class="op">=</span><span class="nam">working</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t377" href="#t377">377</a></span><span class="t">    <span class="nam">ops</span><span class="op">=</span><span class="nam">OPS</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t378" href="#t378">378</a></span><span class="t">    <span class="nam">after_publish</span><span class="op">=</span><span class="nam">after_publish</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t379" href="#t379">379</a></span><span class="t"><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -467,7 +468,7 @@
             <a class="nav" href="z_3dd491eceeebc981_policy_caps_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-10 19:27 +0000
+            created at 2026-10-10 20:06 +0000
         </p>
     </div>
 </footer>
