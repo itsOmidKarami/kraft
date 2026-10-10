@@ -261,6 +261,11 @@ when `NEW` does not collect.
   `just test-py 3.12` reproduces one version's failure locally, in its own
   environment. A test must pass on the floor, so it never relies on a newer
   stdlib API or on 3.14's lazy annotations.
+- CI runs the unit tier in three shards, split by test file. A failure that
+  only shows beside the other tests of its shard is reproduced with the
+  shard's name from the job, `test (python 3.14, 2/3)`:
+  `KRAFT_TEST_SHARD=2/3 just test --no-testmon -n auto`. The repo-root
+  `conftest.py` reads the variable; unset, every test runs.
 - Only one heavy local test run at a time on a shared machine.
 - A test that runs past its timeout (120s, `pyproject.toml`) ends its whole
   process: pytest-timeout's `thread` method dumps every stack, then exits.
