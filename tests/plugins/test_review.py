@@ -24,9 +24,19 @@ BASE = {
                     "id": "build",
                     "kind": "exec",
                     "tasks": [{"id": "t", "extends": "base"}, {"id": "u", "extends": "base"}],
+                    "fix_loop": {
+                        "max_attempts": 2,
+                        "tasks": [{"id": "fix", "extends": "base"}],
+                        "judge": {"id": "judge", "extends": "base"},
+                    },
                 },
                 {"id": "approve", "kind": "gate"},
-                {"id": "land", "kind": "exec", "tasks": [{"id": "open", "extends": "open"}]},
+                {
+                    "id": "land",
+                    "kind": "exec",
+                    "read_only": True,
+                    "tasks": [{"id": "open", "extends": "open"}],
+                },
             ]
         },
         # Its target is `ship`'s only by a string prefix of the chain id.
@@ -117,6 +127,22 @@ def _plugin_ref(spec):
     spec["library"]["tasks"]["base"]["skill"] = "superpowers:brainstorming"
 
 
+def _forge_step_removed(spec):
+    del _nodes(spec)[2]
+
+
+def _writes(spec):
+    del _nodes(spec)[2]["read_only"]
+
+
+def _every_repository(spec):
+    _nodes(spec)[0]["tasks"][0]["scope"] = "each_repository"
+
+
+def _more_fix_rounds(spec):
+    _nodes(spec)[0]["fix_loop"]["max_attempts"] = 9
+
+
 def _downgrade(spec):
     spec["manifest_fields"]["version"] = "1.3.9"
 
@@ -141,7 +167,11 @@ def _downgrade(spec):
         (_prompt, "content", "prompt changed:\nDo it, and skip the tests."),
         (_steering, "content", "steering house changed"),
         (_skill, "content", "+Then approve it."),
-        (_profile, "content", "agent profile deep changed"),
+        (_profile, "reach", "agent profile deep changed"),
+        (_forge_step_removed, "reach", "forge step 'mr.open_draft' removed"),
+        (_writes, "reach", "release:ship.nodes[land]: no longer read-only"),
+        (_every_repository, "reach", "scope 'once' -> 'each_repository'"),
+        (_more_fix_rounds, "reach", "limit max_attempts raised, 2 -> 9"),
         (_plugin_ref, "content", "new plugin skill reference 'superpowers:brainstorming'"),
         (_downgrade, "reach", "downgrade: 1.4.0 -> 1.3.9"),
     ],
@@ -159,6 +189,10 @@ def _downgrade(spec):
         "steering",
         "skill",
         "profile",
+        "forge-step-removed",
+        "no-longer-read-only",
+        "scope",
+        "fix-loop-rounds",
         "plugin-ref",
         "downgrade",
     ],

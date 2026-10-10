@@ -1,6 +1,7 @@
 """What a candidate plugin may not carry, checked before anything is written."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,31 @@ def test_a_skill_may_not_reach_into_another_kraft_plugin(skill, installed, refus
     assert bool(found) is refused
 
 
+@pytest.mark.parametrize(
+    ("fallback", "why"),
+    [
+        ({"harness": "claude"}, "not listed in requires.harnesses"),
+        ({"profile": "other:deep"}, "reaches outside the plugin"),
+    ],
+    ids=["unlisted-harness", "another-plugins-profile"],
+)
+def test_a_plugins_profiles_are_checked_like_its_tasks(fallback, why):
+    files = _files({"tasks": {"base": AGENT}}, {"ship": chain("base")})
+    profiles = {"profiles": {"deep": {"fallback": [fallback]}}}
+    files["profiles.yaml"] = ("100644", yaml.safe_dump(profiles).encode())
+    with pytest.raises(update.Refused, match=why):
+        update.check(_manifest(), files)
+
+
+def test_a_file_nested_too_deep_is_refused_like_any_other():
+    """Not a RecursionError that ends the whole run, every other plugin's update with it."""
+    deep = 5000
+    files = {"library.yaml": ("100644", b"a: " + b"[" * deep + b"]" * deep)}
+    assert "cannot parse" in update.problems(_manifest(), files)[0]
+    with pytest.raises(manifest.ManifestError, match="nested deeper"):
+        manifest.parse('{"a":' * deep + "1" + "}" * deep, "plugin.json")
+
+
 # ── the update pipeline ──
 
 RELEASE = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
@@ -225,6 +251,25 @@ def test_an_update_waits_for_a_version_change(tmp_path, directory, version, outc
         assert "its files changed" in result.note and "--re-install" in result.note
     if version == "0.9.0":
         assert result.review.reach == ("downgrade: 1.0.0 -> 0.9.0",)
+
+
+def test_a_collection_moved_to_another_url_is_reviewed_as_reach(tmp_path):
+    """Another repository under the same name is a change a person reads,
+    whatever its version says."""
+    repo = make_collection(tmp_path, {"release": RELEASE})
+    home = instance(tmp_path, {"acme": {"git": repo.as_uri()}})
+    _run(home, install=[ID])
+    fork = tmp_path / "fork"
+    shutil.copytree(repo, fork)
+    config = read_yaml(home[0] / "plugins.yaml")
+    config["collections"]["acme"]["git"] = fork.as_uri()
+    write_yaml(home[0] / "plugins.yaml", config)
+
+    result = _run(home)[ID]
+
+    assert result.outcome == "applied" and _locked(home).git == fork.as_uri()
+    assert result.review.reach[0] == f"collection URL changed: {repo.as_uri()} -> {fork.as_uri()}"
+    assert _run(home)[ID].outcome == "current"
 
 
 def test_re_install_takes_the_newest_commit(acme):

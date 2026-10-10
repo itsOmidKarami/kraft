@@ -159,6 +159,7 @@ def install(
     lock["plugins"][plugin_id] = {
         "namespace": alias or plugin,
         "ref": ref,
+        "git": url,
         "commit": commit,
         "source": source,
         "tree": extracted.tree,

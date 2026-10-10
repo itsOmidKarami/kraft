@@ -32,7 +32,7 @@ from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 _MERGES = ("mr.merge", "mr.mark_ready")
 _GATE_FIELDS = ("chain_finalized", "skippable", "reject_to")
 _ROUTE = ("harness", "model", "effort", "profile", "fallback")
-_INPUTS = ("inputs", "read_only", "scope")
+_INPUTS = ("inputs",)
 _NODE = re.compile(r"\.nodes\[([^\]]+)\]")
 
 
@@ -239,8 +239,16 @@ def _chain_change(
             return "reach", f"{where}: {new} step {_how(old, new)}; {gated}"
         if new is not None and new not in used:
             return "reach", f"{where}: forge target {new!r}, which this chain did not use before"
+        if new is None:
+            # A wait for CI or for a person's approval is a forge step too.
+            return "reach", f"{where}: forge step {old!r} removed"
         return "content", f"{where}: forge target {_how(old, new)}"
-    if ".policy." in path and last in LIMITS:
+    if last == "read_only" and old and not new:
+        return "reach", f"{where}: no longer read-only"
+    if last == "scope" and old is not None:
+        # `each_repository` runs the task once more per repository.
+        return "reach", f"{where}: scope {_how(old, new)}"
+    if (".policy." in path or ".fix_loop." in path) and last in LIMITS:
         if last == "deny_tools":
             dropped = sorted(set(old or ()) - set(new or ()))
             if dropped:
@@ -337,7 +345,11 @@ def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
                     else "changed"
                 )
                 detail = f": {_how(before_map.get(key), after_map.get(key))}"
-                content.append(f"{label} {key} {state}{detail if label != 'component' else ''}")
+                # A task keeps `profile: fast` while what `fast` runs on changes.
+                rerouted = label == "agent profile" and state == "changed"
+                (reach if rerouted else content).append(
+                    f"{label} {key} {state}{detail if label != 'component' else ''}"
+                )
     for key in sorted(was.skills.keys() | now.skills.keys()):
         before_text, after_text = was.skills.get(key, ""), now.skills.get(key, "")
         if before_text != after_text:
