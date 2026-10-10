@@ -400,8 +400,9 @@ export type { SessionStatus };
 /** What started a pass of a node after its first: nothing named when its rounds simply started over. */
 export interface NodePass {
   pass: number;
-  reason?: "reject" | "retry" | "base_change";
-  /** The gate whose rejection sent the chain back. */
+  /** `fixed`: the gate's reviewer repaired the work itself, which the server records as a rejection. */
+  reason?: "reject" | "fixed" | "retry" | "base_change";
+  /** The gate whose rejection, or whose reviewer's fix, sent the chain back. */
   gate?: string;
 }
 

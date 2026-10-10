@@ -265,6 +265,7 @@ describe("a node the chain ran again", () => {
   it.each([
     [{ pass: 1 }, ""],
     [{ pass: 2, reason: "reject", gate: "local_review" }, "after a reject at local_review"],
+    [{ pass: 2, reason: "fixed", gate: "local_review" }, "after a fix at local_review"],
     [{ pass: 2, reason: "retry" }, "after a retry"],
     [{ pass: 3, reason: "base_change" }, "after a base change"],
     [{ pass: 2 }, "started over"],
