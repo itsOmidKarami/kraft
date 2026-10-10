@@ -115,7 +115,8 @@ def test_reload_that_adds_a_storage_limit_measures_at_once(client, templates_dir
 
     monkeypatch.setattr(storage, "measure", measure)
     policy = templates_dir / "policy.yaml"
-    put_file(templates_dir, "policy.yaml", policy.read_text() + "\nstorage:\n  worktrees:\n    limit: 10G\n")
+    limit = "\nstorage:\n  worktrees:\n    limit: 10G\n"
+    put_file(templates_dir, "policy.yaml", policy.read_text() + limit)
 
     assert client.post("/api/apply/reload").status_code == 200
 

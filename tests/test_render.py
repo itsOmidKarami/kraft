@@ -434,7 +434,8 @@ def test_storage_block_without_a_limit_says_so():
 
     block = render.strip_ansi(render.storage_block(payload))
 
-    assert ["worktrees", "1G", "(no", "limit", "set)"] in [line.split() for line in block.splitlines()]
+    rows = [line.split() for line in block.splitlines()]
+    assert ["worktrees", "1G", "(no", "limit", "set)"] in rows
     assert "quota" not in block
 
 
