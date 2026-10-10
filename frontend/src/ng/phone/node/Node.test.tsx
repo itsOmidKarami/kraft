@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, SCOPE_PATH, scoped, scopeRun, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scoped, scopeRun, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -357,25 +357,61 @@ describe("the task screen (E)", () => {
     expect(screen.getByText("Not run in this round.")).toBeInTheDocument();
   });
 
-  it("lists a changed-test-scope task's scopes by repository in place of attempts, and a scope picks the run read", async () => {
+  describe("a changed-test-scope task", () => {
     const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
-    const [api, web] = [scopeRun(null, "just test-api", 0, "done", { order: 0 }), scopeRun(null, "just test-web", 0, "failed", { order: 1 })];
+    const [api, web, e2e] = [scopeRun(null, "just test-api", 0, "done", { order: 0 }), scopeRun(null, "just test-web", 0, "failed", { order: 1 }), pendingRun(null, "just test-e2e", 0, { order: 2 })];
     // A run the round made of a scope before its newest one: no `scope_runs` entry names it any more.
     const earlier = { ...web[1], id: "old", attempt: 7, created_at: "2026-09-13T10:00:00Z" };
-    const it = scoped([api, web], { chain_definition: { template_id: "default", nodes }, worker_sessions: [earlier, api[1], web[1]] });
-    const calls = mount(it, `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
-    const scopes = (await screen.findByText("Scopes")).closest("section")!;
-    expect(within(scopes).getByText("kraft-web").parentElement).toHaveTextContent("kraft-web · failed · 48s");
-    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "earlier run 1 · failed"]);
-    expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
-    await userEvent.click(within(scopes).getByRole("button", { name: /just test-api/ }));
-    expect(where()).toContain(`scope=${encodeURIComponent(":just test-api").replace(/%20/g, "+")}`);
-    await userEvent.click(screen.getByRole("tab", { name: "Log" }));
-    await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
-    await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
-    await userEvent.click(screen.getByRole("button", { name: /earlier run 1/ }));
-    expect(where()).toContain("attempt=7");
-    expect(where()).not.toContain("scope=");
+    const it0 = () => scoped([api, web, e2e], { chain_definition: { template_id: "default", nodes }, worker_sessions: [earlier, api[1], web[1]] });
+    const TESTS = `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`;
+    const key = (command: string) => `scope=${encodeURIComponent(`:${command}`).replace(/%20/g, "+")}`;
+
+    it("lists its scopes by repository in place of attempts, says how the round went, and keeps an earlier run", async () => {
+      mount(it0(), TESTS);
+      const scopes = (await screen.findByText("Scopes")).closest("section")!;
+      expect(within(scopes).getByText("kraft-web").parentElement).toHaveTextContent("kraft-web · failed · 48s");
+      expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "just test-e2ewaiting", "earlier run 1 · failed"]);
+      expect(scopes).toHaveTextContent("1 of 3 scopes passed");
+      expect(scopes).toHaveTextContent("1 of 1 reached · run in order, stop at the first failure");
+      expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
+      await userEvent.click(within(scopes).getByRole("button", { name: /earlier run 1/ }));
+      expect(where()).toContain("attempt=7");
+    });
+
+    it("opens a scope on its own screen, with its facts and its log, and Back is the task", async () => {
+      const calls = mount(it0(), TESTS);
+      await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
+      expect(where()).toBe(`${TESTS}&${key("just test-api")}`);
+      expect(await screen.findByRole("heading", { level: 1, name: "just test-api" })).toBeInTheDocument();
+      expect(screen.getByText("test scope · round 1 · passed 24s")).toBeInTheDocument();
+      expect(screen.getByText("kraft-cb59 › verification › tests › test_changed_scopes › kraft-web")).toBeInTheDocument();
+      const facts = document.querySelector(".ph-facts") as HTMLElement;
+      const row = (k: string) => within(facts).getByText(k).nextElementSibling!.textContent;
+      expect([row("status"), row("command"), row("paths"), row("repo"), row("execution")]).toEqual(["passed · 24s", "just test-api", "api/**", "kraft-web", "sequential"]);
+      expect(screen.getByRole("button", { name: "Task" })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("tab", { name: "Log" }));
+      await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
+      // The task fact goes back to the task, on the scope's screen no longer.
+      await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
+      await userEvent.click(screen.getByRole("button", { name: "test_changed_scopes" }));
+      await waitFor(() => expect(where()).toBe(TESTS));
+    });
+
+    it.each([
+      ["one that waits has no log to read", "just test-e2e", "test scope · round 1 · waiting", null],
+      ["one the round did not pick says so", "just test-gone", "test scope · round 1 · not picked", "Not picked: no changed path reaches it this round."],
+    ])("opens a scope with no run: %s", async (_n, command, sub, body) => {
+      mount(it0(), `${TESTS}&${key(command)}`);
+      expect(await screen.findByText(sub)).toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "Log" })).toBeNull();
+      if (body) expect(screen.getByText(body)).toBeInTheDocument();
+    });
+  });
+
+  it("keeps an ordinary task on its own screen when the URL names a scope", async () => {
+    mount(item("running"), `${TASK}&scope=%3Ajust+test-api`);
+    expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
+    expect(screen.getByText(/agent task · running now/)).toBeInTheDocument();
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {

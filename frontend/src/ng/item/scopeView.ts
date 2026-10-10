@@ -188,3 +188,25 @@ export function otherRounds(item: ItemDetail, path: string, key: string, round: 
   }
   return out;
 }
+
+/** A chip's state in the words a scope's subtitle uses: "passed 24s", "failed 1m", "running", "not picked". */
+export function stateWords(c: Chip): string {
+  if (c.state === "skipped") return "not picked";
+  const took = c.session?.wall_ms != null ? ` ${elapsed(c.session.wall_ms)}` : "";
+  if (c.state === "done") return `passed${took}`;
+  if (c.state === "failed") return `failed${took}`;
+  return c.meta || (c.state === "waiting" ? "waiting" : "running");
+}
+
+/** The status row: the same, with a dot before the time, and why a dropped scope is. */
+export const statusWords = (c: Chip) => (c.state === "skipped" ? "not picked · no changed path reaches it this round" : stateWords(c).replace(/^(passed|failed) (?=\d)/, "$1 · "));
+
+/** How a round went, in a line each: the scopes it ran that passed, and the repositories it got to. */
+export function roundWords(view: ScopesView): { scopes: string; repos: string } {
+  const chips = view.rows.flatMap((r) => r.chips).filter((c) => c.state !== "skipped");
+  const reached = view.rows.filter((r) => r.state !== "unreached" && r.state !== "waiting").length;
+  return {
+    scopes: `${chips.filter((c) => c.state === "done").length} of ${chips.length} scopes passed`,
+    repos: `${reached} of ${view.rows.length} reached · run in order, stop at the first failure`,
+  };
+}
