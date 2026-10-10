@@ -30,6 +30,8 @@ export interface PatchFile {
   hunks: Hunk[];
   /** This file's own patch text, from its `diff --git` line (Copy diff). */
   text: string;
+  /** The lines after the last hunk, once the whole file was read (`expand.ts`). */
+  rest?: number;
 }
 
 const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;

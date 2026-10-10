@@ -141,6 +141,26 @@ def test_compare_ignore_whitespace_agrees_across_files_counts_and_diff(client, g
 
 
 @_REVIEW
+def test_compare_reads_one_file_with_the_context_asked_for(client, gated):
+    wt = _worktree(client, gated)
+    for name in ("calc.py", "test_calc.py"):
+        with (wt / name).open("a") as f:
+            f.write("# more\n")
+    url = f"/api/work-items/{gated}/compare"
+    params = {"from": "attempt:1", "to": "latest", "file": "test_calc.py"}
+    unchanged = lambda body: sum(  # noqa: E731
+        ln.startswith(" ") for ln in body["diff"].splitlines()
+    )
+    near = client.get(url, params=params).json()
+    whole = client.get(url, params={**params, "context": 1_000_000}).json()
+    assert [f["path"] for f in whole["files"]] == ["test_calc.py"]
+    assert "calc.py b/calc.py" not in whole["diff"].replace("test_calc.py", "")
+    # five committed lines: git's three by default, every one when asked
+    assert (unchanged(near), unchanged(whole)) == (3, 5)
+    assert client.get(url, params={**params, "context": -1}).status_code == 422
+
+
+@_REVIEW
 def test_item_detail_carries_the_fix_target_of_the_pending_gate(client, gated):
     body = client.get(f"/api/work-items/{gated}").json()
     ft = body["fix_target"]

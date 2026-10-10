@@ -8,7 +8,7 @@ export { Archive, ArchiveRestore, ChevronDown, ChevronUp, CircleAlert, CircleChe
 // The apply chip's (ux2-W16).
 export { ExternalLink, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
 // The review page's (ux2-W8).
-export { ChevronsDownUp, ChevronsUpDown, List, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+export { ChevronsDownUp, ChevronsUpDown, File, FileCode, FileCog, FileTerminal, List, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 /** A task's kind, as the prototype draws it. */
 export const KIND_ICON = { agent: Sparkles, builtin: Cog, subprocess: Terminal, forge: GitPullRequest } as const;

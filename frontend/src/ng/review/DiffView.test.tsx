@@ -387,6 +387,24 @@ describe("DiffView", () => {
     }
   });
 
+  it("offers the unchanged lines before a hunk and after the last, where there are any", () => {
+    const onExpand = vi.fn();
+    // One more unchanged line after the change: git's three, so the file may go on.
+    const longer = PATCH.replace("@@ -4,4 +4,5 @@", "@@ -4,5 +4,6 @@").replace("     def get(self, key):\n", "     def get(self, key):\n         return None\n");
+    const { rerender } = render(<View onExpand={onExpand} patch={new Map(parsePatch(longer).map((f) => [f.path, f]))} />);
+    // Three lines sit above the hunk: too few for the arrows that show a step.
+    fireEvent.click(screen.getByRole("button", { name: "Show lines 1–3" }));
+    expect(screen.queryByRole("button", { name: /more lines above/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 20 more lines below line 9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show the rest of the file" }));
+    expect(onExpand.mock.calls).toEqual([["search/cache.py", 0, "all"], ["search/cache.py", 1, "down"], ["search/cache.py", 1, "all"]]);
+    // Two unchanged lines after the change, short of git's three: the file ends there.
+    rerender(<View onExpand={onExpand} />);
+    expect(screen.getAllByRole("button", { name: /^Show / })).toHaveLength(1);
+    rerender(<View />);
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+  });
+
   it("collapses to the header, with the open thread count", () => {
     const onCollapse = vi.fn();
     render(<View collapsed={new Set(["search/cache.py"])} onCollapse={onCollapse} />);
