@@ -191,23 +191,12 @@ def _why_left_out(plugin: InstalledPlugin, config_dir: Path, verify: bool) -> st
     if not manifest.is_source_build(running):
         if why := manifest.kraft_compatible(declared.requires.kraft, running):
             return why
+    if why := instance_problem(plugin.namespace, declared.requires, config_dir):
+        return why
     try:
         harnesses = read_yaml(config_dir / "harnesses.yaml")
-        repos = read_yaml(config_dir / "repos.yaml")
     except ConfigError:
         return None  # that file's own check says why
-    for section, what, wanted in (
-        ("harnesses", "harness", declared.requires.harnesses),
-        ("profiles", "agent profile", declared.requires.profiles),
-    ):
-        defined = harnesses.get(section)
-        for name in wanted:
-            if not isinstance(defined, dict) or name not in defined:
-                return f"requires {what} {name!r}, which harnesses.yaml does not define"
-    entries = repos.get("repos")
-    for entry in entries if isinstance(entries, list) else ():
-        if isinstance(entry, dict) and entry.get("id") == plugin.namespace:
-            return f"its namespace {plugin.namespace!r} is now a repository id"
     # Its own files, read alone: a plugin that does not load must not take the
     # library or the profile table down with it.
     try:
@@ -223,4 +212,31 @@ def _why_left_out(plugin: InstalledPlugin, config_dir: Path, verify: bool) -> st
     except (TemplateLibraryError, TemplateEnvironmentError) as exc:
         if str(root) in str(exc) or f"profiles.{plugin.namespace}:" in str(exc):
             return str(exc)
+    return None
+
+
+def instance_problem(namespace: str, requires, config_dir: Path) -> str | None:
+    """Why this instance cannot hold a plugin under `namespace` that declares
+    `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
+    does not define, or a repository whose id is the namespace. None when it
+    can. Asked at load and of every install or update candidate."""
+    from kraft.config import ConfigError, read_yaml
+
+    try:
+        harnesses = read_yaml(config_dir / "harnesses.yaml")
+        repos = read_yaml(config_dir / "repos.yaml")
+    except ConfigError:
+        return None  # that file's own check says why
+    for section, what, wanted in (
+        ("harnesses", "harness", requires.harnesses),
+        ("profiles", "agent profile", requires.profiles),
+    ):
+        defined = harnesses.get(section)
+        for name in wanted:
+            if not isinstance(defined, dict) or name not in defined:
+                return f"requires {what} {name!r}, which harnesses.yaml does not define"
+    entries = repos.get("repos")
+    for entry in entries if isinstance(entries, list) else ():
+        if isinstance(entry, dict) and entry.get("id") == namespace:
+            return f"its namespace {namespace!r} is now a repository id"
     return None

@@ -63,19 +63,19 @@ origin: src/kraft/plugins/fetch.py §fetch
 ## REQ namespace-kraft-is-reserved
 
 IF a plugin is named `kraft` or installed under the alias `kraft`, THEN the system SHALL refuse it.
-enforced-by: tests/plugins/test_manifest.py::test_a_plugin_is_refused[kraft-name], tests/plugins/test_config.py::test_plugins_yaml_is_refused[kraft-alias]
+enforced-by: tests/plugins/test_manifest.py::test_a_plugin_is_refused[kraft-name], tests/plugins/test_config.py::test_plugins_yaml_is_refused[kraft-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[kraft]
 origin: src/kraft/plugins/config.py §PluginsConfig
 
 ## REQ plugin-namespaces-are-unique
 
 IF a plugin's namespace equals another installed plugin's namespace or a `repos.yaml` entry's `id`, THEN the system SHALL refuse the install.
-enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[duplicate-namespace]
+enforced-by: tests/plugins/test_config.py::test_plugins_yaml_is_refused[duplicate-namespace], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[held-by-a-pending-alias], tests/plugins/test_update.py::test_a_namespace_is_refused[taken-by-repo-id]
 origin: src/kraft/plugins/config.py §PluginsConfig
 
 ## REQ a-plugin-runs-on-one-kraft-major
 
 IF the running Kraft's release is below a plugin's `requires.kraft` version or in a different major, THEN the system SHALL refuse the plugin at validate, install and update, and SHALL leave it out at load.
-enforced-by: tests/plugins/test_manifest.py::test_kraft_compatibility[below-minimum], tests/plugins/test_manifest.py::test_kraft_compatibility[next-major], tests/plugins/test_manifest.py::test_kraft_compatibility[earlier-major], tests/plugins/test_manifest.py::test_kraft_compatibility[release-candidate], tests/plugins/test_load.py::test_a_plugin_for_another_major_is_left_out
+enforced-by: tests/plugins/test_manifest.py::test_kraft_compatibility[below-minimum], tests/plugins/test_manifest.py::test_kraft_compatibility[next-major], tests/plugins/test_manifest.py::test_kraft_compatibility[earlier-major], tests/plugins/test_manifest.py::test_kraft_compatibility[release-candidate], tests/plugins/test_load.py::test_a_plugin_for_another_major_is_left_out, tests/plugins/test_update.py::test_an_update_for_another_major_keeps_the_lock
 origin: src/kraft/plugins/manifest.py §kraft_compatible
 
 ## REQ unknown-manifest-keys-are-ignored
@@ -135,7 +135,7 @@ origin: src/kraft/plugins/load.py §installed
 ## REQ a-hand-alias-or-ref-change-waits-for-update
 
 WHILE a plugin's `plugins.yaml` alias or its collection's `ref` differs from the lock's, the system SHALL keep loading the plugin under its locked namespace and commit until an update applies the change.
-enforced-by: tests/plugins/test_load.py::test_what_loads[alias-change-pending]
+enforced-by: tests/plugins/test_load.py::test_what_loads[alias-change-pending], tests/plugins/test_update.py::test_a_ref_change_is_reviewed_whatever_the_version
 origin: src/kraft/plugins/load.py §installed
 
 ## REQ a-plugin-whose-digest-does-not-match-is-not-loaded
@@ -165,7 +165,7 @@ origin: src/kraft/plugins/update.py §check
 ## REQ update-shows-what-will-run-before-applying
 
 WHEN an install or update would change an installed plugin, the system SHALL list, before it writes anything, its changes to gates, merge steps, the order of a chain's nodes, forge targets, task harnesses and models, policy limits, `requires`, prompts, steering, skills, profiles and plugin skill references, the references its namespace captures, and whether it is a downgrade.
-enforced-by: tests/plugins/test_review.py::test_review_calls_out[gate-removed], tests/plugins/test_review.py::test_review_calls_out[gate-replaced], tests/plugins/test_review.py::test_review_calls_out[auto-review], tests/plugins/test_review.py::test_review_calls_out[merge-step], tests/plugins/test_review.py::test_review_calls_out[forge-target], tests/plugins/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/plugins/test_review.py::test_review_calls_out[harness], tests/plugins/test_review.py::test_review_calls_out[limit-raised], tests/plugins/test_review.py::test_review_calls_out[requires], tests/plugins/test_review.py::test_review_calls_out[prompt], tests/plugins/test_review.py::test_review_calls_out[steering], tests/plugins/test_review.py::test_review_calls_out[skill], tests/plugins/test_review.py::test_review_calls_out[profile], tests/plugins/test_review.py::test_review_calls_out[plugin-ref], tests/plugins/test_review.py::test_review_calls_out[downgrade], tests/plugins/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/plugins/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate]
+enforced-by: tests/plugins/test_review.py::test_review_calls_out[gate-removed], tests/plugins/test_review.py::test_review_calls_out[gate-replaced], tests/plugins/test_review.py::test_review_calls_out[auto-review], tests/plugins/test_review.py::test_review_calls_out[merge-step], tests/plugins/test_review.py::test_review_calls_out[forge-target], tests/plugins/test_review.py::test_review_calls_out[target-used-by-a-sibling-chain], tests/plugins/test_review.py::test_review_calls_out[harness], tests/plugins/test_review.py::test_review_calls_out[limit-raised], tests/plugins/test_review.py::test_review_calls_out[requires], tests/plugins/test_review.py::test_review_calls_out[prompt], tests/plugins/test_review.py::test_review_calls_out[steering], tests/plugins/test_review.py::test_review_calls_out[skill], tests/plugins/test_review.py::test_review_calls_out[profile], tests/plugins/test_review.py::test_review_calls_out[plugin-ref], tests/plugins/test_review.py::test_review_calls_out[downgrade], tests/plugins/test_review.py::test_a_reordered_chain_is_reviewed[gate-after-merge], tests/plugins/test_review.py::test_a_reordered_chain_is_reviewed[work-moved-past-a-gate], tests/plugins/test_update.py::test_the_review_covers_the_instances_own_chains[captured-ref], tests/plugins/test_update.py::test_the_review_covers_the_instances_own_chains[local-chain-through-the-plugin]
 origin: src/kraft/plugins/review.py §review
 
 ## REQ the-review-cannot-hide-text
@@ -173,3 +173,51 @@ origin: src/kraft/plugins/review.py §review
 WHEN the system prints a review, it SHALL escape every control, bidi and format character in it.
 enforced-by: tests/plugins/test_review.py::test_review_escapes_what_it_prints
 origin: src/kraft/plugins/review.py §render
+
+## REQ a-plugin-limit-above-maxima-is-refused
+
+IF a plugin's policy limit exceeds the instance's `maxima:`, THEN the system SHALL refuse the plugin.
+enforced-by: tests/plugins/test_update.py::test_a_limit_above_the_instance_maxima_is_refused
+origin: src/kraft/plugins/update.py §_breaks
+
+## REQ a-left-out-plugin-still-updates
+
+WHILE an installed plugin is left out at load, the system SHALL still check it for updates.
+enforced-by: tests/plugins/test_update.py::test_a_left_out_plugin_still_updates
+origin: src/kraft/plugins/update.py §update
+
+## REQ an-update-waits-for-a-version-change
+
+WHERE a plugin comes from a git collection, the system SHALL treat it as having an update only when its version differs from the version in `plugins.lock`.
+enforced-by: tests/plugins/test_update.py::test_an_update_waits_for_a_version_change[same-version-new-commit], tests/plugins/test_update.py::test_an_update_waits_for_a_version_change[version-raised], tests/plugins/test_update.py::test_an_update_waits_for_a_version_change[version-lowered]
+origin: src/kraft/plugins/update.py §update
+
+## REQ a-directory-collection-updates-on-every-change
+
+WHERE a plugin comes from a directory collection, the system SHALL treat any change to its digest as an update, whatever its version.
+enforced-by: tests/plugins/test_update.py::test_an_update_waits_for_a_version_change[directory-collection-updates-on-change]
+origin: src/kraft/plugins/update.py §update
+
+## REQ re-install-takes-the-newest-commit
+
+WHEN an operator re-installs a plugin, the system SHALL resolve its collection's `ref` again even if the version is unchanged, and SHALL review it like any update.
+enforced-by: tests/plugins/test_update.py::test_re_install_takes_the_newest_commit
+origin: src/kraft/plugins/update.py §update
+
+## REQ update-requires-acceptance
+
+IF an install or update is declined or refused, THEN the system SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
+enforced-by: tests/plugins/test_update.py::test_a_declined_update_writes_nothing[install], tests/plugins/test_update.py::test_a_declined_update_writes_nothing[update], tests/plugins/test_update.py::test_a_batch_continues_past_a_refused_plugin
+origin: src/kraft/plugins/update.py §update
+
+## REQ update-refuses-a-change-that-breaks-a-chain
+
+IF an update's candidate plugins would leave a currently resolving chain, chain reference or profile fallback unresolved, THEN the system SHALL refuse that plugin and name each such reference.
+enforced-by: tests/plugins/test_update.py::test_an_update_that_breaks_a_reference_is_refused[local-chain], tests/plugins/test_update.py::test_an_update_that_breaks_a_reference_is_refused[repos-default-chain], tests/plugins/test_update.py::test_an_update_that_breaks_a_reference_is_refused[intake-schedule], tests/plugins/test_update.py::test_a_captured_reference_the_plugin_does_not_provide_is_refused, tests/plugins/test_update.py::test_a_broken_profile_pairing_is_refused
+origin: src/kraft/plugins/update.py §_breaks
+
+## REQ one-plugin-change-at-a-time
+
+WHILE one process writes plugin state, the system SHALL make a second writer wait, then fail, and SHALL write nothing IF the plugin files changed since the review was built.
+enforced-by: tests/plugins/test_update.py::test_a_second_writer_waits_then_fails, tests/plugins/test_update.py::test_a_lock_changed_during_review_writes_nothing
+origin: src/kraft/plugins/update.py §write_lock
