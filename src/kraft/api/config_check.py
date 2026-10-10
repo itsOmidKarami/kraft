@@ -22,6 +22,8 @@ from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
 from kraft.executor import fallback
 from kraft.plugins import load as plugins_load
+from kraft.plugins import manifest as plugin_manifest
+from kraft.plugins.config import PluginsConfig, PluginsLock
 from kraft.templates import positions
 from kraft.templates.environment import (
     AgentProfileInput,
@@ -53,6 +55,8 @@ FILES = frozenset(
         "access.yaml",
         "theme.yaml",
         "notify.yaml",
+        "plugins.yaml",
+        "plugins.lock",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -68,6 +72,8 @@ class CheckContext:
     providers: Mapping[str, harness_mod.Harness]
     #: The installed plugins the running library was built with.
     plugins: tuple[plugins_load.InstalledPlugin, ...] = ()
+    #: `run/plugins`, where their stores are. None: this process's own.
+    plugins_dir: Path | None = None
 
 
 def context(st) -> CheckContext:
@@ -78,6 +84,7 @@ def context(st) -> CheckContext:
         instance_policy=getattr(st, "instance_policy", None),
         providers=harness_mod.load(None).valid,
         plugins=getattr(getattr(st, "library", None), "plugins", ()),
+        plugins_dir=st.run_dirs.plugins if getattr(st, "run_dirs", None) else None,
     )
 
 
@@ -317,10 +324,16 @@ def validate_policy(data: dict) -> tuple[policy_mod.PolicyInput, policy_mod.Poli
 
 def _check_policy(path, data, ctx):
     try:
-        validate_policy(data)
+        parsed, _ = validate_policy(data)
     except policy_mod.PolicyError as exc:
         return [TemplateIssue(path, None, str(exc), loc=_first_loc(policy_mod.PolicyInput, data))]
-    return []
+    instance = parsed.instance_policy()
+    return [
+        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}", loc=("maxima",))
+        for plugin in ctx.plugins
+        if plugin.left_out is None
+        and (why := plugins_load.limits_problem(plugin, instance)) is not None
+    ]
 
 
 # ── intake ──
@@ -646,6 +659,71 @@ def _check_harnesses(path, data, ctx):
             for name, body in entries.items() if isinstance(entries, dict) else ():
                 loc = loc or _first_loc(model, body, (section, name))
         return [TemplateIssue(path, None, why, loc=loc)]
+    return [
+        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
+        for plugin in ctx.plugins
+        if plugin.left_out is None
+        and (why := _unmet_requires(plugin, ctx, harnesses=data)) is not None
+    ]
+
+
+def _unmet_requires(
+    plugin, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
+) -> str | None:
+    """Why `plugin` would not load once `harnesses` is saved as harnesses.yaml,
+    or `repos` as repos.yaml."""
+    try:
+        declared = plugin_manifest.plugin(
+            plugin_manifest.parse(
+                (plugin.root / plugin_manifest.PLUGIN_JSON).read_text(), plugin_manifest.PLUGIN_JSON
+            ),
+            plugin_manifest.PLUGIN_JSON,
+        )
+    except (OSError, ValueError, plugin_manifest.ManifestError):
+        return None  # already not loading; the load says why
+    return plugins_load.instance_problem(
+        plugin.namespace, declared.requires, ctx.templates_dir, harnesses, repos
+    )
+
+
+# ── plugins ──
+
+
+def _check_plugins(path, data, ctx):
+    """A hand edit of `plugins.yaml`: the file itself, then what it would stop
+    resolving. Disabling or dropping an entry unloads its plugin, and a new
+    entry reserves its namespace before anything is installed under it."""
+    from kraft.plugins import update as plugin_update
+
+    try:
+        config = PluginsConfig.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    root = ctx.plugins_dir or plugins_load.plugins_dir()
+    now = plugins_load.installed(ctx.templates_dir, root)
+    then = plugins_load.installed(ctx.templates_dir, root, config=config)
+
+    def loads(plugins):
+        return {(p.id, p.namespace, p.left_out is None) for p in plugins}
+
+    if loads(now) == loads(then):
+        return []
+    try:
+        broken = plugin_update.breaks(
+            plugin_update.state_of(ctx.templates_dir, now),
+            plugin_update.state_of(ctx.templates_dir, then),
+            ctx.templates_dir,
+        )
+    except policy_mod.PolicyError:
+        return []  # policy.yaml's own check says why
+    return [TemplateIssue(path, None, why, loc=("plugins",)) for why in broken]
+
+
+def _check_lock(path, data, ctx):
+    try:
+        PluginsLock.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
     return []
 
 
@@ -666,7 +744,11 @@ def _check_repos(path, data, ctx):
                 loc = loc or _first_loc(config_mod.RepoEntry, entry, ("repos", index))
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
-    return []
+    return [
+        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
+        for plugin in ctx.plugins
+        if plugin.left_out is None and (why := _unmet_requires(plugin, ctx, repos=data)) is not None
+    ]
 
 
 _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] = {
@@ -678,4 +760,6 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "access.yaml": _check_access,
     "theme.yaml": _check_theme,
     "notify.yaml": _check_notify,
+    "plugins.yaml": _check_plugins,
+    "plugins.lock": _check_lock,
 }

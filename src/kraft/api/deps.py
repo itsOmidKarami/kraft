@@ -317,11 +317,13 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
 def _reload_templates(st) -> None:
     from kraft import apply
 
-    apply.record_library(st)
-    st.library, st.invalid_library = load_library(
-        st.templates_dir, st.skills_dir, installed_plugins(st, verify=True)
-    )
     st.plugins_problem = plugins_load.config_problem(st.templates_dir)
+    # A plugins.yaml or plugins.lock that does not read is refused: the plugins
+    # already running stay, and the two files stay pending with the reason.
+    refused = st.plugins_problem is not None and st.library is not None
+    apply.record_library(st, plugin_files=not refused)
+    plugins = st.library.plugins if refused else installed_plugins(st, verify=True)
+    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir, plugins)
     lint_loaded(st)
 
 

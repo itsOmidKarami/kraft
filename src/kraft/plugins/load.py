@@ -98,7 +98,11 @@ def config_problem(config_dir: Path) -> str | None:
 
 
 def installed(
-    config_dir: Path | None = None, plugins_root: Path | None = None, *, verify: bool = False
+    config_dir: Path | None = None,
+    plugins_root: Path | None = None,
+    *,
+    verify: bool = False,
+    config=None,
 ) -> tuple[InstalledPlugin, ...]:
     """Every plugin `plugins.yaml` or `plugins.lock` names, each either
     loadable (`left_out` None) or carrying why it is not.
@@ -107,6 +111,8 @@ def installed(
     entry, from the store the lock names and under the namespace the lock
     recorded: an alias changed by hand waits for an update. Nothing is fetched
     here, ever. `verify` re-hashes every stored file, not only the manifest.
+    `config` is a `PluginsConfig` to read in place of the file: an edit of
+    `plugins.yaml` not saved yet.
     """
     from kraft import paths
     from kraft.config import ConfigError
@@ -115,7 +121,7 @@ def installed(
     config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
     store = (Path(plugins_root) if plugins_root is not None else plugins_dir()) / "store"
     try:
-        config = PluginsConfig.load(config_dir / PluginsConfig.FILE)
+        config = config or PluginsConfig.load(config_dir / PluginsConfig.FILE)
         lock = PluginsLock.load(config_dir / PluginsLock.FILE)
     except ConfigError:
         return ()  # `config_problem` says why
@@ -168,6 +174,7 @@ def _why_left_out(plugin: InstalledPlugin, config_dir: Path, verify: bool) -> st
     from kraft import harness, update
     from kraft.config import ConfigError, read_yaml
     from kraft.plugins import fetch, manifest
+    from kraft.policy import PolicyError, PolicyInput
     from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
     from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
@@ -212,19 +219,50 @@ def _why_left_out(plugin: InstalledPlugin, config_dir: Path, verify: bool) -> st
     except (TemplateLibraryError, TemplateEnvironmentError) as exc:
         if str(root) in str(exc) or f"profiles.{plugin.namespace}:" in str(exc):
             return str(exc)
-    return None
+        return None
+    try:
+        policy = PolicyInput.from_yaml(config_dir / "policy.yaml").instance_policy()
+    except PolicyError:
+        return None  # no policy.yaml, or one whose own check says why
+    return limits_problem(plugin, policy)
 
 
-def instance_problem(namespace: str, requires, config_dir: Path) -> str | None:
+def limits_problem(plugin: InstalledPlugin, instance_policy) -> str | None:
+    """Why one of `plugin`'s limits no longer fits under `instance_policy`'s
+    `maxima:`, lowered since the plugin was installed; None when all fit."""
+    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
+    try:
+        library = TemplateLibrary.from_mappings(
+            {}, (), library_path=plugin.root / "local-library.yaml", plugins=[plugin]
+        )
+    except TemplateLibraryError:
+        return None
+    unbounded = {issue.message for issue in library.lint()}
+    over = sorted({issue.message for issue in library.lint(instance_policy)} - unbounded)
+    return over[0] if over else None
+
+
+def instance_problem(
+    namespace: str,
+    requires,
+    config_dir: Path,
+    harnesses: Mapping | None = None,
+    repos: Mapping | None = None,
+) -> str | None:
     """Why this instance cannot hold a plugin under `namespace` that declares
     `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
     does not define, or a repository whose id is the namespace. None when it
-    can. Asked at load and of every install or update candidate."""
+    can. Asked at load and of every install or update candidate. `harnesses`
+    is a `harnesses.yaml` to judge in place of the file, `repos` likewise a
+    `repos.yaml`: an edit not saved yet."""
     from kraft.config import ConfigError, read_yaml
 
     try:
-        harnesses = read_yaml(config_dir / "harnesses.yaml")
-        repos = read_yaml(config_dir / "repos.yaml")
+        if harnesses is None:
+            harnesses = read_yaml(config_dir / "harnesses.yaml")
+        if repos is None:
+            repos = read_yaml(config_dir / "repos.yaml")
     except ConfigError:
         return None  # that file's own check says why
     for section, what, wanted in (

@@ -230,7 +230,7 @@ def write_lock(plugins_dir: Path) -> Iterator[None]:
 
 
 @dataclass(frozen=True)
-class _State:
+class State:
     """What resolves in the instance with one set of plugins loaded."""
 
     library: TemplateLibrary | None
@@ -248,7 +248,7 @@ class _State:
         )
 
 
-def _state(config_dir: Path, plugins: Sequence[load.InstalledPlugin]) -> _State:
+def state_of(config_dir: Path, plugins: Sequence[load.InstalledPlugin]) -> State:
     from kraft import harness
     from kraft.api import config_check
     from kraft.paths import default_skills_dir
@@ -277,7 +277,7 @@ def _state(config_dir: Path, plugins: Sequence[load.InstalledPlugin]) -> _State:
         profiles = frozenset(table.agent_profiles)
     except TemplateEnvironmentError as exc:
         table_error = str(exc)
-    return _State(
+    return State(
         library=library,
         chains=frozenset(report["chains"]),
         issues=frozenset((i["chain"], i["message"]) for i in report["issues"]),
@@ -287,7 +287,7 @@ def _state(config_dir: Path, plugins: Sequence[load.InstalledPlugin]) -> _State:
     )
 
 
-def _references(config_dir: Path) -> Iterator[tuple[str, str, str, str]]:
+def references(config_dir: Path) -> Iterator[tuple[str, str, str, str]]:
     """`(where, key, kind, value)` for every qualified reference the instance's
     own files make: its library and chains, and the chain, steering and
     fallback references of `repos.yaml`, `intake.yaml`, `policy.yaml` and
@@ -316,8 +316,12 @@ def _references(config_dir: Path) -> Iterator[tuple[str, str, str, str]]:
                     yield f"{rel}: {at}" if at else rel, key, kind, value
 
 
-def _breaks(before: _State, after: _State, config_dir: Path, namespace: str) -> list[str]:
-    """Why loading the candidate under `namespace` would break what works now."""
+def breaks(
+    before: State, after: State, config_dir: Path, namespace: str | None = None
+) -> list[str]:
+    """Why what resolves in `before` would not in `after`. `namespace` is the
+    candidate plugin's, whose own chains must resolve too; None when no
+    plugin's content changes (a `plugins.yaml` edit)."""
     out = (
         [f"harnesses.yaml: {after.table_error}"]
         if after.table_error and not before.table_error
@@ -326,11 +330,11 @@ def _breaks(before: _State, after: _State, config_dir: Path, namespace: str) -> 
     for chain, message in sorted(after.issues - before.issues, key=str):
         if chain is None:
             out.append(message)
-        elif chain.startswith(f"{namespace}:"):
+        elif namespace is not None and chain.startswith(f"{namespace}:"):
             out.append(f"its chain {chain} does not resolve: {message}")
         elif chain in before.chains:
             out.append(f"chain {chain} would stop resolving: {message}")
-    for where, key, kind, value in _references(config_dir):
+    for where, key, kind, value in references(config_dir):
         if kind and before.resolves(kind, value) and not after.resolves(kind, value):
             out.append(f"{where}: {key} {value!r} would stop resolving")
     return out
@@ -418,7 +422,7 @@ def update(
     accepted: list[_Candidate] = []
     with tempfile.TemporaryDirectory() as scratch:
         loaded = list(load.installed(config_dir, plugins_root))
-        state = _state(config_dir, loaded)
+        state = state_of(config_dir, loaded)
         for plugin_id in ids if ids is not None else list(config.plugins):
             if plugin_id not in config.plugins:
                 results[plugin_id] = Result(
@@ -535,8 +539,8 @@ def update(
                 (root / rel).write_bytes(data)
             candidate = load.InstalledPlugin(plugin_id, name, namespace, found.version, root)
             would_load = [p for p in loaded if p.id != plugin_id] + [candidate]
-            after = _state(config_dir, would_load)
-            if broken := _breaks(state, after, config_dir, namespace):
+            after = state_of(config_dir, would_load)
+            if broken := breaks(state, after, config_dir, namespace):
                 results[plugin_id] = Result(
                     plugin_id,
                     "refused",
@@ -547,7 +551,7 @@ def update(
             captured = (
                 [
                     f"{where}: {key} {value!r} is now read from this plugin"
-                    for where, key, _kind, value in _references(config_dir)
+                    for where, key, _kind, value in references(config_dir)
                     if _qualifier(value) == namespace
                 ]
                 if locked is None or locked.namespace != namespace
