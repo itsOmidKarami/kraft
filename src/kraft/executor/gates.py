@@ -184,6 +184,13 @@ async def apply_rejection(
         )
     )
     if replan:
+        # The fix loops the re-run measures again start over.
+        span = [
+            n.id
+            for n in nodes[target:gate_index]
+            if isinstance(n.node, ExecNode) and n.node.fix_loop
+        ]
+        await db.write(lambda c: store.reset_fix_loops(c, work_item_id, span, by))
         return target
     await db.write(
         lambda c: store.mark_needs_human(

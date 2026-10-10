@@ -3,6 +3,8 @@ and repository, and the ones its rounds picked and have not started."""
 
 from __future__ import annotations
 
+import pytest
+
 from kraft import events
 
 from .test_board_stop import _exit_session, _paused_item, _run, _verified_item
@@ -228,17 +230,50 @@ def test_detail_scope_runs_counts_only_the_latest_dispatch_of_a_repository_and_r
     ]
 
 
-def test_detail_scope_runs_forgets_the_rounds_of_a_pass_a_retry_left_behind(client, repo, tmp_path):
-    """Rounds count up from 0 within a pass and restart at 0 after a retry or a base-change restart:
-    the rounds the first pass reached past it are not rounds of the new one."""
+@pytest.mark.parametrize(
+    "again, why",
+    [
+        pytest.param(0, {}, id="its-rounds-restarted"),
+        pytest.param(
+            1, {"reason": "reject", "gate": "g"}, id="rejected-back-at-the-round-it-left-off"
+        ),
+    ],
+)
+def test_detail_keeps_each_pass_of_a_node_under_its_own_number(client, repo, tmp_path, again, why):
+    """A node the chain ran again is on a new pass, which counts its rounds on its own: the pass
+    before keeps its rounds and its picks, under its number, and is not folded into the new one
+    (a re-run after a gate reject resumed at the round it left off at and read as one more attempt
+    of that round, Kraft-9d8b2.150). Each session says which pass it ran in, and the node what
+    started each."""
     wid = _verified_item(client, repo, tmp_path, [])
-    for rnd in (0, 1, 2):
+    for rnd in (0, 1):
         _picks(wid, "ws", rnd, ["fe-cmd"])
         _session(tmp_path, wid, f"old{rnd}", "fe-cmd", "failed", rnd)
-    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
-    _session(tmp_path, wid, "new0", "fe-cmd", "running")
+    if why:
+        _run(lambda c: events.append(c, wid, "gate_rejected", {"gate": "g", "node": "verify"}))
+    _picks(wid, "ws", again, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "new", "fe-cmd", "running", again)
 
-    assert _runs(client, wid) == [
-        ("new0", "ws", 0, "fe-cmd", None, None),
-        (None, "ws", 0, "be-cmd", None, True),
+    detail = client.get(f"/api/work-items/{wid}").json()
+
+    assert [
+        (r["pass"], r["session_id"], r["round"], r["command"], r.get("pending"))
+        for r in detail["scope_runs"]
+    ] == [
+        (1, "old0", 0, "fe-cmd", None),
+        (1, "old1", 1, "fe-cmd", None),
+        (2, "new", again, "fe-cmd", None),
+        (2, None, again, "be-cmd", True),
     ]
+    assert {s["id"]: s["pass"] for s in detail["worker_sessions"]} == {
+        "old0": 1,
+        "old1": 1,
+        "new": 2,
+    }
+    assert detail["node_passes"] == {"verify": [{"pass": 1}, {"pass": 2, **why}]}
+
+
+def test_detail_names_no_passes_for_a_node_that_ran_once(client, repo, tmp_path):
+    wid = _verified_item(client, repo, tmp_path, [("fe-cmd", "done", 0)])
+
+    assert client.get(f"/api/work-items/{wid}").json()["node_passes"] == {}

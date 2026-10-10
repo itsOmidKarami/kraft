@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { frameWidth, isScopeTask, otherRounds, reposOf, scopesView, type Chip, type ScopesView } from "./scopeView";
+import { asOfPass } from "./nodeGraph";
 import { detail, FROZEN, pendingRun, SCOPE_PATH, scopeChain, scopeRun, scoped, WORKSPACE } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -117,6 +118,30 @@ describe("scopesView", () => {
   it("draws an area's setup as a chip ahead of the area's first scope", () => {
     const it = item([run(null, "just test-web", 0, "done", { order: 3, area: "web" }), run(null, "npm ci", 0, "done", { order: 2.5, area: "web", setup: true, scope: undefined })]);
     expect(names(scopesView(it, PATH, 1, NOW)).map((c) => c[0])).toEqual(["setup · web", "just test-web"]);
+  });
+});
+
+describe("a scope task in a node the chain ran again", () => {
+  // Each pass measured round 1, and picked differently: the pass before is not this one's round.
+  const both = () => {
+    const runs = [run(null, "just test-a", 0, "failed", { pass: 1 }), run(null, "just test-b", 1, "done", { pass: 1 }), run(null, "just test-c", 0, "done", { pass: 2 })];
+    const passes = [1, 1, 2];
+    return item(runs.map(([r, s], i) => [r, { ...s, pass: passes[i] }]), { node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] } });
+  };
+
+  it("draws the scopes of the pass the node is on, and of an earlier one when it is the one shown", () => {
+    expect(names(scopesView(both(), PATH, 1, NOW)).map((c) => c[0])).toEqual(["just test-c"]);
+    const first = asOfPass(both(), "verification", 1);
+    expect(names(scopesView(first, PATH, 1, NOW)).map((c) => c[0])).toEqual(["just test-a"]);
+    expect(names(scopesView(first, PATH, 2, NOW)).map((c) => [c[0], c[1]])).toEqual([["just test-b", "done"], ["just test-a", "skipped"]]);
+  });
+
+  it("says how a scope went in the other rounds of its own pass alone", () => {
+    expect(otherRounds(both(), PATH, ":just test-c", 1)).toEqual([]);
+    expect(otherRounds(asOfPass(both(), "verification", 1), PATH, ":just test-a", 1)).toEqual(["2: not picked"]);
+    // A pass that resumed at round 2 has no round 1 to speak of.
+    const resumed = item([run(null, "just test-a", 1, "done"), run(null, "just test-a", 2, "done")]);
+    expect(otherRounds(resumed, PATH, ":just test-a", 3, 2)).toEqual(["2: passed"]);
   });
 });
 

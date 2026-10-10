@@ -1,5 +1,5 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, SessionStatus, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, WorkerSession } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
@@ -14,27 +14,51 @@ export const isEscalation = (s: WorkerSession) => s.hook_point === ESCALATION ||
 // What the graph counts as in flight; not `LIVE_SESSION_STATUSES` (pending and running only).
 const LIVE = new Set<SessionStatus>(["running", "pending", "rate_limited", "waiting", "needs_context"]);
 
-/** A node's sessions in the pass it is on, oldest first, each with the round it reads in. A retry or a base change
- *  restarts a fix loop at round 0, so a measurement below the highest one seen starts a new pass (`node_started` fires
- *  per measurement and cannot tell). The loop's own repair and judge never count: a fix cycle that was paused and
- *  refunded is measured again at a round below the repair it follows. A negative round (the re-measure after `on_failure`,
- *  `walk._REPAIR_ROUND`) starts nothing and reads in the round of the session before it. */
+/** The pass a node is on, 1-based: the newest its sessions ran in. */
+export const passNow = (item: ItemDetail, node: string) => Math.max(1, ...item.worker_sessions.filter((s) => s.node_id === node).map((s) => s.pass ?? 1));
+
+/** A node's sessions in the pass it is on, oldest first, each with the round it reads in. The server numbers a node's
+ *  passes (`WorkerSession.pass`): one each time the chain ran it again, after a gate reject, a retry or a base change,
+ *  and each counts its rounds on its own. A negative round (the re-measure after `on_failure`, `walk._REPAIR_ROUND`)
+ *  reads in the round of the session before it. An earlier pass is read off `asOfPass`'s item. */
 export function passOf(item: ItemDetail, node: string): WorkerSession[] {
-  const all = item.worker_sessions.filter((s) => s.node_id === node && !isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  let from = 0;
-  let top = 0;
+  const top = passNow(item, node);
   let last = 0;
-  const read = all.map((s, i) => {
-    if (s.round >= 0) {
-      last = s.round;
-      if (!s.hook_point.startsWith(`${node}.${FIX_LOOP}.`)) {
-        if (s.round < top) from = i;
-        top = s.round;
-      }
-    }
-    return s.round < 0 ? { ...s, round: last } : s;
-  });
-  return read.slice(from);
+  return item.worker_sessions
+    .filter((s) => s.node_id === node && !isEscalation(s) && (s.pass ?? 1) === top)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((s) => {
+      if (s.round >= 0) last = s.round;
+      return s.round < 0 ? { ...s, round: last } : s;
+    });
+}
+
+/** A node's passes, oldest first, with what started each; none for a node the chain ran once, which has nothing to tell apart. */
+export const passesOf = (item: ItemDetail, node: string): NodePass[] => item.node_passes?.[node] ?? [];
+
+/** What sent the chain back to start a pass, in words; nothing for a node's first pass. */
+export const passWhy = (p: NodePass | undefined): string =>
+  p?.reason === "reject" ? `after a reject at ${p.gate}` : p?.reason === "retry" ? "after a retry" : p?.reason === "base_change" ? "after a base change" : p && p.pass > 1 ? "started over" : "";
+
+/** The pass a node's view shows: the one picked when the node has it, else the newest. Undefined for a node with one pass. */
+export const passShown = (item: ItemDetail, node: string, picked?: number): number | undefined => {
+  const n = passesOf(item, node).length;
+  return n > 1 ? (picked && picked <= n ? picked : n) : undefined;
+};
+
+/** "pass 1 of 2", for a screen that reads one pass; nothing for a node the chain ran once. */
+export const passWords = (item: ItemDetail, node: string, picked?: number) => {
+  const n = passShown(item, node, picked);
+  return n ? `pass ${n} of ${passesOf(item, node).length}` : "";
+};
+
+/** The item as an earlier pass of `node` left it: the node's later sessions and scope runs are gone, so every reader
+ *  of the node shows that pass, and nothing of it is in flight (no stop on it, not the node the run stands on). The
+ *  newest pass, or none picked, is the item itself. */
+export function asOfPass(item: ItemDetail, node: string, pass?: number): ItemDetail {
+  if (!pass || pass >= passesOf(item, node).length) return item;
+  const later = (x: { node_id: string; pass?: number }) => x.node_id === node && (x.pass ?? 1) > pass;
+  return { ...item, stop: null, current_node_id: null, worker_sessions: item.worker_sessions.filter((s) => !later(s)), scope_runs: item.scope_runs?.filter((r) => !later(r)) };
 }
 
 /** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */
@@ -86,23 +110,25 @@ export const FIX_LOOP = "fix_loop";
 export const JUDGE = "judge";
 
 /** A node's fix-loop rounds, 1-based. A round is one measurement of the node's own steps
- *  (`WorkerSession.round`, 0-based). `total` is the loop's limit, its attempts plus the first pass,
+ *  (`WorkerSession.round`, 0-based). `total` is the loop's limit, its attempts plus the first measurement,
  *  when the chain says; the judge's session carries the round it came after, the repair's the
  *  round it leads into. */
-export function loopRounds(item: ItemDetail, node: ApiNode): { latest: number; total?: number } | undefined {
+export function loopRounds(item: ItemDetail, node: ApiNode): { first?: number; latest: number; total?: number } | undefined {
   if (!node.fix_loop) return;
   const own = new Set(stepsOf(node).steps.flatMap((st) => st.tasks));
   const ran = passOf(item, node.id).filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
   if (!ran.length) return;
   const m = materialized(item);
   const max = m ? Number(attemptsAt(m, node.id, item.policy_override)?.value) : NaN;
-  return { latest: Math.max(...ran), total: Number.isFinite(max) ? max + 1 : undefined };
+  // A pass that kept the count of the one before it (an agent's retry) starts at the round it resumed on.
+  const first = Math.min(...ran);
+  return { ...(first > 1 && { first }), latest: Math.max(...ran), total: Number.isFinite(max) ? max + 1 : undefined };
 }
 
 /** The round a node's canvas and pane show: the one picked when it ran, else the newest. */
 export const roundShown = (item: ItemDetail, node: ApiNode, picked?: number): number | undefined => {
   const r = loopRounds(item, node);
-  return r && (picked && picked <= r.latest ? picked : r.latest);
+  return r && (picked && picked <= r.latest && picked >= (r.first ?? 1) ? picked : r.latest);
 };
 
 export const verdictOf = (events: KraftEvent[] | undefined, node: string, cycle: number) =>
@@ -177,16 +203,24 @@ function loopOf(item: ItemDetail, node: ApiNode, own: ReturnType<typeof loopPath
   return { tone, tasks, label: `round ${round}${rounds.total ? ` of ${rounds.total}` : ""}` };
 }
 
-export type RoundRow = { n: number; tone: "ok" | "warn" | "bad"; outcome: string };
+/** A round's dot and what became of it; a pass has no dot, and says what started it. */
+export type RoundRow = { n: number; tone?: "ok" | "warn" | "bad"; outcome: string };
 export type Rounds = { rows: RoundRow[]; selected: number; latest: number; total?: number };
+
+/** A node's passes for its picker, with the one shown; undefined for a node the chain ran once. */
+export function passList(item: ItemDetail, node: string, picked?: number): Rounds | undefined {
+  const selected = passShown(item, node, picked);
+  const all = passesOf(item, node);
+  return selected ? { rows: all.map((p) => ({ n: p.pass, outcome: passWhy(p) || "first run" })), selected, latest: all.length, total: all.length } : undefined;
+}
 
 /** One row per round that ran, oldest first: its dot and what became of it. A round the loop moved on from was
  *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (amber)
  *  while the node is the one the run stands on, else done (green). */
-function roundList(item: ItemDetail, node: ApiNode, { latest, total }: { latest: number; total?: number }, selected: number): Rounds {
+function roundList(item: ItemDetail, node: ApiNode, { first = 1, latest, total }: { first?: number; latest: number; total?: number }, selected: number): Rounds {
   const halted = item.stop?.node === node.id;
-  const rows = Array.from({ length: latest }, (_, i): RoundRow => {
-    const n = i + 1;
+  const rows = Array.from({ length: latest - first + 1 }, (_, i): RoundRow => {
+    const n = first + i;
     if (n < latest) return { n, tone: "bad", outcome: "sent to the fix loop" };
     if (halted) return { n, tone: "bad", outcome: "stopped · needs you" };
     if (item.current_node_id === node.id) return { n, tone: "warn", outcome: "running" };

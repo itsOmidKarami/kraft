@@ -738,21 +738,6 @@ def _scope_passed(status: str) -> bool | None:
     return None if status in UNFINISHED else False
 
 
-def _current_pass_start(marks: list[tuple[int, int]]) -> int:
-    """Where a node's current pass begins, from `(seq, round)` marks in order: a pass counts its
-    rounds up from 0 (`round` only grows within one), so the mark that drops below the highest seen
-    starts a new one -- a retry or a base-change restart clears the loop counters. The
-    `_REPAIR_ROUND` pass is no round of its own and does not count."""
-    start, top = 0, -1
-    for seq, rnd in marks:
-        if rnd < 0:
-            continue
-        if rnd < top:
-            start = seq
-        top = rnd
-    return start
-
-
 def scope_runs(
     db,
     work_item_id: str,
@@ -761,12 +746,17 @@ def scope_runs(
     entries: Callable[[str | None], RepoEntry | None],
     *,
     live: bool = True,
+    passes: tuple[dict[str, int], dict[str, list[dict]]] = ({}, {}),
 ) -> list[dict]:
-    """Every command the changed-test-scope builtin ran for `task_hook` in the node's current
-    pass, in the order it started, across its rounds and repositories:
-    `{session_id, repository, round, command, passed, exit_code?, scope?, area?, setup?,
+    """Every command the changed-test-scope builtin ran for `task_hook`, in the order it started,
+    across the node's passes, their rounds and its repositories:
+    `{session_id, pass, repository, round, command, passed, exit_code?, scope?, area?, setup?,
     order?, selected?}`. `passed` is None while the command is not finished.
     `order` is where the table lists it, so a round's scopes draw in its order.
+
+    `passes` is `store.session_passes`' answer for the item: a pass counts its rounds on its own,
+    so a round of one is not the same-numbered round of another. A dispatch's picks belong to the
+    pass of the first command started after them, and to the node's newest when none has.
 
     A command its round picked (`test_scopes_selected`) and has not started comes last, `pending`
     with no session, while the run `live`s on; `selected` marks every entry of a round that recorded
@@ -802,20 +792,19 @@ def scope_runs(
         )
     ]
     selections = [(seq, p) for seq, p in selections if p.get("hook_point") == task_hook]
-    start = _current_pass_start(
-        sorted(
-            [(r["seq"], r["round"]) for r in rows] + [(seq, p["round"]) for seq, p in selections]
-        )
-    )
-    # What each round picked in a repository, from its latest dispatch.
-    picked: dict[tuple[str | None, int], tuple[int, list[str]]] = {}
+    session_pass, node_passes = passes
+
+    def ran_in(row) -> int:
+        return session_pass.get(row["id"], 1)
+
+    newest_pass = len(node_passes.get(node_id, [None]))
+    # What each round of a pass picked in a repository, from its latest dispatch.
+    picked: dict[tuple[int, str | None, int], tuple[int, list[str]]] = {}
     for seq, p in selections:
-        if seq >= start:
-            picked[(p.get("repository"), p["round"])] = (seq, p["commands"])
+        n = next((ran_in(r) for r in rows if r["seq"] > seq), newest_pass)
+        picked[(n, p.get("repository"), p["round"])] = (seq, p["commands"])
     rows = [
-        r
-        for r in rows
-        if r["seq"] >= start and r["seq"] > picked.get((r["repository"], r["round"]), (0,))[0]
+        r for r in rows if r["seq"] > picked.get((ran_in(r), r["repository"], r["round"]), (0,))[0]
     ]
     tables: dict[str | None, list[dict]] = {}
     out = []
@@ -832,27 +821,29 @@ def scope_runs(
         repo = row["repository"]
         entry: dict = {
             "session_id": row["id"],
+            "pass": ran_in(row),
             "repository": repo,
             "round": row["round"],
             "command": row["command"],
             "passed": _scope_passed(row["status"]),
             **facts(repo, row["command"]),
         }
-        if (repo, row["round"]) in picked:
+        if (ran_in(row), repo, row["round"]) in picked:
             entry["selected"] = True
         if (code := _exit_code(row["result_path"])) is not None:
             entry["exit_code"] = code
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
-    started = {(r["repository"], r["round"], r["command"]) for r in rows}
+    started = {(ran_in(r), r["repository"], r["round"], r["command"]) for r in rows}
     # Only the round of the node's latest pick can still start what it picked.
-    newest = max(((seq, rnd) for (_, rnd), (seq, _) in picked.items()), default=(0, None))[1]
-    for (repo, rnd), (_, commands) in picked.items():
+    newest = max(((seq, n, rnd) for (n, _, rnd), (seq, _) in picked.items()), default=(0,))[1:]
+    for (n, repo, rnd), (_, commands) in picked.items():
         for command in commands:
-            if live and rnd == newest and (repo, rnd, command) not in started:
+            if live and (n, rnd) == newest and (n, repo, rnd, command) not in started:
                 out.append(
                     {
                         "session_id": None,
+                        "pass": n,
                         "repository": repo,
                         "round": rnd,
                         "command": command,

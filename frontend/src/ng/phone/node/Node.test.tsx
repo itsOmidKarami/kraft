@@ -58,6 +58,13 @@ const looped = (over = {}) => {
   });
 };
 
+/** `looped`, then local_review rejected and sent the chain back: the node's second pass is on its first round. */
+const twice = () => {
+  const first = looped().worker_sessions.map((x) => ({ ...x, pass: 1 }));
+  const again = (id: string, hook: string, status: WorkerSession["status"], m: number) => session({ id, hook_point: hook, round: 0, attempt: 4, pass: 2, status, created_at: `2026-09-13T09:${m}:00Z`, started_at: `2026-09-13T09:${m}:00Z`, wall_ms: status === "done" ? 7000 : null });
+  return looped({ worker_sessions: [...first, again("p2l", "verification.checks.lint", "done", 40), again("p2r", "verification.review.code_review", "running", 41)], node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "reject", gate: "local_review" }] } });
+};
+
 describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () => {
   const bar = (it: ReturnType<typeof detail>, id: string) => {
     const api = it.chain_definition.nodes.find((n) => n.id === id)!;
@@ -204,6 +211,49 @@ describe("the node screen (D)", () => {
     await screen.findByText(/loaded review_package/);
     const logs = calls.filter((c) => c.path.endsWith("/log")).map((c) => c.path.split("/")[2]).sort();
     expect(logs).toEqual(["fx", "l1", "s1"]);
+  });
+
+  it("picks a pass of a node the chain ran again: its rounds, its tasks and their runs, with the pass in the URL", async () => {
+    mount(twice(), "/work-items/w1/nodes/verification");
+    const passes = await screen.findByRole("group", { name: "Passes" });
+    expect(within(passes).getAllByRole("button").map((b) => b.textContent)).toEqual(["pass 1 · first run", "pass 2 · after a reject at local_review"]);
+    const task = (name: string) => screen.getByText(name).closest("button")!;
+    // The newest pass is on its first round: it has no rounds to pick between, and counts none of the pass before.
+    expect(screen.queryByRole("group", { name: "Fix loop rounds" })).toBeNull();
+    expect(task("lint")).toHaveTextContent("7s");
+    await userEvent.click(within(passes).getByRole("button", { name: /pass 1/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?pass=1");
+    expect(within(screen.getByRole("group", { name: "Fix loop rounds" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["round 1 · sent to the fix loop", "round 2 · done"]);
+    expect(task("code_review")).toHaveTextContent("19s");
+    // The node's own buttons are the item's as it stands, whichever pass is read.
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /round 1/ }));
+    await userEvent.click(task("code_review"));
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review&round=1&pass=1");
+    expect(await screen.findByText(/^pass 1 of 2 · agent task · round 1 of 3 · done$/)).toBeInTheDocument();
+  });
+
+  it("drops the pass from the URL on the newest, the round with it, and both when the node changes", async () => {
+    mount(twice(), "/work-items/w1/nodes/verification?round=1&pass=1");
+    await userEvent.click(await screen.findByRole("button", { name: /pass 2/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification");
+    await userEvent.click(screen.getByRole("button", { name: /pass 1/ }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Chain" })).getByRole("button", { name: "plan" }));
+    await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/plan"));
+  });
+
+  it.each([
+    ["", ["p2l", "p2r"]],
+    ["&pass=1", ["fx", "l2", "s3"]],
+  ])("reads the log of the pass shown: %s", async (query, want) => {
+    const calls = mount(twice(), `/work-items/w1/nodes/verification?tab=log${query}`);
+    const logs = () => calls.filter((c) => c.path.endsWith("/log")).map((c) => c.path.split("/")[2]).sort();
+    await waitFor(() => expect(logs()).toEqual(want));
+  });
+
+  it("names no pass on a node the chain ran once", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification?sel=verification.review.code_review&pass=1");
+    expect(await screen.findByText(/^agent task · round 2 of 3 · done · attempt 2 of 2$/)).toBeInTheDocument();
   });
 
   it("has a YAML tab with the node as the item froze it, and what was changed for this item", async () => {
@@ -406,6 +456,19 @@ describe("the task screen (E)", () => {
       await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
       await userEvent.click(await screen.findByRole("button", { name: "test_changed_scopes" }));
       await waitFor(() => expect(where()).toBe(TESTS));
+    });
+
+    it("reads a scope in the pass shown, and says which", async () => {
+      const [a1, b1, a2] = [scopeRun(null, "just test-api", 0, "failed", { pass: 1 }), scopeRun(null, "just test-api", 1, "done", { pass: 1 }), scopeRun(null, "just test-api", 0, "done", { pass: 2 }, 9000)];
+      const passes = [1, 1, 2];
+      const two = scoped([a1, b1, a2].map(([r, x], i) => [r, { ...x, pass: passes[i] }]), { chain_definition: { template_id: "default", nodes: nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n)) }, node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] } });
+      mount(two, `${TESTS}&pass=1`);
+      // The task's screen names the pass, and its scope keeps it.
+      await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
+      expect(where()).toBe(`${TESTS}&pass=1&${key("just test-api")}`);
+      expect(await screen.findByText("test scope · pass 1 of 2 · round 2 of 3 · passed 24s")).toBeInTheDocument();
+      const facts = document.querySelector(".ph-facts") as HTMLElement;
+      expect(within(facts).getByText("other rounds").nextElementSibling).toHaveTextContent(/^1: failed$/);
     });
 
     it("names a scope's repository, and counts repositories, when the item has several", async () => {

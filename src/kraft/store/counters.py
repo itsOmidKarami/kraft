@@ -5,7 +5,7 @@ import sqlite3
 from kraft import events
 from kraft.policy import Cap
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.vocab import CAP_SWEEP_LEAVES, SessionEvent, WorkItemEvent
+from kraft.vocab import CAP_SWEEP_LEAVES, LimitEvent, SessionEvent, WorkItemEvent
 from kraft.vocab.sql import in_list
 
 
@@ -79,6 +79,30 @@ def clear_loop_counters(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                 (work_item_id, counter),
             )
+
+
+def reset_fix_loops(
+    conn: sqlite3.Connection, work_item_id: str, node_ids: list[str], by: str
+) -> None:
+    """Give the nodes a gate rejection re-runs their fix rounds back
+    (`a-gate-reject-gives-the-rerun-its-fix-rounds-back`): the re-run measures
+    new work, and without this it had only the rounds the pass before left
+    (Kraft-9d8b2.150, `verification` re-entered at round 2 of 5). Whoever
+    rejected, unlike a retry (`only-a-person-resets-a-cap-counter`): each
+    rejection spends the gate's own reject loop, which only a person resets, so
+    the total stays bounded. Only the fix loop's counter; the reset is recorded
+    as a retry's is, and not at all when there was nothing to reset.
+    """
+    # `walk._loop_key`'s format; the store must not import the executor.
+    keys = [f"{node_id}.fix_loop" for node_id in node_ids]
+    before = cap_counts(conn, work_item_id)
+    reset = {k: before[k] for k in keys if k in before}
+    for key in reset:
+        delete_counter(conn, work_item_id, key)
+    if reset:
+        events.append(
+            conn, work_item_id, LimitEvent.CAP_COUNTERS_RESET, {"by": by, "counters": reset}
+        )
 
 
 def reject_loop_key(gate: str) -> str:

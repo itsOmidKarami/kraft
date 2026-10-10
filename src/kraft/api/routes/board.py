@@ -836,7 +836,7 @@ def _test_result(st, row) -> dict | None:
     return None
 
 
-def _scope_runs(st, row) -> list[dict]:
+def _scope_runs(st, row, passes) -> list[dict]:
     """`scope_runs` on the detail response: every command each changed-test-scope
     task ran, over every round and repository (`dispatch.scope_runs`), for the
     node's view to draw a round's scopes beside the round before it. Empty for
@@ -869,11 +869,13 @@ def _scope_runs(st, row) -> list[dict]:
     runs = []
     for node, t in verifies:
         try:
-            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, entry, live=live(node))
+            found = dispatch.scope_runs(
+                st.db, row["id"], node.id, t.path, entry, live=live(node), passes=passes
+            )
         except config_mod.ConfigError:
             # An unreadable repos.yaml costs the scope names, not the detail.
             found = dispatch.scope_runs(
-                st.db, row["id"], node.id, t.path, lambda _: None, live=live(node)
+                st.db, row["id"], node.id, t.path, lambda _: None, live=live(node), passes=passes
             )
         runs += [{**r, "node_id": node.id, "hook_point": t.path} for r in found]
     return runs
@@ -1033,6 +1035,7 @@ async def get_work_item(wid: str, request: Request):
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
+    passes = st.db.read(lambda c: store.session_passes(c, wid, [n["id"] for n in chain["nodes"]]))
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
     progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid)
@@ -1062,7 +1065,18 @@ async def get_work_item(wid: str, request: Request):
         "running_time": st.db.read(lambda c: caps.running_time(c, row)),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
-        "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
+        # Which pass of its node each session ran in (`store.number_passes`);
+        # an escalation turn is in none.
+        "worker_sessions": [
+            {
+                **{k: s[k] for k in s.keys()},
+                **({"pass": n} if (n := passes[0].get(s["id"])) else {}),
+            }
+            for s in sessions
+        ],
+        # What started each pass after a node's first, for the nodes that ran
+        # more than once: one pass is nothing to tell apart.
+        "node_passes": {node: ps for node, ps in passes[1].items() if len(ps) > 1},
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), kept once it
         # stops on the implementation node or finishes it; None before that node
@@ -1126,7 +1140,7 @@ async def get_work_item(wid: str, request: Request):
         ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
         "test_result": _test_result(st, row),
-        "scope_runs": _scope_runs(st, row),
+        "scope_runs": _scope_runs(st, row, passes),
         # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
         # the frozen chain's total, how many were gates, and the current
         # node's step when it declares more than one.
