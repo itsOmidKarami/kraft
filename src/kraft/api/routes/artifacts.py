@@ -228,12 +228,27 @@ async def compare_work_item(
         raise HTTPException(400, "`from` cannot be the working tree")
     if not row["base_ref"]:
         raise HTTPException(409, "this work item has no base commit to compare against")
+    if file is not None and (
+        not file or "\0" in file or file.startswith("/") or ".." in file.split("/")
+    ):
+        raise HTTPException(400, "`file` must be a path inside the repository")
     worktree = _readable_worktree(st, row)
     gate = board._pending_gate(st, wid)
     from_sha, from_base = _resolve_target(st, row, gate, frm)
     to_sha, to_base = _resolve_target(st, row, gate, to)
+    # One file is diffed alone, with its old path beside it when it was renamed.
+    paths = (
+        list(dict.fromkeys((review.renamed_from(worktree, from_sha, to_sha, file) or file, file)))
+        if file
+        else []
+    )
     change = review.read_change(
-        worktree, from_sha, head=to_sha, context=context, ignore_whitespace=ignore_whitespace
+        worktree,
+        from_sha,
+        head=to_sha,
+        context=context,
+        ignore_whitespace=ignore_whitespace,
+        paths=paths,
     )
     if change is None:
         raise HTTPException(500, "git could not diff these two targets")
@@ -264,9 +279,7 @@ async def compare_work_item(
         ]
         diff = review.filter_diff(diff, keep)
     if file:
-        # shortcut: git still diffs every changed file at this context and the rest
-        # is dropped here; give git the path (and a rename's old one) if a large
-        # change makes one file's read slow.
+        # Git read `file` as a path, and a directory's is every file under it.
         files = [f for f in files if f["path"] == file]
         diff = review.filter_diff(diff, {file})
     diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)

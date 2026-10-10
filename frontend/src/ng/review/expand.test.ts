@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { gapsOf, grow, spansOf, STEP, widen, type Grow, type Span } from "./expand";
+import { gapsOf, grow, reveal, spansOf, STEP, widen, type Grow, type Span } from "./expand";
+import type { LineRange } from "./range";
 import { parsePatch } from "./patch";
 
 // A 60-line file with lines 10 and 50 changed: one diff line per file line, and one more for each change.
@@ -32,6 +33,19 @@ describe("a diff's unchanged lines", () => {
     ["a press for a gap that has closed changes nothing", [[1, "all"], [2, "down"]], [[6, 55]]],
   ])("%s", (_, presses, spans) => {
     expect(presses.reduce((s, [gap, how]) => grow(s, gap, how, whole.lines.length), whole.spans)).toEqual(spans);
+  });
+
+  it.each<[string, LineRange, Span[] | "the same"]>([
+    ["new-side lines between the hunks, with three lines around them", { side: "new", start: 30, end: 31 }, [[6, 14], [27, 35], [47, 55]]],
+    ["an old-side line near a hunk, joined to it", { side: "old", start: 44, end: 44 }, [[6, 14], [41, 55]]],
+    ["a range across sides, from its first line to its last", { startSide: "old", start: 20, side: "new", end: 22 }, [[6, 14], [17, 26], [47, 55]]],
+    ["the file's last lines, and no further", { side: "new", start: 60, end: 60 }, [[6, 14], [47, 55], [58, 62]]],
+    ["lines drawn already", { side: "new", start: 8, end: 9 }, "the same"],
+    ["a line the file does not have", { side: "new", start: 500, end: 500 }, "the same"],
+  ])("a thread's lines are drawn: %s", (_, range, spans) => {
+    const got = reveal(whole, range);
+    if (spans === "the same") expect(got).toBe(whole.spans);
+    else expect(got).toEqual(spans);
   });
 
   it("draws the wider hunk with its own header, and leaves an untouched one as it was", () => {
