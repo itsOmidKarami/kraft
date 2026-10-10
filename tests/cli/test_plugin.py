@@ -548,7 +548,7 @@ def test_update_json_is_the_results_with_each_review(installed, capsys):
     }
 
 
-@pytest.mark.parametrize("server", ["none", "refuses"])
+@pytest.mark.parametrize("server", ["none", "refuses", "leaves-it-out"])
 def test_a_missing_server_is_not_a_warning(installed, capsys, monkeypatch, server):
     """The next start reads the new lock, so no server is not a problem; one
     that answers an error is."""
@@ -561,7 +561,9 @@ def test_a_missing_server_is_not_a_warning(installed, capsys, monkeypatch, serve
     else:
 
         async def refused():
-            raise ValueError("kraft 500: boom")
+            if server == "refuses":
+                raise ValueError("kraft 500: boom")
+            return {"invalid_templates": {f"plugin {ID}": "its store is gone", "chains/x": "no"}}
 
         monkeypatch.setattr(plugin_cli.client, "reload_plugins", refused)
 
@@ -571,7 +573,10 @@ def test_a_missing_server_is_not_a_warning(installed, capsys, monkeypatch, serve
     assert ("warning: the running server did not reload: kraft 500: boom" in out) is (
         server == "refuses"
     )
-    assert "no Kraft server" not in out
+    assert (f"warning: the running server did not load plugin {ID}: its store is gone" in out) is (
+        server == "leaves-it-out"
+    )
+    assert "no Kraft server" not in out and "chains/x" not in out
 
 
 def _the_same_collection(home, tmp_path):

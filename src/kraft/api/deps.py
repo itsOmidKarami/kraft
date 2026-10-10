@@ -471,12 +471,13 @@ def collect_plugin_stores(st) -> list[str]:
         ended = sorted(ENDED)
         rows = st.db.read(
             lambda c: c.execute(
-                "SELECT materialized_chain FROM work_items WHERE materialized_chain IS NOT NULL "
-                f"AND status NOT IN ({', '.join('?' * len(ended))})",
+                # A retried item runs on `run_chain`, and a revision adds its pins there.
+                "SELECT materialized_chain, run_chain FROM work_items "
+                f"WHERE status NOT IN ({', '.join('?' * len(ended))})",
                 ended,
             ).fetchall()
         )
-        for (stored,) in rows:
+        for stored in (snapshot for row in rows for snapshot in row if snapshot):
             for pin in (json.loads(stored).get("plugins") or {}).values():
                 kept.add(str(pin["digest"]).removeprefix("sha256:"))
         return kept

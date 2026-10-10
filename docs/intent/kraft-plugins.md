@@ -308,8 +308,8 @@ origin: src/kraft/plugins/update.py §may_apply_unattended
 
 ## REQ auto-update-never-installs-or-re-installs
 
-The system SHALL NOT auto-update a plugin that has no lock entry, to a newer commit at an unchanged version, or to a changed alias or ref.
-enforced-by: tests/plugins/test_auto_update.py::test_auto_update_never[installs], tests/plugins/test_auto_update.py::test_auto_update_never[re-installs], tests/plugins/test_auto_update.py::test_auto_update_never[applies-a-ref-change]
+The system SHALL NOT auto-update a plugin that has no lock entry, to a newer commit at an unchanged version, or to a changed alias, ref or collection URL.
+enforced-by: tests/plugins/test_auto_update.py::test_auto_update_never[installs], tests/plugins/test_auto_update.py::test_auto_update_never[re-installs], tests/plugins/test_auto_update.py::test_auto_update_never[applies-a-ref-change], tests/plugins/test_auto_update.py::test_auto_update_never[follows-a-new-url]
 origin: src/kraft/plugins/update.py §auto_update
 
 ## REQ failed-auto-update-keeps-the-locked-version
