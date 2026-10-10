@@ -130,6 +130,7 @@
           "work_item_retried",
           "work_item_self_retry_dropped",
           "work_item_self_retry_requested",
+          "work_item_storage_held",
           "work_item_title_edited",
           "work_item_unblocked",
           "work_item_waiting",
