@@ -117,7 +117,7 @@ origin: src/kraft/plugins/config.py §CollectionConfig
 ## REQ validate-runs-the-install-checks
 
 WHEN an author validates a local collection or plugin, the system SHALL run the same extraction checks, plugin checks and whole-library lint as an install, SHALL report each problem with its file and key, and SHALL NOT change `plugins.yaml`, `plugins.lock` or the store.
-enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json
+enforced-by: tests/cli/test_plugin.py::test_validate[collection], tests/cli/test_plugin.py::test_validate[single-plugin], tests/cli/test_plugin.py::test_validate[lint-failure], tests/cli/test_plugin.py::test_validate[wrong-kraft-major], tests/cli/test_plugin.py::test_validate[no-home], tests/cli/test_plugin.py::test_validate[refused-content], tests/cli/test_plugin.py::test_validate_writes_nothing_and_prints_json
 origin: src/kraft/cli/plugin.py §validate
 
 ## REQ plugins-load-only-from-the-lock
@@ -149,3 +149,27 @@ origin: src/kraft/plugins/load.py §installed
 IF a skill reference's qualifier is the namespace of a plugin in `plugins.yaml` or `plugins.lock` that did not load, THEN the system SHALL fail validation instead of handing the reference to the agent.
 enforced-by: tests/test_skill.py::test_plugin_skill_references[unloaded-plugin-is-an-error], tests/plugins/test_load.py::test_what_loads[disabled]
 origin: src/kraft/skill.py §validate
+
+## REQ a-plugin-is-self-contained
+
+IF a plugin's qualified `extends`, `steering`, `profile` or `skill` reference names another installed Kraft plugin's namespace, THEN the system SHALL refuse the plugin.
+enforced-by: tests/plugins/test_update.py::test_a_plugin_cannot_carry[reference-to-another-plugin], tests/plugins/test_update.py::test_a_skill_may_not_reach_into_another_kraft_plugin[another-kraft-plugin]
+origin: src/kraft/plugins/update.py §check
+
+## REQ a-plugin-cannot-run-commands-or-grant-permissions
+
+IF a plugin declares a `subprocess` task, sets a `policy:` key other than a time cap, `timeout_minutes`, `max_attempts`, `budget_usd`, `token_budget` or `deny_tools` at any scope, or names a harness not in its `requires.harnesses`, THEN the system SHALL refuse the plugin.
+enforced-by: tests/plugins/test_update.py::test_a_plugin_cannot_carry[subprocess], tests/plugins/test_update.py::test_a_plugin_cannot_carry[sandbox], tests/plugins/test_update.py::test_a_plugin_cannot_carry[unrestricted-network], tests/plugins/test_update.py::test_a_plugin_cannot_carry[grants], tests/plugins/test_update.py::test_a_plugin_cannot_carry[allowed-tools], tests/plugins/test_update.py::test_a_plugin_cannot_carry[allowed-harnesses], tests/plugins/test_update.py::test_a_plugin_cannot_carry[escalation-harness], tests/plugins/test_update.py::test_a_plugin_cannot_carry[unknown-policy-key], tests/plugins/test_update.py::test_a_plugin_cannot_carry[gate-scope], tests/plugins/test_update.py::test_a_plugin_cannot_carry[judge-task], tests/plugins/test_update.py::test_a_plugin_cannot_carry[unlisted-harness]
+origin: src/kraft/plugins/update.py §check
+
+## REQ update-shows-what-will-run-before-applying
+
+WHEN an install or update would change an installed plugin, the system SHALL list, before it writes anything, its changes to gates, merge steps, forge targets, task harnesses and models, policy limits, `requires`, prompts, steering, skills, profiles and plugin skill references, the references its namespace captures, and whether it is a downgrade.
+enforced-by: tests/plugins/test_review.py::test_review_calls_out[gate-removed], tests/plugins/test_review.py::test_review_calls_out[auto-review], tests/plugins/test_review.py::test_review_calls_out[merge-step], tests/plugins/test_review.py::test_review_calls_out[forge-target], tests/plugins/test_review.py::test_review_calls_out[harness], tests/plugins/test_review.py::test_review_calls_out[limit-raised], tests/plugins/test_review.py::test_review_calls_out[requires], tests/plugins/test_review.py::test_review_calls_out[prompt], tests/plugins/test_review.py::test_review_calls_out[steering], tests/plugins/test_review.py::test_review_calls_out[skill], tests/plugins/test_review.py::test_review_calls_out[profile], tests/plugins/test_review.py::test_review_calls_out[plugin-ref], tests/plugins/test_review.py::test_review_calls_out[downgrade]
+origin: src/kraft/plugins/review.py §review
+
+## REQ the-review-cannot-hide-text
+
+WHEN the system prints a review, it SHALL escape every control, bidi and format character in it.
+enforced-by: tests/plugins/test_review.py::test_review_escapes_what_it_prints
+origin: src/kraft/plugins/review.py §render

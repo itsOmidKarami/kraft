@@ -123,7 +123,7 @@ def _requires(tmp_path, **requires):
 @pytest.mark.parametrize(
     ("requires", "files", "why"),
     [
-        ({"harnesses": ["codex"]}, {}, "requires harness 'codex'"),
+        ({"harnesses": ["codex"]}, {"harnesses.yaml": {}}, "requires harness 'codex'"),
         (
             {"profiles": ["strong"]},
             {"harnesses.yaml": {"harnesses": {}}},
@@ -213,7 +213,6 @@ def test_a_launch_and_doctor_read_the_installed_plugins(tmp_path, process):
     install(
         process, load.plugins_dir(), make_collection(tmp_path / "v2", {"release": spec}), "release"
     )
-    (process / "harnesses.yaml").write_text("harnesses: {}\n")
     table, _ = profiles.harness_table(harness.load(None))
     assert table.agent_profiles["release:deep"].model == {"codex": "m"}
 
