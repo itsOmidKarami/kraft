@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokens, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, lookWord, messagesThrough, sessionLook, sessionsOf } from "../../item/nodeGraph";
-import { stepsOf } from "../../item/paths";
+import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf } from "../../item/nodeGraph";
+import { stepsOf, taskName } from "../../item/paths";
+import { isScopeTask, scopesView } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
 import { LogLines } from "../log/LogLines";
@@ -21,17 +22,36 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   const navigate = useNavigate();
   const path = selPath(place.sel)!;
   const esc = place.sel.step === ESCALATION;
-  const sessions = esc ? escalationsOf(item, nodeId) : sessionsOf(item, path);
+  const apiNode = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  // In a fix-loop node the screen is one round's, as the desktop's pane is: a task and the judge as the round
+  // measured, the repair as it went on to the next.
+  const loop = !esc && place.sel.step === FIX_LOOP ? (place.sel.task === JUDGE ? "judge" : "repair") : null;
+  const rounds = esc ? undefined : loopRounds(item, apiNode);
+  const r = rounds && roundShown(item, apiNode, place.round);
+  const all = esc ? escalationsOf(item, nodeId) : sessionsOf(item, path);
+  const sessions = r ? all.filter((s) => s.round === (loop === "repair" ? r : r - 1)) : all;
+  // A changed-test-scope task runs a session per scope: they are its scopes, not attempts at it.
+  const view = !esc && !loop && isScopeTask(item, path) ? scopesView(item, path, r ?? 1, now) : null;
+  const chips = view?.rows.flatMap((row) => row.chips) ?? [];
+  // One repository: nothing to tell apart or put in order, so it is not named, as the desktop's frame has it.
+  const solo = view?.rows.length === 1;
+  // A run the round made of a scope before its newest one: no scope names it any more.
+  const earlier = view ? sessions.filter((s) => !chips.some((c) => c.session?.id === s.id)) : [];
   // An escalation's picker is per thread: it shows that thread through its last turn.
   const wanted = place.attempt ? (esc ? sessions.map((s) => s.thread).lastIndexOf(place.attempt) : sessions.findIndex((s) => s.attempt === place.attempt)) : -1;
-  const at: WorkerSession | undefined = sessions[wanted >= 0 ? wanted : sessions.length - 1];
+  const at: WorkerSession | undefined = (place.scope && chips.find((c) => c.key === place.scope)?.session) || sessions[wanted >= 0 ? wanted : sessions.length - 1];
   const look = sessionLook(at, now);
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
   const tab = (tabs.some((t) => t.id === place.tab) ? place.tab : tabs[0].id) as TaskTab;
-  const name = esc ? "escalation" : place.sel.task;
+  const name = esc ? "escalation" : loop ? taskName(path) : place.sel.task;
   const mine = docs.filter((d) => at && (d.worker_session_id === at.id || (d.hook_point === path && d.attempt === at.attempt)));
-  const state = at ? `${esc ? "handler · " : ""}${at.model ? "agent task" : "task"} · ${lookWord(look)}${sessions.length > 1 ? ` · attempt ${sessions.indexOf(at) + 1} of ${sessions.length}` : ""}` : "task · not started";
-  const apiNode = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const kind = at?.model ? "agent task" : "task";
+  const lead = esc ? `handler · ${kind}` : !r ? kind : loop === "judge" ? `fix-loop judge · after round ${r}` : loop === "repair" ? `fix-loop repair · between rounds ${r} and ${r + 1}` : `${kind} · round ${r}${rounds.total ? ` of ${rounds.total}` : ""}`;
+  // A round that is over did not run what it has no session for; the newest may still get to it.
+  const unrun = !at && !!r && (!!loop || r < rounds.latest);
+  const state = at
+    ? `${lead} · ${lookWord(look)}${!view && sessions.length > 1 ? ` · attempt ${sessions.indexOf(at) + 1} of ${sessions.length}` : ""}`
+    : unrun ? `${lead} · ${loop === "judge" && r === 1 ? "skipped · the first repair runs without the judge" : "not run in this round"}` : "task · not started";
   const steps = stepsOf(apiNode).steps;
   const si = steps.findIndex((s) => s.id === place.sel.step);
   const before = si > 0 ? `step ${steps[si - 1].id}` : (() => { const i = item.chain_definition.nodes.findIndex((n) => n.id === nodeId); return i > 0 ? item.chain_definition.nodes[i - 1].id : null; })();
@@ -48,14 +68,48 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
           <p className={`ph-node-sub${look.state === "failed" ? " ph-tone-bad" : look.running ? " ph-tone-info" : ""}`}>{state}</p>
         </div>
         <TabStrip label="Task" tabs={tabs} value={tab} onChange={(t) => setPlace({ tab: t === tabs[0].id ? undefined : t })} />
-        {sessions.length > 1 && (
+        {!view && sessions.length > 1 && (
           <div className="ph-attempts" role="group" aria-label="Attempts">
-            {sessions.map((s) => (
+            {sessions.map((s, i) => (
               <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s === sessions.at(-1) ? undefined : esc ? s.thread : s.attempt })}>
-                {esc ? `thread ${s.thread}` : `#${s.attempt}`} · {sessionLook(s, now).running ? "running" : lookWord(sessionLook(s, now))}
+                {esc ? `thread ${s.thread}` : `#${i + 1}`} · {sessionLook(s, now).running ? "running" : lookWord(sessionLook(s, now))}
               </button>
             ))}
           </div>
+        )}
+        {view && tab === "overview" && (
+          <Block title="Scopes">
+            {view.rows.map((row) => (
+              <div key={row.name} className="ph-scope-repo">
+                {/* With no scopes the note is all a lone repository has to say: waiting, or not reached. */}
+                {(!solo || !row.chips.length) && <p className="ph-note">{!solo && <><span className="ph-mono">{row.name}</span> · </>}{row.note}</p>}
+                <div className="ph-list">
+                  {row.chips.map((c) => {
+                    const text = (
+                      <span className="ph-row-text">
+                        <span className="ph-row-label ph-mono">{c.setup ? c.name : c.command}</span>
+                        <span className="ph-row-hint">{c.state === "done" ? ["done", c.meta].filter(Boolean).join(" · ") : c.meta || c.state}{c.fresh ? " · new this round" : ""}</span>
+                      </span>
+                    );
+                    // A scope with no run this round has nothing to open: it waits, or the round did not pick it
+                    // (its chip then carries the round before's run, which is not this round's to show).
+                    return c.session && c.state !== "skipped"
+                      ? <button key={c.key} type="button" className="ph-row" aria-pressed={c.session.id === at?.id} onClick={() => setPlace({ scope: c.key, attempt: undefined })}>{text}</button>
+                      : <div key={c.key} className="ph-row ph-row-static">{text}</div>;
+                  })}
+                </div>
+              </div>
+            ))}
+            {earlier.length > 0 && (
+              <div className="ph-attempts" role="group" aria-label="Earlier runs this round">
+                {earlier.map((s, i) => (
+                  <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s.attempt, scope: undefined })}>
+                    earlier run {i + 1}{s.command ? ` · ${s.command}` : ""} · {lookWord(sessionLook(s, now))}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Block>
         )}
         {tab === "overview" && (
           at ? (
@@ -66,7 +120,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
                 ...(at.model ? ([["model", <span key="m" className="ph-mono">{at.model}</span>]] as [string, React.ReactNode][]) : []),
                 ["path", <span key="p" className="ph-mono">{path}</span>],
                 ...(at.wall_ms != null ? ([["duration", elapsed(at.wall_ms)]] as [string, React.ReactNode][]) : []),
-                ...(at.round ? ([["round", `fix loop round ${at.round + 1}`]] as [string, React.ReactNode][]) : []),
+                ...(r && !loop ? ([["round", `${r}${rounds.total ? ` of ${rounds.total}` : ""}`]] as [string, React.ReactNode][]) : []),
               ]} />
               <Block title="Result">
                 <Facts rows={[
@@ -93,6 +147,8 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
                 ) : <p className="ph-note">This attempt wrote no documents.</p>}
               </Block>
             </>
+          ) : unrun ? (
+            <p className="ph-note">Not run in this round.</p>
           ) : (
             <Block title="When it runs">
               <p className="ph-note">{before ? `After ${before} finishes.` : "When the item starts."} It has no attempt yet.</p>

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -37,6 +37,26 @@ function mount(it: ReturnType<typeof detail>, path: string, answers: Record<stri
 const posts = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
 const where = () => screen.getByLabelText("where").textContent;
 afterEach(() => vi.unstubAllGlobals());
+
+/** Verification with a fix loop that ran: round 1 found something, one repair, then round 2, where the review ran twice. */
+const LOOP_NODES = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop" } : n));
+const looped = (over = {}) => {
+  const at = (m: number) => `2026-09-13T09:${String(m).padStart(2, "0")}:00Z`;
+  const run = (id: string, hook: string, round: number, attempt: number, m: number, wall_ms: number) => session({ id, hook_point: hook, round, attempt, status: "done", created_at: at(m), started_at: at(m), wall_ms });
+  return item("running", null, {
+    materialized_chain: LOOPED,
+    chain_definition: { template_id: "default", nodes: LOOP_NODES },
+    worker_sessions: [
+      run("l1", "verification.checks.lint", 0, 1, 0, 5000),
+      run("s1", "verification.review.code_review", 0, 1, 1, 80000),
+      run("fx", "verification.fix_loop.main.repair", 1, 1, 3, 120000),
+      run("l2", "verification.checks.lint", 1, 2, 5, 5000),
+      run("s2", "verification.review.code_review", 1, 2, 6, 40000),
+      run("s3", "verification.review.code_review", 1, 3, 9, 19000),
+    ],
+    ...over,
+  });
+};
 
 describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () => {
   const bar = (it: ReturnType<typeof detail>, id: string) => {
@@ -142,6 +162,48 @@ describe("the node screen (D)", () => {
     expect(row("fix loop")).toBe("round 2 of 4");
     expect(row("wall")).toBe("about 12m of 45m");
     expect(row("on failure")).toBe("repair pass, once");
+  });
+
+  it("picks a fix-loop round: its tasks, its repair and its judge, with the round in the URL", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification");
+    const rounds = await screen.findByRole("group", { name: "Fix loop rounds" });
+    expect(within(rounds).getAllByRole("button").map((b) => b.textContent)).toEqual(["round 1 · sent to the fix loop", "round 2 · running"]);
+    const task = (name: string) => screen.getByText(name).closest("button")!;
+    expect(task("code_review")).toHaveTextContent("19s");
+    expect(task("repair")).toHaveTextContent("not yet");
+    await userEvent.click(within(rounds).getByRole("button", { name: /round 1/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?round=1");
+    expect(task("code_review")).toHaveTextContent("1m");
+    expect(task("repair")).toHaveTextContent("done · 2m");
+    expect(task("judge")).toHaveTextContent("skipped · first repair");
+    // The repair opens as a task, and keeps the round it was opened from.
+    await userEvent.click(task("repair"));
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.fix_loop.main.repair&round=1");
+    expect(await screen.findByRole("heading", { level: 1, name: "repair" })).toBeInTheDocument();
+    expect(screen.getByText(/fix-loop repair · between rounds 1 and 2 · done/)).toBeInTheDocument();
+  });
+
+  it("drops the round from the URL on the newest, and when the node changes", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification?round=1");
+    await userEvent.click(await screen.findByRole("button", { name: /round 2/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification");
+    await userEvent.click(screen.getByRole("button", { name: /round 1/ }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Chain" })).getByRole("button", { name: "plan" }));
+    await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/plan"));
+  });
+
+  it("drops the round when the node's own link leads to the next node", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification?round=1");
+    await screen.findByRole("group", { name: "Fix loop rounds" });
+    await userEvent.click(within(document.querySelector(".ph-facts") as HTMLElement).getByRole("button", { name: "merge_request" }));
+    await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/merge_request"));
+  });
+
+  it("reads the log of the round picked", async () => {
+    const calls = mount(looped(), "/work-items/w1/nodes/verification?tab=log&round=1");
+    await screen.findByText(/loaded review_package/);
+    const logs = calls.filter((c) => c.path.endsWith("/log")).map((c) => c.path.split("/")[2]).sort();
+    expect(logs).toEqual(["fx", "l1", "s1"]);
   });
 
   it("has a YAML tab with the node as the item froze it, and what was changed for this item", async () => {
@@ -284,6 +346,66 @@ describe("the task screen (E)", () => {
     // Back on the newest, the pin drops: the screen follows the next attempt.
     await userEvent.click(screen.getByRole("button", { name: /#2/ }));
     expect(where()).not.toContain("attempt=");
+  });
+
+  it.each([
+    ["the newest round", "", /agent task · round 2 of 3 · done · attempt 2 of 2/, ["#1 · done", "#2 · done"]],
+    ["a round picked", "&round=1", /agent task · round 1 of 3 · done$/, null],
+  ])("on a fix-loop node shows one round's attempts, numbered inside it: %s", async (_n, query, header, chips) => {
+    mount(looped(), TASK + query);
+    expect(await screen.findByText(header)).toBeInTheDocument();
+    const group = screen.queryByRole("group", { name: "Attempts" });
+    expect(group && within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(chips);
+  });
+
+  it("says a fix-loop task did not run in the round shown", async () => {
+    mount(looped(), "/work-items/w1/nodes/verification?sel=verification.fix_loop.judge&round=1");
+    expect(await screen.findByText(/fix-loop judge · after round 1 · skipped · the first repair runs without the judge/)).toBeInTheDocument();
+    expect(screen.getByText("Not run in this round.")).toBeInTheDocument();
+  });
+
+  it("lists a changed-test-scope task's scopes by repository in place of attempts, and a scope picks the run read", async () => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    const [api, web] = [scopeRun(null, "just test-api", 0, "done", { order: 0 }), scopeRun(null, "just test-web", 0, "failed", { order: 1 })];
+    // A run the round made of a scope before its newest one: no `scope_runs` entry names it any more.
+    const earlier = { ...web[1], id: "old", attempt: 1, created_at: "2026-09-13T10:00:00Z" };
+    Object.assign(api[1], { attempt: 2 });
+    Object.assign(web[1], { attempt: 3 });
+    const it = scoped([api, web], { chain_definition: { template_id: "default", nodes }, worker_sessions: [earlier, api[1], web[1]] });
+    const calls = mount(it, `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    const scopes = (await screen.findByText("Scopes")).closest("section")!;
+    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "earlier run 1 · just test-web · failed"]);
+    expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
+    await userEvent.click(within(scopes).getByRole("button", { name: /just test-api/ }));
+    expect(where()).toContain("scope=%3Ajust+test-api");
+    await userEvent.click(screen.getByRole("tab", { name: "Log" }));
+    await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
+    await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    await userEvent.click(screen.getByRole("button", { name: /earlier run 1/ }));
+    expect(where()).toContain("attempt=1");
+    expect(where()).not.toContain("scope=");
+  });
+
+  it("a scope the round did not pick is a line, not a way into the round before's run", async () => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop", tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    const runs = [scopeRun(null, "just test-api", 0, "done"), scopeRun(null, "just test-web", 0, "done"), scopeRun(null, "just test-api", 1, "done")];
+    mount(scoped(runs, { chain_definition: { template_id: "default", nodes } }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    expect(await screen.findByText(/task · round 2 of 3 · done/)).toBeInTheDocument();
+    const scopes = screen.getByText("Scopes").closest("section")!;
+    expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s"]);
+    expect(within(scopes).getByText("just test-web").closest(".ph-row")).toHaveTextContent("just test-webnot picked");
+  });
+
+  it.each([
+    // One repository: nothing to tell apart, so it is not named (as the desktop's frame has it).
+    ["one repository is its scopes alone", () => [scopeRun(null, "just test-api", 0, "done")], {}, []],
+    ["one repository with nothing run still says why", () => [], {}, ["not reached"]],
+    ["several are each named, with how they went", () => [scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { materialized_chain: scopeChain("sequential", WORKSPACE) }, ["ws · done · 24s", "pkg · failed · 24s", "web · not reached · pkg failed"]],
+  ])("heads a changed-test-scope task's scopes by repository only when there are several: %s", async (_n, runs, over, lines) => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    mount(scoped(runs(), { chain_definition: { template_id: "default", nodes }, ...over }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    const scopes = (await screen.findByText("Scopes")).closest("section")!;
+    expect([...scopes.querySelectorAll(".ph-scope-repo > p")].map((p) => p.textContent)).toEqual(lines);
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {
