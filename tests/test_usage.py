@@ -375,6 +375,7 @@ async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database
         "cost_complete": True,
         "cost_estimated": False,
         "split_complete": True,
+        "out_complete": True,
     }
 
 
@@ -403,6 +404,35 @@ async def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(dat
     assert verify["tokens_in"] == 1000  # tokens are still fully counted
     assert env["cost_complete"] is True  # a task with no tokens owes nothing
     assert rollup["total"]["cost_complete"] is False
+
+
+async def test_a_session_with_tokens_and_no_output_count_marks_the_rollup_incomplete(database):
+    """A session that never reported its output (still running, paused or
+    killed) has `tokens_out` NULL. Summing that as zero would print a partial
+    output as the whole of it, so the rollup says the sum is a floor."""
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    await database.write(lambda c: _session(c, "told", "verify", u=Usage(100, 10, 0.5, "m")))
+    # tokens, but no output count
+    await database.write(
+        lambda c: _session(c, "untold", "verify", status="failed", u=Usage(900, None, 0.1, "m"))
+    )
+    await database.write(lambda c: _session(c, "whole", "plan", u=Usage(100, 10, 0.5, "m")))
+    # no tokens at all: a subprocess task, not a missing count
+    await database.write(lambda c: _session(c, "free", "env_setup"))
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
+    by = {n["node"]: n for n in rollup["by_node"]}
+
+    assert by["verify"]["tokens_out"] == 10  # what was reported, still summed
+    assert by["verify"]["out_complete"] is False
+    assert by["plan"]["out_complete"] is True
+    assert by["env_setup"]["out_complete"] is True
+    assert rollup["total"]["out_complete"] is False
 
 
 async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess(database):
