@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from pathlib import Path
 
 import yaml
@@ -193,20 +194,27 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.abandon(ns.id)), common.item_action("abandoned {id}"), ns.json)
 
 
-def _archive_ids(ns: argparse.Namespace) -> list[str]:
-    """Who `item archive` takes: every item the Storage view marks reclaimable
-    (`--reclaimable`), else the IDs given, else the item you are standing in.
-    Each explicit one goes through the worker self-action guard, as
-    `item abandon` does."""
+#: What the preview and bulk archive routes accept in one call.
+_ARCHIVE_MAX = 200
+
+
+def _archive_ids(ns: argparse.Namespace) -> tuple[list[str], int]:
+    """Who `item archive` takes, and how many it found: the largest
+    `_ARCHIVE_MAX` of the items the Storage view marks reclaimable
+    (`--reclaimable`, listed largest first), else the IDs given, else the item
+    you are standing in. Each explicit one goes through the worker self-action
+    guard, as `item abandon` does."""
     if ns.reclaimable:
         if ns.ids:
             raise ValueError("give IDs or --reclaimable, not both")
-        return [i["id"] for i in asyncio.run(client.storage_usage())["items"] if i["reclaimable"]]
-    return [client.context._forbid_self_action(i) for i in ns.ids or [None]]
+        found = [i["id"] for i in asyncio.run(client.storage_usage())["items"] if i["reclaimable"]]
+        return found[:_ARCHIVE_MAX], len(found)
+    ids = [client.context._forbid_self_action(i) for i in ns.ids or [None]]
+    return ids, len(ids)
 
 
 def _cmd_archive(ns: argparse.Namespace) -> None:
-    ids = _archive_ids(ns)
+    ids, found = _archive_ids(ns)
     if not ids:
         common.emit({"results": []}, lambda _: "nothing to archive", ns.json)
         return
@@ -229,6 +237,13 @@ def _cmd_archive(ns: argparse.Namespace) -> None:
     out["results"] += [{"id": i, "ok": False, "error": why} for i, why in refused.items()]
     out["results"].sort(key=lambda r: ids.index(r["id"]))
     common.emit(out, render.archive_results, ns.json)
+    if found > len(ids):
+        # stderr under --json, so stdout stays the one payload.
+        print(
+            f"archived the {len(ids)} largest of {found} reclaimable items; "
+            "run it again for the rest",
+            file=sys.stderr if ns.json else sys.stdout,
+        )
     failed = sum(1 for r in out["results"] if not r["ok"])
     if failed:
         # A script must be able to tell: the bulk route answers 200 either way.
@@ -947,7 +962,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     archive.add_argument(
         "--reclaimable",
         action="store_true",
-        help="every completed or abandoned item that is not archived yet",
+        help="the 200 largest completed or abandoned items not archived yet (run again for more)",
     )
     archive.add_argument(
         "--yes",

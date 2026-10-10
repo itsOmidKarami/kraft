@@ -609,6 +609,27 @@ def test_archive_reclaimable_takes_what_the_storage_view_marks(
         assert capsys.readouterr().out.strip() == "nothing to archive"
 
 
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["human", "json"])
+def test_archive_reclaimable_takes_the_200_largest_and_says_so(
+    monkeypatch, archiving, capsys, flags
+):
+    async def storage_usage():  # `GET /storage` lists largest first
+        return {"items": [{"id": f"w{n}", "reclaimable": True} for n in range(201)]}
+
+    monkeypatch.setattr(cli.item.client, "storage_usage", storage_usage)
+    sentence = "archived the 200 largest of 201 reclaimable items; run it again for the rest"
+
+    cli.main(["item", "archive", "--reclaimable", "--yes", *flags])
+
+    out, err = capsys.readouterr()
+    assert archiving["previewed"] == archiving["archived"] == [[f"w{n}" for n in range(200)]]
+    if flags:
+        assert sentence not in out
+        assert err.strip() == sentence
+    else:
+        assert out.splitlines()[-1] == sentence
+
+
 def test_archive_reclaimable_refuses_ids_beside_it(archiving, capsys):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["item", "archive", "w1", "--reclaimable", "--yes"])

@@ -7,7 +7,6 @@ does not re-derive layering. Triggers are the intake draft's; `harnesses` and
 
 from __future__ import annotations
 
-import asyncio
 import re
 
 from kraft import render, storage
@@ -368,7 +367,7 @@ def resolve(st, key, raw, files, published) -> dict:
 
 async def after_publish(app, written) -> None:
     config.reload_policy(app.state)
-    asyncio.ensure_future(storage.tick(app))
+    storage.kick(app)
 
 
 AREA = store.Area(

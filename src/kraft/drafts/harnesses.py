@@ -7,7 +7,6 @@ The page's per-harness access state is one of `available`, `override` or `never`
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import shutil
 from collections.abc import Mapping
@@ -602,7 +601,7 @@ async def after_publish(app, written) -> None:
     # The profile table is read from disk per use; only the policy is loaded.
     if "policy.yaml" in written:
         config.reload_policy(app.state)
-        asyncio.ensure_future(storage.tick(app))
+        storage.kick(app)
 
 
 AREA = store.Area(

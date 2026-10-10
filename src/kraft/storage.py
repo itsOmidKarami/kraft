@@ -191,6 +191,17 @@ async def tick(app) -> None:
     await refresh(app)
 
 
+def kick(app) -> None:
+    """Start a `tick` without waiting for it, and keep the task on `app.state`:
+    asyncio holds a task only weakly, so one nobody references can be collected
+    before its walk ends. A kick during a kick starts nothing; `refresh` is
+    single-flight, so the one running already measures what the caller changed."""
+    st = app.state
+    task = getattr(st, "storage_kick", None)
+    if task is None or task.done():
+        st.storage_kick = asyncio.ensure_future(tick(app))
+
+
 async def poller(app) -> None:
     """`tick` at startup and every ten minutes until cancelled."""
     while True:

@@ -174,6 +174,31 @@ async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatc
     assert storage.usage(app.state) is None
 
 
+async def test_two_kicks_while_one_runs_start_one_tick_and_the_task_is_kept(monkeypatch):
+    import asyncio
+
+    release = asyncio.Event()
+    ticks = []
+
+    async def tick(app):
+        ticks.append(app)
+        await release.wait()
+
+    monkeypatch.setattr(storage, "tick", tick)
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    storage.kick(app)
+    storage.kick(app)
+    await asyncio.sleep(0)
+
+    assert len(ticks) == 1
+    task = app.state.storage_kick
+    assert not task.done()
+    release.set()
+    await task
+    assert task.done()
+
+
 def _row(status="completed", archived_at=None, title="t", updated_at="2026-01-01T00:00:00+00:00"):
     return {"title": title, "status": status, "archived_at": archived_at, "updated_at": updated_at}
 

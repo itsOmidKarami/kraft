@@ -43,10 +43,11 @@ item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
 non-MCP agent gets the same surface; `item abandon`, `item archive` and
-`item restore` are the `item` verbs with no tool. `--json` prints the raw API payload on every verb except `view watch`,
-`repo path`, and the `admin` ones that manage the server process (`start`,
-`stop`, `restart`, the service verbs, `update`, `mcp`, `permission-hook`) and
-`admin init` (it accepts `--json` and ignores it).
+`item restore` are the `item` verbs with no tool. `--json` prints the raw API
+payload on every verb except `view watch`, `repo path`, and the `admin` ones
+that manage the server process (`start`, `stop`, `restart`, the service verbs,
+`update`, `mcp`, `permission-hook`) and `admin init` (it accepts `--json` and
+ignores it).
 
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo

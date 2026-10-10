@@ -148,7 +148,7 @@ async def reload(app) -> str | None:
     refused = deps.reload_policy(st)
     # A limit added by this reload is judged against a stale measurement until
     # the next tick: measure now, without holding the reload.
-    asyncio.ensure_future(storage.tick(app))
+    storage.kick(app)
     deps._reload_templates(st)
     digest = _digest(st.templates_dir / "intake.yaml")
     try:

@@ -503,7 +503,7 @@ async def put_policy(body: PolicyBody, request: Request):
         raise HTTPException(422, str(exc)) from exc
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     deps.apply_policy(st, policy_obj, parsed.instance_policy())
-    asyncio.ensure_future(storage.tick(request.app))
+    storage.kick(request.app)
     deps.lint_loaded(st)
     return data
 
