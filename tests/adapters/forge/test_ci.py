@@ -32,8 +32,22 @@ MR = forge.MR(1, "http://x")
             None,
             "conflict",
         ),
+        # Kraft-09ze6: GitHub runs no checks on a pull request that conflicts
+        # with its base, so this pending read never settles.
+        (
+            {"ci_states": ["pending"], "ci_no_checks": True, "mergeable": False},
+            None,
+            "conflict",
+        ),
+        ({"ci_states": ["pending"], "ci_no_checks": True}, None, "waiting"),
     ],
-    ids=["pending-and-unmergeable-waits", "other-sha-waits", "confirmed-conflict"],
+    ids=[
+        "pending-and-unmergeable-waits",
+        "other-sha-waits",
+        "confirmed-conflict",
+        "no-checks-and-unmergeable-conflicts",
+        "no-checks-yet-waits",
+    ],
 )
 async def test_render_ci_verdict(tmp_path, fake_kw, head_sha, expected):
     fake = forge.FakeForge(**fake_kw)

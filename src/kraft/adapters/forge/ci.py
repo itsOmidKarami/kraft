@@ -30,7 +30,9 @@ async def render_ci(
     and only after a second read confirms it (Kraft-ejj9 stays true, just
     later). A settled red pipeline is `"infra"` when every failed job is the
     forge's own fault, `"failed"` (code-red) otherwise, and green+confirmed-
-    unmergeable is `"conflict"`.
+    unmergeable is `"conflict"`. So is a confirmed unmergeable read with no
+    checks at all (Kraft-09ze6): GitHub runs no `pull_request` workflow on a
+    pull request that conflicts with its base, so there is nothing to wait for.
 
     A pending read standing only on a run cancelled `_CANCEL_GRACE` ago or
     more is `"abandoned"` (Kraft-kbqmk): a successor to a relabel or a
@@ -41,6 +43,14 @@ async def render_ci(
     log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
     if ci.sha and head_sha and ci.sha != head_sha:
         return log, "waiting"
+    if ci.mergeable is False and (ci.state == "success" or ci.no_checks):
+        if _retried:
+            log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
+            return log, "conflict"
+        fresh = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        return await render_ci(
+            fresh, forge=forge, repo=repo, branch=branch, head_sha=head_sha, _retried=True
+        )
     if ci.state == "pending":
         if _abandoned(ci.cancelled_at):
             log += (
@@ -50,14 +60,6 @@ async def render_ci(
             )
             return log, "abandoned"
         return log, "waiting"
-    if ci.state == "success" and ci.mergeable is False:
-        if _retried:
-            log += f"merge request is not mergeable: {ci.merge_detail or 'unknown'}\n"
-            return log, "conflict"
-        fresh = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-        return await render_ci(
-            fresh, forge=forge, repo=repo, branch=branch, head_sha=head_sha, _retried=True
-        )
     if ci.state == "success":
         return log, "done"
     if is_infra_red(ci):

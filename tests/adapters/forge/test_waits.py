@@ -137,6 +137,24 @@ async def test_merge_hands_a_pending_pipeline_back_to_the_scheduler(
     ]
 
 
+async def test_merge_waits_when_the_rebased_head_still_reads_conflicting(
+    run_forge, repo, monkeypatch
+):
+    """Kraft-09ze6: just after the rebase's push GitHub can still report the
+    old conflict and no checks. That is a head to wait for, not a stop."""
+
+    async def forced(*_, **__):
+        return "new-head"
+
+    monkeypatch.setattr(forge.run._builtins, "mr_rebase_forced", forced)
+    fake = await _opened(
+        forge.FakeForge(ci_states=["pending"], ci_no_checks=True, mergeable=False), repo
+    )
+
+    assert (await run_forge(fake, "merge", "r1", repo=repo))[0] == "waiting"
+    assert fake.merged == []
+
+
 async def test_merge_waits_for_a_missing_approval_instead_of_failing(run_forge, tmp_path):
     """`missing-external-approval-is-normal-pending-state`, at the merge
     node too: an approval rule the pipeline cannot see is waited out."""

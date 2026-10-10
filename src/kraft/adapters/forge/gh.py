@@ -173,6 +173,7 @@ class GhCli(mr_ops.CliWaits):
                 state="pending",
                 url=str(data.get("url", "")),
                 jobs=("no checks yet",),
+                no_checks=True,
                 mergeable=mergeable,
                 merge_detail=detail,
                 block_reason=block_reason,

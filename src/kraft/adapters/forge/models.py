@@ -173,6 +173,10 @@ class CIStatus:
     #: successor is still registering from one nobody followed up
     #: (Kraft-kbqmk).
     cancelled_at: str = ""
+    #: gh only: the head has no checks registered at all. Pending while they
+    #: are still on their way, but on a pull request that conflicts with its
+    #: base they never come (Kraft-09ze6).
+    no_checks: bool = False
 
 
 class Forge(Protocol):
@@ -262,6 +266,8 @@ class FakeForge:
     ci_pipeline_refs: list[str] = field(default_factory=lambda: [""])
     #: Parallel to `ci_states`: each `ci_status` call's `cancelled_at`.
     ci_cancelled_at: list[str] = field(default_factory=lambda: [""])
+    #: Every `ci_status` call's `no_checks`.
+    ci_no_checks: bool = False
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
@@ -397,6 +403,7 @@ class FakeForge:
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
             cancelled_at=self._next(self.ci_cancelled_at),
+            no_checks=self.ci_no_checks,
         )
 
     async def branch_ci_status(

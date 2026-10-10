@@ -666,6 +666,10 @@ async def _run_one(
                         )
                         log += recheck_log
                         rebased = False
+                        if gate_status == "conflict" and ci_status.no_checks:
+                            # The forge has not recomputed mergeability for
+                            # the head just pushed; its checks are on the way.
+                            gate_status = "waiting"
                 if rebased:
                     # Rebased the conflict away, not merged: this node's
                     # `on_base_changed` restart re-verifies the rebased head

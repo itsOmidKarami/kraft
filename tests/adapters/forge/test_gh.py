@@ -155,6 +155,16 @@ async def test_gh_ci_status_names_the_conflict_detail(cli, tmp_path):
     assert "CONFLICTING" in status.merge_detail
 
 
+async def test_gh_ci_status_flags_a_conflicting_pr_with_no_checks(cli, tmp_path):
+    """Kraft-09ze6: GitHub registers no checks on a pull request that conflicts
+    with its base, and `render_ci` needs both facts to stop waiting for them."""
+    _gh(cli, _rollup().replace('"number":7', '"number":7,"mergeable":"CONFLICTING"'))
+
+    status = await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
+
+    assert (status.state, status.no_checks, status.mergeable) == ("pending", True, False)
+
+
 async def test_gh_ci_status_maps_timed_out_to_the_infra_reason(cli, tmp_path):
     _gh(cli, GH_PR_VIEW_TIMED_OUT)
 
