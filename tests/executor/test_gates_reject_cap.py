@@ -99,3 +99,22 @@ async def test_a_rejection_that_re_runs_nothing_resets_nothing(item_on):
 
     assert it.database.read(lambda c: store.cap_counts(c, it.id))["implementation.fix_loop"] == 2
     assert it.events("cap_counters_reset") == []
+
+
+async def test_a_rejection_an_ended_item_did_not_take_resets_nothing(item_on):
+    """The reset rides the write that records the rejection: an item that has
+    ended records none (`store.write_status`), so nothing of it starts over."""
+    it = await item_on(
+        [{**_exec("implementation"), **_FIX}, {"id": "gate", "kind": "gate"}],
+        repo="/r",
+        status="completed",
+    )
+    await _spend(it, {"implementation.fix_loop": 2})
+
+    await executor.apply_rejection(
+        it.database, _cap(5), work_item_id=it.id, nodes=it.chain.chain.nodes, gate="gate", note="no"
+    )
+
+    assert it.events("gate_rejected") == []
+    assert it.database.read(lambda c: store.cap_counts(c, it.id))["implementation.fix_loop"] == 2
+    assert it.events("cap_counters_reset") == []

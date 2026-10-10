@@ -104,8 +104,9 @@ def reject_gate(
     node: str | None = None,
     by: str = "human",
     verdict: str | None = None,
-) -> None:
-    """Record the rejection. `reopen` flips the item back to active for the
+) -> bool:
+    """Record the rejection, and say whether it was recorded (an item that has
+    ended takes none). `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
     reject loop leaves it needs_human.
 
@@ -132,13 +133,14 @@ def reject_gate(
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return
+        return False
     events.append(
         conn,
         work_item_id,
         GateEvent.REJECTED,
         {"gate": gate, "note": note, "node": node, "by": by, "verdict": verdict},
     )
+    return True
 
 
 #: Events that mean the newest rejection has already been acted on, so its note

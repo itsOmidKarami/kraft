@@ -49,19 +49,22 @@ def number_passes(
     A pass is one time the chain runs a node; a fix loop's rounds are inside
     it. A new one starts at the first session after something sent the node
     back (`_started_by`), so two of those with nothing run between them are
-    one pass, and one before the node ever ran starts nothing. It also starts,
-    with no reason to give, where a measurement's round drops below the one
-    before it: a person's retry of one task clears the loop counter the round
-    is seeded from. That was the only sign read before (Kraft-9d8b2.150), and
-    a re-run that resumed at the round it left off at was read as one more
+    one pass, and one before the node ever ran starts nothing. It also starts
+    where a measurement's round drops below the one before it: a person's
+    retry of one task clears the loop counter the round is seeded from, and
+    the node's rounds start over (a retry, when one came before the drop; else
+    no reason to give). That was the only sign read before (Kraft-9d8b2.150),
+    and a re-run that resumed at the round it left off at was read as one more
     attempt of that round.
 
     The loop's own repair and judge do not count for the drop (a fix cycle
     that was paused and refunded is measured again at a round below the repair
     it follows), nor does a negative round (`walk._REPAIR_ROUND`). An
-    escalation turn belongs to the node, not to a pass of it, and gets no
-    number; nor does a gate's reviewer (`<gate>.auto_review`), whose runs are
-    the attempts of one review.
+    escalation turn (`escalation`, as the UI's `isEscalation` reads it) belongs
+    to the node, not to a pass of it, and gets no number; nor does a gate's
+    reviewer (`<gate>.auto_review`), whose runs are the attempts of one review.
+    A stuck node's own escalation task (`<node>.escalation.<task>`) runs inside
+    a pass like any task of the node, and is numbered.
 
     `sessions` and `boundaries` are in the order they were created; `order` is
     the chain's node ids.
@@ -75,14 +78,15 @@ def number_passes(
         if hook == "escalation" or hook.endswith((".escalation", ".auto_review")):
             continue
         started = nodes.setdefault(node, [{"pass": 1}])
-        why = None
+        why = retried = None
         if node in last:
             for e in boundaries:
                 if last[node] < e["created_at"] <= s["created_at"]:
                     why = _started_by(e, node, order) or why
+                    retried = retried or e["type"] == ChainEvent.RUN_FORKED
         counts = s["round"] >= 0 and not hook.startswith(f"{node}.fix_loop.")
         if why is None and counts and s["round"] < top.get(node, -1):
-            why = {}
+            why = {"reason": "retry"} if retried else {}
         if why is not None:
             started.append({"pass": len(started) + 1, **why})
             top.pop(node, None)

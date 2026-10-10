@@ -221,11 +221,14 @@ describe("the node screen (D)", () => {
     // The newest pass is on its first round: it has no rounds to pick between, and counts none of the pass before.
     expect(screen.queryByRole("group", { name: "Fix loop rounds" })).toBeNull();
     expect(task("lint")).toHaveTextContent("7s");
+    const head = () => document.querySelector(".ph-node-sub")!.textContent;
+    const standing = head();
     await userEvent.click(within(passes).getByRole("button", { name: /pass 1/ }));
     expect(where()).toBe("/work-items/w1/nodes/verification?pass=1");
     expect(within(screen.getByRole("group", { name: "Fix loop rounds" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["round 1 · sent to the fix loop", "round 2 · done"]);
     expect(task("code_review")).toHaveTextContent("19s");
-    // The node's own buttons are the item's as it stands, whichever pass is read.
+    // The node's own state and buttons are the item's as it stands, whichever pass is read.
+    expect(head()).toBe(standing);
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /round 1/ }));
     await userEvent.click(task("code_review"));

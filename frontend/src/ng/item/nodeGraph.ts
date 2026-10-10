@@ -53,12 +53,17 @@ export const passWords = (item: ItemDetail, node: string, picked?: number) => {
 };
 
 /** The item as an earlier pass of `node` left it: the node's later sessions are gone, so that pass is the one the
- *  node is on to every reader of it, and nothing of it is in flight (no stop on it, not the node the run stands on).
- *  The newest pass, or none picked, is the item itself. */
+ *  node is on to every reader of it. The item's own state stays the item's (where the run stands, why it stopped,
+ *  whether it started); `standsOn` and `stopOn` say that nothing of an earlier pass is in flight. The newest pass,
+ *  or none picked, is the item itself. */
 export function asOfPass(item: ItemDetail, node: string, pass?: number): ItemDetail {
   if (!pass || pass >= passesOf(item, node).length) return item;
-  return { ...item, stop: null, current_node_id: null, worker_sessions: item.worker_sessions.filter((s) => s.node_id !== node || (s.pass ?? 1) <= pass) };
+  return { ...item, earlier_pass: { node, pass }, worker_sessions: item.worker_sessions.filter((s) => s.node_id !== node || (s.pass ?? 1) <= pass) };
 }
+/** Whether the run stands on `node`, in the pass of it the item shows: it has left an earlier pass. */
+export const standsOn = (item: ItemDetail, node: string) => item.current_node_id === node && item.earlier_pass?.node !== node;
+/** The item's stop, when it is on `node` in the pass of it the item shows. */
+export const stopOn = (item: ItemDetail, node: string) => (item.stop?.node === node && item.earlier_pass?.node !== node ? item.stop : undefined);
 
 /** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */
 export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {
@@ -155,14 +160,15 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   const esc = escalationsOf(item, node.id);
   const lastEsc = esc.at(-1);
   const side: GraphItem | undefined = lastEsc && { id: ESCALATION, icon: "siren", ...sessionLook(lastEsc, now), meta: `thread ${lastEsc.thread} · turn ${esc.filter((s) => s.thread === lastEsc.thread).length}` };
-  const stopped = item.stop?.node === node.id && (item.stop.kind === "cap" || item.stop.kind === "budget");
+  const stop = stopOn(item, node.id);
+  const stopped = stop?.kind === "cap" || stop?.kind === "budget";
   const own = loopPaths(frozen, node.id);
   const inLoop = passOf(item, node.id).some((s) => s.hook_point.startsWith(`${node.id}.${FIX_LOOP}.`));
   // The arc is drawn once the loop did something: a second round, or a repair or judge that ran.
   // Red while the newest round is shown and the loop stopped; amber while it runs on past its first round.
-  // A pass that resumed at a later round (`first`) has not looped until it goes past that one, or its limit stops it.
-  const looped = !!rounds && (rounds.latest > (rounds.first ?? 1) || stopped);
-  const tone = stopped && shown === rounds?.latest ? "red" : looped && item.current_node_id === node.id ? "active" : "idle";
+  // A pass that resumed at a later round (`first`) has not looped until it goes past that one, or its limit stops it there.
+  const looped = !!rounds && (rounds.latest > (rounds.first ?? 1) || (stopped && rounds.latest > 1));
+  const tone = stopped && shown === rounds?.latest ? "red" : looped && standsOn(item, node.id) ? "active" : "idle";
   const loop = node.fix_loop && rounds && (looped || inLoop) ? loopOf(item, node, own, shown!, rounds, tone, now, events) : undefined;
   const onFailure = node.on_failure?.length ? node.on_failure.map(taskName).join(", ") : undefined;
   return { steps: out, side, loop, onFailure, rounds: rounds && shown ? roundList(item, node, rounds, shown) : undefined };
@@ -219,12 +225,12 @@ export function passList(item: ItemDetail, node: string, picked?: number): Round
  *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (amber)
  *  while the node is the one the run stands on, else done (green). */
 function roundList(item: ItemDetail, node: ApiNode, { first = 1, latest, total }: { first?: number; latest: number; total?: number }, selected: number): Rounds {
-  const halted = item.stop?.node === node.id;
+  const halted = !!stopOn(item, node.id);
   const rows = Array.from({ length: latest - first + 1 }, (_, i): RoundRow => {
     const n = first + i;
     if (n < latest) return { n, tone: "bad", outcome: "sent to the fix loop" };
     if (halted) return { n, tone: "bad", outcome: "stopped · needs you" };
-    if (item.current_node_id === node.id) return { n, tone: "warn", outcome: "running" };
+    if (standsOn(item, node.id)) return { n, tone: "warn", outcome: "running" };
     return { n, tone: "ok", outcome: "done" };
   });
   return { rows, selected, latest, total };

@@ -822,8 +822,9 @@ The work item detail SHALL say which pass of its node each session ran in, and
 for a node that ran more than once what started each pass. A new pass SHALL
 start at the first session after a gate rejection, a retry or a base-change
 restart that re-runs the node, and where a measurement's round drops. A retry
-of one step or task SHALL NOT start a pass of its own node.
-enforced-by: tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[reject-at-the-round-it-left-off], tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[retry-of-one-task-is-another-attempt], tests/store/test_passes.py::test_each_node_counts_its_own_passes, tests/api/test_scope_runs.py::test_detail_keeps_each_pass_of_a_node_under_its_own_number[rejected-back-at-the-round-it-left-off]
+of one step or task SHALL NOT start a pass of its own node unless it started
+the node's rounds over.
+enforced-by: tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[reject-at-the-round-it-left-off], tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[retry-of-one-task-is-another-attempt], tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[a-persons-retry-of-one-task-starts-the-rounds-over], tests/store/test_passes.py::test_each_node_counts_its_own_passes, tests/api/test_scope_runs.py::test_detail_keeps_each_pass_of_a_node_under_its_own_number[rejected-back-at-the-round-it-left-off]
 origin: src/kraft/store/passes.py §number_passes -- Kraft-9d8b2.150: only a drop in the round number was read as a new pass, so a re-run that resumed at the round it left off at was shown as one more attempt of that round, and the passes before the newest were not shown at all.
 
 ## REQ gate-control-does-not-generate-review-work

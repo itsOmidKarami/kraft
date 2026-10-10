@@ -1,7 +1,7 @@
 import { elapsed, elapsedBetween } from "../../format";
 import type { ScopeRun, SessionStatus, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
-import { passNow, passOf } from "./nodeGraph";
+import { passNow, passOf, standsOn } from "./nodeGraph";
 import type { ItemDetail } from "./useItem";
 
 /** The builtin whose task draws as a frame of repositories and scopes once selected. */
@@ -128,7 +128,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   // The round is still going while one of its commands runs, or the node it belongs to is the one running.
   const node = path.split(".")[0];
   const latest = Math.max(0, ...runs.map((r) => r.round + 1));
-  const going = runs.some((r) => r.passed === null) || item.worker_sessions.some((s) => s.hook_point === path && ["running", "pending"].includes(s.status)) || (item.current_node_id === node && item.display_status === "running");
+  const going = runs.some((r) => r.passed === null) || item.worker_sessions.some((s) => s.hook_point === path && ["running", "pending"].includes(s.status)) || (standsOn(item, node) && item.display_status === "running");
   const liveRound = going && round >= latest;
   const rows: RepoRow[] = [];
   let failedBefore: string | null = null;

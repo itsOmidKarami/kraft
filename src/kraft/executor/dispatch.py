@@ -801,6 +801,8 @@ def scope_runs(
     # What each round of a pass picked in a repository, from its latest dispatch.
     picked: dict[tuple[int, str | None, int], tuple[int, list[str]]] = {}
     for seq, p in selections:
+        # shortcut: picks carry no pass, so ones that started nothing before the node was sent
+        # back are read as the next pass's; stamp the pass on the event if that ever shows.
         n = next((ran_in(r) for r in rows if r["seq"] > seq), newest_pass)
         picked[(n, p.get("repository"), p["round"])] = (seq, p["commands"])
     rows = [

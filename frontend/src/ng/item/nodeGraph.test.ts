@@ -3,6 +3,7 @@ import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
 import { asOfPass, footerState, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
+import { notStarted } from "./chainValues";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -45,6 +46,11 @@ describe("nodeGraph", () => {
     expect(g.side).toMatchObject({ id: "escalation", meta: "thread 1 · turn 2", state: "current" });
     expect(g.loop?.tone).toBe("red");
     expect(g.steps[0].tasks[0]).toMatchObject({ state: "failed", attemptStopped: true });
+  });
+
+  it("draws no loop for a node a budget stopped in its first round: nothing has looped", () => {
+    const item = detail({ display_status: "needs_you", stop: { kind: "budget", node: "verification", resume_at: null, reason: null }, worker_sessions: [s("verification.checks.lint", { status: "failed" })] });
+    expect(nodeGraph(item, node, NOW).loop).toBeUndefined();
   });
 
   it("has no loop before a round ran, and no side branch without an escalation", () => {
@@ -199,6 +205,9 @@ describe("a node the chain ran again", () => {
     // The stop and the running node are the newest pass's: this one's last round is not red, nor amber.
     expect(g.loop!.tone).toBe("idle");
     expect(g.rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "ok" });
+    expect(nodeGraph(asOfPass(again(0), "verification", 1), node, NOW, []).rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "ok", outcome: "done" });
+    // The item's own state is untouched: it has started, it stands where it stands, and it stopped for what it stopped for.
+    expect([first.current_node_id, first.stop, notStarted(first)]).toEqual(["verification", stopped.stop, false]);
     // Its escalation turns stay: they are the node's, in no pass.
     expect(g.side).toBeDefined();
     // The newest pass, a pass the node never had, and no pick are the item itself.

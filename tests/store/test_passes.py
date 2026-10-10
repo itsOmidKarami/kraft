@@ -12,6 +12,7 @@ def _s(at, node="verify", round=0, task="main.test"):
     return {
         "id": f"s{at}",
         "node_id": node,
+        # An escalation turn's hook is the bare word; every other session's starts with its node.
         "hook_point": task if task == "escalation" else f"{node}.{task}",
         "round": round,
         "created_at": f"t{at:02}",
@@ -95,6 +96,13 @@ CASES = [
         id="retry-of-one-task-is-another-attempt",
     ),
     pytest.param(
+        [_s(1, round=2), _s(6)],
+        [_e(5, "run_forked", scope="task", path="verify.main.test")],
+        [1, 2],
+        [{"pass": 1}, {"pass": 2, "reason": "retry"}],
+        id="a-persons-retry-of-one-task-starts-the-rounds-over",
+    ),
+    pytest.param(
         [_s(1), _s(6)],
         [_e(5, "run_forked", scope="node", path="ship")],
         [1, 1],
@@ -174,6 +182,13 @@ CASES = [
         [None, None],
         None,
         id="an-escalation-turn-is-in-no-pass",
+    ),
+    pytest.param(
+        [_s(1), _s(6), _s(7, round=-2, task="escalation.unstick")],
+        [REJECT],
+        [1, 2, 2],
+        [{"pass": 1}, {"pass": 2, "reason": "reject", "gate": "gate"}],
+        id="a-stuck-nodes-escalation-task-runs-inside-its-pass",
     ),
     pytest.param(
         [_s(1, "gone"), _s(6, "gone")],

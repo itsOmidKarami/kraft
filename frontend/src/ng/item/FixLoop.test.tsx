@@ -177,4 +177,16 @@ describe("a node the chain ran again", () => {
     await pickPass(1);
     expect(screen.getByRole("button", { name: "round 2 of 3 · latest" })).toBeInTheDocument();
   });
+
+  it("names the pass in the node's own pane, and offers no setting of a node that has run", async () => {
+    mount("/work-items/w1/nodes/verification?tab=config", twice());
+    expect(sub("verification")).toMatch(/^exec node · running/);
+    await pickPass(1);
+    // The node's state now is its newest pass's: an earlier pass says which it is.
+    expect(sub("verification")).toBe("exec node · pass 1 of 2");
+    // Overrides are set before an item starts. Reading an earlier pass does not make it one that has not.
+    expect(within(pane("verification")).queryByRole("button", { name: /override|Reset/i })).toBeNull();
+    expect(within(pane("verification")).queryByRole("combobox")).toBeNull();
+    expect(within(pane("verification")).queryByRole("spinbutton")).toBeNull();
+  });
 });

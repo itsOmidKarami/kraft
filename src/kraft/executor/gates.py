@@ -178,19 +178,21 @@ async def apply_rejection(
     )
     replan = _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "ok"
     target_id = nodes[target].id
-    await db.write(
-        lambda c: store.reject_gate(
+    # The fix loops the re-run measures again start over, in the write that
+    # records the rejection: one that was not recorded re-runs nothing.
+    span = [
+        n.id for n in nodes[target:gate_index] if isinstance(n.node, ExecNode) and n.node.fix_loop
+    ]
+
+    def _reject(c) -> None:
+        recorded = store.reject_gate(
             c, work_item_id, gate, note, reopen=replan, node=target_id, by=by, verdict=verdict
         )
-    )
+        if recorded and replan:
+            store.reset_fix_loops(c, work_item_id, span, by)
+
+    await db.write(_reject)
     if replan:
-        # The fix loops the re-run measures again start over.
-        span = [
-            n.id
-            for n in nodes[target:gate_index]
-            if isinstance(n.node, ExecNode) and n.node.fix_loop
-        ]
-        await db.write(lambda c: store.reset_fix_loops(c, work_item_id, span, by))
         return target
     await db.write(
         lambda c: store.mark_needs_human(

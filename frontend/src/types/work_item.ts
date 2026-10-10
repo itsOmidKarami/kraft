@@ -392,9 +392,6 @@ export interface Finding {
 
 export type { SessionStatus };
 
-/** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
- *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup
- *  half a place before its first scope), absent for a command the table no longer declares. */
 /** What started a pass of a node after its first: nothing named when its rounds simply started over. */
 export interface NodePass {
   pass: number;
@@ -403,6 +400,9 @@ export interface NodePass {
   gate?: string;
 }
 
+/** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
+ *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup
+ *  half a place before its first scope), absent for a command the table no longer declares. */
 export interface ScopeRun {
   /** Null for a command its round picked and has not started (`pending`). */
   session_id: string | null;
