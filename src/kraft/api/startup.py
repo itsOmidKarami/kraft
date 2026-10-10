@@ -18,6 +18,7 @@ from kraft import (
     mr_poller,
     rate_limit_retry,
     start_queue,
+    storage,
     waits,
 )
 from kraft import auth as auth_mod
@@ -127,6 +128,9 @@ async def lifespan(app: FastAPI):
     # so Settings → Auto-intake comes up and can be used to fix the file.
     # `/health` and doctor name it (`invalid_intake`), as they name a bad policy.
     app.state.invalid_intake = None
+    # The app object outlives a lifespan in tests: a measurement from one
+    # start must not be read by the next.
+    app.state.storage_usage = None
     #: Whether auto-intake and intake.yaml's schedules are off for it: only a
     #: start on a bad file. A reload that refuses one keeps what was running.
     #: A trigger left in policy.yaml fires either way (`triggers.schedules`).
@@ -307,6 +311,10 @@ async def lifespan(app: FastAPI):
     # something, and an operator who forgets to check the board is exactly
     # who auto-archive exists for (UI v2 · 03).
     app.state.archive_task = asyncio.ensure_future(archive.poller(app))
+    # Always on, like the archive poller: with `storage.worktrees.limit` set,
+    # something has to notice the disk filling while nobody watches. Without
+    # the key a tick returns before it measures.
+    app.state.storage_task = asyncio.ensure_future(storage.poller(app))
     # Always on, like the pollers above: nothing else watches for a merge
     # request closed on the forge outside Kraft, so an item parked at an MR
     # node has to be re-checked by something. Its own `forge_poll_s` cadence,
@@ -361,6 +369,9 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()
         await asyncio.gather(app.state.archive_task, return_exceptions=True)
+        storage.stop(app.state)
+        app.state.storage_task.cancel()
+        await asyncio.gather(app.state.storage_task, return_exceptions=True)
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()

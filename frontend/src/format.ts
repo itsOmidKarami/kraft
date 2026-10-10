@@ -226,11 +226,56 @@ export function clock(iso: string): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** A session's or a rollup's token columns, as the API sends them. */
+export interface TokenUse {
+  tokens_in?: number | null;
+  /** null while a session is live: only its exit reports output. */
+  tokens_out?: number | null;
+  tokens_cache_write?: number | null;
+  tokens_cache_read?: number | null;
+  /** False on a rollup holding a session from before cache was counted apart. */
+  split_complete?: boolean;
+  /** False on a rollup missing a session's output count: tokens_out is a floor. */
+  out_complete?: boolean;
+}
+
+/** Every token a run was billed for: cache reads and writes are input too, and
+ *  are most of a long agent run (`Usage.total` in usage.py). */
+export function tokenTotal(u: TokenUse): number {
+  return (u.tokens_in ?? 0) + (u.tokens_out ?? 0) + (u.tokens_cache_write ?? 0) + (u.tokens_cache_read ?? 0);
+}
+
+const unsplit = (u: TokenUse) => u.split_complete === false || u.tokens_cache_read == null;
+
 /** Token counts, the way the design writes them: 980, 41.2k, 1.4M. */
 export function tokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
+/** A run's tokens by what they cost: "40k new + 900k cached". Cache reads are
+ *  billed at a fraction of fresh input, so the total alone overstates a run and
+ *  the uncached count alone hides most of it. One number when there is nothing
+ *  cached, or when cache was not counted apart. */
+export function tokenText(u: TokenUse): string {
+  const cached = u.tokens_cache_read ?? 0;
+  if (!cached || unsplit(u)) return tokens(tokenTotal(u));
+  return `${tokens(tokenTotal(u) - cached)} new + ${tokens(cached)} cached`;
+}
+
+/** Every kind apart, as `kraft view show` words it: what the figure's tooltip reads.
+ *  An output count a session has not reported (null on its own row,
+ *  `out_complete: false` on a sum) reads as a floor or as not known, never as
+ *  a number it is not. */
+export function tokenTip(u: TokenUse): string {
+  const told = u.tokens_out ?? 0;
+  const whole = u.tokens_out != null && u.out_complete !== false;
+  const out = whole ? `${tokens(told)} out` : told ? `at least ${tokens(told)} out` : "out not known";
+  const old = "cache not split on older sessions";
+  if (u.tokens_cache_read == null) return `${tokens(u.tokens_in ?? 0)} in (${old}) · ${out}`;
+  const all = `${tokens(u.tokens_in ?? 0)} in · ${tokens(u.tokens_cache_write ?? 0)} cache write · ${tokens(u.tokens_cache_read)} cache read · ${out}`;
+  return u.split_complete === false ? `${all} (${old})` : all;
 }
 
 /** USD, with enough places to be useful at agent-run scale.

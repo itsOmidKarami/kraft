@@ -216,6 +216,15 @@ describe("Policy page: Housekeeping", () => {
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "retries", key: "forge_cli_timeout_s", value: 60 }));
   });
 
+  it("sends the storage limit and quota as sizes, and refuses a bare number", async () => {
+    mount("/settings/policy/housekeeping");
+    await screen.findByRole("region", { name: "Storage" });
+    await edit(/^limit, no limit/, "10g");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "housekeeping", key: "storage.worktrees.limit", value: "10G" }));
+    await edit(/^quota, not set/, "5G");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "housekeeping", key: "storage.worktrees.quota", value: "5G" }));
+  });
+
   it("says how many slots are in use, from the count the server gives", async () => {
     mount("/settings/policy/housekeeping");
     expect(await screen.findByText(/3 of 5 slots in use now/)).toBeInTheDocument();

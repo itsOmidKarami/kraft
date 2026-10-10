@@ -36,6 +36,10 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     when some session spent tokens but predates the split -- its cache kinds
     are NULL and its `tokens_in` is its whole input -- so `tokens_in` is then
     uncached input plus that older unsplit input, and says so.
+
+    `out_complete` is false when some session spent tokens but has no output
+    count -- a claude session reports it only at exit, and a paused or killed
+    one never does -- so `tokens_out` is then a floor, not a total.
     """
     rows = conn.execute(
         f"SELECT id, node_id, round, {', '.join(KINDS)}, cost_usd, cost_estimated, wall_ms, "
@@ -64,6 +68,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "cost_complete": True,
                 "cost_estimated": False,
                 "split_complete": True,
+                "out_complete": True,
             },
         )
         for k in KINDS:
@@ -76,6 +81,8 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
             node["cost_estimated"] = True
         if r["tokens_cache_read"] is None and spent(r):
             node["split_complete"] = False
+        if r["tokens_out"] is None and spent(r):
+            node["out_complete"] = False
         # Not `r["wall_ms"] or 0`: only `session_exited` writes that column, so
         # a paused, skipped, capped or still-running session contributed
         # nothing and a node that had been running 75 minutes summed to 0
@@ -111,6 +118,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     total["cost_complete"] = all(n["cost_complete"] for n in nodes)
     total["cost_estimated"] = any(n["cost_estimated"] for n in nodes)
     total["split_complete"] = all(n["split_complete"] for n in nodes)
+    total["out_complete"] = all(n["out_complete"] for n in nodes)
     return {"total": total, "by_node": sorted(nodes, key=lambda n: n["node"])}
 
 

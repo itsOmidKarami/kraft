@@ -1,9 +1,9 @@
-import { elapsed, tokens, usd } from "../../../format";
+import { elapsed, tokenText, tokenTip, usd } from "../../../format";
 import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { lookWord, sessionLook } from "../nodeGraph";
+import { lookWord, sessionLook, statusWords } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
@@ -86,7 +86,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
   return (
     <>
       <dl className="item-facts ip-facts">
-        {fact("status", s.status.replaceAll("_", " "))}
+        {fact("status", statusWords(s))}
         {fact("progress", progress ? progressWords(progress, !!running) : null)}
         {fact("kind", s.model ? "agent" : null)}
         {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
@@ -97,7 +97,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
       {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} /> : null}
       <h3 className="ip-h">Result</h3>
       <dl className="item-facts ip-facts">
-        {fact("tokens", s.tokens_in != null ? tokens((s.tokens_in ?? 0) + (s.tokens_out ?? 0)) : null)}
+        {fact("tokens", s.tokens_in != null ? <span data-tip={tokenTip(s)}>{tokenText(s)}</span> : null)}
         {fact("cost", s.cost_usd != null ? usd(s.cost_usd, true, s.cost_estimated) : null)}
       </dl>
       <h3 className="ip-h">Documents</h3>
@@ -133,7 +133,7 @@ export function TaskOutput({ item, s, docs, onDoc, produces, onProduced }: { ite
   return (
     <>
       <dl className="item-facts ip-facts">
-        {fact("result", s.status.replaceAll("_", " "))}
+        {fact("result", statusWords(s))}
         {fact("wrote", produces && <button type="button" className="item-link is-strong" onClick={onProduced}>{produces.replaceAll("_", " ")}</button>)}
         {fact("summary", summary ? <button type="button" className={`item-link${produces ? "" : " is-strong"}`} onClick={() => onDoc(summary)}>{summary.title}</button> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
       </dl>

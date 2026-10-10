@@ -13,6 +13,7 @@ import pytest
 from support.api import (
     _blocked_after,
     _force_node,
+    _hold_storage,
     _paused,
     _poll_events,
     _post_default,
@@ -280,3 +281,30 @@ def test_a_blocked_item_is_put_back_when_what_it_comes_after_is_abandoned(client
     assert _status_of(client, wid) == "paused"
     last = client.get(f"/api/work-items/{wid}/events").json()[-1]
     assert (last["type"], last["payload"]["why"]) == ("work_item_dequeued", "dependency_abandoned")
+
+
+def test_a_start_held_for_storage_keeps_its_place_and_lets_a_worktree_holder_past(
+    client, repo, stopped, board
+):
+    new = _paused(client, repo, chain_template="default")
+    for wid, verb in ((new, "resume"), (stopped, "retry")):
+        assert client.post(f"/api/work-items/{wid}/{verb}", json={}).json()["status"] == "queued"
+    _hold_storage(client)
+    _set_status(board, "paused")
+
+    assert _tick(client) == [stopped]
+    assert _status_of(client, new) == "queued"
+
+
+def test_removing_the_limit_releases_a_held_start(client, repo, board):
+    new = _paused(client, repo, chain_template="default")
+    _hold_storage(client)
+    _set_status(board, "paused")
+    assert client.post(f"/api/work-items/{new}/resume", json={}).json()["status"] == "queued"
+    assert _tick(client) == []
+
+    client.app.state.policy = dataclasses.replace(
+        client.app.state.policy, storage_limit_bytes=None, storage_quota_bytes=None
+    )
+
+    assert _tick(client) == [new]

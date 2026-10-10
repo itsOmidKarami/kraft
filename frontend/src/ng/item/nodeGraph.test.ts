@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { footerState, loopRounds, nodeGraph, passOf, sessionLook } from "./nodeGraph";
+import { asOfPass, footerState, lookWord, loopIdle, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
+import { notStarted } from "./chainValues";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -31,6 +32,13 @@ describe("nodeGraph", () => {
     expect(g.onFailure).toBe("repair_pass");
   });
 
+  it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {
+    const item = detail({ skipped_paths: ["verification.checks"], worker_sessions: [s("verification.checks.lint", { status: "paused", skipped: true })] });
+    const g = nodeGraph(item, node, NOW);
+    expect(g.steps[0].tasks.map((t) => [t.id, t.state, t.meta, lookWord(t)])).toEqual([["lint", "done", "skipped", "skipped"], ["typecheck", "done", "skipped", "skipped"]]);
+    expect(g.steps[1].tasks[0].state).toBe("todo");
+  });
+
   it("draws a task by its kind in the frozen chain, before it has run (WI-3)", () => {
     const g = nodeGraph(detail({ materialized_chain: FROZEN }), node, NOW);
     expect(g.steps.map((st) => st.tasks.map((t) => [t.id, t.taskKind]))).toEqual([[["lint", "subprocess"], ["typecheck", undefined]], [["code_review", "agent"]]]);
@@ -45,6 +53,11 @@ describe("nodeGraph", () => {
     expect(g.side).toMatchObject({ id: "escalation", meta: "thread 1 · turn 2", state: "current" });
     expect(g.loop?.tone).toBe("red");
     expect(g.steps[0].tasks[0]).toMatchObject({ state: "failed", attemptStopped: true });
+  });
+
+  it("draws no loop for a node a budget stopped in its first round: nothing has looped", () => {
+    const item = detail({ display_status: "needs_you", stop: { kind: "budget", node: "verification", resume_at: null, reason: null }, worker_sessions: [s("verification.checks.lint", { status: "failed" })] });
+    expect(nodeGraph(item, node, NOW).loop).toBeUndefined();
   });
 
   it("has no loop before a round ran, and no side branch without an escalation", () => {
@@ -145,6 +158,36 @@ describe("nodeGraph scope task", () => {
   });
 });
 
+describe("nodeGraph scope task state", () => {
+  const solo: ChainNode = { id: "verification", kind: "exec", gate_after: null, tasks: [SCOPE_PATH], steps: [[SCOPE_PATH]] };
+  it.each([
+    ["failed when a scope failed, though a later one passed", ["failed", "done"], "failed"],
+    ["running while a scope still runs, though a later one passed", ["running", "done"], "current"],
+    ["done when every scope passed", ["done", "done"], "done"],
+  ])("draws its box %s", (_n, [a, b], want) => {
+    const item = scoped([scopeRun(null, "just test-a", 0, a), scopeRun(null, "just test-b", 0, b)]);
+    expect(nodeGraph(item, solo, NOW).steps[0].tasks[0].state).toBe(want);
+  });
+});
+
+describe("loopIdle", () => {
+  const stop = (cycle: number): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", payload: { node_id: "verification", cycle, verdict: "stop_needs_human" }, created_at: "2026-09-13T09:30:00Z" }) as KraftEvent;
+  it.each([
+    // The node's own row for the newest round, and that a round which is over did not run it.
+    ["repair", 2, { latest: 2, total: 3 }, [], "not yet"],
+    ["repair", 3, { latest: 3, total: 3 }, [], "last round"],
+    ["repair", 2, { latest: 2, total: 3 }, [stop(1)], "stopped by judge"],
+    ["repair", 1, { latest: 2, total: 3 }, [], "not run in this round"],
+    ["judge", 2, { latest: 2, total: 3 }, [], "not yet"],
+    // The judge after the last round has no repair to rule on, and its row still says "not yet".
+    ["judge", 3, { latest: 3, total: 3 }, [], "not yet"],
+    ["judge", 2, { latest: 3, total: 3 }, [], "not run in this round"],
+    ["judge", 1, { latest: 1, total: 3 }, [], "skipped · the first repair runs without the judge"],
+  ] as const)("%s of round %s in %j: %s", (loop, round, rounds, events, want) => {
+    expect(loopIdle(node, loop, round, rounds, [...events])).toBe(want);
+  });
+});
+
 describe("footerState", () => {
   it.each([
     ["running", [{ status: "running" }], "running"],
@@ -159,19 +202,79 @@ describe("footerState", () => {
   });
 });
 
-describe("a fix loop that started over", () => {
-  // A retry (or a base change) restarts the loop at round 0: the node's earlier pass is history.
-  const retried = () => looped({ worker_sessions: [...LOOP_RUN, s("verification.checks.lint", { round: 0, status: "running", wall_ms: null }), s("verification.escalation", { round: 0 })] });
+describe("a node the chain ran again", () => {
+  // The server numbers the passes: a reject, a retry or a base change sent the chain back to the node.
+  const FIRST = LOOP_RUN.slice(0, 6).map((x) => ({ ...x, pass: 1 }));
+  const PASSES = { verification: [{ pass: 1 }, { pass: 2, reason: "reject" as const, gate: "local_review" }] };
+  const again = (round: number) => looped({ node_passes: PASSES, worker_sessions: [...FIRST, s("verification.checks.lint", { round, pass: 2, status: "running", wall_ms: null }), s("verification.escalation", { round: 0 })] });
 
   it("counts rounds from the pass the node is on, and draws that pass alone", () => {
-    expect(loopRounds(retried(), node)).toEqual({ latest: 1, total: 3 });
-    expect(passOf(retried(), "verification")).toHaveLength(1);
-    const g = nodeGraph(retried(), node, NOW);
+    const retried = again(0);
+    expect(loopRounds(retried, node)).toEqual({ latest: 1, total: 3 });
+    expect(passOf(retried, "verification")).toHaveLength(1);
+    const g = nodeGraph(retried, node, NOW);
     expect(states(g)).toEqual(["lint:current", "typecheck:todo", "code_review:todo"]);
     // One round and nothing run of the loop: no arc yet.
     expect(g.loop).toBeUndefined();
     expect(g.rounds).toMatchObject({ latest: 1, rows: [{ n: 1, tone: "warn" }] });
   });
+
+  it("reads a pass that resumed at the round the one before left off at as its own, starting at that round", () => {
+    // What a reject left before it gave the rounds back, and what an agent's retry still leaves: round 2 again.
+    const resumed = again(1);
+    expect(passOf(resumed, "verification").map((x) => x.pass)).toEqual([2]);
+    expect(loopRounds(resumed, node)).toEqual({ first: 2, latest: 2, total: 3 });
+    // Round 1 is no round of this pass: it is not listed, and picking it shows the newest.
+    expect(nodeGraph(resumed, node, NOW, [], 1).rounds).toMatchObject({ selected: 2, rows: [{ n: 2 }] });
+    expect(roundShown(resumed, node, 1)).toBe(2);
+    // It has measured once and repaired nothing: no loop to draw yet, whatever its round is called.
+    expect(nodeGraph(resumed, node, NOW, []).loop).toBeUndefined();
+  });
+
+  it("shows an earlier pass whole, with nothing of it in flight", () => {
+    const item = again(0);
+    const stopped = { ...item, display_status: "needs_you", stop: { kind: "cap" as const, node: "verification", resume_at: null, reason: null } } as typeof item;
+    const first = asOfPass(stopped, "verification", 1);
+    expect(passOf(first, "verification").map((x) => x.id)).toEqual(FIRST.map((x) => x.id));
+    expect(loopRounds(first, node)).toEqual({ latest: 2, total: 3 });
+    const g = nodeGraph(first, node, NOW, []);
+    expect(states(g)).toEqual(["lint:failed", "typecheck:todo", "code_review:done"]);
+    // The stop and the running node are the newest pass's: this one's last round is not red, nor amber.
+    expect(g.loop!.tone).toBe("idle");
+    expect(g.rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "ok" });
+    expect(nodeGraph(asOfPass(again(0), "verification", 1), node, NOW, []).rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "ok", outcome: "done" });
+    // The item's own state is untouched: it has started, it stands where it stands, and it stopped for what it stopped for.
+    expect([first.current_node_id, first.stop, notStarted(first)]).toEqual(["verification", stopped.stop, false]);
+    // Its escalation turns stay: they are the node's, in no pass.
+    expect(g.side).toBeDefined();
+    // The newest pass, a pass the node never had, and no pick are the item itself.
+    for (const n of [2, 9, undefined]) expect(asOfPass(stopped, "verification", n)).toBe(stopped);
+  });
+
+  it.each([
+    [undefined, 2], [1, 1], [2, 2], [3, 2],
+  ])("shows the pass picked when the node has it, else the newest: %s → %s", (picked, want) => {
+    expect(passShown(again(0), "verification", picked)).toBe(want);
+  });
+
+  it("names no pass for a node the chain ran once: nothing to tell apart", () => {
+    expect(passesOf(looped(), "verification")).toEqual([]);
+    expect(passShown(looped(), "verification", 1)).toBeUndefined();
+  });
+
+  it.each([
+    [{ pass: 1 }, ""],
+    [{ pass: 2, reason: "reject", gate: "local_review" }, "after a reject at local_review"],
+    [{ pass: 2, reason: "fixed", gate: "local_review" }, "after a fix at local_review"],
+    [{ pass: 2, reason: "retry" }, "after a retry"],
+    [{ pass: 3, reason: "base_change" }, "after a base change"],
+    [{ pass: 2 }, "started over"],
+  ] as const)("says what started a pass: %j → %s", (p, want) => {
+    expect(passWhy(p)).toBe(want);
+  });
+});
+
+describe("a fix loop inside one pass", () => {
 
   it("is not told apart by an escalation turn, which carries round 0 whenever it comes", () => {
     const escalated = looped({ worker_sessions: [...LOOP_RUN, s("verification.escalation", { round: 0 })] });

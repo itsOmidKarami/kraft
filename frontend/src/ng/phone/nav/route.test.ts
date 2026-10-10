@@ -8,6 +8,9 @@ describe("parentOf", () => {
 
   it("walks the work item's stack: task, node, item, board", () => {
     expect(parentOf("/work-items/a/nodes/verification?sel=verification.review.code_review&tab=log&attempt=2")).toBe("/work-items/a/nodes/verification");
+    // A scope is a screen over its task, and the pass of the node and its fix-loop round are every one of theirs.
+    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1&scope=%3Ajust+test&tab=log")).toBe("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1");
+    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1")).toBe("/work-items/a/nodes/verification?round=1&pass=1");
     expect(parentOf("/work-items/a/nodes/verification?tab=log")).toBe("/work-items/a");
     expect(parentOf("/work-items/a")).toBe("/");
     expect(parentOf("/work-items/a/review?gate=final_review")).toBe("/work-items/a");
@@ -45,6 +48,10 @@ describe("backLabel", () => {
     expect(backLabel("/work-items/a")).toBe("Board");
     expect(backLabel("/work-items/a/nodes/n")).toBe("Chain");
     expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("Node");
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).toBe("Task");
+    // An empty `scope` names nothing: the screen is the task.
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("Node");
+    expect(parentOf("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("/work-items/a/nodes/n");
     expect(backLabel("/work-items/a/review")).toBe("Back");
     expect(backLabel("/work-items/a?doc=x")).toBe("Back");
     expect(backLabel("/work-items/a?attached=spec")).toBe("Back");
@@ -68,5 +75,7 @@ describe("screenKey", () => {
   it("tells a task from its node by sel, and ignores the rest of the query", () => {
     expect(screenKey("/work-items/a/nodes/n?tab=log")).toBe(screenKey("/work-items/a/nodes/n"));
     expect(screenKey("/work-items/a/nodes/n?sel=n.s.t")).not.toBe(screenKey("/work-items/a/nodes/n"));
+    expect(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).not.toBe(screenKey("/work-items/a/nodes/n?sel=n.s.t"));
+    expect(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).not.toBe(screenKey("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+lint"));
   });
 });

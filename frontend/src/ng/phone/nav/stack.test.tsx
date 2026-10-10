@@ -19,6 +19,7 @@ function Screen({ name }: { name: string }) {
       <button type="button" onClick={() => go("/work-items/a")}>open item</button>
       <button type="button" onClick={() => go("/work-items/a/nodes/n")}>open node</button>
       <button type="button" onClick={() => go("/work-items/a/nodes/n?sel=n.s.t")}>open task</button>
+      <button type="button" onClick={() => go("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")}>open scope</button>
     </>
   );
 }
@@ -50,6 +51,17 @@ describe("Back (A.3)", () => {
     await userEvent.click(screen.getByRole("button", { name: /Board/ }));
     await waitFor(() => expect(where()).toBe("/"));
     expect(idx()).toBe(0);
+  });
+
+  it("pops a scope back to the task it was opened from", async () => {
+    window.history.replaceState(null, "", "/");
+    render(<BrowserRouter><Harness /></BrowserRouter>);
+    await userEvent.click(screen.getByRole("button", { name: "open task" }));
+    await userEvent.click(screen.getByRole("button", { name: "open scope" }));
+    expect(idx()).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "Task" }));
+    await waitFor(() => expect(where()).toBe("/work-items/a/nodes/n?sel=n.s.t"));
+    expect(idx()).toBe(1);
   });
 
   it("replaces with the parent on a deep link, so Back never loops or leaves the app", async () => {

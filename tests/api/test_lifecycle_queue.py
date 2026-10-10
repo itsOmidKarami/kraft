@@ -7,7 +7,14 @@ import json
 from pathlib import Path
 
 import pytest
-from support.api import _in_state
+from support.api import (
+    _force_node,
+    _hold_storage,
+    _in_state,
+    _paused,
+    _poll_events,
+    _post_default,
+)
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 
@@ -124,3 +131,34 @@ def test_pausing_an_item_while_the_queue_starts_it_says_so(client, repo, monkeyp
     assert r.status_code == 409, r.text
     assert "being started from the queue" in r.json()["detail"]
     assert wid not in start_queue.starting(client.app)
+
+
+def test_a_new_start_over_the_storage_limit_is_queued_and_says_why(client, repo):
+    wid = _paused(client, repo, chain_template="default")
+    _hold_storage(client, used=2, limit=1)
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "queued"
+    assert r.json()["slots"]["storage"] == {"used_bytes": 2, "limit_bytes": 1}
+    assert client.get(f"/api/work-items/{wid}").json()["queued"]["storage"] == {
+        "used_bytes": 2,
+        "limit_bytes": 1,
+    }
+    _poll_events(client, wid, "work_item_storage_held")
+
+
+def test_an_item_with_a_worktree_is_not_held_by_the_storage_limit(client, repo):
+    """Retrying it adds little, and finishing it is what frees the space."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "implementation", "needs_human")
+    assert (client.app.state.run_dirs.worktrees / wid).is_dir()
+    _hold_storage(client)
+
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") != "queued"
+    assert client.get(f"/api/work-items/{wid}").json()["queued"] is None

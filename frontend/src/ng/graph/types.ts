@@ -36,7 +36,7 @@ const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", curren
  *  `wait` and `sub` are a chain node's (`layout.ChainNode`). */
 export function accessibleName(item: GraphItem & { wait?: string; sub?: string }, kind: string): string {
   const idle = item.state === "current" && !item.running;
-  const word = (idle && (item.wait ?? item.sub ?? item.meta)) || STATE_WORD[item.state ?? "plain"];
+  const word = (idle && (item.wait ?? item.sub ?? item.meta)) || (item.meta === "skipped" && "skipped") || STATE_WORD[item.state ?? "plain"];
   return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : ""].filter(Boolean).join(", ");
 }
 

@@ -3,7 +3,7 @@ import type { Change, Problem } from "../../templates/draft/types";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { ValueCell } from "../../templates/draft/ValueCell";
 import type { KeySpec } from "./keys";
-import { parse, raw, show } from "./units";
+import { parse, parseSize, raw, show } from "./units";
 
 /** `set_value` for one key; null on success, the server's refusal's message otherwise.
  *  A problem the value creates is not a refusal: the draft holds it, the page shows it
@@ -19,25 +19,31 @@ export const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] :
 /** One editable policy value: its number as the page writes it, the published value
  *  struck through beside a changed one, a problem on it in red. `inherited` names the
  *  level a maximum comes from when this level sets none. */
-export function PolicyCell({ draft, k, label, value, bound, change, problem, inherited }: {
+export function PolicyCell({ draft, k, label, value, bound, placeholder, change, problem, inherited }: {
   draft: ConfigDraft;
   k: KeySpec;
   label: string;
-  value: number | null;
+  /** A size (`10G`) is text; every other unit is a number. */
+  value: number | string | null;
   /** An unset value reads "no bound", not "not set". */
   bound?: boolean;
+  /** What an unset size reads as. */
+  placeholder?: string;
   change?: Change;
   problem?: Problem;
   inherited?: string | null;
 }) {
+  const size = k.unit === "size";
   const commit = (text: string) => {
-    const p = parse(k.unit, text, k.zero);
+    const p = size ? parseSize(text) : parse(k.unit, text, k.zero);
     return "error" in p ? p.error : setValue(draft, k, p.value);
   };
-  const text = show(k.unit, value, bound);
+  const num = typeof value === "number" ? value : null;
+  const text = size ? (value ?? placeholder ?? "not set") : show(k.unit, num, bound);
+  const start = size ? String(value ?? "") : raw(k.unit, num);
   return (
     <span className="pol-cell">
-      <ValueCell label={label} value={raw(k.unit, value)} display={text} muted={value == null} changed={!!change} bad={!!problem} onCommit={commit} />
+      <ValueCell label={label} value={start} display={String(text)} muted={value == null} changed={!!change} bad={!!problem} onCommit={commit} />
       {change && <s className="pol-was" aria-label={`was ${was(change)}`}>{was(change)}</s>}
       {inherited && value != null && <span className="pol-from">from {inherited.replace("_", " ")}</span>}
     </span>

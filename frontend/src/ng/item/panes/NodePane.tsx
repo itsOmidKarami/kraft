@@ -1,7 +1,7 @@
-import { tokens, usd } from "../../../format";
+import { tokenText, tokenTip, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
 import { stepsOf, taskName } from "../paths";
-import { loopRounds, sessionsOf } from "../nodeGraph";
+import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The node pane's Overview (Decisions §5): progress, fix loop, on failure,
@@ -9,7 +9,7 @@ import type { ItemDetail } from "../useItem";
 export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail; node: ChainNode; onStep: (step: string) => void; onNode: (node: string) => void }) {
   const { steps } = stepsOf(node);
   const paths = steps.flatMap((s) => s.tasks);
-  const done = paths.filter((p) => sessionsOf(item, p).at(-1)?.status.startsWith("done")).length;
+  const done = paths.filter((p) => settled(item, p)).length;
   const nodes = item.chain_definition.nodes;
   const next = nodes[nodes.findIndex((n) => n.id === node.id) + 1];
   const rounds = loopRounds(item, node);
@@ -21,7 +21,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
         {node.fix_loop && <div><dt>fix loop</dt><dd>{rounds ? `round ${rounds.latest}${rounds.total ? ` of ${rounds.total}` : ""}` : "not looped"}</dd></div>}
         {node.on_failure?.length ? <div><dt>on failure</dt><dd>{node.on_failure.map(taskName).join(", ")}</dd></div> : null}
         {next && <div><dt>then</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onNode(next.id)}>{next.id}</button></dd></div>}
-        {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · {tokens(by.tokens_in + by.tokens_out)} tokens · {usd(by.cost_usd, by.cost_complete)}</dd></div>}
+        {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · <span data-tip={tokenTip(by)}>{tokenText(by)} tokens</span> · {usd(by.cost_usd, by.cost_complete)}</dd></div>}
       </dl>
       {steps.length > 0 && (
         <>
@@ -29,7 +29,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
           <ul className="ip-list">
             {steps.map((s) => {
               const last = s.tasks.map((p) => sessionsOf(item, p).at(-1));
-              const mark = last.every((x) => x?.status.startsWith("done")) ? "✓" : last.some((x) => x && ["running", "pending", "paused"].includes(x.status)) ? "●" : "○";
+              const mark = s.tasks.every((p) => settled(item, p)) ? "✓" : last.some((x) => x && ["running", "pending", "paused"].includes(x.status)) ? "●" : "○";
               return (
                 <li key={s.id}>
                   <button type="button" className="ip-row" onClick={() => onStep(s.id)}>

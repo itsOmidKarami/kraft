@@ -807,6 +807,27 @@ loop, rather than re-run the rejected work.
 enforced-by: tests/api/test_gates.py::test_gate_reject_is_bounded_by_its_reject_loop, tests/skills/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop
 origin: src/kraft/executor/gates.py §reject_loop_key -- carried from the retired legacy gate spec's per-gate-name reject-loop requirements: V1 keys the loop by the gate node's own id, for every gate.
 
+## REQ a-gate-reject-gives-the-rerun-its-fix-rounds-back
+
+WHEN a gate rejection sends the work item back, the system SHALL reset the
+fix-loop counter of every execution node from the re-entry node up to the
+gate, whoever rejected, and SHALL record the counters it reset in a
+`cap_counters_reset` event naming who rejected. It SHALL NOT reset any other
+counter, nor reset anything when the rejection breached the gate's reject loop.
+enforced-by: tests/executor/test_gates_reject_cap.py::test_a_rejection_gives_the_nodes_it_reruns_their_fix_rounds_back[human], tests/executor/test_gates_reject_cap.py::test_a_rejection_gives_the_nodes_it_reruns_their_fix_rounds_back[assistant], tests/executor/test_gates_reject_cap.py::test_a_rejection_gives_the_nodes_it_reruns_their_fix_rounds_back[agent], tests/executor/test_gates_reject_cap.py::test_a_rejection_gives_the_nodes_it_reruns_their_fix_rounds_back[kraft], tests/executor/test_gates_reject_cap.py::test_a_rejection_that_re_runs_nothing_resets_nothing
+origin: src/kraft/store/counters.py §reset_fix_loops -- Kraft-9d8b2.150: a rejection left the counter where the pass before stopped, so `verification` re-entered at round 2 of 5 and measured new work on the rounds old work had left. Not a breach of `only-a-person-resets-a-cap-counter`: each rejection spends the gate's own reject loop, which only a person resets, so what an agent can run stays bounded.
+
+## REQ each-pass-of-a-node-is-numbered
+
+The work item detail SHALL say which pass of its node each session ran in, and
+for a node that ran more than once what started each pass. A new pass SHALL
+start at the first session after a gate rejection, a retry or a base-change
+restart that re-runs the node, and where a measurement's round drops. A retry
+of one step or task SHALL NOT start a pass of its own node unless it started
+the node's rounds over.
+enforced-by: tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[reject-at-the-round-it-left-off], tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[retry-of-one-task-is-another-attempt], tests/store/test_passes.py::test_a_nodes_sessions_are_numbered_by_the_pass_they_ran_in[a-persons-retry-of-one-task-starts-the-rounds-over], tests/store/test_passes.py::test_each_node_counts_its_own_passes, tests/api/test_scope_runs.py::test_detail_keeps_each_pass_of_a_node_under_its_own_number[rejected-back-at-the-round-it-left-off]
+origin: src/kraft/store/passes.py §number_passes -- Kraft-9d8b2.150: only a drop in the round number was read as a new pass, so a re-run that resumed at the round it left off at was shown as one more attempt of that round, and the passes before the newest were not shown at all.
+
 ## REQ gate-control-does-not-generate-review-work
 
 A gate node SHALL be a decision control point and SHALL NOT generate its own

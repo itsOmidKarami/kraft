@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokenText, tokenTip, tokenTotal, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 import type { EventType } from "./types/vocab.generated";
 
@@ -129,6 +129,8 @@ describe("dollars", () => {
 describe("tokens / usd", () => {
   it("scales token counts and keeps small costs readable", () => {
     expect(tokens(980)).toBe("980");
+    // a live claude session: 28 uncached, output not known yet, the rest cached
+    expect(tokenTotal({ tokens_in: 28, tokens_out: null, tokens_cache_write: 40_000, tokens_cache_read: 900_000 })).toBe(940_028);
     expect(tokens(41_200)).toBe("41.2k");
     expect(tokens(138_000)).toBe("138k");
     expect(tokens(1_400_000)).toBe("1.4M");
@@ -136,6 +138,23 @@ describe("tokens / usd", () => {
     expect(usd(0.0125)).toBe("$0.013");
     // an incomplete sum is a floor, and says so
     expect(usd(2.415, false)).toBe("$2.42+");
+  });
+
+  it.each([
+    // a live claude session: output is not known until it exits
+    ["live", { tokens_in: 28, tokens_out: null, tokens_cache_write: 40_000, tokens_cache_read: 900_000 }, "40k new + 900k cached", "28 in · 40k cache write · 900k cache read · out not known"],
+    ["exited", { tokens_in: 28, tokens_out: 7_700, tokens_cache_write: 40_000, tokens_cache_read: 900_000 }, "47.7k new + 900k cached", "28 in · 40k cache write · 900k cache read · 7.7k out"],
+    ["nothing cached", { tokens_in: 100, tokens_out: 50, tokens_cache_write: 0, tokens_cache_read: 0 }, "150", "100 in · 0 cache write · 0 cache read · 50 out"],
+    ["a session from before the split", { tokens_in: 100, tokens_out: 50 }, "150", "100 in (cache not split on older sessions) · 50 out"],
+    ["a rollup holding one", { tokens_in: 5_000, tokens_out: 50, tokens_cache_write: 10, tokens_cache_read: 2_000, split_complete: false }, "7.1k", "5k in · 10 cache write · 2k cache read · 50 out (cache not split on older sessions)"],
+    ["a rollup whose only session has told no output", { tokens_in: 28, tokens_out: 0, tokens_cache_write: 40_000, tokens_cache_read: 900_000, out_complete: false }, "40k new + 900k cached", "28 in · 40k cache write · 900k cache read · out not known"],
+    ["a rollup with one session's output still missing", { tokens_in: 28, tokens_out: 7_700, tokens_cache_write: 40_000, tokens_cache_read: 900_000, out_complete: false }, "47.7k new + 900k cached", "28 in · 40k cache write · 900k cache read · at least 7.7k out"],
+    // a real zero is a number, not a gap: the flag decides, not the sum
+    ["a rollup whose sessions wrote nothing", { tokens_in: 100, tokens_out: 0, tokens_cache_write: 0, tokens_cache_read: 0, out_complete: true }, "100", "100 in · 0 cache write · 0 cache read · 0 out"],
+    ["a rollup missing output and holding a pre-split session", { tokens_in: 5_000, tokens_out: 50, tokens_cache_write: 10, tokens_cache_read: 2_000, split_complete: false, out_complete: false }, "7.1k", "5k in · 10 cache write · 2k cache read · at least 50 out (cache not split on older sessions)"],
+  ])("tokenText / tokenTip: %s", (_id, u, text, tipText) => {
+    expect(tokenText(u)).toBe(text);
+    expect(tokenTip(u)).toBe(tipText);
   });
 
   it("marks an estimated cost distinctly, taking precedence over incomplete", () => {

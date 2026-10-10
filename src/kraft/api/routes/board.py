@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, events, executor, store
+from kraft import caps, events, executor, storage, store
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
@@ -836,7 +836,7 @@ def _test_result(st, row) -> dict | None:
     return None
 
 
-def _scope_runs(st, row) -> list[dict]:
+def _scope_runs(st, row, passes) -> list[dict]:
     """`scope_runs` on the detail response: every command each changed-test-scope
     task ran, over every round and repository (`dispatch.scope_runs`), for the
     node's view to draw a round's scopes beside the round before it. Empty for
@@ -869,11 +869,13 @@ def _scope_runs(st, row) -> list[dict]:
     runs = []
     for node, t in verifies:
         try:
-            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, entry, live=live(node))
+            found = dispatch.scope_runs(
+                st.db, row["id"], node.id, t.path, entry, live=live(node), passes=passes
+            )
         except config_mod.ConfigError:
             # An unreadable repos.yaml costs the scope names, not the detail.
             found = dispatch.scope_runs(
-                st.db, row["id"], node.id, t.path, lambda _: None, live=live(node)
+                st.db, row["id"], node.id, t.path, lambda _: None, live=live(node), passes=passes
             )
         runs += [{**r, "node_id": node.id, "hook_point": t.path} for r in found]
     return runs
@@ -1017,6 +1019,32 @@ def budget_cap(st, row) -> dict:
     }
 
 
+def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> list[dict]:
+    """The item's sessions as the API gives them. `skipped` marks the newest
+    session of a task under a skipped path, or of a node skipped after it
+    began, unless it had already finished: its stored status is only where the
+    skip found it. A fanned-out task has a newest session per repository, and
+    an escalation turn is no task of the node: a node skip does not mark it."""
+    newest = {(s["hook_point"], s["repository"]): s["id"] for s in sessions}
+
+    def cut_short(s) -> bool:
+        hook = s["hook_point"]
+        return (
+            newest[hook, s["repository"]] == s["id"]
+            and not s["status"].startswith("done")
+            and (
+                any(hook == p or hook.startswith(p + ".") for p in skipped)
+                or (
+                    hook.startswith(s["node_id"] + ".")
+                    and not hook.endswith(".escalation")
+                    and s["created_at"] < nodes.get(s["node_id"], "")
+                )
+            )
+        )
+
+    return [{**{k: s[k] for k in s.keys()}, "skipped": cut_short(s)} for s in sessions]
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -1028,11 +1056,14 @@ async def get_work_item(wid: str, request: Request):
             "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
         ).fetchall()
     )
+    skipped = st.db.read(lambda c: store.skipped_paths(c, wid))
+    skipped_nodes = st.db.read(lambda c: store.skipped_nodes(c, wid))
     pending = _pending_gate(st, wid)
     stop_payload, escalated = _stop_episode(st, wid)
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
+    passes = st.db.read(lambda c: store.session_passes(c, wid, [n["id"] for n in chain["nodes"]]))
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
     progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid)
@@ -1062,7 +1093,18 @@ async def get_work_item(wid: str, request: Request):
         "running_time": st.db.read(lambda c: caps.running_time(c, row)),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
-        "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
+        # Which pass of its node each session ran in (`store.number_passes`);
+        # an escalation turn is in none.
+        "worker_sessions": [
+            {**s, **({"pass": n} if (n := passes[0].get(s["id"])) else {})}
+            for s in _sessions_out(sessions, skipped, skipped_nodes)
+        ],
+        # Every task or step path a person skipped in this run: a task under
+        # one that never ran has no session to carry `skipped`.
+        "skipped_paths": sorted(skipped),
+        # What started each pass after a node's first, for the nodes that ran
+        # more than once: one pass is nothing to tell apart.
+        "node_passes": {node: ps for node, ps in passes[1].items() if len(ps) > 1},
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), kept once it
         # stops on the implementation node or finishes it; None before that node
@@ -1105,7 +1147,12 @@ async def get_work_item(wid: str, request: Request):
         "stop_reason": stop_payload["reason"] if stop_payload else None,
         # Set while queued: which start it is waiting to make, and since when.
         "queued": (
-            {"verb": q["verb"], "since": q["at"]}
+            {
+                "verb": q["verb"],
+                "since": q["at"],
+                # Set when the storage limit, not a busy slot, is what it waits on.
+                "storage": storage.figures(st) if storage.holds(st, wid) else None,
+            }
             if row["status"] == WorkItemStatus.QUEUED and (q := store.queued_request_of(row))
             else None
         ),
@@ -1126,7 +1173,7 @@ async def get_work_item(wid: str, request: Request):
         ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
         "test_result": _test_result(st, row),
-        "scope_runs": _scope_runs(st, row),
+        "scope_runs": _scope_runs(st, row, passes),
         # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
         # the frozen chain's total, how many were gates, and the current
         # node's step when it declares more than one.

@@ -61,8 +61,6 @@ export function arcYAt(TY: number, e: number, x1: number, y: number, px: number)
   return u ** 3 * (TY + 9) + 3 * u * u * t * y + 3 * u * t * t * y + t ** 3 * (TY + 10);
 }
 
-/** The least width of the changed-test-scope task's frame once it opens (`frameWidth` widens it to its chips); its column is the frame and 12px. */
-export const EXPAND_W = 760;
 /** One task of one step drawn open: a frame `w` wide and `h` tall in place of its box. */
 export type Expand = { step: number; row: number; w: number; h: number };
 

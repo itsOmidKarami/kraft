@@ -1,5 +1,6 @@
 /** A file's diff drawn with the unchanged lines its hunks leave out (the hunk rows' arrows). Pure. */
 import type { Hunk, PatchFile, PatchLine } from "./patch";
+import { startSideOf, type LineRange } from "./range";
 
 /** How many lines one press of an arrow shows. */
 export const STEP = 20;
@@ -14,6 +15,9 @@ export interface Whole {
   lines: PatchLine[];
   spans: Span[];
 }
+
+/** Git's own context around a change, which `/compare` leaves alone. */
+const CONTEXT = 3;
 
 const sameLine = (a: PatchLine | undefined, b: PatchLine | undefined) => !!a && !!b && a.old === b.old && a.new === b.new;
 
@@ -39,12 +43,26 @@ export function grow(spans: Span[], gap: number, how: Grow, total: number): Span
   const hi = gap < next.length ? next[gap][0] : total;
   if (gap < next.length && how !== "down") next[gap][0] = how === "all" ? lo : Math.max(lo, hi - STEP);
   else if (gap > 0) next[gap - 1][1] = how === "all" ? hi : Math.min(hi, lo + STEP);
-  return next.reduce<Span[]>((out, s) => {
+  return joined(next);
+}
+
+/** Spans in the file's order, those that meet made one. */
+const joined = (spans: Span[]) =>
+  [...spans].sort((a, b) => a[0] - b[0]).reduce<Span[]>((out, s) => {
     const last = out[out.length - 1];
-    if (last && last[1] >= s[0]) last[1] = s[1];
-    else out.push(s);
+    if (last && last[1] >= s[0]) last[1] = Math.max(last[1], s[1]);
+    else out.push([...s]);
     return out;
   }, []);
+
+/** `w`'s spans with the lines of `r` drawn, and git's context around them: where a thread on lines the diff
+ *  leaves out sits. The same spans when they are drawn already, or are no lines of this file. */
+export function reveal(w: Whole, r: LineRange): Span[] {
+  const at = (side: "old" | "new", n: number) => w.lines.findIndex((l) => l[side] === n);
+  const a = at(startSideOf(r), r.start);
+  const b = at(r.side, r.end);
+  if (a < 0 || b < a || w.spans.some(([from, to]) => from <= a && b < to)) return w.spans;
+  return joined([...w.spans, [Math.max(0, a - CONTEXT), Math.min(w.lines.length, b + 1 + CONTEXT)]]);
 }
 
 /** `pf` with `w`'s spans for hunks. A span no arrow touched is its own hunk still, header and all. */
@@ -60,9 +78,6 @@ export function widen(pf: PatchFile, w: Whole): PatchFile {
   });
   return { ...pf, hunks, rest: w.lines.length - (w.spans[w.spans.length - 1]?.[1] ?? 0) };
 }
-
-/** Git's own context around a change, which `/compare` leaves alone. */
-const CONTEXT = 3;
 
 /** The lines after `pf`'s last hunk: counted once the whole file was read. Before that, 0 when the hunk
  *  stops short of git's context after its last change (the file ends there), else null: not known. */

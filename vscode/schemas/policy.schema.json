@@ -345,6 +345,56 @@
       "title": "PolicyMaximaInput",
       "type": "object"
     },
+    "StorageInput": {
+      "additionalProperties": false,
+      "properties": {
+        "worktrees": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StorageWorktreesInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "StorageInput",
+      "type": "object"
+    },
+    "StorageWorktreesInput": {
+      "additionalProperties": false,
+      "description": "`storage.worktrees`: over `limit`, a start that needs a new worktree\nwaits until a person cleans up; over `quota` Kraft only warns. `quota`\ndefaults to 80% of `limit`.",
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "quota": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quota"
+        }
+      },
+      "title": "StorageWorktreesInput",
+      "type": "object"
+    },
     "TriggerInput": {
       "properties": {
         "chain": {
@@ -477,6 +527,17 @@
       "exclusiveMinimum": 0,
       "title": "Rate Limit Retries",
       "type": "integer"
+    },
+    "storage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StorageInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "triggers": {
       "items": {

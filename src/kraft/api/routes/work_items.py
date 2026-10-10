@@ -11,11 +11,11 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from kraft import config as config_mod
-from kraft import executor, store
+from kraft import executor, storage, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
 from kraft.api import SENTENCE_ERROR, api_router, deps
-from kraft.api.routes import board, gates
+from kraft.api.routes import board, gates, lifecycle
 from kraft.executor import entry
 from kraft.overrides import (
     harness_refusal,
@@ -435,7 +435,13 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             # milliseconds apart must not both see a free slot and both win
             # one (Kraft-m43g, Kraft-nxht). `None` when not autostarting --
             # `status` is already "paused" and needs no capacity decision.
-            limit=(st.policy.max_concurrent if st.policy else 1) if start_now else None,
+            limit=(
+                0
+                if storage.state_of(st.policy, storage.usage(st)) == "held"
+                else (st.policy.max_concurrent if st.policy else 1)
+            )
+            if start_now
+            else None,
             auto_gate=body.auto_gate,
             implements_beads=body.implements_beads,
             skip_nodes=frozenset(body.skip_nodes),
@@ -510,10 +516,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
                 from_statuses=[WorkItemStatus.PAUSED],
             )
         )
-        slots = {
-            "busy": st.db.read(store.active_count),
-            "limit": st.policy.max_concurrent if st.policy else 1,
-        }
+        slots = await lifecycle.slots_answer(st, wid)
         return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": slots, **extra}
 
     deps.spawn(

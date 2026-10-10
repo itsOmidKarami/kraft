@@ -16,7 +16,7 @@ import asyncio
 import logging
 
 from kraft import config as config_mod
-from kraft import executor, store
+from kraft import executor, storage, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads
 from kraft.templates.models import GateNode
@@ -86,6 +86,10 @@ async def _poll(app) -> dict:
     if _daily_breached(st.db, budget):
         logger.info("auto-intake: daily budget reached, starting nothing")
         blocked = "daily_budget"
+    elif storage.state_of(st.policy, storage.usage(st)) == "held":
+        # Every pick-up is a new worktree.
+        logger.info("auto-intake: worktrees over the storage limit, starting nothing")
+        blocked = "storage"
     else:
         blocked = "max_concurrent" if slots <= 0 else None
 

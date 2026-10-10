@@ -28,6 +28,9 @@ type Props = {
   /** The fix-loop rounds, with the one the canvas shows; picking one (undefined: the newest) is `onRound`. */
   rounds?: Rounds;
   onRound?: (round: number | undefined) => void;
+  /** The node's passes, when the chain ran it more than once, with the one the canvas shows; picking one is `onPass`. */
+  passes?: Rounds;
+  onPass?: (pass: number | undefined) => void;
   /** A task drawn open, as a frame of its repositories and scopes in place of its box. */
   expand?: { step: string; task: string; view: ScopesView; scope?: string };
   /** A scope of the open task picked. */
@@ -72,7 +75,7 @@ const parse = (key: string): NodeSel => {
 };
 
 /** A node's inside: steps in order, parallel tasks as rows (NodeGraph.dc.html). */
-export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, expand, onScope, onCollapse, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
+export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, passes, onPass, expand, onScope, onCollapse, onFailure, seamAfter, reserve = 0, onSelect, onOpen, onExpand, onEscape, onBackground, onSlot, onSeam }: Props) {
   const calm = useReducedMotion();
   // What the arc carries: a loop step's tasks run together, so a step of several is one box. It is open as a frame
   // of them while it, or one of them, is the selection, as a changed-test-scope task is; `shut` folds it where it
@@ -392,6 +395,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
       </div>
       <div className="canvas-zoom" style={{ right: reserve + 12 }}>
         <ZoomControls scale={cam.s} mode={camera.mode} onIn={camera.zoomIn} onOut={camera.zoomOut} onReset={camera.reset} onFit={camera.fit} fitLabel="Fit the node" />
+        {passes && onPass && <RoundPicker rounds={passes} onPick={onPass} pass />}
         {rounds && onRound && <RoundPicker rounds={rounds} onPick={onRound} />}
       </div>
     </div>

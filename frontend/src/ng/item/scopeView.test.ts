@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { frameWidth, isScopeTask, otherRounds, reposOf, scopesView, type Chip, type ScopesView } from "./scopeView";
+import { frameWidth, isScopeTask, otherRounds, reposOf, scopeAt, scopeLead, scopeRuns, scopesView, type Chip, type ScopesView } from "./scopeView";
+import { asOfPass } from "./nodeGraph";
 import { detail, FROZEN, pendingRun, SCOPE_PATH, scopeChain, scopeRun, scoped, WORKSPACE } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -120,15 +121,100 @@ describe("scopesView", () => {
   });
 });
 
+describe("a scope task in a node the chain ran again", () => {
+  // Each pass measured round 1, and picked differently: the pass before is not this one's round.
+  const both = () => {
+    const runs = [run(null, "just test-a", 0, "failed", { pass: 1 }), run(null, "just test-b", 1, "done", { pass: 1 }), run(null, "just test-c", 0, "done", { pass: 2 })];
+    const passes = [1, 1, 2];
+    return item(runs.map(([r, s], i) => [r, { ...s, pass: passes[i] }]), { node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] } });
+  };
+
+  it("draws the scopes of the pass the node is on, and of an earlier one when it is the one shown", () => {
+    expect(names(scopesView(both(), PATH, 1, NOW)).map((c) => c[0])).toEqual(["just test-c"]);
+    const first = asOfPass(both(), "verification", 1);
+    expect(names(scopesView(first, PATH, 1, NOW)).map((c) => c[0])).toEqual(["just test-a"]);
+    expect(names(scopesView(first, PATH, 2, NOW)).map((c) => [c[0], c[1]])).toEqual([["just test-b", "done"], ["just test-a", "skipped"]]);
+  });
+
+  it("says how a scope went in the other rounds of its own pass alone", () => {
+    expect(otherRounds(both(), PATH, ":just test-c", 1)).toEqual([]);
+    expect(otherRounds(asOfPass(both(), "verification", 1), PATH, ":just test-a", 1)).toEqual(["2: not picked"]);
+    // A pass that resumed at round 2 has no round 1 to speak of.
+    const resumed = item([run(null, "just test-a", 1, "done"), run(null, "just test-a", 2, "done")]);
+    expect(otherRounds(resumed, PATH, ":just test-a", 3, 2)).toEqual(["2: passed"]);
+  });
+});
+
+describe("a scope the round has no chip for", () => {
+  const miss = (it: ReturnType<typeof item>, key: string, round: number) => {
+    const { miss, why, command } = scopeAt(it, PATH, key, scopesView(it, PATH, round, NOW));
+    return [miss, why, command];
+  };
+  const three = () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done"), run(null, "just test-a", 1, "done"), run(null, "just test-a", 2, "done")]);
+
+  it.each([
+    // Round 3 against round 2 alone: b ran in round 1, and neither since.
+    ["a scope another round ran", () => three(), ":just test-b", 3, "not picked", "Not picked: no changed path reaches it this round.", "just test-b"],
+    ["a command no round ran", () => three(), ":just test-gone", 3, "not found", "Not found: this task ran no scope with this command.", "just test-gone"],
+    ["a key with no repository part", () => three(), "just test-a", 3, "not found", "Not found: this task ran no scope with this command.", "just test-a"],
+    // Another test task of the chain ran it: it is that task's scope, not this one's.
+    ["a scope of another task", () => { const it = three(); it.scope_runs!.push({ ...run(null, "just test-z", 0, "done")[0], hook_point: "verification.other.tests" }); return it; }, ":just test-z", 3, "not found", "Not found: this task ran no scope with this command.", "just test-z"],
+    // A repository the item no longer names has no row to have run without it.
+    ["a scope of a repository the item no longer names", () => { const it = three(); it.scope_runs!.push(run("gone", "just test-g", 0, "done")[0]); return it; }, "gone:just test-g", 3, "not reached", "Not reached: the task did not run it this round.", "just test-g"],
+    // Round 2 runs on and has recorded no picks: what it dropped is not known yet.
+    ["a round still choosing", () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done"), run(null, "just test-a", 1, "running")]), ":just test-b", 2, "still choosing", "Still choosing: this round has not picked its scopes yet.", "just test-b"],
+    ["a repository the round did not reach", () => item([run("ws", "just test-a", 0, "done"), run("pkg", "just test-p", 0, "done"), run("ws", "just test-a", 1, "failed")], { materialized_chain: chain("sequential", WORKSPACE) }), "pkg:just test-p", 2, "not reached", "Its repository was not reached this round.", "just test-p"],
+    // The node runs on (its repair): the repository after the one that failed is still not reached, as its row says.
+    ["a repository after a failure, while the round's repair runs", () => item([run("ws", "just test-a", 0, "done"), run("pkg", "just test-p", 0, "done"), run("ws", "just test-a", 1, "failed")], { materialized_chain: chain("sequential", WORKSPACE), display_status: "running" }), "pkg:just test-p", 2, "not reached", "Its repository was not reached this round.", "just test-p"],
+    // One repository is not passed over: the task did not get to the scope.
+    ["a round the task did not run in, in the item's one repository", () => item([run(null, "just test-a", 0, "done"), run(null, "just test-b", 2, "done")]), ":just test-a", 2, "not reached", "Not reached: the task did not run it this round.", "just test-a"],
+    // Another pass of the node ran it: it is a scope of the task, which this pass's round ran without.
+    ["a scope only another pass ran", () => { const [a, b] = [run(null, "just test-a", 0, "done", { pass: 1 }), run(null, "just test-b", 0, "done", { pass: 2 })]; return item([[a[0], { ...a[1], pass: 1 }], [b[0], { ...b[1], pass: 2 }]], { node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] } }); }, ":just test-a", 1, "not picked", "Not picked: no changed path reaches it this round.", "just test-a"],
+  ])("says why: %s", (_n, of, key, round, want, why, command) => {
+    expect(miss(of(), key, round)).toEqual([want, why, command]);
+  });
+
+  it("finds the chip and its row when the round has one, a dropped one included", () => {
+    const it = three();
+    expect(scopeAt(it, PATH, ":just test-a", scopesView(it, PATH, 2, NOW))).toMatchObject({ chip: { state: "done" }, row: { id: null }, command: "just test-a" });
+    expect(scopeAt(it, PATH, ":just test-b", scopesView(it, PATH, 2, NOW)).chip).toMatchObject({ state: "skipped" });
+  });
+});
+
+describe("a changed-test-scope task as one thing", () => {
+  it.each([
+    ["a scope that failed speaks for it, though a later one passed", [run(null, "just test-a", 0, "failed"), run(null, "just test-b", 0, "done")], "just test-a"],
+    ["else a scope still running", [run(null, "just test-a", 0, "running"), run(null, "just test-b", 0, "done")], "just test-a"],
+    ["a failure before one still running", [run(null, "just test-a", 0, "running"), run(null, "just test-b", 0, "failed")], "just test-b"],
+    ["every scope passed: its last run, as any task", [run(null, "just test-a", 0, "done"), run(null, "just test-b", 0, "done")], undefined],
+  ] as const)("%s", (_n, runs, want) => {
+    expect(scopeLead(scopesView(item([...runs]), PATH, 1, NOW))?.command).toBe(want);
+  });
+
+  it("counts the latest run of each scope: a scope that failed and then passed in the round did not fail", () => {
+    const [first, again] = [run(null, "just test-a", 0, "failed"), run(null, "just test-a", 0, "done")];
+    Object.assign(again[1], { attempt: 2, created_at: "2026-09-13T10:11:00Z" });
+    const it = item([again], { worker_sessions: [first[1], again[1]] });
+    expect(scopeLead(scopesView(it, PATH, 1, NOW))).toBeUndefined();
+    // Both are runs of the scope in the round, oldest first; another round's are not.
+    expect(scopeRuns(it, PATH, ":just test-a", 1).map((s) => s.status)).toEqual(["failed", "done"]);
+    expect(scopeRuns(it, PATH, ":just test-a", 2)).toEqual([]);
+    expect(scopeRuns(it, PATH, ":just test-b", 1)).toEqual([]);
+  });
+});
+
 describe("frameWidth", () => {
   const chip = (name: string, meta: string, state: Chip["state"] = "done"): Chip => ({ key: name, name, command: name, state, meta });
-  const of = (chips: Chip[], execution: ScopesView["execution"] = "sequential"): ScopesView => ({ path: "p", round: 1, execution, rows: [{ id: null, name: "r", state: "running", note: "", chips }] });
+  const row = (chips: Chip[]): ScopesView["rows"][number] => ({ id: null, name: "r", state: "running", note: "", chips });
+  const of = (chips: Chip[], execution: ScopesView["execution"] = "sequential", repos = 2): ScopesView => ({ path: "verification.tests.test_changed_scopes", round: 1, execution, rows: [row(chips), ...(repos > 1 ? [row([])] : [])] });
   const long = [chip("pnpm --dir docsite '&&' npm…", "0s"), chip("just test-vscode", "2s"), chip("just ci-test", "running · 5s", "running")];
 
   it.each([
-    ["a short row keeps the least width", of([chip("a/**", "1s")]), (w: number) => w === 760],
-    ["a row of chips longer than that widens it", of(long), (w: number) => w > 760],
-    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === 760],
+    ["a short row is as wide as the header", of([chip("a/**", "1s")]), (w: number) => w === 480],
+    ["a row of chips longer than that widens it", of(long), (w: number) => w > 480],
+    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === frameWidth(of([long[0]], "parallel")) && w < frameWidth(of(long))],
+    ["one repository's header says less, so a short row is narrower still", of([chip("a/**", "1s")], "sequential", 1), (w: number) => w === 400],
+    ["one repository's long row is its chips, without the repository column", of(long, "sequential", 1), (w: number) => w > 400 && w < frameWidth(of(long))],
   ])("%s", (_, view, ok) => expect(ok(frameWidth(view))).toBe(true));
 
   it("does not widen as a waiting chip starts, nor as a running chip's clock ticks", () => {

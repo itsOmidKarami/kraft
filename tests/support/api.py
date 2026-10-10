@@ -6,6 +6,7 @@ and `run_with_app` for the client tests, which reach the app over ASGI.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import sqlite3
@@ -16,6 +17,7 @@ from urllib.parse import urljoin
 
 from fastapi.testclient import TestClient
 
+from kraft import storage
 from support.harness import entry_of, fake_templates_dir, isolated_bd
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -273,6 +275,17 @@ def _post_default(client, repo):
             "autostart": True,
         },
     ).json()["id"]
+
+
+def _hold_storage(client, *, used: int = 2, limit: int = 1) -> None:
+    """Put the app over its worktree storage limit, as a measurement would."""
+    st = client.app.state
+    # The app's own poller would measure the real, tiny run folder over this.
+    client.portal.call(st.storage_task.cancel)
+    st.policy = dataclasses.replace(
+        st.policy, storage_limit_bytes=limit, storage_quota_bytes=limit * 8 // 10
+    )
+    st.storage_usage = storage.Usage("2026-01-01T00:00:00+00:00", used, {}, {})
 
 
 def _set_status(wid: str, status: str) -> None:

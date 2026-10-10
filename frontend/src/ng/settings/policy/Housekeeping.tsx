@@ -5,10 +5,10 @@ import { problemAt, type Ctx } from "./ctx";
 /** Housekeeping (Decisions §12): how this install runs: instance-wide, no repo, chain or item can change these. */
 export function Housekeeping({ ctx }: { ctx: Ctx }) {
   const { p, draft, changes } = ctx;
-  const row = (id: keyof typeof KEYS, label: string, value: number | null, help: string, bound = false) => (
+  const row = (id: keyof typeof KEYS, label: string, value: number | string | null, help: string, bound = false, placeholder?: string) => (
     <div className="pol-one" key={id}>
       <span className="pol-k">{label}</span>
-      <PolicyCell draft={draft} k={KEYS[id]} label={label} value={value} bound={bound} change={changes.get(KEYS[id].key)} problem={problemAt(ctx, KEYS[id].key)} />
+      <PolicyCell draft={draft} k={KEYS[id]} label={label} value={value} bound={bound} placeholder={placeholder} change={changes.get(KEYS[id].key)} problem={problemAt(ctx, KEYS[id].key)} />
       <span className="pol-help">{help}</span>
     </div>
   );
@@ -26,6 +26,11 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
         <h2 className="pol-h2">Board and forge</h2>
         {row("archive", "archive after", p.housekeeping.archive_after_days.value, "Completed and abandoned items older than this are archived. Blank never archives. The board's Done group states this number.")}
         {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error. Read at startup.")}
+      </section>
+      <section className="pol-card" aria-label="Storage">
+        <h2 className="pol-h2">Storage</h2>
+        {row("storageLimit", "limit", p.housekeeping.storage_limit?.value ?? null, "The most disk worktrees may use, as a size: 1000M, 10G, 1T. Over it, a start that needs a new worktree waits until you make room; Kraft deletes nothing on its own. Blank is no limit.", false, "no limit")}
+        {row("storageQuota", "quota", p.housekeeping.storage_quota?.value ?? null, "Over this, Kraft warns. Blank is 80% of the limit.", false, p.housekeeping.storage_quota_default ?? "not set")}
       </section>
     </>
   );

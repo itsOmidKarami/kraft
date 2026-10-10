@@ -3,12 +3,14 @@ import { Popover } from "../ui/Popover";
 import type { Rounds } from "../item/nodeGraph";
 import "./graph.css";
 
-type Props = { rounds: Rounds; onPick: (round: number | undefined) => void };
+type Props = { rounds: Rounds; onPick: (round: number | undefined) => void; /** The node's passes, not a fix loop's rounds. */ pass?: boolean };
 
 /** Which fix-loop round the canvas shows, beside the zoom: a button naming it, a `latest ↩` while an
  *  older one is picked, and a list of the rounds, newest first, that opens upward (the control sits
- *  at the foot of the canvas). */
-export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick }: Props) {
+ *  at the foot of the canvas). The same for the node's passes, which have no dot and no limit. */
+export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick, pass }: Props) {
+  const word = pass ? "pass" : "round";
+  const head = pass ? "Passes of this node" : "Fix loop rounds";
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<Record<number, HTMLButtonElement | null>>({});
@@ -21,14 +23,14 @@ export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick 
   return (
     <div className="round-picker" onPointerDown={(e) => e.stopPropagation()}>
       <button ref={button} type="button" className={`round-btn${old ? " is-old" : ""}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className={`round-dot is-${tone}`} aria-hidden="true" />
-        round {selected}{total ? ` of ${total}` : ""}{old ? "" : " · latest"}
+        {!pass && <span className={`round-dot is-${tone}`} aria-hidden="true" />}
+        {word} {selected}{total ? ` of ${total}` : ""}{old ? "" : " · latest"}
         <span className="round-caret" aria-hidden="true">▾</span>
       </button>
       {old && <button type="button" className="round-latest" onClick={() => onPick(undefined)}>latest ↩</button>}
-      <Popover anchor={button} open={open} onClose={close} role="menu" label="Fix loop rounds" up>
+      <Popover anchor={button} open={open} onClose={close} role="menu" label={head} up>
         <div className="round-menu">
-          <span className="round-menu-head" aria-hidden="true">Fix loop rounds</span>
+          <span className="round-menu-head" aria-hidden="true">{head}</span>
           {[...rows].reverse().map((r) => (
             <button
               key={r.n}
@@ -40,12 +42,12 @@ export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick 
               className="round-row"
               onClick={() => { close(); onPick(r.n === latest ? undefined : r.n); }}
             >
-              <span className={`round-dot is-${r.tone}`} aria-hidden="true" />
-              <span>Round {r.n}{r.n === latest ? " · now" : ""}</span>
+              {r.tone && <span className={`round-dot is-${r.tone}`} aria-hidden="true" />}
+              <span>{pass ? "Pass" : "Round"} {r.n}{r.n === latest ? " · now" : ""}</span>
               <span className="round-outcome">{r.outcome}</span>
             </button>
           ))}
-          {total && <p className="round-foot">limit: {total} rounds · {Math.max(0, total - latest)} left</p>}
+          {total && !pass && <p className="round-foot">limit: {total} rounds · {Math.max(0, total - latest)} left</p>}
         </div>
       </Popover>
     </div>

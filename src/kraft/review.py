@@ -24,6 +24,7 @@ and names the git command for the rest, so nothing is hidden -- only unpasted.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -52,8 +53,13 @@ def read_change(
     head: str | None = None,
     context: int | None = None,
     ignore_whitespace: bool = False,
+    paths: Sequence[str] = (),
 ) -> Change | None:
     """The change in `worktree` against `base`, or None if git itself failed.
+
+    `paths` keeps the diff and the file list to those paths, each read as a
+    path and not a pattern. A renamed file needs both of its paths, or git
+    reads the new one as added.
 
     With `head` set the range is `base..head` and nothing uncommitted is in it,
     so `untracked` is `[]`: `git status --porcelain` describes the working tree
@@ -70,10 +76,13 @@ def read_change(
     # -w on both commands: git then drops a whitespace-only file from the patch and
     # the numstat alike, so `files` and `diff` cannot disagree.
     ws = ["-w"] if ignore_whitespace else []
-    diff_args = ["diff", unentered, *ws] + ([f"-U{context}"] if context is not None else []) + rev
+    only = ["--", *paths] if paths else []
+    # A path, not a pathspec: `*` must not keep whatever file it matches.
+    diff = (["--literal-pathspecs"] if paths else []) + ["diff", unentered, *ws]
+    diff_args = diff + ([f"-U{context}"] if context is not None else []) + rev + only
     # strip=False: a diff whose last line is blank context is still that diff
     body = _config.git_read(worktree, *diff_args, strip=False)
-    numstat = _config.git_read(worktree, "diff", unentered, *ws, "--numstat", *rev)
+    numstat = _config.git_read(worktree, *diff, "--numstat", *rev, *only)
     if body is None or numstat is None:
         return None
     untracked: list[str] = []
@@ -326,10 +335,22 @@ def _clip_quote(lines: list[str]) -> str | None:
     return "\n".join(lines[:QUOTE_LINES] + (["…"] if len(lines) > QUOTE_LINES else []))
 
 
-def _renamed_from(worktree: Path, base: str, head: str, path: str) -> str | None:
-    """The path `path` had at `base`, when `base..head` renamed it there."""
+def renamed_from(worktree: Path, base: str, head: str | None, path: str) -> str | None:
+    """The path `path` had at `base`, when `base..head` renamed it there;
+    `head` None is the working tree."""
+    rev = [base] + ([head] if head else [])
+    # With no `head` this reads the working tree: never inside a nested
+    # repository, as `read_change` never does (Kraft-nx4id).
     out = _config.git_read(
-        worktree, "diff", "-M", "--name-status", "-z", "--diff-filter=R", base, head, strip=False
+        worktree,
+        "diff",
+        _sandbox.SUBMODULES_UNENTERED,
+        "-M",
+        "--name-status",
+        "-z",
+        "--diff-filter=R",
+        *rev,
+        strip=False,
     )
     tokens = (out or "").split("\0")
     # `R<score>`, the old path, the new path, per rename.
@@ -364,7 +385,7 @@ def quote_range(
     # A renamed file's thread is on its new path, and its old side is the old
     # path's lines: diffed by one path alone, git saw no rename, quoted no old
     # side, and marked every line of the new file added (R11E-05).
-    old_path = _renamed_from(worktree, base, head, path) or path
+    old_path = renamed_from(worktree, base, head, path) or path
     # A path, not a pathspec: `*` must not quote whatever file it matches.
     diff = _config.git_read(
         worktree,

@@ -77,7 +77,11 @@ def mcp_tool_names() -> set[str]:
 #: thing, because the YAML shape nests it under a parent key the Python
 #: attribute flattens away. Add here, not to the docs -- the doc's spelling
 #: is the operator-facing one and is what should stay put.
-_POLICY_FIELD_RENAMES = {"archive_after_days": "archive.after_days"}
+_POLICY_FIELD_RENAMES = {
+    "archive_after_days": "archive.after_days",
+    "storage_limit_bytes": "storage.worktrees.limit",
+    "storage_quota_bytes": "storage.worktrees.quota",
+}
 
 
 def policy_fields() -> set[str]:

@@ -100,11 +100,11 @@ describe("maybeNotify", () => {
 });
 
 describe("enabledEvents", () => {
-  it("is both events until set, and an unreadable value is the default", () => {
-    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human"]);
+  it("is every event until set, and an unreadable value is the default", () => {
+    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human", "work_item_storage_held"]);
     setEvents(["gate_requested"]);
     expect(enabledEvents()).toEqual(["gate_requested"]);
     localStorage.setItem("kraft.browserNotify.events", "{not json");
-    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human"]);
+    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human", "work_item_storage_held"]);
   });
 });

@@ -9,7 +9,7 @@ export const SECTIONS: { id: Section; label: string; sub: string; icon: string }
 export function sectionOfKey(key: string): Section | null {
   if (/^(budget\.|(defaults|maxima)\.(work_item|nodes|steps|tasks)\.)/.test(key)) return "limits";
   if (/^((defaults|maxima)\.(max_attempts|timeout_minutes)|loops\.|default\.|findings\.|auto_escalate_|auto_review_attempts)/.test(key)) return "loops";
-  if (/^(max_concurrent|archive\.|rate_limit_retries|forge_cli_timeout_s)/.test(key)) return "housekeeping";
+  if (/^(max_concurrent|archive\.|storage\.|rate_limit_retries|forge_cli_timeout_s)/.test(key)) return "housekeeping";
   return null;
 }
 

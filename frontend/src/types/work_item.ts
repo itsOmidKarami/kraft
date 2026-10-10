@@ -285,6 +285,9 @@ export interface WorkItem {
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */
   head_sha?: string | null;
+  /** While queued: the start it waits to make and since when. `storage` is set when the
+   *  worktree storage limit, not a busy slot, is what it waits on. Detail only. */
+  queued?: { verb: string; since: string; storage: { used_bytes: number; limit_bytes: number } | null } | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
   /** The latest changed-test-scope verification run, one entry per scope that
@@ -293,12 +296,17 @@ export interface WorkItem {
   /** Every command a changed-test-scope task ran, over every round and repository, in the order it
    *  started (detail only). `test_result` is the latest run alone. */
   scope_runs?: ScopeRun[];
+  /** Each pass of the nodes the chain ran more than once, oldest first, with what started it (detail only). A node
+   *  that ran once is not listed. */
+  node_passes?: Record<string, NodePass[]>;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
    *  from `deferred_findings`: these are critical/important, not minor ones
    *  that never entered the loop. Only on the detail endpoint. */
   judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
+  /** Task and step paths skipped in this run. */
+  skipped_paths?: string[];
   /** `done_with_concerns` text from every session that reported one; only on the detail endpoint. */
   concerns?: string[];
   /** The agent's question, set only while a `needs_human` stop is answerable
@@ -389,12 +397,23 @@ export interface Finding {
 
 export type { SessionStatus };
 
+/** What started a pass of a node after its first: nothing named when its rounds simply started over. */
+export interface NodePass {
+  pass: number;
+  /** `fixed`: the gate's reviewer repaired the work itself, which the server records as a rejection. */
+  reason?: "reject" | "fixed" | "retry" | "base_change";
+  /** The gate whose rejection, or whose reviewer's fix, sent the chain back. */
+  gate?: string;
+}
+
 /** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
  *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup
  *  half a place before its first scope), absent for a command the table no longer declares. */
 export interface ScopeRun {
   /** Null for a command its round picked and has not started (`pending`). */
   session_id: string | null;
+  /** The pass of the node it ran in, as its session's. */
+  pass?: number;
   node_id: string;
   hook_point: string;
   repository: string | null;
@@ -418,12 +437,18 @@ export interface WorkerSession {
   node_id: string;
   hook_point: string;
   status: SessionStatus;
+  /** A person skipped its task before it finished: `status` is only where the skip found it. */
+  skipped?: boolean;
   attempt: number;
   /** 1-based; restarts only across a `new_thread` escalation (Kraft-dkb6g).
    *  Every non-escalation session is implicitly thread 1 for its whole life. */
   thread: number;
-  /** Fix-cycle index this session was dispatched in; 0 on the first pass. */
+  /** Fix-cycle index this session was dispatched in; 0 on a pass's first measurement. */
   round: number;
+  /** Which pass of its node it ran in, 1-based (`store.number_passes`): the chain runs a node again after a gate
+   *  reject, a retry or a base change, and each pass counts its rounds on its own. Absent on an escalation turn and
+   *  a gate's reviewer, which belong to the node, and on a fixture literal that predates it. */
+  pass?: number;
   created_at: string;
   started_at: string | null;
   exited_at: string | null;
@@ -478,6 +503,8 @@ export interface UsageRollup {
   tokens_cache_read?: number;
   /** False when some session predates the split: its cache use is in tokens_in. */
   split_complete?: boolean;
+  /** False when some session spent tokens but has no output count yet: tokens_out is a floor. */
+  out_complete?: boolean;
   cost_usd: number;
   /** False when a session spent tokens but reported no cost — the sum is a floor. */
   cost_complete: boolean;

@@ -4,8 +4,9 @@ import type { Compare, CompareTarget, ReviewThread, WorkItem, WorkItemArtifact }
 import { detailOf, request } from "../http";
 import { COALESCE_MS } from "../item/useItem";
 import { showToast } from "../ui/Toast";
-import { grow, spansOf, widen, type Grow, type Whole } from "./expand";
+import { grow, reveal, spansOf, widen, type Grow, type Span, type Whole } from "./expand";
 import { parsePatch, type PatchFile } from "./patch";
+import { threadRange, type LineRange } from "./range";
 
 export type Fetched<T> = { state: "loading" } | { state: "error"; status: number; error: string } | { state: "ready"; data: T };
 
@@ -34,40 +35,66 @@ const WHOLE_FILE = 1_000_000;
 
 /** The unchanged lines a hunk row's arrows show: a file's whole diff is read once
  *  (`/compare?file=&context=`) and `patch` comes back with that file drawn wider.
- *  A new `patch` (another comparison, a new commit) starts over. */
-export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, patch: Map<string, PatchFile>) {
+ *  A thread on a line the diff leaves out has its file read too, and its lines
+ *  drawn, so it sits under them. A new `patch` (another comparison, a new commit) starts over. */
+export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, patch: Map<string, PatchFile>, threads: ReviewThread[]) {
   const [got, setGot] = useState<{ of: Map<string, PatchFile>; files: Map<string, Whole> }>({ of: patch, files: new Map() });
   const live = useRef(patch);
   live.current = patch;
-  // The files being read: a press on one of them waits for the next drawing, whose gaps it would name.
-  const reading = useRef(new Set<string>()).current;
+  // This comparison's files being read (a press on one of them is dropped: it names gaps of a drawing about to
+  // change), and those read for their threads, each once: one that cannot be read leaves its threads in the list at the foot.
+  const work = useRef({ of: patch, reading: new Set<string>(), tried: new Set<string>() });
+  if (work.current.of !== patch) work.current = { of: patch, reading: new Set(), tried: new Set() };
+  const { reading, tried } = work.current;
   const files = got.of === patch ? got.files : null;
-  const expand = async (path: string, gap: number, how: Grow) => {
-    let whole = files?.get(path) ?? null;
-    if (!whole) {
-      if (reading.has(path)) return;
-      reading.add(path);
-      const q = new URLSearchParams({ from, to, file: path, context: String(WHOLE_FILE) });
-      if (ignoreWhitespace) q.set("ignore_whitespace", "1");
-      const { status, body } = await request<Compare>(`/work-items/${encodeURIComponent(id)}/compare?${q}`);
-      reading.delete(path);
-      if (live.current !== patch) return;
-      // Cut at the server's size cap, the file would seem to end where the cut fell.
-      if (status === 200 && body.truncated) return showToast(`${path} is too large to show in full`);
-      const pf = patch.get(path);
-      const read = status === 200 ? parsePatch(body.diff).find((f) => f.path === path) : undefined;
-      whole = pf && read ? spansOf(pf, read) : null;
-      if (!whole) return showToast(status === 200 ? `Could not read the rest of ${path}` : detailOf(body));
-    }
-    const first = whole;
-    // From the state as it is now: a second press before this one drew adds to it.
+  /** The whole file, or null with the reason said (not when `quiet`: nobody asked). */
+  const read = async (path: string, quiet = false): Promise<Whole | null> => {
+    if (reading.has(path)) return null;
+    reading.add(path);
+    const q = new URLSearchParams({ from, to, file: path, context: String(WHOLE_FILE) });
+    if (ignoreWhitespace) q.set("ignore_whitespace", "1");
+    const { status, body } = await request<Compare>(`/work-items/${encodeURIComponent(id)}/compare?${q}`);
+    reading.delete(path);
+    if (live.current !== patch) return null;
+    const pf = patch.get(path);
+    const got = status === 200 && !body.truncated ? parsePatch(body.diff).find((f) => f.path === path) : undefined;
+    const whole = pf && got ? spansOf(pf, got) : null;
+    // Cut at the server's size cap, the file would seem to end where the cut fell.
+    if (!whole && !quiet) showToast(status !== 200 ? detailOf(body) : body.truncated ? `${path} is too large to show in full` : `Could not read the rest of ${path}`);
+    return whole;
+  };
+  /** `path` drawn as `next` makes of its spans as they are now: a second press before the first drew adds to it. */
+  const draw = (path: string, first: Whole, next: (w: Whole) => Span[]) =>
     setGot((g) => {
       const had = g.of === patch ? g.files : new Map<string, Whole>();
       const w = had.get(path) ?? first;
-      return { of: patch, files: new Map(had).set(path, { lines: w.lines, spans: grow(w.spans, gap, how, w.lines.length) }) };
+      const spans = next(w);
+      return spans === w.spans && had.has(path) ? g : { of: patch, files: new Map(had).set(path, { lines: w.lines, spans }) };
     });
+  const expand = async (path: string, gap: number, how: Grow) => {
+    const whole = files?.get(path) ?? (await read(path));
+    if (whole) draw(path, whole, (w) => grow(w.spans, gap, how, w.lines.length));
   };
   const wide = useMemo(() => (files ? new Map([...patch].map(([k, pf]) => [k, files.has(k) ? widen(pf, files.get(k)!) : pf])) : patch), [patch, files]);
+  useEffect(() => {
+    const undrawn = new Map<string, LineRange[]>();
+    for (const t of threads) {
+      const r = threadRange(t);
+      const pf = wide.get(t.file_path ?? "");
+      if (!r || !pf?.hunks.length || pf.hunks.some((h) => h.lines.some((l) => l[r.side] === r.end))) continue;
+      undrawn.set(pf.path, [...(undrawn.get(pf.path) ?? []), r]);
+    }
+    for (const [path, ranges] of undrawn) {
+      const show = (w: Whole) => ranges.reduce((spans, r) => reveal({ lines: w.lines, spans }, r), w.spans);
+      const whole = files?.get(path);
+      if (whole) draw(path, whole, show);
+      else if (!tried.has(path)) {
+        tried.add(path);
+        void read(path, true).then((w) => w && draw(path, w, show));
+      }
+    }
+    // `read` and `draw` are of this render's `patch`, which `wide` follows.
+  }, [wide, threads]);
   return { patch: wide, expand };
 }
 

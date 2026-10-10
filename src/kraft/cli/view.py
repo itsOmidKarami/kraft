@@ -61,15 +61,19 @@ def _suggestion_text(item: dict) -> str:
 
 def _usage_text(u: dict) -> str:
     """Every kind of token apart (Ruling 211). A session from before the split
-    counts its cache use under `in`, and the line says so."""
+    counts its cache use under `in`, and the line says so. So does an output
+    count that is missing a session's: a floor, or not known at all."""
     total = sum(u.get(k, 0) for k in usage.KINDS)
+    out = f"{u['tokens_out']:,} out"
+    if not u.get("out_complete", True):
+        out = f"at least {out}" if u["tokens_out"] else "out not known"
     parts = [
         f"{total:,} tokens",
         f"{u['tokens_in']:,} in"
         + ("" if u.get("split_complete", True) else " (cache not split on older sessions)"),
         f"{u.get('tokens_cache_write', 0):,} cache write",
         f"{u.get('tokens_cache_read', 0):,} cache read",
-        f"{u['tokens_out']:,} out",
+        out,
     ]
     if u.get("cost_usd"):
         # As the stop reasons and the web UI's meter print it (`format.ts` `usd`).

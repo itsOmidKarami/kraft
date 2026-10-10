@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, TemplateSummary } from "../../types";
-import { Composer } from "./Composer";
+import { Composer, sayIfFiledPaused } from "./Composer";
 
 const N = (id: string, kind: "exec" | "gate" = "exec", covered_by: string | null = null) => ({ id, kind, covered_by, gate_after: null, tasks: [] }) as unknown as ChainNode;
 const DEFAULT = [N("spec", "exec", "spec"), N("spec_approval", "gate", "spec"), N("implementation"), N("final_review", "gate")];
@@ -84,6 +84,15 @@ describe("Composer", () => {
     await settle();
     expect(toasts).toEqual(["Queued: 3 of 3 slots are busy. It starts when one frees."]);
     window.removeEventListener("kraft:toast", hear);
+  });
+
+  it("says the worktree storage limit is why a start is queued", () => {
+    const toasts: string[] = [];
+    const hear = (e: Event) => toasts.push((e as CustomEvent<{ message: string }>).detail.message);
+    window.addEventListener("kraft:toast", hear);
+    sayIfFiledPaused(true, { id: "w", status: "queued", slots: { busy: 0, limit: 3, storage: { used_bytes: 12 * 1024 ** 3, limit_bytes: 10 * 1024 ** 3 } } });
+    window.removeEventListener("kraft:toast", hear);
+    expect(toasts).toEqual(["Queued: worktrees use 12G of the 10G storage limit. It starts when space frees."]);
   });
 
   it("says before filing that an item on a repo with no setup command stops before its first task", async () => {

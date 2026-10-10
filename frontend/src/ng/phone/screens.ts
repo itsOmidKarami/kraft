@@ -16,6 +16,10 @@ export interface PhoneScreen {
   heading?: string;
   /** The data the taps need (a card, a row): the vitest walk covers a screen without it, the UI contract's phone rows the rest. */
   data?: boolean;
+  /** Data the default seed does not have, which the UI contract adds by this name: a test task with scopes. */
+  seed?: "scopes";
+  /** A query parameter the address carries there, when the route alone is another screen's too. */
+  query?: string;
 }
 
 const tab = (name: string): Tap => ({ role: "link", name: `^${name}$` });
@@ -32,6 +36,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "item-escalated", route: "/work-items/:id", taps: [card("escalated")], data: true },
   { id: "node", route: "/work-items/:id/nodes/:node", taps: [card("running"), node], data: true },
   { id: "task", route: "/work-items/:id/nodes/:node", taps: [card("running"), node, { css: ".ph-task-row" }], data: true },
+  { id: "scope", route: "/work-items/:id/nodes/:node", taps: [card("running"), { role: "button", name: "^verification" }, { role: "button", name: "^unit_tests" }, { role: "button", name: "^just test-unit" }], data: true, seed: "scopes", query: "scope" },
   { id: "gate-node", route: "/work-items/:id/nodes/:node", taps: [card("gate"), node], data: true },
   { id: "review", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review and decide$" }], data: true },
   { id: "new", route: "/work-items/new", taps: [{ role: "link", name: "^New work item$" }], heading: "New work item" },

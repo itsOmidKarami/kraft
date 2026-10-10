@@ -847,6 +847,40 @@ export const withFixRoundOutcome = (committed: boolean | undefined) => (S: Scena
   b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "fix_cycle_finished", payload: { node_id: start.node_id, cycle: start.payload.cycle, ...(committed === undefined ? {} : { committed }) }, node_id: start.node_id, created_at: start.created_at });
 };
 
+/** The running item's `unit_tests` is a changed-test-scope task, and its verification node ran twice: a first pass
+ *  that a retry left behind (one scope, which failed), and the pass it is on (two rounds, the second picking one
+ *  more scope). What a node's pass picker, a round's scopes and the phone's scope screen need to have something to show. */
+export const withScopes = (S: Scenario) => {
+  // The item page's running item, and the board's running card (the one the phone taps in from).
+  for (const b of new Set([ngBundle("running", S), ...Object.values(S.bundles).filter((x) => x.item.bead_id === "kraft-91bc")])) scoped(b);
+};
+function scoped(b: ItemBundle) {
+  const path = "verification.test.unit_tests";
+  const chain = JSON.parse(b.item.materialized_chain);
+  chain.chain.nodes.find((n: any) => n.id === "verification").steps.find((s: any) => s.id === "test").tasks[0].ref = "kraft.verify_changed_test_scopes";
+  b.item.materialized_chain = JSON.stringify(chain);
+  const mine = b.sessions.filter((s: any) => s.node_id === "verification");
+  for (const s of mine) s.pass = 2;
+  const tests = mine.filter((s: any) => s.hook_point === path);
+  for (const s of tests) Object.assign(s, { command: "just test-unit", repository: null });
+  const copy = (of: any, n: number, over: Record<string, unknown>) => {
+    const s = { ...of, id: `${String(n).padStart(4, "0")}${of.id.slice(4)}`, ...over };
+    b.sessions.push(s);
+    b.logs[s.id] = b.logs[of.id];
+    return s;
+  };
+  const later = (of: any, ms: number) => new Date(Date.parse(of.created_at) + ms).toISOString();
+  // Attempts count up per hook point over every pass and round, as the server numbers them.
+  const old = copy(tests[0], 2, { pass: 1, status: "failed", attempt: 1, created_at: later(tests[0], -3_600_000) });
+  tests.forEach((s: any, i: number) => { s.attempt = i + 2; });
+  const api = copy(tests.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(tests.at(-1), 1000) });
+  b.item.scope_runs = [old, ...tests, api].map((s: any) => ({
+    session_id: s.id, node_id: "verification", hook_point: path, repository: null, round: s.round, pass: s.pass, command: s.command,
+    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true, scope: s.command === "just test-api" ? "api/**" : "tests/**", order: s.command === "just test-api" ? 1 : 0,
+  }));
+  b.item.node_passes = { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] };
+}
+
 const testScopes = (n: number, red: number) => Array.from({ length: n }, (_, i) => ({ command: `pytest tests/s${i}`, scope: `tests/s${i}`, passed: i >= red, exit_code: i >= red ? 0 : 1, session_id: `${(i + 1).toString(16).padStart(32, "0")}` }));
 
 /** The gate's item ran `n` test scopes, the first `red` of them failing. */

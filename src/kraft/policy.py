@@ -139,6 +139,43 @@ class ArchiveInput(BaseModel):
     after_days: Annotated[StrictInt, Field(ge=0)] | None = None
 
 
+class StorageWorktreesInput(BaseModel):
+    """`storage.worktrees`: over `limit`, a start that needs a new worktree
+    waits until a person cleans up; over `quota` Kraft only warns. `quota`
+    defaults to 80% of `limit`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    limit: str | None = None
+    quota: str | None = None
+
+    @field_validator("limit", "quota", mode="before")
+    @classmethod
+    def _is_a_size(cls, value):
+        if value is None:
+            return None
+        size_bytes(value)
+        return str(value).strip()
+
+    @model_validator(mode="after")
+    def _quota_is_below_limit(self) -> StorageWorktreesInput:
+        if self.quota is None:
+            return self
+        if self.limit is None:
+            raise ValueError("storage.worktrees.quota needs a limit beside it")
+        if size_bytes(self.quota) >= size_bytes(self.limit):
+            raise ValueError(
+                f"storage.worktrees.quota {self.quota} must be below limit {self.limit}"
+            )
+        return self
+
+
+class StorageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worktrees: StorageWorktreesInput | None = None
+
+
 class PolicyInput(BaseModel):
     """Static policy.yaml schema; runtime conversion remains in ``load_policy``.
 
@@ -157,6 +194,7 @@ class PolicyInput(BaseModel):
     triggers: list[TriggerInput] = Field(default_factory=list)
     max_concurrent: PositiveInt = 3
     archive: ArchiveInput | None = None
+    storage: StorageInput | None = None
     auto_escalate_stuck: StrictBool = True
     auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
@@ -264,6 +302,12 @@ class Policy:
     #: fresh install ships with no auto-archive rather than a guessed default
     #: (UI v2 · 03).
     archive_after_days: int | None = None
+    #: `storage.worktrees.limit` in bytes; None is no limit, and then nothing
+    #: is measured, warned about or held (`kraft.storage`).
+    storage_limit_bytes: int | None = None
+    #: `storage.worktrees.quota` in bytes, or 80% of the limit. Set whenever
+    #: the limit is.
+    storage_quota_bytes: int | None = None
     triggers: list[Trigger] = field(default_factory=list)
     #: How many work items may be `status == 'active'` at once, across every
     #: repo, however they were started. Moved here from intake.yaml (UI v2 ·
@@ -328,12 +372,23 @@ class Policy:
             if parsed.findings.loop_severities is not None
             else DEFAULT_LOOP_SEVERITIES
         )
+        worktrees = parsed.storage.worktrees if parsed.storage else None
+        limit = size_bytes(worktrees.limit) if worktrees and worktrees.limit else None
+        quota = (
+            None
+            if limit is None
+            else size_bytes(worktrees.quota)
+            if worktrees.quota
+            else limit * 8 // 10
+        )
         return cls(
             loops=parsed.loops,
             default=parsed.default,
             loop_severities=severities,
             budget=parsed.budget or NO_BUDGET,
             archive_after_days=parsed.archive.after_days if parsed.archive else None,
+            storage_limit_bytes=limit,
+            storage_quota_bytes=quota,
             rate_limit_retries=parsed.rate_limit_retries,
             triggers=_triggers(name, parsed.triggers),
             max_concurrent=parsed.max_concurrent,
@@ -830,7 +885,7 @@ class InstancePolicyInput(BaseModel):
 #: `resources.memory` as `docker run --memory` takes it: a whole number of
 #: bytes, or of `k`, `m` or `g` (binary units, as docker reads them).
 _MEMORY = re.compile(r"[1-9][0-9]*[bkmg]?")
-_MEMORY_UNITS = {"b": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
+_MEMORY_UNITS = {"b": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 #: The smallest memory limit docker starts a container under.
 MIN_SANDBOX_MEMORY = 6 * 1024**2
 
@@ -838,7 +893,22 @@ MIN_SANDBOX_MEMORY = 6 * 1024**2
 def memory_bytes(value: str) -> int:
     """`resources.memory` (already validated) as a byte count."""
     unit = value[-1] if value[-1] in _MEMORY_UNITS else "b"
-    return int(value.rstrip("bkmg")) * _MEMORY_UNITS[unit]
+    return int(value.rstrip("bkmgt")) * _MEMORY_UNITS[unit]
+
+
+#: A `storage` size: `1000M`, `10G`, `1T`. The unit is required, unlike
+#: `resources.memory`: a bare `10` would be a 10-byte limit that holds every start.
+_SIZE = re.compile(r"[1-9][0-9]*[kmgt]b?")
+
+
+def size_bytes(value) -> int:
+    """A `storage` size as a byte count (binary units, as `memory_bytes`)."""
+    text = str(value).strip().lower()
+    if not _SIZE.fullmatch(text):
+        raise ValueError(
+            f"size {value!r} needs a whole number and a unit K, M, G or T, as in `10G`"
+        )
+    return memory_bytes(text.removesuffix("b"))
 
 
 def _memory(value: str) -> str:
