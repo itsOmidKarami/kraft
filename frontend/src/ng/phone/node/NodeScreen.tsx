@@ -6,7 +6,7 @@ import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
 import { chainGraph, rejectTarget } from "../../item/graph";
-import { escalationsOf, ESCALATION, FIX_LOOP, nodeGraph, passOf, stateWord } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { TestsLine } from "../../item/TestsLine";
 import { placeUrl, type Place } from "../../item/url";
@@ -49,7 +49,7 @@ export interface PlaceProps {
 }
 
 /** `/work-items/:id/nodes/:node` (W17 brief D): the strip, Overview / Log / Config, and the node's one pair. */
-export function NodeScreen({ item, version, events, docs, place, node: nodeId, now, reload, setPlace }: PlaceProps) {
+export function NodeScreen({ item, seen = item, version, events, docs, place, node: nodeId, now, reload, setPlace }: PlaceProps & { /** The item as the pass shown left it (`asOfPass`): what the tasks, the fix loop and the log read. */ seen?: ItemDetail }) {
   const navigate = useNavigate();
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
@@ -67,10 +67,11 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
   const overridden = !!mine || drafted.length > 0;
   const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
-  const { steps, side, loop, rounds } = useMemo(() => nodeGraph(item, api, now, events, place.round), [item, api, now, events, place.round]);
+  const { steps, side, loop, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
+  const passes = passList(item, nodeId, place.pass);
   const paths = stepsOf(api).steps;
   const escalations = escalationsOf(item, nodeId);
-  const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round }));
+  const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
   const wall = wallWords(item, api, events, now);
   const m = materialized(item);
   const frozen = m ? nodeAt(m, nodeId) : undefined;
@@ -104,7 +105,17 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
           <p className={`ph-node-sub ph-tone-${sub.tone}`}>{gate ? "gate" : "exec node"} · {sub.text}</p>
         </div>
         <TabStrip label="Node" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />
-        {rounds && rounds.latest > 1 && (tab === "overview" || tab === "log") && (
+        {passes && !gate && (tab === "overview" || tab === "log") && (
+          <div className="ph-attempts" role="group" aria-label="Passes">
+            {passes.rows.map((p) => (
+              // Another pass has its own rounds: the round picked does not carry over.
+              <button key={p.n} type="button" className={`ph-attempt${p.n === passes.selected ? " ph-is-on" : ""}`} aria-pressed={p.n === passes.selected} onClick={() => setPlace({ pass: p.n === passes.latest ? undefined : p.n, round: undefined })}>
+                pass {p.n} · {p.outcome}
+              </button>
+            ))}
+          </div>
+        )}
+        {rounds && rounds.rows.length > 1 && (tab === "overview" || tab === "log") && (
           <div className="ph-attempts" role="group" aria-label="Fix loop rounds">
             {rounds.rows.map((r) => (
               <button key={r.n} type="button" className={`ph-attempt${r.n === rounds.selected ? " ph-is-on" : ""}`} aria-pressed={r.n === rounds.selected} onClick={() => setPlace({ round: r.n === rounds.latest ? undefined : r.n })}>
@@ -125,7 +136,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
                     ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])
                 : ([
-                    ...(api.fix_loop ? [["fix loop", fixLoopWords(item, api)]] : []),
+                    ...(api.fix_loop ? [["fix loop", fixLoopWords(seen, api)]] : []),
                     ...(wall ? [["wall", wall]] : []),
                     ...(api.on_failure?.length ? [["on failure", `${api.on_failure.map(plainName).join(", ")}, once`]] : []),
                   ] as [string, React.ReactNode][])),
@@ -188,7 +199,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
             )}
           </>
         )}
-        {tab === "log" && <NodeLog item={item} node={nodeId} round={rounds && rounds.selected < rounds.latest ? rounds.selected : undefined} />}
+        {tab === "log" && <NodeLog item={seen} node={nodeId} round={rounds && rounds.selected < rounds.latest ? rounds.selected : undefined} />}
         {tab === "yaml" && (
           <div className="ph-yaml">
             <p className="ph-yaml-file">As frozen at intake, with this item's overrides.</p>
@@ -199,7 +210,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
           <>
             <Facts rows={[
               ["chain", `${chainName(item)} · frozen at intake`],
-              ...(api.fix_loop ? ([["fix loop", fixLoopWords(item, api)]] as [string, React.ReactNode][]) : []),
+              ...(api.fix_loop ? ([["fix loop", fixLoopWords(seen, api)]] as [string, React.ReactNode][]) : []),
               ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
               ["overrides", overridden ? [mine && `${mine} · changed for this item`, ...drafted].filter(Boolean).join(" · ") : "none"],
             ]} />
@@ -237,7 +248,7 @@ function NodeLog({ item, node, round }: { item: ItemDetail; node: string; round?
   const latest = new Map<string, ItemDetail["worker_sessions"][number]>();
   // A repair carries the round it leads into; a task and the judge, the round they measured.
   const repair = new Set(loopPaths(materialized(item), node).repair);
-  const ran = round ? passOf(item, node).filter((s) => s.round === (repair.has(s.hook_point) ? round : round - 1)) : item.worker_sessions.filter((x) => x.node_id === node);
+  const ran = round ? passOf(item, node).filter((s) => s.round === (repair.has(s.hook_point) ? round : round - 1)) : [...passOf(item, node), ...escalationsOf(item, node)];
   for (const s of [...ran].sort((a, b) => a.created_at.localeCompare(b.created_at))) latest.set(s.hook_point, s);
   const sessions = [...latest.values()].map((s) => ({ id: s.id, who: taskName(s.hook_point), running: s.status === "running" || s.status === "pending" }));
   const lines = useLogs(sessions);

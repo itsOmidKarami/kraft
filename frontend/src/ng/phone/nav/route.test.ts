@@ -8,9 +8,9 @@ describe("parentOf", () => {
 
   it("walks the work item's stack: task, node, item, board", () => {
     expect(parentOf("/work-items/a/nodes/verification?sel=verification.review.code_review&tab=log&attempt=2")).toBe("/work-items/a/nodes/verification");
-    // A scope is a screen over its task, and the fix-loop round is every one of theirs.
-    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&scope=%3Ajust+test&tab=log")).toBe("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1");
-    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1")).toBe("/work-items/a/nodes/verification?round=1");
+    // A scope is a screen over its task, and the pass of the node and its fix-loop round are every one of theirs.
+    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1&scope=%3Ajust+test&tab=log")).toBe("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1");
+    expect(parentOf("/work-items/a/nodes/verification?sel=verification.tests.scopes&round=1&pass=1")).toBe("/work-items/a/nodes/verification?round=1&pass=1");
     expect(parentOf("/work-items/a/nodes/verification?tab=log")).toBe("/work-items/a");
     expect(parentOf("/work-items/a")).toBe("/");
     expect(parentOf("/work-items/a/review?gate=final_review")).toBe("/work-items/a");

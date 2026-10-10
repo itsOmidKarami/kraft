@@ -51,6 +51,12 @@ describe("item URL", () => {
     // A round is a node view's: the chain view neither reads one nor writes one.
     expect(readPlace(undefined, q("round=2"), nodes).round).toBeUndefined();
     expect(placeUrl("w1", { sel: { kind: "chain" }, round: 2 })).toBe("/work-items/w1");
+    // The pass of the node, which the round is counted in, travels the same way.
+    expect(readPlace("verification", q("sel=verification.checks.lint&round=2&pass=1"), nodes)).toMatchObject({ sel, round: 2, pass: 1 });
+    expect(placeUrl("w1", { node: "verification", sel, round: 2, pass: 1 })).toBe("/work-items/w1/nodes/verification?sel=verification.checks.lint&round=2&pass=1");
+    for (const not of ["0", "1.5", "two"]) expect(readPlace("verification", q(`pass=${not}`), nodes).pass).toBeUndefined();
+    expect(readPlace(undefined, q("pass=2"), nodes).pass).toBeUndefined();
+    expect(placeUrl("w1", { sel: { kind: "chain" }, pass: 2 })).toBe("/work-items/w1");
   });
 
   it("round-trips a gate's reviewer as <gate>.auto_review, and reads it on no other node", () => {

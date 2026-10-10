@@ -1,4 +1,4 @@
-import { loopRounds, roundShown } from "../../item/nodeGraph";
+import { loopRounds, passWords, roundShown } from "../../item/nodeGraph";
 import { otherRounds, scopesView, stateWords, statusWords } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -16,7 +16,9 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
   const path = selPath(place.sel)!;
   const apiNode = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
   const round = roundShown(item, apiNode, place.round) ?? 1;
-  const total = loopRounds(item, apiNode)?.total;
+  const rounds = loopRounds(item, apiNode);
+  const total = rounds?.total;
+  const pass = passWords(item, nodeId, place.pass);
   const view = scopesView(item, path, round, now);
   const hit = view.rows.flatMap((row) => row.chips.map((chip) => ({ row, chip }))).find((x) => x.chip.key === place.scope);
   const at = place.scope.indexOf(":");
@@ -30,7 +32,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
   // The task fact is Back: a second entry for the task would bring the phone's own back gesture to it twice.
   const toTask = useBack().go;
   const mono = (v: string) => <span className="ph-mono">{v}</span>;
-  const others = hit ? otherRounds(item, path, place.scope, round) : [];
+  const others = hit ? otherRounds(item, path, place.scope, round, rounds?.first) : [];
   return (
     <>
       <ScreenHeader />
@@ -39,7 +41,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
           <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId} › {place.sel.step} › {place.sel.task}{several && repo ? ` › ${repo.name}` : ""}</p>
           <h1 className="ph-node-title">{hit ? (hit.chip.setup ? hit.chip.name : hit.chip.command) : place.scope.slice(at + 1) || place.scope}</h1>
           <p className={`ph-node-sub${hit?.chip.state === "failed" ? " ph-tone-bad" : hit?.chip.state === "running" ? " ph-tone-info" : ""}`}>
-            {hit?.chip.setup ? "area setup" : "test scope"} · round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : dropped ? "not picked" : "not reached"}
+            {hit?.chip.setup ? "area setup" : "test scope"} · {pass && `${pass} · `}round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : dropped ? "not picked" : "not reached"}
           </p>
         </div>
         {s && <TabStrip label="Scope" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />}

@@ -28,7 +28,7 @@ export function scopePane({ item, node, step, task, scope, round, now, crumbs, t
   const s = chip.session;
   const tabs = s ? [{ value: "overview", label: "Overview" }, { value: "log", label: "Log" }] : undefined;
   const on = tabs?.some((t) => t.value === tab) ? tab : "overview";
-  const others = otherRounds(item, path, scope, round);
+  const others = otherRounds(item, path, scope, round, loopRounds(item, node)?.first);
   return {
     crumbs: [...crumbs, toTaskCrumb, { label: row.name }],
     // The scope is its command: the whole of it here, where the chip trims it.

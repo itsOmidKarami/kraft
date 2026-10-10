@@ -293,6 +293,9 @@ export interface WorkItem {
   /** Every command a changed-test-scope task ran, over every round and repository, in the order it
    *  started (detail only). `test_result` is the latest run alone. */
   scope_runs?: ScopeRun[];
+  /** Each pass of the nodes the chain ran more than once, oldest first, with what started it (detail only). A node
+   *  that ran once is not listed. */
+  node_passes?: Record<string, NodePass[]>;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
@@ -391,12 +394,22 @@ export interface Finding {
 
 export type { SessionStatus };
 
+/** What started a pass of a node after its first: nothing named when its rounds simply started over. */
+export interface NodePass {
+  pass: number;
+  reason?: "reject" | "retry" | "base_change";
+  /** The gate whose rejection sent the chain back. */
+  gate?: string;
+}
+
 /** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
  *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup
  *  half a place before its first scope), absent for a command the table no longer declares. */
 export interface ScopeRun {
   /** Null for a command its round picked and has not started (`pending`). */
   session_id: string | null;
+  /** The pass of the node it ran in, as its session's. */
+  pass?: number;
   node_id: string;
   hook_point: string;
   repository: string | null;
@@ -426,8 +439,12 @@ export interface WorkerSession {
   /** 1-based; restarts only across a `new_thread` escalation (Kraft-dkb6g).
    *  Every non-escalation session is implicitly thread 1 for its whole life. */
   thread: number;
-  /** Fix-cycle index this session was dispatched in; 0 on the first pass. */
+  /** Fix-cycle index this session was dispatched in; 0 on a pass's first measurement. */
   round: number;
+  /** Which pass of its node it ran in, 1-based (`store.number_passes`): the chain runs a node again after a gate
+   *  reject, a retry or a base change, and each pass counts its rounds on its own. Absent on an escalation turn and
+   *  a gate's reviewer, which belong to the node, and on a fixture literal that predates it. */
+  pass?: number;
   created_at: string;
   started_at: string | null;
   exited_at: string | null;

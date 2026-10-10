@@ -13,6 +13,8 @@ export interface Place {
   attempt?: number;
   /** The fix-loop round a node view shows, 1-based; absent on the newest. The phone's screens carry it from one to the next. */
   round?: number;
+  /** The pass of the node a node view shows, 1-based (`WorkerSession.pass`); absent on the newest. Carried as the round is. */
+  pass?: number;
   /** The scope of an open changed-test-scope task, picked: its chip's key (`scopeKey`). Only with that task selected. */
   scope?: string;
   /** The document id open over the page (`?doc=`), so ⌘K and a pasted link land on it. */
@@ -55,7 +57,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;
   const count = (k: string) => { const n = Number(search.get(k)); return Number.isInteger(n) && n > 0 ? n : undefined; };
-  return { node, sel, tab: search.get("tab") ?? undefined, attempt: count("attempt"), round: node ? count("round") : undefined, scope: (sel.kind === "task" && search.get("scope")) || undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
+  return { node, sel, tab: search.get("tab") ?? undefined, attempt: count("attempt"), round: node ? count("round") : undefined, pass: node ? count("pass") : undefined, scope: (sel.kind === "task" && search.get("scope")) || undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
 }
 
 /** The URL for a place. */
@@ -66,6 +68,7 @@ export function placeUrl(id: string, p: Place): string {
   if (p.tab) q.set("tab", p.tab);
   if (p.attempt) q.set("attempt", String(p.attempt));
   if (p.round && p.node) q.set("round", String(p.round));
+  if (p.pass && p.node) q.set("pass", String(p.pass));
   if (p.scope && p.sel.kind === "task") q.set("scope", p.scope);
   if (p.doc) q.set("doc", p.doc);
   if (p.doc && p.q) q.set("q", p.q);

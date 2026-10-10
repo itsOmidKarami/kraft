@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, sessionLook, sessionsOf, settled, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -122,7 +122,9 @@ export function paneContent(a: PaneArgs): PaneContent {
   const drawn = a.graph.find((g) => g.id === sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
-  const live = drawn?.state === "current" && drawn.running;
+  // An earlier pass of the node says which it is: the node's state now is its newest pass's.
+  const earlier = item.earlier_pass?.node === node.id ? passWords(item, node.id, item.earlier_pass.pass) : "";
+  const live = !earlier && drawn?.state === "current" && drawn.running;
   // Before the item starts, an exec node's own overrides are set in place.
   const fresh = notStarted(item) && node.kind !== "gate";
   return {
@@ -132,7 +134,7 @@ export function paneContent(a: PaneArgs): PaneContent {
     title: node.id,
     // A node the run stands on but that isn't running says why: "needs you", "paused", "stopped at the cap",
     // "waiting on CI" (R11b-04: those last two read "running").
-    sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
+    sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${earlier || currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
     tabs: OVERVIEW_CONFIG,
     body: (
       <>
@@ -297,7 +299,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       config: edit ? <DraftConfig path={path} /> : <><dl className="item-facts ip-facts"><div><dt>path</dt><dd className="is-mono">{path}</dd></div></dl><AppliedRows applied={a.applied} path={path} /></>,
     };
     // `/skip` takes no path under a fix loop (422), so its tasks have no Skip.
-    const here = !esc && !rev && !loop && item.current_node_id === node.id;
+    const here = !esc && !rev && !loop && standsOn(item, node.id);
     return {
       ...head,
       tabs,
@@ -305,7 +307,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       footer: here ? <PathFooter item={item} path={path} what="task" state={item.display_status === "paused" ? "paused" : "running"} reload={a.reload} only="skip" /> : undefined,
     };
   }
-  const current = item.current_node_id === node.id;
+  const current = standsOn(item, node.id);
   // A changed-test-scope task runs one session per scope: they are its scopes, not attempts at it.
   const scopes = !esc && !rev && !loop && isScopeTask(item, path);
   // Picking the newest attempt drops the pin, so the pane follows the next one that starts;

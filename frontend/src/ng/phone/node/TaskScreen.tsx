@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { isScopeTask, roundWords, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
@@ -47,7 +47,9 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   const name = esc ? "escalation" : loop ? taskName(path) : place.sel.task;
   const mine = docs.filter((d) => at && (d.worker_session_id === at.id || (d.hook_point === path && d.attempt === at.attempt)));
   const kind = at?.model ? "agent task" : "task";
-  const lead = esc ? `handler · ${kind}` : !r ? kind : loop === "judge" ? `fix-loop judge · after round ${r}` : loop === "repair" ? `fix-loop repair · between rounds ${r} and ${r + 1}` : `${kind} · round ${r}${rounds.total ? ` of ${rounds.total}` : ""}`;
+  // A node the chain ran again reads one pass at a time: the screen says which.
+  const pass = esc ? "" : passWords(item, nodeId, place.pass);
+  const lead = (pass && `${pass} · `) + (esc ? `handler · ${kind}` : !r ? kind : loop === "judge" ? `fix-loop judge · after round ${r}` : loop === "repair" ? `fix-loop repair · between rounds ${r} and ${r + 1}` : `${kind} · round ${r}${rounds.total ? ` of ${rounds.total}` : ""}`);
   // A round that is over did not run what it has no session for; the newest may still get to it.
   const unrun = !at && !!r && (!!loop || r < rounds.latest);
   const state = at
@@ -87,7 +89,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
                 {(!solo || !row.chips.length) && <p className="ph-note">{!solo && <><span className="ph-mono">{row.name}</span> · </>}{row.note}</p>}
                 <div className="ph-list">
                   {row.chips.map((c) => (
-                    <button key={c.key} type="button" className="ph-row ph-task-row" onClick={() => navigate(placeUrl(item.id, { node: nodeId, sel: place.sel, round: place.round, scope: c.key }))}>
+                    <button key={c.key} type="button" className="ph-row ph-task-row" onClick={() => navigate(placeUrl(item.id, { node: nodeId, sel: place.sel, round: place.round, pass: place.pass, scope: c.key }))}>
                       <span className="ph-row-text">
                         <span className="ph-row-label ph-mono">{c.setup ? c.name : c.command}</span>
                         <span className="ph-row-hint">{c.state === "done" ? ["done", c.meta].filter(Boolean).join(" · ") : c.meta || c.state}{c.fresh ? " · new this round" : ""}</span>

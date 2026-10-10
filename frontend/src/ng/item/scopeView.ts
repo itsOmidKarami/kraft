@@ -1,7 +1,7 @@
 import { elapsed, elapsedBetween } from "../../format";
 import type { ScopeRun, SessionStatus, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
-import { passOf } from "./nodeGraph";
+import { passNow, passOf, standsOn } from "./nodeGraph";
 import type { ItemDetail } from "./useItem";
 
 /** The builtin whose task draws as a frame of repositories and scopes once selected. */
@@ -74,11 +74,13 @@ export const scopeKey = (repository: string | null | undefined, command: string)
 export const trim = (c: string, n = 28) => (c.length > n ? `${c.slice(0, n - 1)}…` : c);
 const basename = (p: string) => p.replace(/\/+$/, "").split("/").at(-1) || p;
 
-/** The runs of the changed-test-scope task at `path`. A run's round is its session's as the node's pass reads it: a
- *  re-measure after `on_failure` (stamped -1) is the round's own. */
+/** The runs of the changed-test-scope task at `path`, in the pass its node is on. A run's round is its session's as
+ *  the node's pass reads it: a re-measure after `on_failure` (stamped -1) is the round's own. */
 const runsOf = (item: ItemDetail, path: string): ScopeRun[] => {
-  const read = new Map(passOf(item, path.split(".")[0]).map((s) => [s.id, s.round]));
-  return (item.scope_runs ?? []).filter((r) => r.hook_point === path).map((r) => ({ ...r, round: (r.session_id ? read.get(r.session_id) : undefined) ?? r.round }));
+  const node = path.split(".")[0];
+  const top = passNow(item, node);
+  const read = new Map(passOf(item, node).map((s) => [s.id, s.round]));
+  return (item.scope_runs ?? []).filter((r) => r.hook_point === path && (r.pass ?? 1) === top).map((r) => ({ ...r, round: (r.session_id ? read.get(r.session_id) : undefined) ?? r.round }));
 };
 
 /** The repositories a fanned-out task visits, in the order it does (`dispatch._fan_out`): a workspace's root, then
@@ -126,7 +128,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   // The round is still going while one of its commands runs, or the node it belongs to is the one running.
   const node = path.split(".")[0];
   const latest = Math.max(0, ...runs.map((r) => r.round + 1));
-  const going = runs.some((r) => r.passed === null) || item.worker_sessions.some((s) => s.hook_point === path && ["running", "pending"].includes(s.status)) || (item.current_node_id === node && item.display_status === "running");
+  const going = runs.some((r) => r.passed === null) || item.worker_sessions.some((s) => s.hook_point === path && ["running", "pending"].includes(s.status)) || (standsOn(item, node) && item.display_status === "running");
   const liveRound = going && round >= latest;
   const rows: RepoRow[] = [];
   let failedBefore: string | null = null;
@@ -179,14 +181,14 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
 
 /** One scope across the other rounds, for the scope pane: "1: passed · 3: not picked". A round it ran in says how it went;
  *  one its repository ran in without it says "not picked"; one that never reached the repository says so. `round` itself
- *  is left out, as are rounds the node has not got to. */
-export function otherRounds(item: ItemDetail, path: string, key: string, round: number): string[] {
+ *  is left out, as are rounds the node has not got to, and those before `from`, the round the pass started at. */
+export function otherRounds(item: ItemDetail, path: string, key: string, round: number, from = 1): string[] {
   const all = runsOf(item, path);
   const [repo, ...rest] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   const command = rest.join(":");
   const latest = Math.max(0, ...all.map((r) => r.round + 1));
   const out: string[] = [];
-  for (let n = 1; n <= latest; n++) {
+  for (let n = from; n <= latest; n++) {
     if (n === round) continue;
     const here = all.filter((r) => r.round === n - 1 && (r.repository ?? "") === repo);
     const ran = here.filter((r) => r.command === command).at(-1);

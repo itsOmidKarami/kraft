@@ -45,6 +45,8 @@ describe("a fix-loop node", () => {
     expect(within(canvas()).getByRole("button", { name: /^code_review/ })).toHaveAccessibleName("code_review, agent task, done");
     expect(sub("code_review")).toBe("agent task · round 2 of 3 · done 1m");
     expect(within(pane("code_review")).queryByRole("button", { name: /^attempt/ })).toBeNull();
+    // The chain ran the node once: no pass to tell apart, so none is named.
+    expect(screen.queryByRole("button", { name: /^pass \d/ })).toBeNull();
   });
 
   it("opens the repair and the judge from the arc, with the round they sit between or after", async () => {
@@ -134,5 +136,57 @@ describe("a fix-loop node", () => {
   it("says 'round 2 of 3' in the node's own fix loop row", () => {
     mount("/work-items/w1/nodes/verification");
     expect(within(pane("verification")).getByText("fix loop").nextElementSibling).toHaveTextContent("round 2 of 3");
+  });
+});
+
+describe("a node the chain ran again", () => {
+  // Two rounds, then local_review rejected and sent the chain back: the node's second pass is on its first round.
+  const again = () => item([
+    ...run().slice(0, 6).map((x) => ({ ...x, pass: 1 })),
+    sess("verification.checks.lint", { pass: 2, attempt: 3, wall_ms: 12_000 }), sess("verification.review.code_review", { pass: 2, attempt: 3, status: "running", wall_ms: null }),
+  ]);
+  const twice = () => ({ ...again(), node_passes: { verification: [{ pass: 1 }, { pass: 2, reason: "reject" as const, gate: "local_review" }] } });
+  const pickPass = async (pass: number) => {
+    await userEvent.click(screen.getByRole("button", { name: /^pass \d/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(`^Pass ${pass}`) }));
+  };
+
+  it("opens on the newest pass, which counts its rounds and its attempts on its own", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.checks.lint", twice());
+    expect(screen.getByRole("button", { name: "pass 2 of 2 · latest" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "round 1 of 3 · latest" })).toBeInTheDocument();
+    expect(sub("lint")).toBe("subprocess task · round 1 of 3 · done 12s");
+    // The passes say what started them, newest first.
+    await userEvent.click(screen.getByRole("button", { name: /^pass \d/ }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Pass 2 · nowafter a reject at local_review", "Pass 1first run"]);
+  });
+
+  it("follows the pass picked: its rounds, its tasks and their runs, and back to the newest", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review", twice());
+    expect(sub("code_review")).toMatch(/^agent task · round 1 of 3 · running/);
+    await pickPass(1);
+    expect(screen.getByRole("button", { name: /^pass 1 of 2$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "round 2 of 3 · latest" })).toBeInTheDocument();
+    expect(sub("code_review")).toBe("agent task · round 2 of 3 · done 1m");
+    expect(within(canvas()).getByRole("button", { name: /^lint/ })).toHaveAccessibleName("lint, subprocess task, failed");
+    await pickRound(1);
+    expect(sub("code_review")).toBe("agent task · round 1 of 3 · done 4m");
+    // Another pass has its own rounds: the round picked in this one does not carry over.
+    await pickPass(2);
+    expect(sub("code_review")).toMatch(/^agent task · round 1 of 3 · running/);
+    await pickPass(1);
+    expect(screen.getByRole("button", { name: "round 2 of 3 · latest" })).toBeInTheDocument();
+  });
+
+  it("names the pass in the node's own pane, and offers no setting of a node that has run", async () => {
+    mount("/work-items/w1/nodes/verification?tab=config", twice());
+    expect(sub("verification")).toMatch(/^exec node · running/);
+    await pickPass(1);
+    // The node's state now is its newest pass's: an earlier pass says which it is.
+    expect(sub("verification")).toBe("exec node · pass 1 of 2");
+    // Overrides are set before an item starts. Reading an earlier pass does not make it one that has not.
+    expect(within(pane("verification")).queryByRole("button", { name: /override|Reset/i })).toBeNull();
+    expect(within(pane("verification")).queryByRole("combobox")).toBeNull();
+    expect(within(pane("verification")).queryByRole("spinbutton")).toBeNull();
   });
 });

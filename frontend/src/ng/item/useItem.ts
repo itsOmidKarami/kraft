@@ -3,7 +3,11 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { WorkItem, WorkerSession } from "../../types";
 
-export type ItemDetail = WorkItem & { worker_sessions: WorkerSession[] };
+export type ItemDetail = WorkItem & {
+  worker_sessions: WorkerSession[];
+  /** Set by `asOfPass` alone, never by the server: the node whose earlier pass this copy of the item shows, and which pass. */
+  earlier_pass?: { node: string; pass: number };
+};
 /** `version` moves when a read of the item brings something new. Key what the
  *  page reads beside the item (its events, documents, thread, diff) on it, not
  *  on `updated_at`: the server leaves `updated_at` alone when only a session or
