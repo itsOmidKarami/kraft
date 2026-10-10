@@ -575,24 +575,25 @@ def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client,
     assert client.get("/api/health").json()["status"] == "ok"
 
 
-def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path):
+def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path, monkeypatch):
     """The server started without it (offline, say) and left the plugin out;
     a work item pinned to it then restored the store by itself."""
-    from support.plugins import drop_store
-
     st = client.app.state
     store = _install_release(client, tmp_path)
-    kept = tmp_path / "kept"
-    shutil.copytree(store, kept)
-    drop_store(store)
+    store.chmod(0o755)  # a store is read-only, and a directory moves only if writable
+    away = store.rename(tmp_path / "away")
     deps._reload_templates(st)
     assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
-    shutil.copytree(kept, store)
+    away.rename(store)
 
     client.portal.call(deps.restore_plugins, client.app)
 
     assert "release:ship" in st.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
+    _edit_a_stored_file(st, store)  # left out for another reason, its store present
+    deps._reload_templates(st)
+    monkeypatch.setattr(deps, "_reload_templates", lambda st: pytest.fail("reloaded"))
+    client.portal.call(deps.restore_plugins, client.app)
 
 
 def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
