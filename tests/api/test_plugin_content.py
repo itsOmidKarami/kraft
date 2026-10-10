@@ -4,7 +4,7 @@ library through the draft operations."""
 
 import pytest
 import yaml
-from support.plugins import load_release
+from support.plugins import AGENT, load_release
 
 READ_ONLY = "comes from plugin release@acme; extend it or copy it to your library"
 
@@ -157,3 +157,37 @@ def test_the_library_view_carries_the_plugins_components_beside_its_own(loaded):
     }
     assert "release:base" not in view["files"]["library.yaml"]
     assert loaded.get("/api/drafts/chains/default").json()["plugin_library"] is None
+
+
+BUILD = {"kind": "exec", "tasks": [{"id": "coder", "extends": "base"}]}
+
+
+def _mine(client, *ops):
+    start = [{"op": "new_chain"}, {"op": "add_node", "at": 0, "id": "n", "kind": "exec"}]
+    answer = client.post("/api/drafts/chains/mine/ops", json={"ops": [*start, *ops]})
+    assert answer.status_code == 200, answer.text
+    return yaml.safe_load(answer.json()["files"]["chains/mine.yaml"])
+
+
+def test_a_plugins_components_are_extended_from_a_local_chain(client, tmp_path):
+    """Extending is the way to use what a plugin ships: the editor's own ops
+    reach its nodes and tasks, and a task it adds gets an id of its own."""
+    library = {"tasks": {"base": {**AGENT, "skill": "notes"}}, "nodes": {"build": BUILD}}
+    load_release(client, tmp_path, library=library)
+
+    written = _mine(
+        client,
+        {"op": "add_step", "container": "n", "at": 0},
+        {"op": "add_task", "container": "n", "step": "step_1", "extends": "release:base"},
+        {"op": "add_node", "at": 1, "id": "m", "kind": "exec"},
+        {"op": "extend", "node": "m", "base": "release:build"},
+        {"op": "set_field", "path": "m.main.coder", "field": "prompt", "value": "mine"},
+    )
+
+    first, second = written["nodes"]
+    assert first["steps"][0]["tasks"] == [{"id": "base", "extends": "release:base"}]
+    assert second["extends"] == "release:build"
+    # The inherited task is owned to change it, and the step keeps its other fields.
+    assert second["tasks"] == [{"extends": "release:base", "prompt": "mine", "id": "coder"}]
+    assert client.post("/api/drafts/chains/mine/publish").status_code == 200
+    assert not client.get("/api/health").json()["invalid_templates"]

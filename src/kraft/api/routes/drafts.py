@@ -95,21 +95,8 @@ def _view(st, area: str, key: str, files: dict, published: dict, result: dict) -
         # On the library: the loaded plugins' components, in `library.yaml`'s
         # own shape (`{section: {"release:base": definition}}`), to show beside
         # the local ones. Never part of `files`: no op or publish touches them.
-        "plugin_library": _plugin_library(st) if area == "library" else None,
+        "plugin_library": ops.plugin_components(st) if area == "library" else None,
     }
-
-
-def _plugin_library(st) -> dict[str, dict]:
-    library = getattr(st, "library", None)
-    if library is None:
-        return {}
-    out: dict[str, dict] = {}
-    for component in catalogue.components(library, []):
-        if component["plugin"] is not None:
-            out.setdefault(component["kind"], {})[component["name"]] = ops.plain(
-                component["definition"]
-            )
-    return out
 
 
 @api_router.get("/drafts")
