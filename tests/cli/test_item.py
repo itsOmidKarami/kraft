@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
+from support.api import _set_status
 
 from kraft import cli
 
@@ -434,3 +436,239 @@ def test_reject_asks_for_its_note_before_it_looks_for_a_gate(monkeypatch, capsys
         cli.main(["item", "reject", "w1", "--note", "  "])
     assert caught.value.code == 1
     assert "a reject note is required" in capsys.readouterr().err
+
+
+_PREVIEW = {
+    "freed_bytes": 1024**3,
+    "used_after_bytes": 9 * 1024**3,
+    "state_after": "ok",
+    "items": [
+        {
+            "id": "w1",
+            "title": "Fix",
+            "bytes": 1024**3,
+            "archivable": True,
+            "refusal": None,
+            "uncommitted_files": 3,
+            "unpushed_commits": 0,
+            "branch_kept": False,
+        },
+    ],
+}
+
+
+@pytest.fixture
+def archiving(monkeypatch):
+    """The client calls `item archive` makes, recorded: (previewed, archived) id lists."""
+    calls = {"previewed": [], "archived": [], "preview": _PREVIEW, "bulk": None}
+
+    async def storage_preview(ids):
+        calls["previewed"].append(ids)
+        return calls["preview"]
+
+    async def archive(ids):
+        calls["archived"].append(ids)
+        if calls["bulk"] is not None:
+            return calls["bulk"]
+        return {"results": [{"id": i, "ok": True, "status": "completed"} for i in ids]}
+
+    monkeypatch.setattr(cli.item.client, "storage_preview", storage_preview)
+    monkeypatch.setattr(cli.item.client, "archive", archive)
+    return calls
+
+
+def _archived(wid) -> bool:
+    return bool(asyncio.run(cli.item.client.transport._get(f"/work-items/{wid}"))["archived_at"])
+
+
+def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys):
+    wid = make_item(repo)
+    _set_status(wid, "completed")
+
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", wid])
+
+    assert stopped.value.code == 1
+    seen = capsys.readouterr()
+    assert wid in seen.out and "archiving frees" in seen.out
+    assert "pass --yes" in seen.err
+    assert not _archived(wid)
+
+    cli.main(["item", "archive", wid, "--yes"])
+
+    assert f"archived {wid}" in capsys.readouterr().out
+    assert _archived(wid)
+
+    cli.main(["item", "restore", wid])
+
+    assert f"restored {wid}" in capsys.readouterr().out
+    assert not _archived(wid)
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["human", "json"])
+def test_archive_with_yes_archives_every_id_and_prints_each_result(archiving, capsys, flags):
+    cli.main(["item", "archive", "w1", "w2", "--yes", *flags])
+
+    out = capsys.readouterr().out
+    assert archiving["archived"] == [["w1", "w2"]]
+    if flags:
+        assert json.loads(out) == {
+            "results": [
+                {"id": "w1", "ok": True, "status": "completed"},
+                {"id": "w2", "ok": True, "status": "completed"},
+            ]
+        }
+    else:
+        assert out.splitlines()[-2:] == ["archived w1", "archived w2"]
+
+
+@pytest.mark.parametrize(
+    ("bulk", "refused", "sent", "lines"),
+    [
+        (
+            {
+                "results": [
+                    {"id": "w1", "ok": False, "error": "git said no"},
+                    {"id": "w2", "ok": True},
+                ]
+            },
+            None,
+            ["w1", "w2"],
+            ["not archived w1: git said no", "archived w2"],
+        ),
+        (None, "w2", ["w1"], ["archived w1", "not archived w2: no"]),
+        (None, "w1", ["w2"], ["not archived w1: no", "archived w2"]),
+    ],
+    ids=["bulk-refuses-one", "preview-refuses-one", "preview-refuses-first"],
+)
+def test_archive_exits_1_after_printing_when_an_id_was_not_archived(
+    archiving, capsys, bulk, refused, sent, lines
+):
+    archiving["bulk"] = bulk
+    if refused:
+        archiving["preview"] = {
+            **_PREVIEW,
+            "items": [
+                _PREVIEW["items"][0] | {"id": wid, "archivable": wid != refused, "refusal": "no"}
+                for wid in ("w1", "w2")
+            ],
+        }
+
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", "w1", "w2", "--yes"])
+
+    assert stopped.value.code == 1
+    assert archiving["archived"] == [sent]
+    assert capsys.readouterr().out.splitlines()[-2:] == lines
+
+
+def test_archive_sends_nothing_when_the_preview_refused_every_id(archiving, capsys):
+    archiving["preview"] = {
+        **_PREVIEW,
+        "items": [_PREVIEW["items"][0] | {"archivable": False, "refusal": "already archived"}],
+    }
+
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", "w1", "--yes"])
+
+    assert stopped.value.code == 1
+    assert archiving["archived"] == []
+    assert "not archived w1: already archived" in capsys.readouterr().out
+
+
+def test_archive_json_without_yes_prints_the_preview_and_refuses(archiving, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", "w1", "--json"])
+
+    assert stopped.value.code == 1
+    assert json.loads(capsys.readouterr().out) == _PREVIEW
+    assert archiving["archived"] == []
+
+
+@pytest.mark.parametrize(
+    ("items", "taken"),
+    [
+        ([{"id": "a", "reclaimable": True}, {"id": "b", "reclaimable": False}], [["a"]]),
+        ([{"id": "b", "reclaimable": False}], []),
+    ],
+    ids=["some", "none"],
+)
+def test_archive_reclaimable_takes_what_the_storage_view_marks(
+    monkeypatch, archiving, capsys, items, taken
+):
+    async def storage_usage():
+        return {"items": items}
+
+    monkeypatch.setattr(cli.item.client, "storage_usage", storage_usage)
+
+    cli.main(["item", "archive", "--reclaimable", "--yes"])
+
+    assert archiving["archived"] == taken
+    assert archiving["previewed"] == taken
+    if not taken:
+        assert capsys.readouterr().out.strip() == "nothing to archive"
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["human", "json"])
+def test_archive_reclaimable_takes_the_200_largest_and_says_so(
+    monkeypatch, archiving, capsys, flags
+):
+    async def storage_usage():  # `GET /storage` lists largest first
+        return {"items": [{"id": f"w{n}", "reclaimable": True} for n in range(201)]}
+
+    monkeypatch.setattr(cli.item.client, "storage_usage", storage_usage)
+    sentence = "archived the 200 largest of 201 reclaimable items; run it again for the rest"
+
+    cli.main(["item", "archive", "--reclaimable", "--yes", *flags])
+
+    out, err = capsys.readouterr()
+    assert archiving["previewed"] == archiving["archived"] == [[f"w{n}" for n in range(200)]]
+    if flags:
+        assert sentence not in out
+        assert err.strip() == sentence
+    else:
+        assert out.splitlines()[-1] == sentence
+
+
+def test_archive_reclaimable_refuses_ids_beside_it(archiving, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", "w1", "--reclaimable", "--yes"])
+
+    assert stopped.value.code == 1
+    assert "not both" in capsys.readouterr().err
+    assert archiving["archived"] == []
+
+
+def test_archive_with_no_id_takes_the_item_you_are_standing_in(monkeypatch, archiving):
+    monkeypatch.setattr("kraft.client.context.resolve_context", lambda cwd=None: ("w9", "user"))
+
+    cli.main(["item", "archive", "--yes", "--json"])
+
+    assert archiving["archived"] == [["w9"]]
+
+
+def test_archive_refuses_a_workers_own_item(monkeypatch, archiving, capsys):
+    monkeypatch.setattr("kraft.client.context.resolve_context", lambda cwd=None: ("w9", "worker"))
+
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "archive", "w9", "--yes"])
+
+    assert stopped.value.code == 1
+    assert "cannot act on its own work item" in capsys.readouterr().err
+    assert archiving["archived"] == []
+
+
+@pytest.mark.parametrize(("argv", "sent"), [(["w1"], "w1"), ([], None)], ids=["id", "no-id"])
+def test_restore_names_the_item(monkeypatch, capsys, argv, sent):
+    seen = []
+
+    async def restore(work_item_id=None):
+        seen.append(work_item_id)
+        return {"id": "w1", "status": "completed"}
+
+    monkeypatch.setattr(cli.item.client, "restore", restore)
+
+    cli.main(["item", "restore", *argv])
+
+    assert seen == [sent]
+    assert "restored w1" in capsys.readouterr().out

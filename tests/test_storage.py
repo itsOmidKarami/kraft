@@ -172,3 +172,108 @@ async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatc
     await storage.tick(app)
 
     assert storage.usage(app.state) is None
+
+
+async def test_two_kicks_while_one_runs_start_one_tick_and_the_task_is_kept(monkeypatch):
+    import asyncio
+
+    release = asyncio.Event()
+    ticks = []
+
+    async def tick(app):
+        ticks.append(app)
+        await release.wait()
+
+    monkeypatch.setattr(storage, "tick", tick)
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    storage.kick(app)
+    storage.kick(app)
+    await asyncio.sleep(0)
+
+    assert len(ticks) == 1
+    task = app.state.storage_kick
+    assert not task.done()
+    release.set()
+    await task
+    assert task.done()
+
+
+def _row(status="completed", archived_at=None, title="t", updated_at="2026-01-01T00:00:00+00:00"):
+    return {"title": title, "status": status, "archived_at": archived_at, "updated_at": updated_at}
+
+
+@pytest.mark.parametrize(
+    ("row", "why"),
+    [
+        (_row("completed"), None),
+        (_row("abandoned"), None),
+        (_row("active"), "only a completed or abandoned item can be archived"),
+        (_row("paused"), "only a completed or abandoned item can be archived"),
+        (_row("completed", "2026-01-02T00:00:00+00:00"), "already archived"),
+        (None, "unknown work item"),
+    ],
+    ids=["completed", "abandoned", "active", "paused", "archived", "unknown"],
+)
+def test_refusal_says_why_an_item_cannot_be_archived(row, why):
+    assert storage.refusal(row) == why
+    assert storage.reclaimable(row) is (why is None)
+
+
+def test_report_joins_the_measurement_to_the_work_items():
+    used = storage.Usage(
+        "2026-01-01T00:00:00+00:00",
+        155,
+        {"done": 30, "live": 50, "old": 5, "ghost": 70},
+        {"worktrees": 155, "sandboxes": 0},
+    )
+    rows = {
+        "done": _row("completed", title="Done one"),
+        "live": _row("active", title="Live one"),
+        "old": _row("completed", "2026-01-02T00:00:00+00:00"),
+    }
+
+    got = storage.report(_policy(150, 120), used, rows)
+
+    assert [(i["id"], i["bytes"], i["reclaimable"], i["archived"]) for i in got["items"]] == [
+        ("live", 50, False, False),
+        ("done", 30, True, False),
+        ("old", 5, False, True),
+    ]
+    assert got["items"][1] == {
+        "id": "done",
+        "title": "Done one",
+        "status": "completed",
+        "archived": False,
+        "bytes": 30,
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "reclaimable": True,
+    }
+    assert got["orphans"] == [{"name": "ghost", "bytes": 70}]
+    assert got["reclaimable_bytes"] == 30
+    assert got["categories"] == used.categories
+    assert (got["measured_at"], got["state"], got["used_bytes"]) == (
+        "2026-01-01T00:00:00+00:00",
+        "held",
+        155,
+    )
+    assert (got["quota_bytes"], got["limit_bytes"]) == (120, 150)
+
+
+def test_report_without_a_limit_has_no_state_quota_or_limit():
+    got = storage.report(_policy(), _usage(155, {"done": 30}), {"done": _row()})
+    assert (got["state"], got["quota_bytes"], got["limit_bytes"]) == (None, None, None)
+    assert (got["used_bytes"], got["reclaimable_bytes"]) == (155, 30)
+
+
+@pytest.mark.parametrize(
+    ("freed", "left", "state"),
+    [(0, 140, "held"), (40, 100, "over_quota"), (70, 70, "ok"), (500, 0, "ok")],
+    ids=["nothing", "down-to-the-limit", "down-to-the-quota", "more-than-used"],
+)
+def test_after_says_where_usage_lands(freed, left, state):
+    assert storage.after(_policy(100, 80), _usage(140), freed) == (left, state)
+
+
+def test_after_without_a_limit_has_no_state():
+    assert storage.after(_policy(), _usage(140), 40) == (100, None)
