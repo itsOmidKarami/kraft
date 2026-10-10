@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
+from kraft.store.counters import reset_fix_loops
 from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
 
 
@@ -104,11 +106,16 @@ def reject_gate(
     node: str | None = None,
     by: str = "human",
     verdict: str | None = None,
-) -> bool:
-    """Record the rejection, and say whether it was recorded (an item that has
-    ended takes none). `reopen` flips the item back to active for the
+    rerun: Sequence[str] = (),
+) -> None:
+    """Record the rejection. `reopen` flips the item back to active for the
     backward-motion re-run (02 §7.2); a rejection that breached the gate's
     reject loop leaves it needs_human.
+
+    `rerun` is the nodes with a fix loop that the re-run measures again: a
+    rejection that reopens gives them their rounds back
+    (`counters.reset_fix_loops`), here so that it is one write with the
+    rejection, and an item that has ended (which records none) resets nothing.
 
     `node` is the chain node the re-run enters at (Kraft-ko7j). It rides the
     event rather than a column: the events table is already append-only and
@@ -133,14 +140,15 @@ def reject_gate(
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     ):
-        return False
+        return
     events.append(
         conn,
         work_item_id,
         GateEvent.REJECTED,
         {"gate": gate, "note": note, "node": node, "by": by, "verdict": verdict},
     )
-    return True
+    if reopen:
+        reset_fix_loops(conn, work_item_id, list(rerun), by)
 
 
 #: Events that mean the newest rejection has already been acted on, so its note
