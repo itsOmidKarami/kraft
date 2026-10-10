@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
   vi.spyOn(api, "getLibrary").mockResolvedValue({ file: "", text: "", components: [
     { id: "tasks.implementer", kind: "tasks", name: "implementer", definition: { kind: "agent", prompt: "Implement the approved plan." }, used_by: [], issues: [] },
+    { id: "tasks.release:base", kind: "tasks", name: "release:base", definition: { kind: "agent", prompt: "Ship it." }, used_by: [], issues: [], plugin: { id: "release@acme", version: "1.0.0" } },
     { id: "tasks.verify_changed_scopes", kind: "tasks", name: "verify_changed_scopes", definition: { kind: "subprocess", command: "true" }, used_by: [], issues: [] },
     { id: "nodes.verification", kind: "nodes", name: "verification", definition: { kind: "exec", steps: [{ id: "tests", tasks: [] }, { id: "review", tasks: [] }] }, used_by: [], issues: [] },
   ] });
@@ -98,15 +99,16 @@ describe("Chains page: the node view", () => {
     expect(screen.getByRole("textbox", { name: "prompt" })).toHaveFocus();
   });
 
-  it("adds a library task beside a step's tasks from its parallel seam", async () => {
+  // A plugin's task is `release:base`; the id it gets is one an id may be.
+  it.each([["impl", "implementer", "implementer"], ["release", "base", "release:base"]])("adds a library task beside a step's tasks from its parallel seam (%s)", async (typed, id, name) => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...DEFAULT_VIEW, ops: [] }));
     mount("/templates/chains/default/nodes/verification");
     // The file's first mount pays for the shell's and the chain page's imports: under a loaded CPU that ran past 1s.
     const g = await screen.findByRole("group", { name: "verification" }, { timeout: 5000 });
     await userEvent.click(within(g).getAllByRole("button", { name: "Add a parallel task" })[0]);
     await userEvent.click(await screen.findByRole("menuitem", { name: "From the library…" }));
-    await userEvent.type(await screen.findByRole("textbox", { name: "Search the library" }), "impl{Enter}");
-    await waitFor(() => expect(post.mock.calls[0][2]).toEqual([{ op: "add_task", container: "verification", step: "tests", id: "implementer", extends: "implementer" }]));
+    await userEvent.type(await screen.findByRole("textbox", { name: "Search the library" }), `${typed}{Enter}`);
+    await waitFor(() => expect(post.mock.calls[0][2]).toEqual([{ op: "add_task", container: "verification", step: "tests", id, extends: name }]));
   });
 
   it("extends a library node from the empty node, and says what the base is", async () => {

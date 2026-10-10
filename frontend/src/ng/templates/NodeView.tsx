@@ -149,7 +149,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
     if (!menu || menu.t !== "task") return;
     const step = menu.step ?? nextStepId(ids);
     const taken = steps.find((s) => s.id === step)?.tasks.map((x) => x.id) ?? [];
-    const id = uniq("kind" in c ? c.kind : c.extends, taken);
+    const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
     const ops: Op[] = menu.step ? [] : [{ op: "add_step", container: node, at: menu.at ?? ids.length, id: step }];
     ops.push({ op: "add_task", container: node, step, id, ...c });
     if (!(await send(ops))) return;
