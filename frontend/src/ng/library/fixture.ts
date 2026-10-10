@@ -42,7 +42,7 @@ export const libView = (extra: Partial<Result> = {}, draft = false): DraftView =
 
 const comp = (id: string, used_by: string[] = [], paths?: PublishedComponent["used_by_paths"]): PublishedComponent => {
   const [kind, name] = id.split(".");
-  return { id, kind: kind as PublishedComponent["kind"], name, used_by, used_by_paths: paths ?? used_by.map((chain) => ({ chain, path: "x", overrides: false })) };
+  return { id, kind: kind as PublishedComponent["kind"], name, plugin: null, used_by, used_by_paths: paths ?? used_by.map((chain) => ({ chain, path: "x", overrides: false })) };
 };
 
 export const PUBLISHED: PublishedLibrary = {

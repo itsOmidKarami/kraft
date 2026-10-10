@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button";
 import { detailOf } from "../../http";
 import * as d from "../draft/draftApi";
@@ -7,13 +7,15 @@ import type { Scope } from "../draft/types";
 import { problemsAt } from "../draft/view";
 import { problemText } from "../problems";
 import { jumpTo } from "../YamlView";
+import { ReadOnly } from "../plugin";
 
 /** One component's own YAML (Decisions §9 Item YAML): the server writes it
  *  (W13-A's fragment route, R46), edits send `set_fragment` on a pause; an id
  *  change or a syntax error is refused and the last valid version kept. */
-export function ItemYaml({ draft, scope, path, extendsName }: { draft: ConfigDraft; scope: Scope; path: string; extendsName?: string }) {
+export function ItemYaml({ draft, scope, path, extendsName, fixed }: { draft: ConfigDraft; scope: Scope; path: string; extendsName?: string; /** The text itself, for a part the fragment route does not serve (a plugin's library component). */ fixed?: string }) {
   const view = draft.view!;
-  const [text, setText] = useState<string | null>(null);
+  const readOnly = useContext(ReadOnly);
+  const [text, setText] = useState<string | null>(fixed ?? null);
   const [refusal, setRefusal] = useState<{ message: string; line?: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const dirty = useRef(false);
@@ -30,7 +32,7 @@ export function ItemYaml({ draft, scope, path, extendsName }: { draft: ConfigDra
       setText(a.body.text);
     });
   useEffect(() => {
-    if (!dirty.current) void load();
+    if (!dirty.current && fixed === undefined) void load();
     // `load` reads only the scope and path, both in `stamp`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stamp]);
@@ -56,7 +58,7 @@ export function ItemYaml({ draft, scope, path, extendsName }: { draft: ConfigDra
   if (text === null) return <p className="pane-note">Loading…</p>;
   return (
     <div className="iy">
-      <p className="pane-note">{extendsName ? `Only what this chain sets. Everything else comes from ${extendsName}.` : "Edits apply to the draft as you type."}</p>
+      <p className="pane-note">{readOnly ? "Read-only: it comes from a plugin." : extendsName ? `Only what this chain sets. Everything else comes from ${extendsName}.` : "Edits apply to the draft as you type."}</p>
       <div className="iy-box" ref={box}>
         <div className="iy-gutter" aria-hidden="true">{lines.map((_, i) => <div key={i} className={refusal?.line === i + 1 ? "is-bad" : undefined}>{i + 1}</div>)}</div>
         <textarea
@@ -65,6 +67,7 @@ export function ItemYaml({ draft, scope, path, extendsName }: { draft: ConfigDra
           aria-label={`${path}, YAML`}
           spellCheck={false}
           wrap="off"
+          readOnly={readOnly}
           value={text}
           style={{ height: lines.length * 17 + 8 }}
           onChange={(e) => edit(e.target.value)}

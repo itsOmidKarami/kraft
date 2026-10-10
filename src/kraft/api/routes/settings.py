@@ -50,7 +50,11 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     `description` is read as authored, so a broken chain still shows it."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
     description = library.chain_data(id).get("description")
-    listed = {"id": id, "description": description if isinstance(description, str) else None}
+    listed = {
+        "id": id,
+        "description": description if isinstance(description, str) else None,
+        "plugin": catalogue.plugin_view(library, id),
+    }
     try:
         nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
     except TemplateLibraryError as exc:
@@ -358,7 +362,13 @@ async def get_template(tid: str, request: Request):
         text = path.read_text()
     except OSError as exc:
         raise HTTPException(500, f"{path}: cannot read: {exc}") from exc
-    return {"id": tid, "file": str(path), "text": text, "chain": yaml.safe_load(text) or {}}
+    return {
+        "id": tid,
+        "file": str(path),
+        "text": text,
+        "chain": yaml.safe_load(text) or {},
+        "plugin": catalogue.plugin_view(library, tid),
+    }
 
 
 class ChainText(BaseModel):
@@ -372,9 +382,12 @@ async def put_template(tid: str, body: ChainText, request: Request):
     `POST /templates/resolve` runs -- and written verbatim, so the author's
     comments and layout survive. A new id becomes `chains/<id>.yaml`."""
     st = request.app.state
+    library = deps.library_or_503(st)
+    # Before the id-shape check, which would answer 400 for a qualified id.
+    if why := catalogue.read_only_message(library, tid):
+        raise HTTPException(409, why)
     if not _CHAIN_ID.fullmatch(tid):
         raise HTTPException(400, f"invalid chain id {tid!r}")
-    library = deps.library_or_503(st)
     path = (
         library.chain_file(tid)
         if tid in library.chain_ids

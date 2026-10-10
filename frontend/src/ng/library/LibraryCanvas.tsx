@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf } from "../http";
 import { isTextField } from "../keys";
@@ -11,6 +11,7 @@ import type { Row } from "./rows";
 import { SteeringCanvas } from "./steering";
 import type { Use } from "./types";
 import { libSel } from "./sel";
+import { ReadOnly } from "../templates/plugin";
 
 /** The Library's canvas (Decisions §10): a node as its steps and tasks, with its failure handlers in the bottom
  *  pane; a step as one step; a task as its one glyph. Drawn from the draft as written (R18). The page keys it by
@@ -34,6 +35,7 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
 }) {
   const r = draft.view!.result;
   const scope = draft.scope;
+  const readOnly = useContext(ReadOnly);
   const [tab, setTab] = useState<BottomTab>("on_failure");
   const [bottom, setBottom] = useState(false);
   // The bottom pane opens when what is picked lives in it (Decisions §9 Bottom pane).
@@ -48,7 +50,7 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
   const moveSel = useRef<(dir: -1 | 1) => void>(() => {});
   moveSel.current = async (dir) => {
     const sel = libSel(path);
-    if (row.section !== "nodes" || sel.kind !== "step" || handler) return;
+    if (readOnly || row.section !== "nodes" || sel.kind !== "step" || handler) return;
     const ids = (normalise(authoredAt(r, scope, row.id))?.steps ?? []).map((x) => x.id);
     const at = ids.indexOf(sel.step);
     const to = at + dir;
