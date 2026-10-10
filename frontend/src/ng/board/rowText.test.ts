@@ -85,13 +85,13 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("paused", { current_node_id: null })).state).toBe("todo");
   });
 
-  it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, its nodes between gates one dash", () => {
+  it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, the whole chain still drawn", () => {
     const states = (i: WorkItem) => ticksOf(i).map((t) => t.state[0]).join("");
     expect(states(row("running"))).toBe("ddct");
     expect(states(row("needs_you", { stop: stop("cap") }))).toBe("ddht");
-    expect(states(row("done"))).toBe("ddd");
-    expect(states(row("archived"))).toBe("ddd");
-    expect(ticksOf(row("done")).map((t) => t.gate)).toEqual([false, true, false]);
+    expect(states(row("done"))).toBe("dddd");
+    expect(states(row("archived"))).toBe("dddd");
+    expect(ticksOf(row("done")).map((t) => t.gate)).toEqual([false, true, false, false]);
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
   });
