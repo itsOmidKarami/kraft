@@ -166,7 +166,9 @@ async def review(
         return "undecided", (f"gate {gate!r} declares no agent task to review it; a person decides")
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain FROM work_items WHERE id = ?", (work_item_id,)
+            # `run_chain` too: a retried item's pins are the ones its launch reads.
+            "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?",
+            (work_item_id,),
         ).fetchone()
     )
     pins = executor.frozen_steering(item)["plugins"] if item is not None else None

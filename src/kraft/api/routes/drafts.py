@@ -389,7 +389,7 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
     # A throwaway copy of the request's model: owning what the component
     # inherits (as `set_fragment` does) writes nothing.
     found = (
-        authored.at(mapping, path, file=kind, library=library, write=True)
+        authored.at(mapping, path, file=kind, library=ops.with_plugins(st, library), write=True)
         if isinstance(mapping, dict)
         else None
     )

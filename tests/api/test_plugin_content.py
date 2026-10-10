@@ -159,7 +159,10 @@ def test_the_library_view_carries_the_plugins_components_beside_its_own(loaded):
     assert loaded.get("/api/drafts/chains/default").json()["plugin_library"] is None
 
 
-BUILD = {"kind": "exec", "tasks": [{"id": "coder", "extends": "base"}]}
+BUILD = {
+    "kind": "exec",
+    "tasks": [{"id": "coder", "extends": "base"}, {"id": "checker", "extends": "base"}],
+}
 
 
 def _mine(client, *ops):
@@ -182,12 +185,22 @@ def test_a_plugins_components_are_extended_from_a_local_chain(client, tmp_path):
         {"op": "add_node", "at": 1, "id": "m", "kind": "exec"},
         {"op": "extend", "node": "m", "base": "release:build"},
         {"op": "set_field", "path": "m.main.coder", "field": "prompt", "value": "mine"},
+        {"op": "add_node", "at": 2, "id": "untouched", "kind": "exec"},
+        {"op": "extend", "node": "untouched", "base": "release:build"},
     )
 
-    first, second = written["nodes"]
+    first, second, third = written["nodes"]
     assert first["steps"][0]["tasks"] == [{"id": "base", "extends": "release:base"}]
     assert second["extends"] == "release:build"
     # The inherited task is owned to change it, and the step keeps its other fields.
-    assert second["tasks"] == [{"extends": "release:base", "prompt": "mine", "id": "coder"}]
+    # Owning one inherited task keeps the one beside it.
+    assert second["tasks"] == [
+        {"extends": "release:base", "prompt": "mine", "id": "coder"},
+        {"extends": "release:base", "id": "checker"},
+    ]
+    # The YAML tab reads a part the node only inherits, through the plugin parent.
+    assert third == {"id": "untouched", "extends": "release:build"}
+    part = client.get("/api/drafts/chains/mine/fragment", params={"path": "untouched.main.checker"})
+    assert part.status_code == 200 and "extends: release:base" in part.json()["text"]
     assert client.post("/api/drafts/chains/mine/publish").status_code == 200
     assert not client.get("/api/health").json()["invalid_templates"]

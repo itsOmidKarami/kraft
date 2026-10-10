@@ -56,6 +56,12 @@ def _ref_changed(config_dir, store, repo):
     edit_plugins_yaml(config_dir, lambda w: w["collections"]["acme"].update(ref="main"))
 
 
+def _url_changed(config_dir, store, repo):
+    edit_plugins_yaml(
+        config_dir, lambda w: w["collections"]["acme"].update(git=(repo.parent / "fork").as_uri())
+    )
+
+
 def _listed_not_installed(config_dir, store, repo):
     edit_plugins_yaml(config_dir, lambda w: w["plugins"].update({"tools@acme": True}))
 
@@ -70,10 +76,18 @@ def _a_directory_collection(config_dir, store, repo):
         (_store_gone, False, False, "release@acme: its store is missing"),
         (_files_do_not_read, False, False, "plugins.yaml"),
         (_ref_changed, True, True, "release@acme: ref change pending"),
+        (_url_changed, True, True, "release@acme: collection URL change pending"),
         (_listed_not_installed, True, True, "tools@acme is not installed"),
         (_a_directory_collection, True, True, "collection local is a local directory"),
     ],
-    ids=["left-out", "unreadable", "ref-pending", "not-installed", "directory-collection"],
+    ids=[
+        "left-out",
+        "unreadable",
+        "ref-pending",
+        "url-pending",
+        "not-installed",
+        "directory-collection",
+    ],
 )
 def test_the_plugins_row(installed, happens, ok, warn, says):
     config_dir, _plugins_dir, store, repo = installed
