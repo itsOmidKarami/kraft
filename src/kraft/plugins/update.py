@@ -126,7 +126,7 @@ def problems(
     out: list[str] = []
     allowed_harnesses = set(found.requires.harnesses)
     for rel in sorted(files):
-        if not (rel == "library.yaml" or rel.startswith("chains/")):
+        if not (rel in ("library.yaml", "profiles.yaml") or rel.startswith("chains/")):
             continue
         try:
             data = bounded_yaml(files[rel][1].decode(), [20_000])
@@ -502,7 +502,7 @@ def update(
             except Refused as exc:
                 results[plugin_id] = Result(plugin_id, "refused", problems=tuple(exc.problems))
                 continue
-            except (fetch.PluginRefused, manifest.ManifestError) as exc:
+            except (fetch.PluginRefused, manifest.ManifestError, OSError) as exc:
                 results[plugin_id] = Result(plugin_id, "refused", problems=(str(exc),))
                 continue
 
@@ -512,6 +512,7 @@ def update(
                 or re_install
                 or found.version != locked.version
                 or collection.ref != locked.ref
+                or collection.git != locked.git
                 or namespace != locked.namespace
                 or (mirror is None and digest != locked.digest)
             )
@@ -530,9 +531,15 @@ def update(
             )
             try:
                 old = fetch.extract_dir(store) if store is not None and store.is_dir() else None
-            except fetch.PluginRefused:
-                old = None  # an edited store: everything in the candidate is shown as new
-            reviewed = review_mod.review(plugin_id, old, extracted)
+                reviewed = review_mod.review(plugin_id, old, extracted)
+            except (fetch.PluginRefused, manifest.ManifestError, OSError, KeyError, ValueError):
+                # An edited or damaged store: everything in the candidate is shown as new.
+                reviewed = review_mod.review(plugin_id, None, extracted)
+            if locked is not None and collection.git != locked.git:
+                moved = f"collection URL changed: {fetch.redact(locked.git or '')} -> " + (
+                    fetch.redact(collection.git or "")
+                )
+                reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
             root = Path(scratch) / digest.removeprefix("sha256:")
             for rel, (_mode, data) in extracted.files.items():
@@ -581,6 +588,7 @@ def update(
                     LockEntry(
                         namespace=namespace,
                         ref=collection.ref,
+                        git=collection.git,
                         commit=commit,
                         tree=extracted.tree,
                         source=entry.source,
@@ -707,6 +715,7 @@ def auto_update(
             what
             for what, changed in (
                 ("ref", collection.ref != locked.ref),
+                ("collection URL", collection.git != locked.git),
                 ("alias", config.namespace(plugin_id) != locked.namespace),
             )
             if changed

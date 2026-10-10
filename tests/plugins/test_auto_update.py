@@ -1,6 +1,8 @@
 """Auto-update: what a plugin set to update itself may take with nobody
 watching, what is held for a person, and where the outcome is recorded."""
 
+import shutil
+
 import pytest
 from support.harness import git
 from support.plugins import AGENT, chain, edit_plugins_yaml, instance, make_collection, publish
@@ -118,6 +120,13 @@ def _ref_changed_by_hand(repo, config_dir):
     edit_plugins_yaml(config_dir, lambda w: w["collections"]["acme"].update(ref="main"))
 
 
+def _url_changed_by_hand(repo, config_dir):
+    fork = repo.parent / "fork"
+    shutil.copytree(repo, fork)
+    publish(fork, "release", version="1.1.0", skills={"notes": "from somewhere else"})
+    edit_plugins_yaml(config_dir, lambda w: w["collections"]["acme"].update(git=fork.as_uri()))
+
+
 def _orphaned_in_the_lock(repo, config_dir):
     edit_plugins_yaml(config_dir, lambda w: w["plugins"].pop("tools@acme"))
 
@@ -128,9 +137,10 @@ def _orphaned_in_the_lock(repo, config_dir):
         (_listed_not_locked, None),
         (_orphaned_in_the_lock, None),
         (_same_version_new_commit, "up to date"),
-        (_ref_changed_by_hand, "held"),
+        (_ref_changed_by_hand, "held: ref"),
+        (_url_changed_by_hand, "held: collection URL"),
     ],
-    ids=["installs", "an-orphan", "re-installs", "applies-a-ref-change"],
+    ids=["installs", "an-orphan", "re-installs", "applies-a-ref-change", "follows-a-new-url"],
 )
 def test_auto_update_never(home, happens, outcome):
     repo, config_dir, plugins_dir = home
@@ -140,17 +150,16 @@ def test_auto_update_never(home, happens, outcome):
     outcomes = update.auto_update(config_dir, plugins_dir)
 
     assert sorted(outcomes) == [ID]
-    assert outcomes[ID]["outcome"] == (outcome or "up to date")
+    state, _, what = (outcome or "up to date").partition(": ")
+    assert outcomes[ID]["outcome"] == state
     assert (config_dir / "plugins.lock").read_text() == before
-    if outcome == "held":
-        assert outcomes[ID]["message"] == "ref change pending; run kraft admin plugin update"
+    if state == "held":
+        assert outcomes[ID]["message"] == f"{what} change pending; run kraft admin plugin update"
 
 
 def test_a_failed_auto_update_keeps_the_lock_and_records_why(home):
     repo, config_dir, plugins_dir = home
-    edit_plugins_yaml(
-        config_dir, lambda w: w["collections"]["acme"].update(git=(repo / "gone").as_uri())
-    )
+    repo.rename(repo.parent / "gone")
     before = _versions(config_dir)
 
     outcome = update.auto_update(config_dir, plugins_dir)[ID]

@@ -267,6 +267,9 @@ class LockEntry(_Model):
     #: `plugins.yaml` that says otherwise waits for `update` to apply it.
     namespace: Name
     ref: StrictStr | None  # None: a directory collection
+    #: The collection's `git:` URL it was fetched from: another repository
+    #: under the same name is a change a person reviews. None for a directory.
+    git: StrictStr | None = None
     #: The collection's commit, and the tree at `source` in it. Both None for
     #: a directory collection.
     commit: Annotated[StrictStr, Field(pattern=_OID)] | None
