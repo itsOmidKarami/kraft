@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
 import type { ChainNode, TemplateSummary } from "../../../types";
 import { Shell } from "../../shell/Shell";
+import { useStore } from "../../../store";
 import { DRAFT_KEY, DraftItemPage } from "./DraftItemPage";
 
 const N = (id: string, more: Partial<ChainNode> = {}) => ({ id, kind: "exec", tasks: [], gate_after: null, ...more }) as ChainNode;
@@ -56,6 +57,7 @@ beforeEach(() => {
   vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
 });
 afterEach(() => {
+  useStore.setState({ workItems: {} });
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -149,6 +151,25 @@ describe("DraftItemPage", () => {
     await settle();
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("kept");
     expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue("and this");
+  });
+
+  it("picks what the item comes after from the items that have not ended, sends it, and drops one again", async () => {
+    // The app's boot loads the board's items into the store; the page reads them from there.
+    useStore.setState({ workItems: { a1: { id: "a1", title: "Schema first", repo: "/code/kraft-plugins", bead_id: "kraft-a1", display_status: "running" }, b2: { id: "b2", title: "Old cleanup", repo: "/code/kraft-plugins", bead_id: null, display_status: "done" } } as never });
+    const calls = stub();
+    mount({ draft: { title: "Cache it", repo: "/code/kraft-plugins", chain: "default" } });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "+ item" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["kraft-a1 · Schema firstkraft-plugins"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Schema first/ }));
+    // Nothing left to pick: the picked one is a chip, and the menu is gone until it is dropped.
+    expect(screen.queryByRole("button", { name: "+ item" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Do not come after kraft-a1 · Schema first" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ item" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Schema first/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+    await settle();
+    expect(creates(calls).at(-1)?.body.depends_on).toEqual(["a1"]);
   });
 
   it("starts from a bead in the URL: its title prefilled, and Create names it as implemented", async () => {

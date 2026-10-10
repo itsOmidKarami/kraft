@@ -169,6 +169,33 @@ async def test_cancel_with_timeout_returns_before_a_slow_task_finishes_unwinding
     assert "w1" not in app.state.tasks  # pops on its own once it actually exits
 
 
+@pytest.mark.parametrize(
+    "timeout", [pytest.param(None, id="unbounded"), pytest.param(5.0, id="bounded")]
+)
+async def test_cancel_does_not_swallow_a_cancellation_aimed_at_its_caller(timeout):
+    """Kraft-1zhnj: a caller cancelled while it waits here (the queue's
+    scheduler task at shutdown) ends cancelled. The walk's `CancelledError`
+    and its own look the same at that await."""
+    app = _app()
+    unwinding = asyncio.Event()
+
+    async def slow_to_unwind():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            unwinding.set()
+            await asyncio.sleep(0.05)
+            raise
+
+    walk = deps.spawn(app, "w1", slow_to_unwind())
+    await asyncio.sleep(0)  # let it reach its own `await`, as above
+    caller = asyncio.ensure_future(deps.cancel(app, "w1", timeout=timeout))
+    await unwinding.wait()
+    caller.cancel()
+    await asyncio.gather(caller, walk, return_exceptions=True)
+    assert caller.cancelled()
+
+
 async def test_cancel_on_an_absent_or_already_done_task_is_a_noop():
     app = _app()
     await deps.cancel(app, "nope")  # nothing there at all

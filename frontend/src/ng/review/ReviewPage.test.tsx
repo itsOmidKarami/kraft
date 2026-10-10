@@ -88,6 +88,69 @@ describe("an ended item's review", () => {
   });
 });
 
+describe("a file's header and its hunks", () => {
+  // The file has seven lines; the diff shows the last four, with `e = 5` added.
+  const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -4,3 +4,4 @@\n d = 4\n+e = 5\n f = 6\n g = 7\n";
+  const WHOLE = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,6 +1,7 @@\n a = 1\n b = 2\n c = 3\n d = 4\n+e = 5\n f = 6\n g = 7\n";
+  const open = async (truncated = false) => {
+    vi.spyOn(http, "request").mockImplementation(async (p, init) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: { from: { target: "base", sha: "b" }, to: { target: "latest", sha: null }, rebased: false, files: [{ path: "a.py", insertions: 1, deletions: 0, touched_by: [], viewed: false }], groups: [], diff: String(p).includes("context=") ? WHOLE : PATCH, untracked: [], truncated: truncated && String(p).includes("context="), ignore_whitespace: false, diff_max_bytes: 1000 } }
+        : init?.method === "POST" ? { status: 201, body: {} } : { status: 200, body: [] },
+    );
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review?from=base"]}>
+        <Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("region", { name: "a.py" });
+  };
+  const lines = () => [...document.querySelectorAll(".rv-code")].map((c) => c.textContent);
+
+  it("folds a file marked viewed, and opens it again when the mark is taken off", async () => {
+    await open();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Viewed" })));
+    expect(screen.getByRole("button", { name: "Viewed" })).toHaveAttribute("aria-pressed", "true");
+    expect(lines()).toEqual([]);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Viewed" })));
+    expect(lines()).toHaveLength(4);
+    // A mark the server refuses folds nothing.
+    vi.mocked(http.request).mockImplementation(async () => ({ status: 409, body: { detail: "the worker still has this worktree open" } }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Viewed" })));
+    expect(screen.getByRole("button", { name: "Viewed" })).toHaveAttribute("aria-pressed", "false");
+    expect(lines()).toHaveLength(4);
+  });
+
+  it("shows the unchanged lines above a hunk, read once, and takes a comment on one", async () => {
+    await open();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Show lines 1–3" })));
+    expect(lines()).toEqual(["a = 1", "b = 2", "c = 3", "d = 4", "e = 5", "f = 6", "g = 7"]);
+    // The file ends with the hunk, which the read told: no arrows left.
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+    expect(vi.mocked(http.request).mock.calls.map(([p]) => String(p)).filter((p) => p.includes("context="))).toEqual(["/work-items/w1/compare?from=base&to=latest&file=a.py&context=1000000"]);
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line 2" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "why 2?" } });
+    await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", ctrlKey: true }));
+    const posts = vi.mocked(http.request).mock.calls.filter(([p, i]) => i?.method === "POST" && String(p).endsWith("/threads")).map(([, i]) => JSON.parse(i!.body as string));
+    expect(posts).toEqual([{ body: "why 2?", file_path: "a.py", label: null, side: "new", start_line: 2, end_line: 2, quote: " b = 2" }]);
+  });
+
+  it("reads a file once however fast its arrow is pressed, and says it is too large instead of showing a part", async () => {
+    await open(true);
+    const said: string[] = [];
+    const hear = (e: Event) => said.push((e as CustomEvent<{ message: string }>).detail.message);
+    window.addEventListener("kraft:toast", hear);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Show lines 1–3" }));
+      fireEvent.click(screen.getByRole("button", { name: "Show lines 1–3" }));
+    });
+    window.removeEventListener("kraft:toast", hear);
+    expect(vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes("context="))).toHaveLength(1);
+    expect(said).toEqual(["a.py is too large to show in full"]);
+    expect(document.querySelectorAll(".rv-code")).toHaveLength(4);
+  });
+});
+
 describe("useDiffPrefs", () => {
   it("saves the whole diff object on each change, and takes it back on a refusal", async () => {
     const req = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });

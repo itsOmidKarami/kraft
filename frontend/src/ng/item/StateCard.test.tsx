@@ -4,11 +4,11 @@ import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffFile, WorkerSession } from "../../types";
-import { PausedCard, StateCard } from "./StateCard";
+import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/unblock");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -23,6 +23,55 @@ const Where = () => {
 };
 const routed = (ui: ReactElement) => render(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
 const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...routed(<StateCard item={detail(over)} {...h} />) });
+
+describe("ComesAfterCard", () => {
+  const DEPS = [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] as const;
+  const after = (over: Parameters<typeof detail>[0]) => {
+    const reload = vi.fn();
+    routed(<ComesAfterCard item={detail({ dependencies: [...DEPS], ...over })} reload={reload} />);
+    return reload;
+  };
+
+  it.each([
+    ["blocked", "blocked", "Blocked", true],
+    ["paused", "paused", "Comes after", true],
+    // `/unblock` takes a blocked or paused item only.
+    ["needs_you", "needs_human", "Comes after", false],
+  ] as const)("a %s item lists what it comes after, each a link, and offers Unblock only where the server takes it", (display_status, status, title, offered) => {
+    after({ display_status, status });
+    const card = screen.getByRole("region", { name: title });
+    expect(card).toHaveTextContent("waiting on 1 item");
+    expect(within(card).getByRole("link", { name: "Schema first" })).toHaveAttribute("href", "/work-items/a1");
+    expect(card).toHaveTextContent("needs humanSchema first");
+    expect(card).toHaveTextContent("completedOld cleanup");
+    expect(!!within(card).queryByRole("button", { name: "Unblock" })).toBe(offered);
+  });
+
+  it("Unblock posts /unblock and reads the item again; a refusal stays on the card", async () => {
+    const calls = stubFetch(WRITES);
+    const reload = after({ display_status: "blocked", status: "blocked" });
+    await userEvent.click(screen.getByRole("button", { name: "Unblock" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/unblock", body: {} }]);
+    stubFetch({ "POST /work-items/w1/unblock": [409, { detail: "work item is active" }] });
+    await userEvent.click(screen.getByRole("button", { name: "Unblock" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("work item is active");
+  });
+
+  it("is gone once nothing it comes after is unfinished", () => {
+    after({ display_status: "running", dependencies: [DEPS[1]] });
+    expect(screen.queryByRole("region")).toBeNull();
+  });
+
+  // After Unblock the item stays blocked until the scheduler's next pass.
+  it("a blocked item with nothing left to wait for says Kraft queues it, with no Unblock", () => {
+    after({ display_status: "blocked", status: "blocked", dependencies: [] });
+    const card = screen.getByRole("region", { name: "Blocked" });
+    expect(card).toHaveTextContent("nothing left to wait for");
+    expect(card).toHaveTextContent("Kraft queues it within seconds.");
+    expect(within(card).queryByRole("button")).toBeNull();
+  });
+});
 
 describe("StateCard", () => {
   it("failed: where, the reason, the facts sent, Retry from the task by its path", async () => {

@@ -81,7 +81,7 @@ describe("budgetRaise: only a budget stop the server would raise offers a raise"
  *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
  *  surface's link to another page: it calls nothing. */
 const LIFECYCLE: { doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
-type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "approve" | "navigate";
+type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "unblock" | "approve" | "navigate";
 const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.doors[door].takes.includes(state);
 
 const S = (kind: StopKind, more: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", task: "verification.review.code_review", resume_at: null, reason: "r", ...more });
@@ -122,7 +122,7 @@ const MAIN_DOOR = (item: ItemDetail): Record<Main, Door> => ({ pause: "pause", r
 // Mark complete and Cancel end the item through one guard (`_end_work_item`).
 const PANEL_DOOR: Record<PanelItem, Door> = { escalate: "escalate", complete: "cancel", archive: "archive", cancel: "cancel" };
 const PHONE_DOOR = (item: ItemDetail): Record<ActId, Door> => ({
-  pause: "pause", steer: steerDoor(item), resume: "resume", start: "resume", reject: "approve", review: "navigate", raise: raiseDoor(item), retry: "retry", escalate: "escalate", answer: "resume",
+  pause: "pause", unblock: "unblock", steer: steerDoor(item), resume: "resume", start: "resume", reject: "approve", review: "navigate", raise: raiseDoor(item), retry: "retry", escalate: "escalate", answer: "resume",
   cancel: "cancel", "reopen-mr": "reopen_mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", repo: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
 });
 const NODE_DOOR: Record<NodeActId, Door> = { pause: "pause", resume: "resume", skip: "skip", "retry-node": "retry", "retry-from": "retry", review: "navigate" };

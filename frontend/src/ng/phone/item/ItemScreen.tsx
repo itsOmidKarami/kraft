@@ -71,6 +71,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "steer": case "reject": case "answer": case "escalate": case "cancel": case "complete": return navigate(itemUrl(item.id, `?compose=${id}`));
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
+      case "unblock": return void run(act.unblock(item.id), "Unblocked. It starts when a slot is free.");
       case "resume": return void run(act.resume(item.id), "Resumed.");
       // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
       case "start": return void draftToStart(item.id).then(({ waits, ops }) => {
@@ -150,7 +151,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             {card.hint && <p className="ph-statecard-text ph-statecard-fix">{withCode(card.hint)}</p>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
-                {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
+                {card.facts.map(([k, v], i) => <div key={i} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
               </dl>
             )}
           </section>

@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { CompareFile } from "../../types";
-import { EllipsisVertical, MessageSquare, Plus } from "../icons";
+import { ChevronDown, ChevronUp, ChevronsUpDown, EllipsisVertical, MessageSquare, Plus } from "../icons";
 import { IconButton } from "../ui/IconButton";
 import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
+import { gapsOf, STEP, type Gap, type Grow } from "./expand";
 import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
 import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type LineIndex, type LineRange } from "./range";
@@ -65,6 +66,8 @@ export interface DiffViewProps {
   truncated: { bytes: number; files: number } | null;
   /** An ended item takes no comment (the server refuses it): no line picks, no file comment button. */
   readOnly?: boolean;
+  /** Show unchanged lines in the gap before hunk `gap` of a file (after its last hunk, at the hunk count). Absent: no arrows. */
+  onExpand?: (path: string, gap: number, how: Grow) => void;
 }
 
 /** The diff column's content (prototype 419–492). The split view always
@@ -119,6 +122,14 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const range = useMemo(() => picked && rangeOfPick(picked, index), [picked, index]);
   const isPicked = (a: Anchor) => !!range && inRange(range, a, index);
   const commented = p.commented?.(file.path) ?? NO_RANGES;
+  // An added or a deleted file is all in its diff: nothing more to show.
+  const canExpand = !!p.onExpand && pf.status !== "added" && pf.status !== "deleted";
+  const gaps = useMemo(() => gapsOf(pf), [pf]);
+  // An arrow that showed the last of its lines is gone, and the focus with it: the line group takes it.
+  const group = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (pf.rest !== undefined && document.activeElement === document.body) group.current?.focus({ preventScroll: true });
+  }, [pf]);
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
     let h = -1;
@@ -246,7 +257,8 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null) };
+    const onExpand = (gap: number, how: Grow) => () => live.current.p.onExpand?.(path, gap, how);
+    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null), onExpand };
   }, [file.path]);
   const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean; edit: boolean } | null>(null);
 
@@ -313,12 +325,13 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
+            <div ref={group} className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}
                   row={r}
                   hunk={hunkOf[i]}
+                  gap={r.t === "hunk" && canExpand ? gaps[hunkOf[i]] : null}
                   // Only the rows the pick touches see it, so the rest skip the render.
                   pick={picked && anchors[i].some(isPicked) ? picked : null}
                   range={picked && anchors[i].some(isPicked) ? range : null}
@@ -329,6 +342,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
                   slots={p.after ? anchors[i].map((a) => p.after!(file.path, a)) : NONE}
                 />
               ))}
+              {canExpand && gaps[pf.hunks.length].count !== 0 && <div className="rv-hunk"><Expander at={pf.hunks.length} gap={gaps[pf.hunks.length]} tail g={gutter} /></div>}
             </div>
           )}
         </div>
@@ -357,6 +371,22 @@ interface Gutter {
   onPlus: (a: Anchor) => () => void;
   onOver: (e: MouseEvent) => void;
   onLeave: () => void;
+  onExpand: (gap: number, how: Grow) => () => void;
+}
+
+/** The arrows on a hunk's row, for the unchanged lines before it (gap `at`); `tail` is the row after the last hunk,
+ *  whose count is null until the file was read. A short gap has only the arrow that shows it all. Each names its
+ *  lines, so no two in a file read the same. */
+function Expander({ at, gap: { from, count }, tail, g }: { at: number; gap: Gap; tail?: boolean; g: Gutter }) {
+  const many = count === null || count > STEP;
+  const all = count === null ? "Show the rest of the file" : count === 1 ? `Show line ${from}` : `Show lines ${from}–${from + count - 1}`;
+  return (
+    <span className="rv-expand">
+      {many && at > 0 && <IconButton label={`Show ${STEP} more lines below line ${from - 1}`} onClick={g.onExpand(at, "down")}><ChevronDown size={13} aria-hidden /></IconButton>}
+      {many && !tail && <IconButton label={`Show ${STEP} more lines above line ${from + (count ?? 0)}`} onClick={g.onExpand(at, "up")}><ChevronUp size={13} aria-hidden /></IconButton>}
+      <IconButton label={all} onClick={g.onExpand(at, "all")}><ChevronsUpDown size={13} aria-hidden /></IconButton>
+    </span>
+  );
 }
 
 const NONE: ReactNode[] = [];
@@ -402,6 +432,8 @@ const endsOf = (r: LineRange | null, as: Anchor[]) => ({
 interface RowProps {
   row: Row;
   hunk: number;
+  /** A hunk row's unchanged lines before it, when arrows can show them. */
+  gap: Gap | null;
   /** The pick and its range, when it covers a line of this row; else null. */
   pick: Pick | null;
   range: LineRange | null;
@@ -414,8 +446,8 @@ interface RowProps {
   slots: ReactNode[];
 }
 
-const RowView = memo(function RowView({ row, hunk, pick, range, picked, commented, readOnly, g, slots }: RowProps) {
-  if (row.t === "hunk") return <div className="rv-hunk rv-mono">{row.text}</div>;
+const RowView = memo(function RowView({ row, hunk, gap, pick, range, picked, commented, readOnly, g, slots }: RowProps) {
+  if (row.t === "hunk") return <div className="rv-hunk rv-mono">{gap && (gap.count ?? 0) > 0 && <Expander at={hunk} gap={gap} g={g} />}{row.text}</div>;
   const kind = (c: Cell | null) => (c ? (c.kind === "+" ? " is-add" : c.kind === "-" ? " is-del" : "") : " is-none");
   const marks = (as: Anchor[]) => `${as.some((a) => has(picked, a)) ? " is-picked" : ""}${as.some((a) => has(commented, a)) ? " is-commented" : ""}`;
   const anchors = anchorsOf(row);
@@ -463,6 +495,6 @@ const RowView = memo(function RowView({ row, hunk, pick, range, picked, commente
       {tail}
     </>
   );
-}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.pick === b.pick && a.range === b.range && a.picked === b.picked && a.commented === b.commented && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
+}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.gap === b.gap && a.pick === b.pick && a.range === b.range && a.picked === b.picked && a.commented === b.commented && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
 
 const AfterSlot = ({ node }: { node: ReactNode }) => (node ? <div className="rv-after">{node}</div> : null);

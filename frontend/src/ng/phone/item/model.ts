@@ -1,6 +1,6 @@
-import { ago, elapsed, until, usd } from "../../../format";
+import { ago, elapsed, plural, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
-import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
+import { budgetRaise, headerState, archivable, NOT_RAISABLE, RELEASED } from "../../item/status";
 import { gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
@@ -123,6 +123,15 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         default: return { tone: "warn", title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, facts: spent(item) };
       }
     }
+    case "blocked": {
+      const deps = item.dependencies ?? [];
+      const waits = deps.filter((d) => !d.met).length;
+      return {
+        tone: "info", title: "Blocked", where: waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where,
+        text: waits ? "Kraft starts it when they complete. Unblock stops it waiting for them." : RELEASED.text,
+        facts: deps.map((d) => [d.status.replace("_", " "), d.title]),
+      };
+    }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${item.current_node_id}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
     case "paused": return item.current_node_id ? { tone: "warn", title: "Paused", where: `at ${item.current_node_id}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
     case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: "All nodes passed.", facts: spent(item) };
@@ -137,7 +146,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
 }
 
 export type ActId =
-  | "pause" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "escalate" | "answer"
+  | "pause" | "unblock" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "escalate" | "answer"
   | "cancel" | "reopen-mr" | "conflicts" | "board" | "restore"
   | "repo" | "settings" | "open-mr" | "duplicate" | "archive" | "complete";
 export interface Act {
@@ -167,8 +176,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
     // Queued for a slot: Kraft starts it; Pause takes it out of the queue.
     case "queued": return { secondary: null, primary: a("pause", "Pause") };
-    // Blocked behind another item: Kraft starts it; Pause takes it out.
-    case "blocked": return { secondary: null, primary: a("pause", "Pause") };
+    // Blocked behind another item: Kraft starts it; Pause takes it out, Unblock stops it waiting.
+    case "blocked": return { secondary: item.dependencies?.some((d) => !d.met) ? a("unblock", "Unblock") : null, primary: a("pause", "Pause") };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {
