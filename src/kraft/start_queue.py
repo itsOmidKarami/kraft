@@ -32,7 +32,7 @@ import logging
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from kraft import events, store
+from kraft import events, storage, store
 from kraft.vocab import WorkItemEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,11 @@ async def tick(app) -> list[str]:
     for wid in st.db.read(store.queued_ids):
         if st.db.read(store.active_count) >= limit:
             break
+        if storage.holds(st, wid):
+            # Keeps its place, and is not asked again each tick (its door would
+            # write another `work_item_storage_held`). A start behind it that
+            # has a worktree still goes.
+            continue
         if await _start_one(app, wid):
             started.append(wid)
     return started

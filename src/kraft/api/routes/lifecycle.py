@@ -787,6 +787,20 @@ def queued_refusal(row) -> str:
     )
 
 
+async def slots_answer(st, wid: str) -> dict:
+    """The `slots` a queued answer carries. With `storage`, and the item's
+    `work_item_storage_held`, when the storage limit and not a busy slot is
+    what holds it (`storage.holds`)."""
+    limit = st.policy.max_concurrent if st.policy else 1
+    slots = {"busy": st.db.read(store.active_count), "limit": limit}
+    if storage.holds(st, wid):
+        slots["storage"] = storage.figures(st)
+        await st.db.write(
+            lambda c: events.append(c, wid, WorkItemEvent.STORAGE_HELD, slots["storage"])
+        )
+    return slots
+
+
 async def queued_answer(request: Request, wid: str, verb: str, body, from_statuses) -> dict:
     """Hold a start request that passed every check but capacity, and answer
     for it. `kraft.start_queue` makes the same request again when a slot
@@ -806,12 +820,7 @@ async def queued_answer(request: Request, wid: str, verb: str, body, from_status
         raise HTTPException(
             409, "work item is not stopped" if verb == "retry" else "work item is not paused"
         )
-    limit = st.policy.max_concurrent if st.policy else 1
-    return {
-        "id": wid,
-        "status": WorkItemStatus.QUEUED,
-        "slots": {"busy": st.db.read(store.active_count), "limit": limit},
-    }
+    return {"id": wid, "status": WorkItemStatus.QUEUED, "slots": await slots_answer(st, wid)}
 
 
 def blocked_refusal(row) -> str:
@@ -1032,6 +1041,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # could not.
     if (held := await blocked_answer(request, wid, "resume", body, from_statuses)) is not None:
         return held
+    if storage.holds(st, wid):
+        return await queued_answer(request, wid, "resume", body, from_statuses)
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -1273,7 +1284,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         ) is not None:
             return held
         limit = st.policy.max_concurrent if st.policy else 1
-        if st.db.read(store.active_count) >= limit:
+        if st.db.read(store.active_count) >= limit or storage.holds(st, wid):
             # Queued with the turn left running: the kill below belongs to the
             # start, which makes this same request again.
             return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
@@ -1391,6 +1402,8 @@ async def _retry(wid: str, body: Retry, request: Request):
         held := await blocked_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
     ) is not None:
         return held
+    if storage.holds(st, wid):
+        return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
     async with stops.claimed_or_stopped(
         st.db,
         wid,

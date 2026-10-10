@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import sys
@@ -16,7 +17,7 @@ import yaml
 from fastapi.testclient import TestClient
 from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo, v1_library
 
-from kraft import config, policy, store
+from kraft import config, policy, storage, store
 from kraft import intake as intake_mod
 from kraft.adapters import beads
 
@@ -216,6 +217,24 @@ async def test_respects_max_concurrent_counting_every_active_item(tmp_path, monk
     await _file(app, bead_id="HAND-1", status="active")
     assert await intake_mod.tick(app) == []
     assert [r["bead_id"] for r in _work_items(app)] == ["HAND-1"]
+
+
+async def test_picks_nothing_up_while_storage_holds_starts(tmp_path, monkeypatch, stub_app):
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+    state = _state(tmp_path, max_concurrent=3)
+    state["policy"] = dataclasses.replace(
+        state["policy"], storage_limit_bytes=1, storage_quota_bytes=0
+    )
+    app = stub_app(**state, storage_usage=storage.Usage("t", 2, {}, {}))
+
+    assert await intake_mod.tick(app) == []
+    assert _work_items(app) == []
+    check = app.state.db.read(
+        lambda c: c.execute("SELECT skipped FROM intake_checks ORDER BY rowid DESC").fetchone()
+    )
+    assert json.loads(check["skipped"]) == [{"bead": "B-1", "reason": "storage"}]
 
 
 async def test_a_queued_item_keeps_its_slot_from_auto_intake(tmp_path, monkeypatch, stub_app):
