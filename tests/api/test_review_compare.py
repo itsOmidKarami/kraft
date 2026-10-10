@@ -158,6 +158,12 @@ def test_compare_reads_one_file_with_the_context_asked_for(client, gated):
     # five committed lines: git's three by default, every one when asked
     assert (unchanged(near), unchanged(whole)) == (3, 5)
     assert client.get(url, params={**params, "context": -1}).status_code == 422
+    assert client.get(url, params={**params, "file": "../calc.py"}).status_code == 400
+    # A renamed file is read with its old path: alone, git would call every line added.
+    subprocess.run(["git", "mv", "test_calc.py", "test_sums.py"], cwd=wt, check=True)
+    moved = client.get(url, params={**params, "file": "test_sums.py", "context": 1_000_000}).json()
+    assert "rename from test_calc.py" in moved["diff"] and unchanged(moved) == 5
+    assert [f["path"] for f in moved["files"]] == ["test_sums.py"]
 
 
 @_REVIEW
