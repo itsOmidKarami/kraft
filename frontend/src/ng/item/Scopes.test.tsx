@@ -60,6 +60,12 @@ describe("an open changed-test-scope task", () => {
     expect(f.querySelector(".scope-ring, .scope-rail, .scope-name, .scope-note")).toBeNull();
   });
 
+  it("says why an item of one repository has no chips, where there is nothing else in its row", async () => {
+    mount(`${AT}?sel=${SCOPE_PATH}`, scoped([], { chain_definition: { template_id: "default", nodes } }));
+    const f = await screen.findByRole("group", { name: /repositories and scopes/ });
+    expect(f.querySelector(".scope-row.is-solo")!.textContent).toBe("not reached");
+  });
+
   it("shows a repository after the first failure as not reached, with no chips", async () => {
     mount(`${AT}?sel=${SCOPE_PATH}`);
     await userEvent.click(await screen.findByRole("button", { name: /round 2 of 3/ }));

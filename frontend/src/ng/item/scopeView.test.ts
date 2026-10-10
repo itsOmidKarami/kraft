@@ -129,7 +129,7 @@ describe("frameWidth", () => {
   it.each([
     ["a short row is as wide as the header", of([chip("a/**", "1s")]), (w: number) => w === 480],
     ["a row of chips longer than that widens it", of(long), (w: number) => w > 480],
-    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w < frameWidth(of(long))],
+    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === frameWidth(of([long[0]], "parallel")) && w < frameWidth(of(long))],
     ["one repository's header says less, so a short row is narrower still", of([chip("a/**", "1s")], "sequential", 1), (w: number) => w === 400],
     ["one repository's long row is its chips, without the repository column", of(long, "sequential", 1), (w: number) => w > 400 && w < frameWidth(of(long))],
   ])("%s", (_, view, ok) => expect(ok(frameWidth(view))).toBe(true));

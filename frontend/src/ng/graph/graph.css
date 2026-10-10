@@ -261,8 +261,8 @@
 .scope-frame.is-on :is(.scope-head, .scope-body) { opacity: 1; transform: none; transition: opacity .24s ease .2s, transform .3s cubic-bezier(.2, .8, .2, 1) .2s; }
 .scope-task { padding: 0; border: 0; background: transparent; color: var(--text); font: 600 12px ui-monospace, Menlo, monospace; cursor: pointer; }
 .scope-task:focus-visible, .scope-close:focus-visible, .scope-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.scope-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.scope-close { margin-left: auto; padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); font: inherit; font-size: 11px; cursor: pointer; }
+.scope-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.scope-close { flex: none; margin-left: auto; padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); font: inherit; font-size: 11px; cursor: pointer; }
 .scope-close:hover { background: var(--line); color: var(--text); }
 .scope-rail { position: absolute; left: 23px; top: 14px; bottom: 28px; border-left: 1.5px solid var(--border); }
 .scope-row { position: relative; display: grid; grid-template-columns: 20px 112px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 40px; box-sizing: border-box; }

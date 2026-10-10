@@ -83,6 +83,8 @@ export function ScopeFrame({ view, width, step, task, rect, on, full, out, selec
                 </div>
               )}
               <ChipRow fork={parallel}>
+                {/* With no chips the note is all the row has to say: waiting, or not reached. */}
+                {solo && !r.chips.length && <span className={`scope-note is-${r.state}`}>{r.note}</span>}
                 {r.chips.map((c, j) => {
                   const key = chipKey(step, task, c.key);
                   return (
