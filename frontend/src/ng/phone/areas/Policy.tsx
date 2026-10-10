@@ -5,7 +5,7 @@ import { problemAt, type Ctx } from "../../settings/policy/ctx";
 import { capKey, KEYS, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
 import { SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, policyOf } from "../../settings/policy/types";
-import { parse, raw, show } from "../../settings/policy/units";
+import { parse, parseSize, raw, show } from "../../settings/policy/units";
 import type { Change } from "../../templates/draft/types";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
@@ -15,7 +15,7 @@ import { Group, useEditor, type Edit, type RowSpec } from "./kit";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] : undefined);
-const UNIT_WORD = { usd: "dollars", tok: "tokens", min: "minutes", days: "days", s: "seconds", count: "a whole number", "s-as-min": "minutes" } as const;
+const UNIT_WORD = { usd: "dollars", tok: "tokens", min: "minutes", days: "days", s: "seconds", count: "a whole number", "s-as-min": "minutes", size: "a size: 1000M, 10G, 1T" } as const;
 
 /** `set_value` as the desktop's `PolicyCell` sends it: a scope, the dotted key, the value (null clears). */
 const sendValue = async (draft: ConfigDraft, k: Pick<KeySpec, "scope" | "key">, value: unknown) => {
@@ -81,6 +81,27 @@ function single({ ctx, edit }: Edits, k: KeySpec, label: string, value: number |
     changed: !!ch,
     chips: bad ? [{ label: "problem", tone: "bad" }] : undefined,
     onEdit: () => edit(textEdit(ctx, k, label, value, o.bound)),
+  };
+}
+
+/** A storage size (`10G`): text, blank clears. */
+function sizeRow({ ctx, edit }: Edits, k: KeySpec, label: string, value: string | null, unset: string, sub: string): RowSpec {
+  const bad = problemAt(ctx, k.key);
+  const ch = ctx.changes.get(k.key);
+  return {
+    key: k.key,
+    label,
+    value: value ?? unset,
+    sub: bad ? bad.message : ch ? `was ${was(ch)} · ${sub}` : sub,
+    changed: !!ch,
+    chips: bad ? [{ label: "problem", tone: "bad" }] : undefined,
+    onEdit: () => edit({
+      kind: "text", title: label, help: "A size: 1000M, 10G, 1T. Leave empty to clear it.", value: value ?? "",
+      set: async (t) => {
+        const v = parseSize(t);
+        return "error" in v ? v.error : sendValue(ctx.draft, k, v.value);
+      },
+    }),
   };
 }
 
@@ -233,6 +254,10 @@ function Housekeeping(e: Edits) {
       <Group title="Board and forge" rows={[
         single(e, KEYS.archive, "archive after", p.housekeeping.archive_after_days.value, { never: "never", sub: "completed and abandoned items; empty never archives" }),
         single(e, KEYS.forge, "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), { sub: "read at startup" }),
+      ]} />
+      <Group title="Storage" rows={[
+        sizeRow(e, KEYS.storageLimit, "limit", p.housekeeping.storage_limit?.value ?? null, "no limit", "over it, new starts wait until you make room"),
+        sizeRow(e, KEYS.storageQuota, "quota", p.housekeeping.storage_quota?.value ?? null, p.housekeeping.storage_quota_default ?? "not set", "over it, Kraft warns; blank is 80% of the limit"),
       ]} />
     </>
   );

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { capKey, KEYS, SEVERITY_KEY, STUCK_KEY } from "./keys";
 import { sectionOfKey, sectionOfProblem, SECTIONS } from "./sections";
-import { parse, raw, show } from "./units";
+import { parse, parseSize, raw, show } from "./units";
 
 describe("Policy sections", () => {
   it("puts every key the page edits in exactly one section", () => {
@@ -62,5 +62,20 @@ describe("Policy numbers", () => {
     expect(parse("min", "1.5")).toEqual({ error: "Enter a whole number." });
     expect(parse("s-as-min", "2")).toEqual({ value: 120 });
     expect(raw("s-as-min", 3600)).toBe("60");
+  });
+});
+
+describe("a storage size", () => {
+  it.each([["10g", "10G"], [" 1000M ", "1000M"], ["1T", "1T"], ["10GB", "10GB"]])("%s is sent as %s", (typed, sent) => {
+    expect(parseSize(typed)).toEqual({ value: sent });
+  });
+  it("blank clears the key", () => {
+    expect(parseSize("  ")).toEqual({ value: null });
+  });
+  it.each(["10", "1.5G", "0G", "ten"])("%s is refused with the fix", (typed) => {
+    expect(parseSize(typed)).toEqual({ error: "Enter a whole number with a unit: 1000M, 10G, 1T." });
+  });
+  it("belongs to Housekeeping", () => {
+    expect(sectionOfKey("storage.worktrees.limit")).toBe("housekeeping");
   });
 });

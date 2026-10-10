@@ -199,17 +199,22 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
         set_value("loops", "default.wall_clock_s", 900),
         set_value("housekeeping", "max_concurrent", 7),
         set_value("housekeeping", "archive.after_days", 14),
+        set_value("housekeeping", "storage.worktrees.limit", "10G"),
         set_value("findings", "findings.loop_severities", ["critical", "minor"]),
     )
     data = written(client)
     assert data["default"]["attempts"] == 4 and data["default"]["wall_clock_s"] == 900
     assert data["max_concurrent"] == 7
     assert data["archive"] == {"after_days": 14}
+    assert data["storage"] == {"worktrees": {"limit": "10G"}}
     assert data["findings"] == {"loop_severities": ["critical", "minor"]}
     r = body["resolved"]
     assert r["housekeeping"] == {
         "max_concurrent": {"value": 7, "source": "policy"},
         "archive_after_days": {"value": 14, "source": "policy"},
+        "storage_limit": {"value": "10G", "source": "policy"},
+        "storage_quota": {"value": None, "source": "default"},
+        "storage_quota_default": "8G",
     }
     assert r["findings"]["loop_severities"] == {"value": ["critical", "minor"], "source": "policy"}
     assert r["loops"]["default"] == {"attempts": 4, "wall_clock_s": 900}
@@ -217,10 +222,11 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
     resolved(
         client,
         set_value("housekeeping", "archive.after_days", None),
+        set_value("housekeeping", "storage.worktrees.limit", None),
         set_value("findings", "findings.loop_severities", None),
     )
     data = written(client)
-    assert "archive" not in data and "findings" not in data
+    assert "archive" not in data and "findings" not in data and "storage" not in data
 
 
 @pytest.mark.parametrize(
@@ -228,6 +234,7 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
     [
         ("housekeeping", "archive.after_days", -1, "housekeeping"),
         ("housekeeping", "max_concurrent", 0, "housekeeping"),
+        ("housekeeping", "storage.worktrees.quota", "8G", "housekeeping"),
         ("findings", "findings.loop_severities", ["info"], "loops"),
     ],
 )

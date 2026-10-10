@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from kraft import render
 from kraft.api import config_check
 from kraft.cap_levels import CAP_LEVELS, SCOPE_CAP_FIELDS
 from kraft.drafts import config, harnesses, policy_caps, store
@@ -32,7 +33,12 @@ RETRIES = ("rate_limit_retries", "forge_cli_timeout_s")
 #: The `default:` block, `max_concurrent` and `archive`, which the shipped Policy
 #: page edits and `defaults:`/`maxima:` do not hold, and the findings that burn a cycle.
 LOOP_DEFAULT = ("default.attempts", "default.wall_clock_s")
-HOUSEKEEPING = ("max_concurrent", "archive.after_days")
+HOUSEKEEPING = (
+    "max_concurrent",
+    "archive.after_days",
+    "storage.worktrees.limit",
+    "storage.worktrees.quota",
+)
 FINDINGS = ("findings.loop_severities",)
 SECTION_FIELDS = ("max_attempts", "timeout_minutes")
 HARNESS_FIELDS = ("allowed_harnesses", "allowed_tools", "escalation_harness", "escalation_grants")
@@ -235,7 +241,7 @@ def _group(field: str | None) -> tuple[str, str | None]:
     level = parts[1] if len(parts) > 1 and parts[1] in CAP_LEVELS else None
     if top in ("loops", "default", "findings"):
         return "loops", None
-    if top in ("max_concurrent", "archive"):
+    if top in ("max_concurrent", "archive", "storage"):
         return "housekeeping", None
     if top in ESCALATION:
         return "escalation", None
@@ -283,6 +289,8 @@ def resolve(st, key, raw, files, published) -> dict:
     lint = harnesses._lint_problems(st, data)
     out["problems"] += [{**p, "scope": "limits", "level": None} for p in lint]
 
+    worktrees = parsed.storage.worktrees if parsed.storage else None
+
     def scalar(name: str) -> dict:
         return _leaf(data, getattr(policy, name), name)
 
@@ -323,6 +331,18 @@ def resolve(st, key, raw, files, published) -> dict:
         "housekeeping": {
             "max_concurrent": scalar("max_concurrent"),
             "archive_after_days": _leaf(data, policy.archive_after_days, "archive", "after_days"),
+            "storage_limit": _leaf(
+                data, worktrees.limit if worktrees else None, "storage", "worktrees", "limit"
+            ),
+            "storage_quota": _leaf(
+                data, worktrees.quota if worktrees else None, "storage", "worktrees", "quota"
+            ),
+            # What a blank quota is: 80% of the limit, for the page to show.
+            "storage_quota_default": (
+                render.human_size(policy.storage_quota_bytes)
+                if policy.storage_limit_bytes is not None and not (worktrees and worktrees.quota)
+                else None
+            ),
         },
         "findings": {
             "loop_severities": _leaf(

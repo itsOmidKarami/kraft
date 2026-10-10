@@ -27,6 +27,8 @@ export const KEYS = {
   reviewAttempts: spec("escalation", "auto_review_attempts", "count"),
   concurrent: spec("housekeeping", "max_concurrent", "count"),
   archive: spec("housekeeping", "archive.after_days", "days", true),
+  storageLimit: spec("housekeeping", "storage.worktrees.limit", "size"),
+  storageQuota: spec("housekeeping", "storage.worktrees.quota", "size"),
   relaunch: spec("retries", "rate_limit_retries", "count"),
   forge: spec("retries", "forge_cli_timeout_s", "s"),
 } as const;

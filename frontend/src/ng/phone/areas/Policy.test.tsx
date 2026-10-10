@@ -182,6 +182,17 @@ describe("Policy housekeeping (N.1)", () => {
     await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "archive.after_days", value: 0 }]));
   });
 
+  it("storage: shows the limit and the 80% quota default, and sends a size", async () => {
+    const { calls } = open("housekeeping", ans(policyView({}, resolved({ housekeeping: { max_concurrent: { value: 5, source: "policy" }, archive_after_days: { value: 30, source: "policy" }, storage_limit: { value: "10G", source: "policy" }, storage_quota: { value: null, source: "default" }, storage_quota_default: "8G" } }))));
+    const limit = await screen.findByRole("button", { name: /^limit/ });
+    expect(within(limit).getByText("10G", { exact: true })).toBeInTheDocument();
+    const quota = screen.getByRole("button", { name: /^quota/ });
+    expect(within(quota).getByText("8G", { exact: true })).toBeInTheDocument();
+    await userEvent.click(quota);
+    await userEvent.type(screen.getByLabelText("quota", { selector: "input" }), "5g{Enter}");
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "storage.worktrees.quota", value: "5G" }]));
+  });
+
   it("an unreadable policy says so and offers YAML", async () => {
     open("limits", ans(policyView({ problems: [problem({ message: "line 3: bad indent" })] }, null)));
     expect(await screen.findByRole("alert")).toHaveTextContent("policy.yaml does not load: line 3: bad indent");
