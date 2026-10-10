@@ -41,8 +41,11 @@ export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, 
   const [got, setGot] = useState<{ of: Map<string, PatchFile>; files: Map<string, Whole> }>({ of: patch, files: new Map() });
   const live = useRef(patch);
   live.current = patch;
-  // The files being read: a press on one of them waits for the next drawing, whose gaps it would name.
-  const reading = useRef(new Set<string>()).current;
+  // This comparison's files being read (a press on one of them is dropped: it names gaps of a drawing about to
+  // change), and those read for their threads, each once: one that cannot be read leaves its threads in the list at the foot.
+  const work = useRef({ of: patch, reading: new Set<string>(), tried: new Set<string>() });
+  if (work.current.of !== patch) work.current = { of: patch, reading: new Set(), tried: new Set() };
+  const { reading, tried } = work.current;
   const files = got.of === patch ? got.files : null;
   /** The whole file, or null with the reason said (not when `quiet`: nobody asked). */
   const read = async (path: string, quiet = false): Promise<Whole | null> => {
@@ -73,10 +76,7 @@ export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, 
     if (whole) draw(path, whole, (w) => grow(w.spans, gap, how, w.lines.length));
   };
   const wide = useMemo(() => (files ? new Map([...patch].map(([k, pf]) => [k, files.has(k) ? widen(pf, files.get(k)!) : pf])) : patch), [patch, files]);
-  // The files read for their threads, each once a comparison: one that cannot be read leaves its threads in the list at the foot.
-  const tried = useRef({ of: patch, paths: new Set<string>() });
   useEffect(() => {
-    if (tried.current.of !== patch) tried.current = { of: patch, paths: new Set() };
     const undrawn = new Map<string, LineRange[]>();
     for (const t of threads) {
       const r = threadRange(t);
@@ -88,8 +88,8 @@ export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, 
       const show = (w: Whole) => ranges.reduce((spans, r) => reveal({ lines: w.lines, spans }, r), w.spans);
       const whole = files?.get(path);
       if (whole) draw(path, whole, show);
-      else if (!tried.current.paths.has(path)) {
-        tried.current.paths.add(path);
+      else if (!tried.has(path)) {
+        tried.add(path);
         void read(path, true).then((w) => w && draw(path, w, show));
       }
     }

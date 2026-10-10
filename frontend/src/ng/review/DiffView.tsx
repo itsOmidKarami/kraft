@@ -67,7 +67,7 @@ export interface DiffViewProps {
   /** An ended item takes no comment (the server refuses it): no line picks, no file comment button. */
   readOnly?: boolean;
   /** Show unchanged lines in the gap before hunk `gap` of a file (after its last hunk, at the hunk count). Absent: no arrows. */
-  onExpand?: (path: string, gap: number, how: Grow) => void;
+  onExpand?: (path: string, gap: number, how: Grow) => void | Promise<void>;
 }
 
 /** The diff column's content (prototype 419–492). The split view always
@@ -125,14 +125,6 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   // An added or a deleted file is all in its diff: nothing more to show.
   const canExpand = !!p.onExpand && pf.status !== "added" && pf.status !== "deleted";
   const gaps = useMemo(() => gapsOf(pf), [pf]);
-  // An arrow that showed the last of its lines is gone, and the focus with it: the line group takes it.
-  // Only after an arrow: lines drawn for a thread as the page loads take no focus.
-  const group = useRef<HTMLDivElement>(null);
-  const pressed = useRef(false);
-  useEffect(() => {
-    if (pressed.current && document.activeElement === document.body) group.current?.focus({ preventScroll: true });
-    pressed.current = false;
-  }, [pf]);
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
     let h = -1;
@@ -260,9 +252,11 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    const onExpand = (gap: number, how: Grow) => () => {
-      pressed.current = true;
-      live.current.p.onExpand?.(path, gap, how);
+    // An arrow that showed the last of its lines is gone once they are drawn, and the focus with it: the line group takes it.
+    const onExpand = (gap: number, how: Grow) => async (e: MouseEvent) => {
+      const group = e.currentTarget.closest<HTMLElement>(".rv-lines");
+      await live.current.p.onExpand?.(path, gap, how);
+      requestAnimationFrame(() => document.activeElement === document.body && group?.focus({ preventScroll: true }));
     };
     return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null), onExpand };
   }, [file.path]);
@@ -331,7 +325,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div ref={group} className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
+            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}
@@ -377,7 +371,7 @@ interface Gutter {
   onPlus: (a: Anchor) => () => void;
   onOver: (e: MouseEvent) => void;
   onLeave: () => void;
-  onExpand: (gap: number, how: Grow) => () => void;
+  onExpand: (gap: number, how: Grow) => (e: MouseEvent) => void;
 }
 
 /** The arrows on a hunk's row, for the unchanged lines before it (gap `at`); `tail` is the row after the last hunk,

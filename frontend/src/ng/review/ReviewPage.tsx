@@ -206,7 +206,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               top={comments.top}
               truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
               readOnly={ended}
-              onExpand={(path, gap, how) => void expand(path, gap, how)}
+              onExpand={expand}
             />
           )}
           {compare.state === "ready" && comments.elsewhere}

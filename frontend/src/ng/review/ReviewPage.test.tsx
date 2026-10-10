@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -127,7 +127,7 @@ describe("a file's header and its hunks", () => {
     expect(lines()).toEqual(["a = 1", "b = 2", "c = 3", "d = 4", "e = 5", "f = 6", "g = 7"]);
     // The file ends with the hunk, which the read told: no arrows left, and the focus the arrow had is on the lines.
     expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
-    expect(document.activeElement).toBe(document.querySelector(".rv-lines"));
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".rv-lines")));
     expect(vi.mocked(http.request).mock.calls.map(([p]) => String(p)).filter((p) => p.includes("context="))).toEqual(["/work-items/w1/compare?from=base&to=latest&file=a.py&context=1000000"]);
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 2" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "why 2?" } });

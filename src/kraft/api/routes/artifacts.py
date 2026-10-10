@@ -228,7 +228,9 @@ async def compare_work_item(
         raise HTTPException(400, "`from` cannot be the working tree")
     if not row["base_ref"]:
         raise HTTPException(409, "this work item has no base commit to compare against")
-    if file is not None and (not file or file.startswith("/") or ".." in file.split("/")):
+    if file is not None and (
+        not file or "\0" in file or file.startswith("/") or ".." in file.split("/")
+    ):
         raise HTTPException(400, "`file` must be a path inside the repository")
     worktree = _readable_worktree(st, row)
     gate = board._pending_gate(st, wid)
@@ -276,6 +278,10 @@ async def compare_work_item(
             for n in wanted
         ]
         diff = review.filter_diff(diff, keep)
+    if file:
+        # Git read `file` as a path, and a directory's is every file under it.
+        files = [f for f in files if f["path"] == file]
+        diff = review.filter_diff(diff, {file})
     diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)
     return {
         "from": {"target": frm, "sha": from_sha},

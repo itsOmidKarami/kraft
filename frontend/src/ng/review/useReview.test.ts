@@ -33,6 +33,21 @@ describe("useExpanded", () => {
     await act(async () => {});
     expect(calls("context=")).toEqual(["/work-items/w1/compare?from=base&to=latest&file=a.py&context=1000000"]);
   });
+
+  it("reads a thread's file for the comparison that replaced the one being read", async () => {
+    const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -4,3 +4,4 @@\n d = 4\n+e = 5\n f = 6\n g = 7\n";
+    const WHOLE = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,6 +1,7 @@\n a = 1\n b = 2\n c = 3\n d = 4\n+e = 5\n f = 6\n g = 7\n";
+    const answers: ((r: { status: number; body: unknown }) => void)[] = [];
+    vi.mocked(http.request).mockImplementation(() => new Promise((answer) => answers.push(answer)));
+    const patchOf = () => new Map(parsePatch(PATCH).map((f) => [f.path, f]));
+    const threads = [{ id: "t1", file_path: "a.py", side: "new", start_line: 2, end_line: 2 } as ReviewThread];
+    const { result, rerender } = renderHook((p: { patch: ReturnType<typeof patchOf> }) => useExpanded("w1", "base", "latest", false, p.patch, threads), { initialProps: { patch: patchOf() } });
+    // The comparison is read again (a new commit) while the first one's file is still being read.
+    rerender({ patch: patchOf() });
+    expect(answers).toHaveLength(2);
+    await act(async () => answers.forEach((answer) => answer({ status: 200, body: { diff: WHOLE, truncated: false } })));
+    expect(result.current.patch.get("a.py")!.hunks[0].lines.map((l) => l.text)).toEqual(["a = 1", "b = 2", "c = 3", "d = 4", "e = 5", "f = 6", "g = 7"]);
+  });
 });
 
 describe("useCompare", () => {
