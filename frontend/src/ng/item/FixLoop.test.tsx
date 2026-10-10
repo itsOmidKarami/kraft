@@ -113,6 +113,17 @@ describe("a fix-loop node", () => {
     expect(within(pane("judge")).queryByRole("button", { name: /^Skip/ })).toBeNull();
   });
 
+  it.each([
+    ["verification.fix_loop.judge", "judge", "fix-loop judge · after round 2 · not yet"],
+    ["verification.fix_loop.main.repair", "repair", "fix-loop repair · between rounds 2 and 3 · not yet"],
+  ])("says of the newest round's %s what its box on the canvas says: it may yet run", (sel, name, want) => {
+    // Round 2 has measured, and neither its judge nor the repair after it has started.
+    mount(`/work-items/w1/nodes/verification?sel=${sel}`, item(run().slice(0, 5)));
+    expect(sub(name)).toBe(want);
+    expect(within(screen.getByRole("tabpanel")).getByText("Not yet.")).toBeInTheDocument();
+    expect(within(canvas()).getByRole("button", { name: new RegExp(`^${name}`) })).toHaveTextContent("not yet");
+  });
+
   it("keeps the pick while the selection moves inside the node", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
     await pickRound(1);

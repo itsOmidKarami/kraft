@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
-import { isScopeTask, roundWords, scopesView } from "../../item/scopeView";
+import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
 import { LogLines } from "../log/LogLines";
@@ -19,7 +19,7 @@ type TaskTab = "overview" | "log" | "config" | "thread";
 const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
 
 /** A task of a node, or the node's escalation (W17 brief E): its attempts, and Overview / Log / Config, with Thread first on an escalation. */
-export function TaskScreen({ item, version, docs, place, node: nodeId, now, setPlace }: PlaceProps & { place: Place & { sel: { kind: "task"; node: string; step: string; task: string } } }) {
+export function TaskScreen({ item, version, events, docs, place, node: nodeId, now, setPlace }: PlaceProps & { place: Place & { sel: { kind: "task"; node: string; step: string; task: string } } }) {
   const navigate = useNavigate();
   const path = selPath(place.sel)!;
   const esc = place.sel.step === ESCALATION;
@@ -40,7 +40,8 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   const earlier = view ? sessions.filter((s) => !chips.some((c) => c.session?.id === s.id)) : [];
   // An escalation's picker is per thread: it shows that thread through its last turn.
   const wanted = place.attempt ? (esc ? sessions.map((s) => s.thread).lastIndexOf(place.attempt) : sessions.findIndex((s) => s.attempt === place.attempt)) : -1;
-  const at: WorkerSession | undefined = sessions[wanted >= 0 ? wanted : sessions.length - 1];
+  // A changed-test-scope task is all of its scopes: one that failed, or still runs, speaks for it, whichever ran last.
+  const at: WorkerSession | undefined = wanted >= 0 ? sessions[wanted] : (view && scopeLead(view)) || sessions.at(-1);
   const look = sessionLook(at, now);
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
   const tab = (tabs.some((t) => t.id === place.tab) ? place.tab : tabs[0].id) as TaskTab;
@@ -54,7 +55,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   const unrun = !at && !!r && (!!loop || r < rounds.latest);
   const state = at
     ? `${lead} · ${lookWord(look)}${!view && sessions.length > 1 ? ` · attempt ${sessions.indexOf(at) + 1} of ${sessions.length}` : ""}`
-    : unrun ? `${lead} · ${loop === "judge" && r === 1 ? "skipped · the first repair runs without the judge" : "not run in this round"}` : "task · not started";
+    : unrun ? `${lead} · ${loop ? loopIdle(apiNode, loop, r, rounds, events) : "not run in this round"}` : "task · not started";
   const steps = stepsOf(apiNode).steps;
   const si = steps.findIndex((s) => s.id === place.sel.step);
   const before = si > 0 ? `step ${steps[si - 1].id}` : (() => { const i = item.chain_definition.nodes.findIndex((n) => n.id === nodeId); return i > 0 ? item.chain_definition.nodes[i - 1].id : null; })();
@@ -148,7 +149,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
               </Block>
             </>
           ) : unrun ? (
-            <p className="ph-note">Not run in this round.</p>
+            <p className="ph-note">{loop && r ? loopIdleSentence(apiNode, loop, r, rounds, events) : "Not run in this round."}</p>
           ) : (
             <Block title="When it runs">
               <p className="ph-note">{before ? `After ${before} finishes.` : "When the item starts."} It has no attempt yet.</p>

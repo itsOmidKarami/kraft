@@ -1,5 +1,5 @@
 import { loopRounds, passWords, roundShown } from "../../item/nodeGraph";
-import { otherRounds, scopesView, stateWords, statusWords } from "../../item/scopeView";
+import { otherRounds, scopeAt, scopesView, stateWords, statusWords } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
@@ -20,11 +20,10 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
   const total = rounds?.total;
   const pass = passWords(item, nodeId, place.pass);
   const view = scopesView(item, path, round, now);
-  const hit = view.rows.flatMap((row) => row.chips.map((chip) => ({ row, chip }))).find((x) => x.chip.key === place.scope);
-  const at = place.scope.indexOf(":");
-  // A scope the round has no chip for: its repository ran without it, or was not reached at all.
-  const repo = hit?.row ?? view.rows.find((r) => (r.id ?? "") === place.scope.slice(0, at));
-  const dropped = !hit && !!repo && repo.chips.length > 0;
+  // The scope's row and chip, or why the round has none for it: not picked, not reached, not found, still choosing.
+  const at = scopeAt(item, path, place.scope, view);
+  const hit = at.chip && at.row ? { row: at.row, chip: at.chip } : undefined;
+  const repo = at.row;
   // One repository: nothing to tell apart, so the screen does not name it, as the desktop's frame does not.
   const several = view.rows.length > 1;
   const s = hit?.chip.session;
@@ -39,14 +38,14 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
       <div className="ph-content">
         <div className="ph-node-head">
           <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId} › {place.sel.step} › {place.sel.task}{several && repo ? ` › ${repo.name}` : ""}</p>
-          <h1 className="ph-node-title">{hit ? (hit.chip.setup ? hit.chip.name : hit.chip.command) : place.scope.slice(at + 1) || place.scope}</h1>
+          <h1 className="ph-node-title">{hit ? (hit.chip.setup ? hit.chip.name : hit.chip.command) : at.command}</h1>
           <p className={`ph-node-sub${hit?.chip.state === "failed" ? " ph-tone-bad" : hit?.chip.state === "running" ? " ph-tone-info" : ""}`}>
-            {hit?.chip.setup ? "area setup" : "test scope"} · {pass && `${pass} · `}round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : dropped ? "not picked" : "not reached"}
+            {hit?.chip.setup ? "area setup" : "test scope"} · {pass && `${pass} · `}round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : at.miss}
           </p>
         </div>
         {s && <TabStrip label="Scope" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />}
         {!hit ? (
-          <p className="ph-note">{dropped ? "Not picked: no changed path reaches it this round." : "Its repository was not reached this round."}</p>
+          <p className="ph-note">{at.why}</p>
         ) : tab === "log" ? (
           <TaskLog session={s} />
         ) : (

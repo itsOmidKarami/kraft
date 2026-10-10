@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -23,7 +23,7 @@ import { chainName } from "../chainName";
 import { loopStepPaths, materialized, notStarted, planTaskPath, taskAt, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 import { scopePane, ScopeOverview } from "./ScopePane";
-import { isScopeTask, scopesView } from "../scopeView";
+import { isScopeTask, scopeLead, scopesView } from "../scopeView";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -261,7 +261,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const path = esc ? ESCALATION : rev ? `${node.id}.${AUTO_REVIEW}` : `${node.id}.${stepId}.${task}`;
   // One of an open changed-test-scope task's scopes has its own pane.
   if (a.scope && !esc && !rev && stepId !== FIX_LOOP) {
-    return scopePane({ item, node, step: stepId, task, scope: a.scope, round: a.round ?? 1, now: a.now, crumbs, tab: a.tab, toTask: () => a.pick({ kind: "task", node: node.id, step: stepId, task }) });
+    return scopePane({ item, node, step: stepId, task, scope: a.scope, round: a.round ?? 1, now: a.now, crumbs, tab: a.tab, toTask: () => a.pick({ kind: "task", node: node.id, step: stepId, task }), attempt: a.attempt, setAttempt: a.setAttempt });
   }
   // In a fix-loop node a task's pane is one round's: the step tasks and the judge as the round measured
   // (the judge after it), the repair as it went on to the next.
@@ -270,7 +270,12 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const r = rounds && a.round;
   const all = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const sessions = r ? all.filter((s) => s.round === (loop === "repair" ? r : r - 1)) : all;
-  const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
+  // A changed-test-scope task runs one session per scope: they are its scopes, not attempts at it.
+  const scopes = !esc && !rev && !loop && isScopeTask(item, path);
+  const view = scopes ? scopesView(item, path, a.round ?? 1, a.now) : null;
+  // Such a task is all of its scopes: one that failed, or still runs, speaks for it, whichever ran last.
+  // A run pinned in one of its scopes' panes is that scope's: this pane has no menu to pick one, or to let it go.
+  const at = view ? scopeLead(view) || sessions.at(-1) : sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
   const frozen = materialized(item);
   const kind = esc ? "agent" : taskKindAt(frozen, path) ?? (at?.model ? "agent" : undefined);
@@ -281,7 +286,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   // A round's task says how long it took, as the words run on: "running 41s", "done 31s".
   const took = r && at ? (look.running ? look.meta?.replace(" · ", " ") : look.state === "done" && at.wall_ms != null ? `done ${elapsed(at.wall_ms)}` : undefined) : undefined;
   // A task the round did not run says so in so many words, as the prototype has it.
-  const state = took ?? (look.running ? (look.meta ?? "running") : at || !r ? lookWord(look) : loop === "judge" && r === 1 ? "skipped · the first repair runs without the judge" : "not run in this round");
+  const state = took ?? (look.running ? (look.meta ?? "running") : at || !r || !loop ? (at || !r ? lookWord(look) : "not run in this round") : loopIdle(node, loop, r, rounds!, a.events));
   const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: loop ? taskName(task) : task, sub: `${lead} · ${state}` };
   if (!at) {
     // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
@@ -289,7 +294,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     // before it runs (`/skip` takes a task of the current node).
     const edit = !esc && !rev && !!a.canEdit?.(node.id);
     // The fix loop's repair and judge do not wait on a step before them: a round either ran them or did not.
-    const empty = (text: string) => <p className="item-muted">{loop ? "Not run in this round." : text}</p>;
+    const empty = (text: string) => <p className="item-muted">{loop && r ? loopIdleSentence(node, loop, r, rounds!, a.events) : loop ? "Not run in this round." : text}</p>;
     const bodies: Record<string, ReactNode> = {
       thread: empty("No turns yet."),
       overview: empty("Not run yet. It starts when the step before this one finishes."),
@@ -308,8 +313,6 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     };
   }
   const current = standsOn(item, node.id);
-  // A changed-test-scope task runs one session per scope: they are its scopes, not attempts at it.
-  const scopes = !esc && !rev && !loop && isScopeTask(item, path);
   // Picking the newest attempt drops the pin, so the pane follows the next one that starts;
   // an older attempt stays put while newer ones arrive, and the menu's count shows them.
   const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} inRound={!!r} />;
@@ -323,7 +326,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     overview: (
       <>
         {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}
-        {scopes && <ScopeOverview view={scopesView(item, path, a.round ?? 1, a.now)} />}
+        {view && <ScopeOverview view={view} />}
         <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />
       </>
     ),
