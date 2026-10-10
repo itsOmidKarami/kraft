@@ -5,10 +5,12 @@ import { useEvents } from "../../item/useEvents";
 import { runVersion, useItem } from "../../item/useItem";
 import { loopStepPaths, materialized } from "../../item/chainValues";
 import { FIX_LOOP } from "../../item/nodeGraph";
-import { placeUrl, readPlace, type Place } from "../../item/url";
+import { isScopeTask } from "../../item/scopeView";
+import { placeUrl, readPlace, selPath, type Place } from "../../item/url";
 import { Doc } from "../doc/Doc";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { NodeScreen } from "./NodeScreen";
+import { ScopeScreen } from "./ScopeScreen";
 import { TaskScreen } from "./TaskScreen";
 
 /** `/work-items/:id/nodes/:node`: the node screen, or the task screen when `sel` names a task. The URL carries node, selection, tab and attempt (spec §6.2). */
@@ -50,6 +52,11 @@ export function NodeRoute() {
   if (place.sel.kind === "task" && place.sel.step === FIX_LOOP && loopStepPaths(materialized(loaded.item), place.node, place.sel.task).length)
     return <Navigate to={placeUrl(id, { node: place.node, sel: { kind: "node", node: place.node } })} replace />;
   const props = { item: loaded.item, version, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
-  if (place.sel.kind === "task") return <TaskScreen {...props} place={place as Place & { sel: { kind: "task"; node: string; step: string; task: string } }} />;
+  type OfTask = Place & { sel: { kind: "task"; node: string; step: string; task: string } };
+  // A scope of a changed-test-scope task has its own screen; on any other task `scope` names nothing.
+  if (place.sel.kind === "task" && place.scope && isScopeTask(loaded.item, selPath(place.sel)!)) return <ScopeScreen {...props} place={place as OfTask & { scope: string }} />;
+  // On any other task a `scope` would only make Back name a screen that is not there: drop it.
+  if (place.sel.kind === "task" && place.scope) return <Navigate to={placeUrl(id, { ...place, scope: undefined })} replace />;
+  if (place.sel.kind === "task") return <TaskScreen {...props} place={place as OfTask} />;
   return <NodeScreen {...props} />;
 }

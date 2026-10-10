@@ -29,6 +29,12 @@ export function parentOf(href: string): string | null {
     if (seg[2] === "review") return `/work-items/${seg[1]}`;
     if (seg[2] === "nodes") {
       // A task is the node route with `sel` naming a task (node.step.task); anything else is the node.
+      // A scope of a changed-test-scope task is a screen over that task.
+      if (q.has("sel") && q.get("scope")) {
+        q.delete("scope");
+        q.delete("tab");
+        return join(pathname, q);
+      }
       if (q.has("sel")) {
         q.delete("sel");
         q.delete("attempt");
@@ -59,7 +65,7 @@ export function backLabel(href: string): string {
   if (q.has("doc") || q.has("attached") || q.has("yaml") || q.has("compose")) return "Back";
   if (parent === "/") return "Board";
   if (parent === "/more") return "More";
-  if (pathname.includes("/nodes/")) return q.has("sel") ? "Node" : "Chain";
+  if (pathname.includes("/nodes/")) return q.has("sel") ? (q.get("scope") ? "Task" : "Node") : "Chain";
   if (pathname.endsWith("/review")) return "Back";
   if (parent && AREA.test(parent) && parent !== pathname) return parent.split("/").filter(Boolean).at(-1)!.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
   return "Back";
@@ -75,8 +81,8 @@ export function tabOf(href: string): Tab | null {
   return null;
 }
 
-/** `pathname` and `sel` only: whether two addresses are the same screen. */
+/** `pathname`, `sel` and a task's `scope` only: whether two addresses are the same screen. */
 export const screenKey = (href: string) => {
   const { pathname, q } = split(href);
-  return `${pathname}${q.get("sel") ? `#${q.get("sel")}` : ""}`;
+  return `${pathname}${q.get("sel") ? `#${q.get("sel")}${q.get("scope") ? `#${q.get("scope")}` : ""}` : ""}`;
 };

@@ -1,11 +1,12 @@
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokens, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
 import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
-import { isScopeTask, scopesView } from "../../item/scopeView";
-import { selPath, type Place } from "../../item/url";
+import { isScopeTask, roundWords, scopesView } from "../../item/scopeView";
+import { placeUrl, selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
@@ -39,7 +40,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   const earlier = view ? sessions.filter((s) => !chips.some((c) => c.session?.id === s.id)) : [];
   // An escalation's picker is per thread: it shows that thread through its last turn.
   const wanted = place.attempt ? (esc ? sessions.map((s) => s.thread).lastIndexOf(place.attempt) : sessions.findIndex((s) => s.attempt === place.attempt)) : -1;
-  const at: WorkerSession | undefined = (place.scope && chips.find((c) => c.key === place.scope)?.session) || sessions[wanted >= 0 ? wanted : sessions.length - 1];
+  const at: WorkerSession | undefined = sessions[wanted >= 0 ? wanted : sessions.length - 1];
   const look = sessionLook(at, now);
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
   const tab = (tabs.some((t) => t.id === place.tab) ? place.tab : tabs[0].id) as TaskTab;
@@ -79,31 +80,28 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
         )}
         {view && tab === "overview" && (
           <Block title="Scopes">
+            {chips.length > 0 && <p className="ph-note">{roundWords(view).scopes}{!solo && ` · ${roundWords(view).repos}`}</p>}
             {view.rows.map((row) => (
               <div key={row.name} className="ph-scope-repo">
                 {/* With no scopes the note is all a lone repository has to say: waiting, or not reached. */}
                 {(!solo || !row.chips.length) && <p className="ph-note">{!solo && <><span className="ph-mono">{row.name}</span> · </>}{row.note}</p>}
                 <div className="ph-list">
-                  {row.chips.map((c) => {
-                    const text = (
+                  {row.chips.map((c) => (
+                    <button key={c.key} type="button" className="ph-row ph-task-row" onClick={() => navigate(placeUrl(item.id, { node: nodeId, sel: place.sel, round: place.round, scope: c.key }))}>
                       <span className="ph-row-text">
                         <span className="ph-row-label ph-mono">{c.setup ? c.name : c.command}</span>
                         <span className="ph-row-hint">{c.state === "done" ? ["done", c.meta].filter(Boolean).join(" · ") : c.meta || c.state}{c.fresh ? " · new this round" : ""}</span>
                       </span>
-                    );
-                    // A scope with no run this round has nothing to open: it waits, or the round did not pick it
-                    // (its chip then carries the round before's run, which is not this round's to show).
-                    return c.session && c.state !== "skipped"
-                      ? <button key={c.key} type="button" className="ph-row" aria-pressed={c.session.id === at?.id} onClick={() => setPlace({ scope: c.key, attempt: undefined })}>{text}</button>
-                      : <div key={c.key} className="ph-row ph-row-static">{text}</div>;
-                  })}
+                      <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+                    </button>
+                  ))}
                 </div>
               </div>
             ))}
             {earlier.length > 0 && (
               <div className="ph-attempts" role="group" aria-label="Earlier runs this round">
                 {earlier.map((s, i) => (
-                  <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s.attempt, scope: undefined })}>
+                  <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s.attempt })}>
                     earlier run {i + 1}{s.command ? ` · ${s.command}` : ""} · {lookWord(sessionLook(s, now))}
                   </button>
                 ))}
@@ -170,7 +168,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   );
 }
 
-function TaskLog({ session }: { session?: WorkerSession }) {
+export function TaskLog({ session }: { session?: WorkerSession }) {
   const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
   const running = session?.status === "running" || session?.status === "pending";
   const { lines, error } = useLog(session?.id ?? null, !!running);

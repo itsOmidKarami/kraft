@@ -1,25 +1,12 @@
 import type { ReactNode } from "react";
-import { elapsed } from "../../../format";
 import type { ChainNode } from "../../../types";
 import { loopRounds } from "../nodeGraph";
-import { otherRounds, scopesView, type Chip, type ScopesView } from "../scopeView";
+import { otherRounds, roundWords, scopesView, stateWords, statusWords, type ScopesView } from "../scopeView";
 import type { ItemDetail } from "../useItem";
 import { Log } from "./Log";
 import type { PaneContent } from "./paneContent";
 
 const fact = (k: string, v: ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
-
-/** A chip's state in the words a pane's subtitle uses: "passed 24s", "failed 1m", "running", "not picked". */
-function stateWords(c: Chip): string {
-  if (c.state === "skipped") return "not picked";
-  const took = c.session?.wall_ms != null ? ` ${elapsed(c.session.wall_ms)}` : "";
-  if (c.state === "done") return `passed${took}`;
-  if (c.state === "failed") return `failed${took}`;
-  return c.meta || (c.state === "waiting" ? "waiting" : "running");
-}
-
-/** The status row: the same, with a dot before the time, and why a dropped scope is. */
-const statusWords = (c: Chip) => (c.state === "skipped" ? "not picked · no changed path reaches it this round" : stateWords(c).replace(/^(passed|failed) (?=\d)/, "$1 · "));
 
 type Args = { item: ItemDetail; node: ChainNode; step: string; task: string; scope: string; round: number; now: number; crumbs: PaneContent["crumbs"]; tab: string; toTask: () => void };
 
@@ -66,13 +53,12 @@ export function scopePane({ item, node, step, task, scope, round, now, crumbs, t
 
 /** The open task's own Overview: how its round went in a line each, then what the chips and rings on its canvas mean. */
 export function ScopeOverview({ view }: { view: ScopesView }) {
-  const chips = view.rows.flatMap((r) => r.chips).filter((c) => c.state !== "skipped");
-  const reached = view.rows.filter((r) => r.state !== "unreached" && r.state !== "waiting").length;
+  const words = roundWords(view);
   return (
     <>
       <dl className="item-facts ip-facts">
-        {fact("this round", `${chips.filter((c) => c.state === "done").length} of ${chips.length} scopes passed`)}
-        {fact("repos", `${reached} of ${view.rows.length} reached · run in order, stop at the first failure`)}
+        {fact("this round", words.scopes)}
+        {fact("repos", words.repos)}
         {fact("scopes", view.execution === "parallel" ? "in parallel within a repo" : "one after another within a repo, all run")}
         {fact("config", <span className="is-mono">execution: {view.execution}</span>)}
       </dl>
