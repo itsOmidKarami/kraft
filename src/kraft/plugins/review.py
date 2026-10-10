@@ -200,8 +200,8 @@ def _chain_change(
     if last in _GATE_FIELDS:
         return "reach", f"{where}: {last} {_how(old, new)}"
     if last == "kind":
-        if old == "gate" and new is None:
-            return "reach", f"{where}: gate removed"
+        if old == "gate":  # the fact changed, so `new` is not a gate
+            return "reach", f"{where}: gate removed{'' if new is None else f', now {new}'}"
         return "content", f"{where}: {'removed' if new is None else f'added ({new})'}"
     if last == "target":
         chain_id = path.split(".nodes[", 1)[0]

@@ -39,6 +39,10 @@ def _gate_removed(spec):
     del _nodes(spec)[1]
 
 
+def _gate_replaced(spec):
+    _nodes(spec)[1].update(kind="exec", tasks=[{"id": "open", "extends": "open"}])
+
+
 def _auto_review(spec):
     _nodes(spec)[1]["auto_review"] = {**AGENT, "id": "reviewer"}
 
@@ -94,6 +98,7 @@ def _downgrade(spec):
     ("change", "section", "says"),
     [
         (_gate_removed, "reach", "release:ship.nodes[approve]: gate removed"),
+        (_gate_replaced, "reach", "release:ship.nodes[approve]: gate removed, now exec"),
         (_auto_review, "reach", "a gate's own agent review changed"),
         (_merge_step, "reach", "mr.merge step set to 'mr.merge'; a gate comes before it"),
         (_forge_target, "reach", "forge target 'mr.sync', which this chain did not use before"),
@@ -109,6 +114,7 @@ def _downgrade(spec):
     ],
     ids=[
         "gate-removed",
+        "gate-replaced",
         "auto-review",
         "merge-step",
         "forge-target",
