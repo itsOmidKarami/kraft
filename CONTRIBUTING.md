@@ -13,7 +13,8 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
   API added later (3.13's `Path.read_text(newline=)`, 3.14's t-strings,
   unparenthesized `except A, B:`), and every module under `src/` starts with
   `from __future__ import annotations`, which lint enforces.
-- git.
+- git, and bash and [jq](https://jqlang.org) for the tests that run CI's own
+  scripts (`tests/test_ci_workflow.py`).
 - Node 22 with npm, for the frontend, the docs site and the VS Code extension.
   CI builds on Node 22; no `package.json` sets an `engines` floor, so use the
   same major.
@@ -177,22 +178,24 @@ its `enforced-by:` pins, which break when you rename a pinned test.
 
 ### What CI checks
 
-Every pull request runs these, except that a docs-only one skips the six
-marked *(code)*. A pull request is docs-only when every file it changes is a
-root-level `*.md`, `docsite/**`, `.github/assets/**`, or `docs/*.md` (not
-`docs/intent/`). In their place, `docs tests` runs every unit test file that
-names one of those paths. `just ci-test` runs `lint` and the test matrix, in
-CI's order, on the full suite.
+Every pull request runs these, with two exceptions decided by the paths it
+changes. A docs-only one skips the jobs marked *(code)* and *(python)*. It is
+docs-only when every file it changes is a root-level `*.md`, `docsite/**`,
+`.github/assets/**`, or `docs/*.md` (not `docs/intent/`). One that changes
+those and `frontend/**`, and nothing else, skips the jobs marked *(python)*:
+no Python moved. In their place, `python tests (by path)` runs every unit test
+file that names one of the changed trees. A push to `main` runs everything.
+`just ci-test` runs `lint` and the unit tier, in CI's order, on the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
 | `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
-| `changes` | decides whether the pull request is docs-only | nothing to run |
-| `test (python 3.12 / 3.13 / 3.14, 1/3 … 3/3)` *(code)* | the unit tier (`-m "not e2e"`) in three shards on each supported Python, with `python -m kraft.intent` in the first | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
-| `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
-| `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
-| `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode`, `playwright` and `ui contract` all pass; on a docs-only pull request those *(code)* jobs skip, which counts as passing, and `docs tests` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
-| `e2e (real CLIs)` *(code)* | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
+| `changes` | decides whether the pull request is docs-only, or changes no Python | nothing to run |
+| `test (python 3.12 / 3.13 / 3.14, 1/3 … 3/3)` *(python)* | the unit tier (`-m "not e2e"`) in three shards on each supported Python, with `python -m kraft.intent` in the first | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
+| `test report` *(python)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
+| `python tests (by path)` (pull requests that change no Python) | the unit test files that name a docs path, and `frontend/` when it changed, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
+| `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode`, `playwright` and `ui contract` all pass; a job that skips because of the paths changed (*(python)*, and on a docs-only pull request *(code)* too) counts as passing, and `python tests (by path)` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
+| `e2e (real CLIs)` *(python)* | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
 | `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
 | `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |

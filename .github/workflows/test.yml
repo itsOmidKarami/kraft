@@ -39,12 +39,16 @@ jobs:
     # `code` is false only for a pull request whose every changed path is
     # prose nothing in the heavy jobs reads: root-level *.md, docsite/ (docs.yml
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
-    # the test job checks). Pushes to main run everything, and so does a PR if
-    # this job fails: the heavy jobs skip only on an explicit 'false'. The unit
-    # tests that read those files still run, in `docs-tests`.
+    # the test job checks). `python` is false for those and for one that also
+    # changes frontend/, with nothing else and no .py file among them: no
+    # Python moved, so the unit shards and the real-CLI tier have nothing new
+    # to say. Pushes to main run everything, and so does a PR if this job
+    # fails: the heavy jobs skip only on an explicit 'false'. The unit tests
+    # that read the changed trees still run, in `docs-tests`.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      python: ${{ steps.diff.outputs.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,13 +58,23 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           code=true
+          python=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            files=$(git diff --name-only "$BASE" HEAD)
-            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md)$')" ]; then
+            # --no-renames: a rename is named by its new path alone, and a
+            # Python file moved into docs/ would read as a docs change.
+            files=$(git diff --name-only --no-renames "$BASE" HEAD)
+            docs='[^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md'
+            if [ -z "$(printf '%s\n' "$files" | grep -vE "^($docs)$")" ]; then
               code=false
+            fi
+            # A .py file is Python wherever it lives: frontend/e2e/serve.py.
+            if [ -z "$(printf '%s\n' "$files" | grep -vE "^($docs|frontend/.*)$")" ] &&
+              ! printf '%s\n' "$files" | grep -qE '\.py$'; then
+              python=false
             fi
           fi
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+          echo "python=$python" | tee -a "$GITHUB_OUTPUT"
 
   lint:
     runs-on: ubuntu-latest
@@ -96,7 +110,7 @@ jobs:
     # failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/3)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -160,7 +174,7 @@ jobs:
     # One set of junit annotations and one coverage comment for the three
     # shards. Not in `test-gate`: it reports on the tests and checks nothing
     # itself, so a comment that could not be posted does not block a merge.
-    # It does not run when the shards were skipped (a docs-only pull request).
+    # It does not run when the shards were skipped (no Python changed).
     name: test report
     needs: test
     if: ${{ !cancelled() && needs.test.result != 'skipped' }}
@@ -213,15 +227,17 @@ jobs:
           MERGE_COVERAGE_FILES: true
 
   docs-tests:
-    # On a docs-only pull request, the unit tests that read a docs file stand
-    # in for the skipped matrix: a test that parses a docsite page's policy
-    # example, the README's install URL, docs/templates-v1-design.md's YAML. The
-    # grep names the same trees `changes` calls docs-only, so a new test that
-    # reads one is picked up without editing a list. Python 3.14 only, like
-    # every job but the matrix.
-    name: docs tests
+    # On a pull request that changes no Python, the unit tests that read a
+    # changed tree stand in for the skipped shards: a test that parses a docsite
+    # page's policy example, the README's install URL, a frontend type a Python
+    # model mirrors. The grep names the same trees `changes` does, so a new test
+    # that reads one is picked up without editing a list; it is wide on purpose
+    # (any test file that so much as mentions the tree). A test that reaches
+    # one without naming it is caught on main, which runs everything. Python
+    # 3.14 only, like every job but the shards.
+    name: python tests (by path)
     needs: changes
-    if: needs.changes.outputs.code == 'false'
+    if: needs.changes.outputs.python == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -236,8 +252,13 @@ jobs:
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
       - run: uv sync --frozen
-      - run: |
-          git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
+      - env:
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          trees='docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md'
+          # Not docs-only, so frontend/ changed too.
+          if [ "$CODE" != false ]; then trees="$trees|\"frontend\"|frontend/"; fi
+          git grep -lE "$trees" -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
           cat "$RUNNER_TEMP/docs-tests.txt"
           xargs uv run pytest -m "not e2e" -n logical < "$RUNNER_TEMP/docs-tests.txt"
 
@@ -272,16 +293,20 @@ jobs:
     # hand also leaves a skipped gate, not a red one.
     #
     # The shell below reads every `needs` result. Each must be `success`, with
-    # two exceptions that follow `changes`: on a docs-only pull request the
-    # path-gated jobs report `skipped`, which passes, and `docs tests` must then
-    # succeed; on any other change `docs tests` is the one job expected to skip.
-    # Anything else -- failure, cancelled, or a skip nobody asked for -- fails.
+    # the exceptions that follow `changes`. On a pull request that changes no
+    # Python, the unit shards and the real-CLI tier report `skipped`, which
+    # passes, and `python tests (by path)` must then succeed. On a docs-only one
+    # the frontend and browser jobs skip as well. On any other change
+    # `python tests (by path)` is the one job expected to skip. Anything else
+    # -- failure, cancelled, or a skip nobody asked for -- fails.
+    # tests/test_ci_workflow.py runs this script on each of those cases.
     name: test
     needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e, ui-contract]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
+      PYTHON: ${{ needs.changes.outputs.python }}
       NEEDS: ${{ toJSON(needs) }}
     steps:
       - run: |
@@ -298,13 +323,15 @@ jobs:
           fail() { echo "::error::$job finished '$result', not 'success'"; status=1; }
           while read -r job result; do
             echo "$job: $result"
-            case "$job:$result:$CODE" in
+            case "$job:$result:$CODE:$PYTHON" in
               *:success:*) ;;
-              docs-tests:skipped:false) fail ;;  # docs-only: it stands in for the matrix
-              docs-tests:skipped:*) ;;           # a code change skips it
-              # docs-only: the path-gated jobs skip, and only they may
-              test:skipped:false | e2e-cli:skipped:false | frontend:skipped:false) ;;
-              vscode:skipped:false | e2e:skipped:false | ui-contract:skipped:false) ;;
+              docs-tests:skipped:*:false) fail ;;  # no Python changed: it stands in for the shards
+              docs-tests:skipped:*) ;;             # a Python change skips it
+              # no Python changed: these two skip, and only they may
+              test:skipped:*:false | e2e-cli:skipped:*:false) ;;
+              # docs-only: the frontend and browser jobs skip too
+              frontend:skipped:false:* | vscode:skipped:false:*) ;;
+              e2e:skipped:false:* | ui-contract:skipped:false:*) ;;
               *) fail ;;
             esac
           done <<<"$results"
@@ -321,7 +348,7 @@ jobs:
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
