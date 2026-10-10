@@ -72,13 +72,21 @@ archive:
 # Kraft holds any start that would create a new worktree until you make room:
 # archive finished items (Settings > Storage shows what each one frees), finish
 # or abandon live work, or raise the limit. Work that already has a worktree
-# keeps running. Kraft never deletes anything for the limit on its own. Over
-# `quota` it only warns; `quota` defaults to 80% of `limit`. A size is a whole
-# number with a unit: 1000M, 10G, 1T.
+# keeps running. Kraft deletes nothing for the limit on its own unless you add
+# `auto_cleanup`. Over `quota` it only warns; `quota` defaults to 80% of
+# `limit`. A size is a whole number with a unit: 1000M, 10G, 1T.
+#
+# To have Kraft make that room itself, add `auto_cleanup`. Over `limit` it then
+# archives completed and abandoned items, oldest first, until usage is back
+# under `quota`. It never takes an item that ended less than `min_age` ago
+# (hours or days: 12h, 24h, 2d). Archiving removes the worktree and any
+# uncommitted changes in it; a branch with unpushed commits is kept.
 # storage:
 #   worktrees:
 #     limit: 10G
 #     quota: 8G
+#     auto_cleanup:
+#       min_age: 24h
 
 # Schedules (a work item filed from a cron) are `intake.yaml`'s `schedules:`,
 # with the rest of what files work by itself. A `triggers:` list here is

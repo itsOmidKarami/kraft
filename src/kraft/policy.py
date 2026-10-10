@@ -139,6 +139,22 @@ class ArchiveInput(BaseModel):
     after_days: Annotated[StrictInt, Field(ge=0)] | None = None
 
 
+class AutoCleanupInput(BaseModel):
+    """`storage.worktrees.auto_cleanup`: its presence lets Kraft archive
+    finished items for the limit without a person (`kraft.storage.tick`),
+    never one that ended less than `min_age` ago."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_age: str = "24h"
+
+    @field_validator("min_age", mode="before")
+    @classmethod
+    def _is_an_age(cls, value):
+        age_seconds(value)
+        return str(value).strip()
+
+
 class StorageWorktreesInput(BaseModel):
     """`storage.worktrees`: over `limit`, a start that needs a new worktree
     waits until a person cleans up; over `quota` Kraft only warns. `quota`
@@ -148,6 +164,7 @@ class StorageWorktreesInput(BaseModel):
 
     limit: str | None = None
     quota: str | None = None
+    auto_cleanup: AutoCleanupInput | None = None
 
     @field_validator("limit", "quota", mode="before")
     @classmethod
@@ -159,6 +176,8 @@ class StorageWorktreesInput(BaseModel):
 
     @model_validator(mode="after")
     def _quota_is_below_limit(self) -> StorageWorktreesInput:
+        if self.auto_cleanup is not None and self.limit is None:
+            raise ValueError("storage.worktrees.auto_cleanup needs a limit beside it")
         if self.quota is None:
             return self
         if self.limit is None:
@@ -308,6 +327,9 @@ class Policy:
     #: `storage.worktrees.quota` in bytes, or 80% of the limit. Set whenever
     #: the limit is.
     storage_quota_bytes: int | None = None
+    #: `storage.worktrees.auto_cleanup.min_age` in seconds. None is off: the
+    #: limit then archives nothing and a person cleans up.
+    storage_auto_cleanup_min_age_s: int | None = None
     triggers: list[Trigger] = field(default_factory=list)
     #: How many work items may be `status == 'active'` at once, across every
     #: repo, however they were started. Moved here from intake.yaml (UI v2 ·
@@ -381,6 +403,7 @@ class Policy:
             if worktrees.quota
             else limit * 8 // 10
         )
+        cleanup = worktrees.auto_cleanup if worktrees else None
         return cls(
             loops=parsed.loops,
             default=parsed.default,
@@ -389,6 +412,7 @@ class Policy:
             archive_after_days=parsed.archive.after_days if parsed.archive else None,
             storage_limit_bytes=limit,
             storage_quota_bytes=quota,
+            storage_auto_cleanup_min_age_s=age_seconds(cleanup.min_age) if cleanup else None,
             rate_limit_retries=parsed.rate_limit_retries,
             triggers=_triggers(name, parsed.triggers),
             max_concurrent=parsed.max_concurrent,
@@ -909,6 +933,19 @@ def size_bytes(value) -> int:
             f"size {value!r} needs a whole number and a unit K, M, G or T, as in `10G`"
         )
     return memory_bytes(text.removesuffix("b"))
+
+
+#: `auto_cleanup.min_age`: `12h`, `24h`, `2d`. Days are the largest unit, and
+#: the unit is required for the reason a size's is.
+_AGE = re.compile(r"(0|[1-9][0-9]*)[hd]")
+
+
+def age_seconds(value) -> int:
+    """An age (`24h`, `2d`) as seconds."""
+    text = str(value).strip().lower()
+    if not _AGE.fullmatch(text):
+        raise ValueError(f"age {value!r} needs a whole number and a unit h or d, as in `24h`")
+    return int(text[:-1]) * (3600 if text[-1] == "h" else 86400)
 
 
 def _memory(value: str) -> str:
