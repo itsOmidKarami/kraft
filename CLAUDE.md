@@ -98,6 +98,7 @@ kraft admin templates lint                   # check every chain in the library;
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin templates library [ID]           # the library's components
 kraft admin harnesses [ID]                   # harness profiles and the tasks that select each
+kraft admin plugin validate PATH             # check a collection or plugin directory; installs nothing, exit 1 on any problem
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```
