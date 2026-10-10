@@ -1,5 +1,4 @@
 import { elapsed, elapsedBetween } from "../../format";
-import { EXPAND_W } from "../graph/nodeLayout";
 import type { ScopeRun, SessionStatus, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
 import { passOf } from "./nodeGraph";
@@ -49,12 +48,19 @@ const chipsWidth = (row: RepoRow, execution: ScopesView["execution"]) => {
   if (!w.length) return 0;
   return execution === "parallel" ? 2 + 10 + 6 + Math.max(...w) : w.reduce((t, x) => t + x, 0) + (w.length - 1) * (6 + 12 + 6) + 4;
 };
-/** The frame's width: wide enough for its longest row of chips, as it is tall enough for its rows, so nothing in it
- *  scrolls under a canvas whose wheel pans; never narrower than `EXPAND_W`. A row is 14px of padding a side, the
- *  20px ring, the 112px repository column and the 10px gaps between them; rounded up to 20px, with 16 to spare. */
+/** The words beside the frame's title. One repository is not a sequence of them, so it is not called one. */
+export const subtitle = (v: ScopesView) => `round ${v.round} · ${v.rows.length > 1 ? "repos in order · " : ""}scopes ${v.execution === "parallel" ? "in parallel" : "in order"}`;
+/** About how wide the frame's header draws: 24px of padding, the task's name in 12px monospace, the subtitle in the
+ *  11px UI face, the close button, and 10px between them. */
+const headWidth = (v: ScopesView) => 24 + v.path.split(".").at(-1)!.length * 7.3 + 10 + subtitle(v).length * 5.3 + 10 + 58;
+/** The frame's width: wide enough for its header and its longest row of chips, as it is tall enough for its rows,
+ *  so nothing in it scrolls under a canvas whose wheel pans. A row is 14px of padding a side, the 20px ring, the
+ *  112px repository column and the 10px gaps between them; rounded up to 20px, with 16 to spare. One repository
+ *  has no ring and no column to draw. */
 export const frameWidth = (v: ScopesView) => {
   const widest = Math.max(0, ...v.rows.map((r) => chipsWidth(r, v.execution)));
-  return Math.max(EXPAND_W, Math.ceil((28 + 20 + 10 + 112 + 10 + widest + 16) / 20) * 20);
+  const row = 28 + (v.rows.length === 1 ? 0 : 20 + 10 + 112 + 10) + widest;
+  return Math.ceil((Math.max(row, headWidth(v)) + 16) / 20) * 20;
 };
 
 /** Whether the frozen chain's task at `path` is the changed-test-scope builtin. */

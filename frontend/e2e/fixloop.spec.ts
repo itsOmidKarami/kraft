@@ -73,6 +73,12 @@ async function openVerification(page: Page) {
   return { canvas, id };
 }
 const frame = (page: Page) => page.getByRole("group", { name: /repositories and scopes/ });
+/** The frame at its full size: as wide as its contents, which are laid out at that width from the start. */
+const full = async (page: Page) => {
+  const width = await frame(page).locator(".scope-inner").evaluate((el) => getComputedStyle(el).width);
+  expect(parseFloat(width)).toBeGreaterThan(300);
+  await expect(frame(page)).toHaveCSS("width", width);
+};
 
 test("a verification that went three rounds: open the scopes, pick one, step back, and move between rounds", async ({ page }) => {
   const { canvas } = await openVerification(page);
@@ -82,9 +88,9 @@ test("a verification that went three rounds: open the scopes, pick one, step bac
   await expect(canvas.getByRole("button", { name: /^judge, fix-loop judge/ })).toBeVisible();
   await expect(canvas.getByRole("button", { name: "round 3 of 3 · latest" })).toBeVisible();
 
-  // Selecting the task opens it: 760px wide, once the move is over.
+  // Selecting the task opens it: at its full width, once the move is over.
   await canvas.getByRole("button", { name: /^test_changed_scopes/ }).click();
-  await expect(frame(page)).toHaveCSS("width", "760px");
+  await full(page);
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(0);
   await expect(frame(page).locator(".scope-row")).toHaveCount(2);
   // The box it replaced held the focus; the frame's title has it now.
@@ -121,7 +127,7 @@ test("the frame moves while it opens, and does not for someone who asked for les
   await canvas.getByRole("button", { name: /^test_changed_scopes/ }).click();
   // Everything glides for the 420ms the frame grows in.
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(1);
-  await expect(frame(page)).toHaveCSS("width", "760px");
+  await full(page);
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(frame(page)).toHaveCount(0);
@@ -130,7 +136,7 @@ test("the frame moves while it opens, and does not for someone who asked for les
   await expect(page.locator(".canvas.is-calm")).toHaveCount(1);
   await canvas.getByRole("button", { name: /^test_changed_scopes/ }).click();
   // At full size at once, nothing glides, and the frame only fades in.
-  await expect(frame(page)).toHaveCSS("width", "760px");
+  await full(page);
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(0);
   await expect(frame(page)).toHaveCSS("animation-name", "scope-in");
   await expect(frame(page)).toHaveCSS("animation-duration", "0.12s");
