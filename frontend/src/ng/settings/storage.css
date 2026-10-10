@@ -10,3 +10,8 @@
 .set-st-note.is-warn { color: var(--warn); }
 .set-st-note.is-held { color: var(--bad); }
 .set-st-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.set-st-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
+.set-st-sum { margin: 0 0 10px; font-size: 12.5px; }
+.set-st-list { margin: 0 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
+.set-st-li { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.set-st-li-title { font-weight: 500; }

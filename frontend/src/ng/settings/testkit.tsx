@@ -49,3 +49,6 @@ export function storagePreview(over: Partial<StoragePreview> = {}): StoragePrevi
     ...over,
   };
 }
+
+/** `POST /work-items/bulk` when every id was archived. */
+export const bulkOk = (...ids: string[]): [number, unknown] => [200, { results: ids.map((id) => ({ id, ok: true, status: "completed" })) }];
