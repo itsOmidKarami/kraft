@@ -22,6 +22,7 @@ build/
 .coverage
 .coverage.*
 junit.xml
+junit-*.xml
 coverage.xml
 
 # macOS

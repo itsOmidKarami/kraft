@@ -28,7 +28,7 @@ def pytest_collection_modifyitems(config, items):
     if not spec:
         return
     index, _, count = spec.partition("/")
-    if not (index.isdigit() and count.isdigit() and 1 <= int(index) <= int(count)):
+    if not (index.isdecimal() and count.isdecimal() and 1 <= int(index) <= int(count)):
         raise pytest.UsageError(f"KRAFT_TEST_SHARD={spec!r}: want K/N with 1 <= K <= N")
     mine, others = [], []
     for item in items:

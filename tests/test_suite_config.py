@@ -99,7 +99,9 @@ def test_shards_split_the_suite_with_nothing_lost_and_nothing_run_twice(
         assert len(shard) == 2 * len({node.split("::")[0] for node in shard})
 
 
-@pytest.mark.parametrize("spec", ["0/3", "4/3", "3", "a/b", "1/0", "-1/3"])
+@pytest.mark.parametrize(
+    "spec", ["0/3", "4/3", "3", "a/b", "1/0", "-1/3", pytest.param("²/3", id="superscript-digit")]
+)
 def test_a_malformed_shard_stops_the_run_instead_of_running_the_wrong_tests(
     pytester, monkeypatch, spec
 ):

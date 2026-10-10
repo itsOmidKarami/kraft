@@ -169,3 +169,5 @@ def test_the_gate_passes_only_the_skips_the_change_asked_for(code, python, resul
     ran = _bash(_script("test-gate"), {"CODE": code, "PYTHON": python, "NEEDS": json.dumps(needs)})
 
     assert (ran.returncode == 0) is merges, ran.stdout + ran.stderr
+    # and it failed on a job's result, not on a missing jq
+    assert ("::error::" in ran.stdout) is not merges, ran.stdout + ran.stderr
