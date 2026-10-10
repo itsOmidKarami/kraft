@@ -3,7 +3,7 @@ import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../typ
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { lookWord, sessionLook } from "../nodeGraph";
+import { lookWord, sessionLook, statusWords } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
@@ -86,7 +86,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
   return (
     <>
       <dl className="item-facts ip-facts">
-        {fact("status", s.status.replaceAll("_", " "))}
+        {fact("status", statusWords(s))}
         {fact("progress", progress ? progressWords(progress, !!running) : null)}
         {fact("kind", s.model ? "agent" : null)}
         {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
@@ -133,7 +133,7 @@ export function TaskOutput({ item, s, docs, onDoc, produces, onProduced }: { ite
   return (
     <>
       <dl className="item-facts ip-facts">
-        {fact("result", s.status.replaceAll("_", " "))}
+        {fact("result", statusWords(s))}
         {fact("wrote", produces && <button type="button" className="item-link is-strong" onClick={onProduced}>{produces.replaceAll("_", " ")}</button>)}
         {fact("summary", summary ? <button type="button" className={`item-link${produces ? "" : " is-strong"}`} onClick={() => onDoc(summary)}>{summary.title}</button> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
       </dl>

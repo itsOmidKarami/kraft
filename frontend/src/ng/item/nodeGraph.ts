@@ -75,9 +75,23 @@ const LOOK: Record<SessionStatus, (s: WorkerSession, now: number) => Look> = {
   done: DONE_LOOK, done_with_concerns: DONE_LOOK,
 };
 
+/** A task a person skipped: the walk counts it done, and it says why it did not finish. */
+const SKIPPED: Look = { state: "done", meta: "skipped" };
+/** Whether `path` is, or is under, a task or step skipped in this run. */
+const skippedAt = (item: ItemDetail, path: string) => !!item.skipped_paths?.some((p) => path === p || path.startsWith(`${p}.`));
+
+/** Whether the task at `path` is settled: its newest session finished, or a person skipped it, run or not. */
+export const settled = (item: ItemDetail, path: string) => {
+  const s = sessionsOf(item, path).at(-1);
+  return s ? !!s.skipped || s.status.startsWith("done") : skippedAt(item, path);
+};
+/** A session's status as a fact row's words. */
+export const statusWords = (s: WorkerSession) => (s.skipped ? "skipped" : s.status.replaceAll("_", " "));
+
 /** What a session draws as: its glyph state and the one meta word (Decisions §5 Task meta: duration only). */
 export function sessionLook(s: WorkerSession | undefined, now: number): Look {
   if (!s) return { state: "todo" };
+  if (s.skipped) return SKIPPED;
   return (LOOK[s.status] ?? DONE_LOOK)(s, now); // a status from a newer server reads as done, as before
 }
 
@@ -124,7 +138,7 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
       // In a fix-loop node the round says which run this is; a count of runs across rounds would badge every task.
       const last = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
       // The scopes of a changed-test-scope task are sessions of it too, but not attempts: no count on its box.
-      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...sessionLook(last, now) };
+      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...(!last && skippedAt(item, path) ? SKIPPED : sessionLook(last, now)) };
     }),
   }));
   const esc = escalationsOf(item, node.id);
@@ -217,6 +231,7 @@ export const stateWord = (s: GlyphState | undefined) =>
 /** A session's state in words: "running now", or why it waits ("needs you", "paused", "waiting"), or its end. */
 export function lookWord(look: ReturnType<typeof sessionLook>): string {
   if (look.running) return "running now";
+  if (look.meta === "skipped") return "skipped";
   if ((look.state === "current" || look.state === "amber") && look.meta) return look.meta;
   return stateWord(look.state);
 }

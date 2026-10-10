@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopRounds, messagesThrough, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { isScopeTask, roundWords, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
@@ -113,7 +113,7 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
           at ? (
             <>
               <Facts rows={[
-                ["state", at.status.replaceAll("_", " ")],
+                ["state", statusWords(at)],
                 ...(at.harness ? ([["harness", <span key="h" className="ph-mono">{at.harness}</span>]] as [string, React.ReactNode][]) : []),
                 ...(at.model ? ([["model", <span key="m" className="ph-mono">{at.model}</span>]] as [string, React.ReactNode][]) : []),
                 ["path", <span key="p" className="ph-mono">{path}</span>],
