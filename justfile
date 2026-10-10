@@ -205,7 +205,7 @@ test-py version *ARGS:
     set -uo pipefail
     v=$1
     shift
-    UV_PROJECT_ENVIRONMENT=".venv-$v" uv run --python "$v" pytest -m "not e2e" -n auto "$@"
+    UV_PROJECT_ENVIRONMENT=".venv-$v" uv run --python "$v" pytest -m "not e2e" -n logical "$@"
 
 # Check the intent tree: every enforced-by pin resolves, and list what nothing pins
 intent:
@@ -386,7 +386,7 @@ ci-test:
     uv run python dev/check_docs_landings.py
     uv run python dev/check_docs_shell.py
     uv run python dev/check_tests.py
-    uv run pytest -m "not e2e" -n auto
+    uv run pytest -m "not e2e" -n logical
     uv run python -m kraft.intent
 
 # Render docsite/diagrams/*.mmd to the SVGs the pages show. Docus does not

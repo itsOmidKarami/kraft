@@ -132,12 +132,15 @@ jobs:
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
       - run: uv sync --frozen
+      # `-n logical`, not `-n auto`: psutil is installed (Kraft depends on it),
+      # so `auto` counts physical cores and starts 2 workers on a runner with
+      # 4 CPUs. `--durations` keeps the slowest tests in every log.
       - if: matrix.python-version == '3.14'
         run: >
-          uv run pytest -m "not e2e" -n auto
+          uv run pytest -m "not e2e" -n logical --durations=25
           --junitxml=junit.xml --cov=src/kraft --cov-report=xml:coverage.xml
       - if: matrix.python-version != '3.14'
-        run: uv run pytest -m "not e2e" -n auto
+        run: uv run pytest -m "not e2e" -n logical --durations=25
       # ~1s, no tests run: catches a renamed pinned test the suite above would not.
       - run: uv run python -m kraft.intent
       - if: always() && matrix.python-version == '3.14'
@@ -195,7 +198,7 @@ jobs:
       - run: |
           git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
           cat "$RUNNER_TEMP/docs-tests.txt"
-          xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
+          xargs uv run pytest -m "not e2e" -n logical < "$RUNNER_TEMP/docs-tests.txt"
 
   test-gate:
     # One check named exactly `test` that stands for every job below that
@@ -299,7 +302,7 @@ jobs:
           git config --global user.name "Kraft CI"
           bd version
       - run: uv sync --frozen
-      - run: uv run pytest -m e2e -n auto -rs --junitxml=e2e-junit.xml
+      - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
           KRAFT_E2E_REQUIRE: bd,docker,podman
       - if: always()
