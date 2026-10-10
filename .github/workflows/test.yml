@@ -39,12 +39,17 @@ jobs:
     # `code` is false only for a pull request whose every changed path is
     # prose nothing in the heavy jobs reads: root-level *.md, docsite/ (docs.yml
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
-    # the test job checks). Pushes to main run everything, and so does a PR if
-    # this job fails: the heavy jobs skip only on an explicit 'false'. The unit
-    # tests that read those files still run, in `docs-tests`.
+    # the test job checks). `python` is false for those and for one that also
+    # changes frontend/, with nothing else and no .py file among them: no
+    # Python moved, so the unit tier runs on the newest Python alone and the
+    # real-CLI tier skips. Pushes to main run everything, and so does a PR if
+    # this job fails: nothing is trimmed or skipped except on an explicit
+    # 'false'. The unit tests that read the docs still run on a docs-only
+    # pull request, in `docs-tests`.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      python: ${{ steps.diff.outputs.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,13 +59,23 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           code=true
+          python=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            files=$(git diff --name-only "$BASE" HEAD)
-            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md)$')" ]; then
+            # --no-renames: a rename is named by its new path alone, and a
+            # Python file moved into docs/ would read as a docs change.
+            files=$(git diff --name-only --no-renames "$BASE" HEAD)
+            docs='[^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md'
+            if [ -z "$(printf '%s\n' "$files" | grep -vE "^($docs)$")" ]; then
               code=false
+            fi
+            # A .py file is Python wherever it lives: frontend/e2e/serve.py.
+            if [ -z "$(printf '%s\n' "$files" | grep -vE "^($docs|frontend/.*)$")" ] &&
+              ! printf '%s\n' "$files" | grep -qE '\.py$'; then
+              python=false
             fi
           fi
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+          echo "python=$python" | tee -a "$GITHUB_OUTPUT"
 
   lint:
     runs-on: ubuntu-latest
@@ -88,33 +103,28 @@ jobs:
 
   test:
     # The unit tier on every supported Python (`requires-python` in pyproject.toml
-    # is the floor, 3.12; the newest is 3.14). One wheel serves all of them, so
-    # this is the only place a version gap shows. Coverage, junit annotations and
-    # the PR comment come from the newest leg only: one report, not three.
-    # fail-fast off, so one version's failure doesn't hide another's.
-    name: test (python ${{ matrix.python-version }})
+    # is the floor, 3.12; the newest is 3.14), each in three shards
+    # (`KRAFT_TEST_SHARD`, read by the repo-root conftest.py). One wheel serves
+    # all of them, so this is the only place a version gap shows. A pull request
+    # that changes no Python (`changes`) runs the newest alone: every unit test
+    # still runs, since some read frontend/ files, but nothing in it can differ
+    # by Python version. Coverage and junit come from the newest Python only,
+    # one file per shard, and `test-report` below puts them together. fail-fast
+    # off, so one leg's failure doesn't hide another's.
+    name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/3)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(needs.changes.outputs.python == 'false' && '["3.14"]' || '["3.12", "3.13", "3.14"]') }}
+        shard: [1, 2, 3]
     # Job-level, so it beats the workflow's UV_PYTHON for `uv run` too: `uv run`
     # rebuilds the venv whenever UV_PYTHON names another version than the one
     # `uv sync` just installed into, which would test 3.14 three times.
     env:
       UV_PYTHON: ${{ matrix.python-version }}
-    # checks: write is action-junit-report's annotations; pull-requests: write
-    # is its optional PR comment and the coverage action's PR comment;
-    # contents: write is the coverage action pushing history to its own
-    # python-coverage-comment-action-data branch on pushes to main. A fork's
-    # GITHUB_TOKEN is downgraded to read-only regardless of this block, so
-    # granting it here doesn't widen what untrusted code can do.
-    permissions:
-      contents: write
-      checks: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,41 +142,92 @@ jobs:
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
       - run: uv sync --frozen
+      # `-n logical`, not `-n auto`: psutil is installed (Kraft depends on it),
+      # so `auto` counts physical cores and starts 2 workers on a runner with
+      # 4 CPUs. `--durations` keeps the slowest tests in every log.
+      #
+      # KRAFT_TEST_SHARD is set on these two steps only. The intent check
+      # below collects the whole suite, and must not see it.
       - if: matrix.python-version == '3.14'
+        env:
+          KRAFT_TEST_SHARD: ${{ matrix.shard }}/3
+          COVERAGE_FILE: .coverage.${{ matrix.shard }}
         run: >
-          uv run pytest -m "not e2e" -n auto
-          --junitxml=junit.xml --cov=src/kraft --cov-report=xml:coverage.xml
+          uv run pytest -m "not e2e" -n logical --durations=25
+          --junitxml=junit-${{ matrix.shard }}.xml --cov=src/kraft --cov-report=
       - if: matrix.python-version != '3.14'
-        run: uv run pytest -m "not e2e" -n auto
-      # ~1s, no tests run: catches a renamed pinned test the suite above would not.
-      - run: uv run python -m kraft.intent
+        env:
+          KRAFT_TEST_SHARD: ${{ matrix.shard }}/3
+        run: uv run pytest -m "not e2e" -n logical --durations=25
+      # ~5s, no tests run: catches a renamed pinned test the suite above would
+      # not. Once per Python, not once per shard.
+      - if: matrix.shard == 1
+        run: uv run python -m kraft.intent
       - if: always() && matrix.python-version == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-reports
+          name: test-shard-${{ matrix.shard }}
+          # .coverage.N is a dotfile, which the action leaves out by default.
+          include-hidden-files: true
           path: |
-            junit.xml
-            coverage.xml
+            junit-${{ matrix.shard }}.xml
+            .coverage.${{ matrix.shard }}
+
+  test-report:
+    # One set of junit annotations and one coverage comment for the three
+    # shards. Not in `test-gate`: it reports on the tests and checks nothing
+    # itself, so a comment that could not be posted does not block a merge.
+    # It does not run when the shards were skipped (a docs-only pull request).
+    name: test report
+    needs: test
+    if: ${{ !cancelled() && needs.test.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    # checks: write is action-junit-report's annotations; pull-requests: write
+    # is its optional PR comment and the coverage action's PR comment;
+    # contents: write is the coverage action pushing history to its own
+    # python-coverage-comment-action-data branch on pushes to main. A fork's
+    # GITHUB_TOKEN is downgraded to read-only regardless of this block, so
+    # granting it here doesn't widen what untrusted code can do.
+    permissions:
+      contents: write
+      checks: write
+      pull-requests: write
+    steps:
+      # The coverage action reads the source files the data names, and
+      # compares against the base branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-shard-*
+          merge-multiple: true
+      # The name tools and people already download: every shard's junit.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-reports
+          path: junit-*.xml
       # Skipped for forks: their GITHUB_TOKEN is read-only, so the annotation
-      # step would just fail. Not gated on the event type -- only relevant on
-      # pull_request, and there's no pull_request context on a push to main.
+      # step would just fail. Only relevant on pull_request; there's no
+      # pull_request context on a push to main.
       - if: >-
-          always() && matrix.python-version == '3.14' &&
           github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
         with:
-          report_paths: junit.xml
-      # Runs on both pull_request (posts/updates the PR comment) and push to
-      # main (writes history + badge to the data branch) -- see the action's
-      # own heuristic for picking which. Push to main has no fork to gate on.
+          report_paths: junit-*.xml
+      # On pull_request it posts or updates the PR comment; on push to main it
+      # writes history and the badge to the data branch. Only when every shard
+      # passed: a shard that died wrote no data, and three shards' worth of
+      # coverage from two would read as a drop.
       - if: >-
-          always() && matrix.python-version == '3.14' &&
+          needs.test.result == 'success' &&
           (github.event_name == 'push' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: py-cov-action/python-coverage-comment-action@e5fb2218463c3377f3504b0c5b5646ed53da7a2f # v4.5
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_COVERAGE_FILES: true
 
   docs-tests:
     # On a docs-only pull request, the unit tests that read a docs file stand
@@ -195,7 +256,7 @@ jobs:
       - run: |
           git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
           cat "$RUNNER_TEMP/docs-tests.txt"
-          xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
+          xargs uv run pytest -m "not e2e" -n logical < "$RUNNER_TEMP/docs-tests.txt"
 
   test-gate:
     # One check named exactly `test` that stands for every job below that
@@ -228,16 +289,19 @@ jobs:
     # hand also leaves a skipped gate, not a red one.
     #
     # The shell below reads every `needs` result. Each must be `success`, with
-    # two exceptions that follow `changes`: on a docs-only pull request the
+    # the exceptions that follow `changes`. On a docs-only pull request the
     # path-gated jobs report `skipped`, which passes, and `docs tests` must then
-    # succeed; on any other change `docs tests` is the one job expected to skip.
-    # Anything else -- failure, cancelled, or a skip nobody asked for -- fails.
+    # succeed; on any other change `docs tests` is expected to skip. On a pull
+    # request that changes no Python, `e2e (real CLIs)` skips as well. Anything
+    # else -- failure, cancelled, or a skip nobody asked for -- fails.
+    # tests/test_ci_workflow.py runs this script on each of those cases.
     name: test
     needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e, ui-contract]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
+      PYTHON: ${{ needs.changes.outputs.python }}
       NEEDS: ${{ toJSON(needs) }}
     steps:
       - run: |
@@ -254,13 +318,14 @@ jobs:
           fail() { echo "::error::$job finished '$result', not 'success'"; status=1; }
           while read -r job result; do
             echo "$job: $result"
-            case "$job:$result:$CODE" in
+            case "$job:$result:$CODE:$PYTHON" in
               *:success:*) ;;
-              docs-tests:skipped:false) fail ;;  # docs-only: it stands in for the matrix
-              docs-tests:skipped:*) ;;           # a code change skips it
+              docs-tests:skipped:false:*) fail ;;  # docs-only: it stands in for the shards
+              docs-tests:skipped:*) ;;             # a code change skips it
+              e2e-cli:skipped:*:false) ;;          # no Python changed
               # docs-only: the path-gated jobs skip, and only they may
-              test:skipped:false | e2e-cli:skipped:false | frontend:skipped:false) ;;
-              vscode:skipped:false | e2e:skipped:false | ui-contract:skipped:false) ;;
+              test:skipped:false:* | frontend:skipped:false:* | vscode:skipped:false:*) ;;
+              e2e:skipped:false:* | ui-contract:skipped:false:*) ;;
               *) fail ;;
             esac
           done <<<"$results"
@@ -277,7 +342,7 @@ jobs:
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -299,7 +364,7 @@ jobs:
           git config --global user.name "Kraft CI"
           bd version
       - run: uv sync --frozen
-      - run: uv run pytest -m e2e -n auto -rs --junitxml=e2e-junit.xml
+      - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
           KRAFT_E2E_REQUIRE: bd,docker,podman
       - if: always()
