@@ -39,14 +39,21 @@ export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, 
   const [got, setGot] = useState<{ of: Map<string, PatchFile>; files: Map<string, Whole> }>({ of: patch, files: new Map() });
   const live = useRef(patch);
   live.current = patch;
+  // The files being read: a press on one of them waits for the next drawing, whose gaps it would name.
+  const reading = useRef(new Set<string>()).current;
   const files = got.of === patch ? got.files : null;
   const expand = async (path: string, gap: number, how: Grow) => {
     let whole = files?.get(path) ?? null;
     if (!whole) {
+      if (reading.has(path)) return;
+      reading.add(path);
       const q = new URLSearchParams({ from, to, file: path, context: String(WHOLE_FILE) });
       if (ignoreWhitespace) q.set("ignore_whitespace", "1");
       const { status, body } = await request<Compare>(`/work-items/${encodeURIComponent(id)}/compare?${q}`);
+      reading.delete(path);
       if (live.current !== patch) return;
+      // Cut at the server's size cap, the file would seem to end where the cut fell.
+      if (status === 200 && body.truncated) return showToast(`${path} is too large to show in full`);
       const pf = patch.get(path);
       const read = status === 200 ? parsePatch(body.diff).find((f) => f.path === path) : undefined;
       whole = pf && read ? spansOf(pf, read) : null;
@@ -119,7 +126,7 @@ export function useThreads(id: string) {
 
 /** Viewed marks (B11): the comparison's own, overlaid by what was clicked since
  *  it loaded. A click is sent at once and taken back, with the server's words,
- *  if refused; `toggle` answers whether it held. */
+ *  if refused. */
 export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compare>) {
   const [marks, setMarks] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -130,10 +137,9 @@ export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compar
     setMarks((m) => ({ ...m, [path]: viewed }));
     const q = new URLSearchParams({ file: path, to });
     const { status, body } = await request(`/work-items/${encodeURIComponent(id)}/viewed?${q}`, { method: viewed ? "PUT" : "DELETE" });
-    if (status === 200) return setError(null), true;
+    if (status === 200) return setError(null);
     setMarks((m) => ({ ...m, [path]: !viewed }));
     setError(detailOf(body));
-    return false;
   };
   return { isViewed, toggle, error };
 }

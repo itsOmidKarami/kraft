@@ -61,10 +61,11 @@ export function FileTree(p: {
                 return (
                   <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}${v ? " is-viewed" : ""}`}>
                     <Icon className="rv-file-icon" data-lang={lang} size={13} aria-hidden />
-                    <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={v ? `${f.path} (viewed)` : f.path} onClick={() => p.onSelect(f.path)}>
+                    <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
                       <span className="rv-mono">{f.path.slice(dir.length)}</span>
                       {p.notShown.has(f.path) && <span className="rv-muted"> not shown</span>}
                     </button>
+                    {v && <span className="review-visually-hidden">viewed</span>}
                     {n > 0 && <span className="rv-tree-threads" title={`${n} open thread${n === 1 ? "" : "s"}`}>{n}</span>}
                     <span className="rv-add">+{f.insertions}</span>
                     <span className="rv-del">−{f.deletions}</span>

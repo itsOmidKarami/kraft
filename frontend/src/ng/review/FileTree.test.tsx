@@ -38,9 +38,9 @@ describe("FileTree", () => {
   it("groups by folder, top level last; counts, open threads, viewed, each kind's icon, the cut and untracked files", () => {
     tree();
     expect(screen.getAllByRole("button", { expanded: true }).map((b) => b.textContent)).toEqual(["▾search/", "▾tests/"]);
-    expect([...document.querySelectorAll(".rv-file-name")].map((b) => b.getAttribute("title"))).toEqual(["search/cache.py", "search/embed.py (viewed)", "tests/test_cache.py", "pyproject.toml"]);
+    expect([...document.querySelectorAll(".rv-file-name")].map((b) => b.getAttribute("title"))).toEqual(["search/cache.py", "search/embed.py", "tests/test_cache.py", "pyproject.toml"]);
     expect([...document.querySelectorAll(".rv-file-icon")].map((i) => i.getAttribute("data-lang"))).toEqual(["python", "python", "python", "yaml"]);
-    expect([...document.querySelectorAll(".rv-file-row.is-viewed .rv-file-name")].map((b) => b.textContent)).toEqual(["embed.py"]);
+    expect([...document.querySelectorAll(".rv-file-row.is-viewed")].map((r) => r.textContent)).toEqual(["embed.pyviewed+3−1"]);
     expect(screen.getByText("4 files")).toBeInTheDocument();
     expect(screen.getByTitle("2 open threads")).toHaveTextContent("2");
     expect(screen.getByRole("button", { name: /^pyproject.toml/ })).toHaveTextContent("not shown");

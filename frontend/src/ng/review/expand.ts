@@ -32,6 +32,8 @@ export function spansOf(pf: PatchFile, whole: PatchFile): Whole | null {
 
 /** `spans` with the gap before span `gap` opened by `how`; `gap` is `spans.length` for the lines after the last one. Spans that meet become one. */
 export function grow(spans: Span[], gap: number, how: Grow, total: number): Span[] {
+  // A press made on an older drawing, for a gap that has since closed.
+  if (gap < 0 || gap > spans.length) return spans;
   const next = spans.map((s): Span => [...s]);
   const lo = gap > 0 ? next[gap - 1][1] : 0;
   const hi = gap < next.length ? next[gap][0] : total;
@@ -64,7 +66,7 @@ const CONTEXT = 3;
 
 /** The lines after `pf`'s last hunk: counted once the whole file was read. Before that, 0 when the hunk
  *  stops short of git's context after its last change (the file ends there), else null: not known. */
-export function hiddenAfter(pf: PatchFile): number | null {
+function rest(pf: PatchFile): number | null {
   if (pf.rest !== undefined) return pf.rest;
   const last = pf.hunks[pf.hunks.length - 1]?.lines ?? [];
   let trailing = 0;
@@ -72,12 +74,19 @@ export function hiddenAfter(pf: PatchFile): number | null {
   return trailing < CONTEXT ? 0 : null;
 }
 
-/** How many lines sit unshown before each hunk of `pf`: between it and the hunk before, or the file's first line. */
-export function hiddenBefore(pf: PatchFile): number[] {
+/** Unchanged lines not drawn: `count` of them from the new side's line `from`. A null count is not known yet. */
+export interface Gap {
+  from: number;
+  count: number | null;
+}
+
+/** The gap before each hunk of `pf` (from the hunk before it, or the file's first line), then the one after its last hunk. */
+export function gapsOf(pf: PatchFile): Gap[] {
   let next = 1;
-  return pf.hunks.map((h) => {
-    const n = h.newStart - next;
+  const before = pf.hunks.map((h): Gap => {
+    const gap = { from: next, count: h.newStart - next };
     next = h.newStart + h.lines.filter((l) => l.new !== null).length;
-    return n;
+    return gap;
   });
+  return [...before, { from: next, count: rest(pf) }];
 }

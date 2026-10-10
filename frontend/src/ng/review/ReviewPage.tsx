@@ -57,19 +57,28 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const [treeOpen, setTreeOpen] = useState(!overlay);
   useEffect(() => setTreeOpen(!overlay), [overlay]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const setFold = (path: string, folded: boolean) => setCollapsed((s) => {
+  // The files folded by their Viewed mark: each stays folded for as long as its mark holds.
+  const [byMark, setByMark] = useState<Set<string>>(new Set());
+  const withPath = (path: string, on: boolean) => (s: Set<string>) => {
     const n = new Set(s);
-    if (folded) n.add(path);
+    if (on) n.add(path);
     else n.delete(path);
     return n;
-  });
+  };
+  const setFold = (path: string, folded: boolean) => {
+    setCollapsed(withPath(path, folded));
+    if (!folded) setByMark(withPath(path, false));
+  };
   const [picked, setPicked] = useState<Pick | null>(null);
   const viewed = useViewed(item.id, place.to, compare);
-  // A file marked viewed folds away, and opens again when the mark is taken off; a mark the server refused folds nothing.
+  // A file marked viewed folds away, and opens again when the mark goes: taken off, refused by the server,
+  // or dropped because the file changed since.
   const setViewed = (path: string, v: boolean) => {
-    setFold(path, v);
-    void viewed.toggle(path, v).then((held) => held || setFold(path, !v));
+    setByMark(withPath(path, v));
+    if (!v) setCollapsed(withPath(path, false));
+    void viewed.toggle(path, v);
   };
+  const folded = new Set([...collapsed, ...[...byMark].filter(viewed.isViewed)]);
   const all = compare.state === "ready" ? compare.data.files : [];
   const files = byNodes(all, place.nodes);
   const diffText = compare.state === "ready" ? compare.data.diff : "";
@@ -142,7 +151,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         treeOpen={treeOpen}
         onTree={() => setTreeOpen((o) => !o)}
         onCollapseAll={() => setCollapsed(new Set(all.map((f) => f.path)))}
-        onExpandAll={() => setCollapsed(new Set())}
+        onExpandAll={() => (setCollapsed(new Set()), setByMark(new Set()))}
         prefs={diff.prefs}
         setPrefs={diff.set}
       />
@@ -173,7 +182,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               files={files}
               patch={patch}
               prefs={diff.prefs}
-              collapsed={collapsed}
+              collapsed={folded}
               onCollapse={setFold}
               selected={current}
               isViewed={viewed.isViewed}
