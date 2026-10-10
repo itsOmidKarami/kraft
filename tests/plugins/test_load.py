@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.plugins import AGENT, chain, home, install, make_collection
+from support.harness import git
+from support.plugins import AGENT, chain, drop_store, home, install, make_collection
 
 import kraft
 from kraft import harness, update
 from kraft.config import read_yaml, write_yaml
-from kraft.plugins import load
+from kraft.plugins import fetch, load
 from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.library import TemplateLibrary
 
@@ -242,3 +243,101 @@ def test_a_limit_above_a_lowered_maximum_leaves_the_plugin_out(tmp_path):
 
     found = _one(config, plugins)
     assert "sets budget_usd 8 > the administrator maximum 5" in found.left_out and not found.quiet
+
+
+# ── restoring a store that is gone ──
+
+
+def _locked(tmp_path, *, directory=False):
+    """`release@acme` installed by an update, its collection, and the home."""
+    from support.plugins import instance, publish
+
+    from kraft.plugins import update as plugin_update
+
+    repo = make_collection(tmp_path, RELEASE)
+    source = {"path": str(repo)} if directory else {"git": repo.as_uri()}
+    config, plugins = instance(tmp_path, {"acme": source})
+    plugin_update.update(
+        ["release@acme"],
+        accept=lambda review: True,
+        entries={"release@acme": True},
+        config_dir=config,
+        plugins_root=plugins,
+    )
+    (found,) = load.installed(config, plugins)
+    assert found.left_out is None
+    return repo, config, plugins, found, publish
+
+
+@pytest.mark.parametrize("mirror_too", [False, True], ids=["mirror-has-it", "fetched-by-its-id"])
+def test_a_missing_store_is_restored_from_the_locked_commit(tmp_path, monkeypatch, mirror_too):
+    """The collection has moved on; what comes back is what was locked."""
+    repo, config, plugins, found, publish = _locked(tmp_path)
+    publish(repo, "release", version="2.0.0", skills={"deploy-review": "a newer method"})
+    drop_store(found.root)
+    if mirror_too:
+        shutil.rmtree(plugins / "mirrors")
+    else:  # the mirror kept the commit: the remote is not asked
+        shutil.rmtree(repo)
+        monkeypatch.setattr(fetch, "fetch", lambda *a: pytest.fail("fetched from the remote"))
+    assert "store is missing" in _one(config, plugins).left_out
+
+    assert load.restore_missing(load.installed(config, plugins), config, plugins) == {}
+
+    restored = _one(config, plugins, verify=True)
+    assert (restored.left_out, restored.root, restored.version) == (None, found.root, "1.0.0")
+    assert (restored.root / "skills/deploy-review/SKILL.md").read_text() == "the method"
+    (mirror,) = (plugins / "mirrors").iterdir()
+    assert git(mirror, "rev-parse", f"refs/kraft/pinned/{found.commit}") == found.commit
+
+
+def _remote_gone(repo, config, plugins):
+    shutil.rmtree(repo)
+    shutil.rmtree(plugins / "mirrors")
+
+
+def _collection_removed(repo, config, plugins):
+    written = read_yaml(config / "plugins.yaml")
+    written["collections"]["other"] = written["collections"].pop("acme")
+    written["plugins"] = {}
+    write_yaml(config / "plugins.yaml", written)
+
+
+@pytest.mark.parametrize(
+    "happens, why",
+    [
+        (_remote_gone, "could not be fetched"),
+        (_collection_removed, "collection acme is no longer in plugins.yaml"),
+    ],
+    ids=["commit-not-on-the-remote", "collection-removed"],
+)
+def test_a_store_that_cannot_be_restored_says_why(tmp_path, happens, why):
+    repo, config, plugins, found, _publish = _locked(tmp_path)
+    drop_store(found.root)
+    happens(repo, config, plugins)
+
+    failed = load.restore_missing((found,), config, plugins)
+
+    assert why in failed["release@acme"] and "release@acme 1.0.0" in failed["release@acme"]
+    assert not found.root.exists()
+    if happens is _remote_gone:
+        assert "kraft admin plugin install release@acme --re-install" in failed["release@acme"]
+        assert "could not be restored: release@acme 1.0.0" in _one(config, plugins).left_out
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["unchanged", "changed"])
+def test_a_directory_store_is_restored_only_if_unchanged(tmp_path, changed):
+    """A folder edited since it was locked is never loaded unreviewed."""
+    repo, config, plugins, found, _publish = _locked(tmp_path, directory=True)
+    drop_store(found.root)
+    if changed:
+        (repo / "plugins/release/skills/deploy-review/SKILL.md").write_text("edited since")
+
+    failed = load.restore_missing((found,), config, plugins)
+
+    assert found.root.is_dir() == (not changed)
+    if changed:
+        assert "no longer match the locked digest" in failed["release@acme"]
+        assert "kraft admin plugin update" in failed["release@acme"]
+    else:
+        assert failed == {} and _one(config, plugins, verify=True).left_out is None

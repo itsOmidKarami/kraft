@@ -48,6 +48,7 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
+from kraft.plugins import load as _plugins_load
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import (
@@ -451,6 +452,25 @@ def frozen_steering(row) -> dict:
         "repository_steering": snapshot.repository_steering,
         "plugins": snapshot.chain.plugins,
     }
+
+
+#: One restore at a time: two launches that need the same store wait for the
+#: one restore of it, and the second finds it there.
+_restoring = asyncio.Lock()
+
+
+async def restore_pins(row) -> None:
+    """Put back any plugin store this item pinned that is gone, before a
+    launch reads it. Off the event loop: it may fetch. A store that cannot be
+    restored is left missing, and the launch that needs it stops and says why
+    (`resolve_agent_task`)."""
+    pins = frozen_steering(row)["plugins"]
+    if not pins:
+        return
+    pinned = tuple(p for p in _plugins_load.for_item(pins) if p.namespace in pins)
+    if any(not p.root.is_dir() for p in pinned):
+        async with _restoring:
+            await asyncio.to_thread(_plugins_load.restore_missing, pinned)
 
 
 def _item_root(row, worktree, repository: str | None) -> Path:
@@ -1294,6 +1314,7 @@ async def _dispatch_task(
         db, work_item_row["id"], node.id, task.path, overridden=bool(merged_override)
     )
     status = None
+    await restore_pins(work_item_row)
     for i, cand in enumerate(cands):
         primary = i == 0
         try:

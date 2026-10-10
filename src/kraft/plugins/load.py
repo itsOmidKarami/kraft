@@ -202,6 +202,8 @@ def _why_left_out(plugin: InstalledPlugin, config_dir: Path, verify: bool) -> st
 
     root = plugin.root
     if not root.is_dir():
+        if why := _unrestored.get(root.name):
+            return f"its store could not be restored: {why}"
         return "its store is missing and has not been restored"
     mismatch = "its files do not match the locked digest"
     try:
@@ -326,7 +328,8 @@ def for_item(
                 root,
                 left_out=None
                 if root.is_dir()
-                else "the version this work item started with is no longer in the store",
+                else _unrestored.get(root.name)
+                or "the version this work item started with is no longer in the store",
                 commit=pin.get("commit"),
                 tree=pin.get("tree"),
                 source=pin.get("source"),
@@ -334,3 +337,106 @@ def for_item(
         )
     live = [p for p in installed(config_dir, plugins_root) if p.namespace not in (pins or {})]
     return (*live, *pinned)
+
+
+#: Why the last restore of a store failed, by its digest: what a launch that
+#: needed it says when it stops. Cleared when a restore of it succeeds.
+_unrestored: dict[str, str] = {}
+
+
+class RestoreError(Exception):
+    """A store that is gone and cannot be put back. The message says why and,
+    where there is one, what to run."""
+
+
+def restore(
+    plugin: InstalledPlugin, config_dir: Path | None = None, plugins_root: Path | None = None
+) -> Path:
+    """Put `plugin`'s missing store back, from where the lock (or a work
+    item's pin) says its files came from, and return it. Not a review: this
+    commit was accepted when it was locked, and it is taken only if its tree
+    and digest are still the ones recorded. A directory collection is copied
+    again only while the folder still matches the digest. Raises `RestoreError`."""
+    from kraft import paths
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    root = Path(plugins_root) if plugins_root is not None else plugins_dir()
+    if plugin.root.is_dir():
+        return plugin.root
+    try:
+        store = _restore(plugin, config_dir, root)
+    except RestoreError as exc:
+        _unrestored[plugin.root.name] = str(exc)
+        raise
+    _unrestored.pop(plugin.root.name, None)
+    return store
+
+
+def _restore(plugin: InstalledPlugin, config_dir: Path, root: Path) -> Path:
+    from kraft.config import ConfigError
+    from kraft.plugins import fetch, update
+    from kraft.plugins.config import PluginsConfig
+
+    what = f"{plugin.id} {plugin.version}"
+    collection_name = plugin.id.split("@", 1)[1]
+    try:
+        collection = PluginsConfig.load(config_dir / PluginsConfig.FILE).collections.get(
+            collection_name
+        )
+    except ConfigError as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if collection is None or plugin.source is None:
+        raise RestoreError(
+            f"{what}: collection {collection_name} is no longer in plugins.yaml; add it again"
+        )
+    again = f"run `kraft admin plugin install {plugin.id} --re-install`"
+    try:
+        if collection.git is not None and plugin.commit is not None:
+            try:
+                mirror = fetch.fetch_commit(root, collection_name, collection.git, plugin.commit)
+            except fetch.FetchError as exc:
+                raise RestoreError(
+                    f"{what}: locked commit {plugin.commit[:12]} could not be fetched "
+                    f"({exc.kind}: {exc}); if it is no longer on the remote, {again}"
+                ) from exc
+            fetch.pin(mirror, plugin.commit)
+            # A commit names its tree: only the digest, which also covers how
+            # this Kraft extracts, is left to check.
+            extracted = fetch.extract_git(mirror, plugin.commit, plugin.source)
+        elif collection.path is not None and plugin.commit is None:
+            extracted = fetch.extract_dir(Path(collection.path) / plugin.source.removeprefix("./"))
+        else:
+            raise RestoreError(
+                f"{what}: collection {collection_name} is no longer the kind it was locked "
+                f"from; {again}"
+            )
+    except (OSError, fetch.FetchError, fetch.PluginRefused) as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if fetch.digest(extracted.files) != f"sha256:{plugin.root.name}":
+        raise RestoreError(
+            f"{what}: its files no longer match the locked digest; "
+            + (again if plugin.commit else "run `kraft admin plugin update` to review the change")
+        )
+    try:
+        with update.write_lock(root):
+            return fetch.write_store(root, extracted)
+    except update.Busy as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+
+
+def restore_missing(
+    plugins: tuple[InstalledPlugin, ...],
+    config_dir: Path | None = None,
+    plugins_root: Path | None = None,
+) -> dict[str, str]:
+    """Restore every store of `plugins` that is gone; plugin id to why, for
+    each that could not be. A plugin left out on purpose is not restored."""
+    failed: dict[str, str] = {}
+    for plugin in plugins:
+        if plugin.quiet:
+            continue
+        try:
+            restore(plugin, config_dir, plugins_root)
+        except RestoreError as exc:
+            failed[plugin.id] = str(exc)
+    return failed

@@ -363,7 +363,9 @@ def resolve_agent_task(
     known = plugins_load.for_item(plugins, path.parent)
     for plugin in known:
         if plugin.namespace in (plugins or {}) and plugin.left_out is not None:
-            raise HarnessUnavailable(f"plugin {plugin.id} {plugin.version}: {plugin.left_out}")
+            raise HarnessUnavailable(
+                f"plugin {plugin.id} {plugin.version} could not be read: {plugin.left_out}"
+            )
     profile = select_profile(table.profiles, task.harness, path)
     # The task's own rung: its agent profile, read live, or its own fields.
     model, effort = task.model, task.effort
