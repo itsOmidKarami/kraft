@@ -388,6 +388,26 @@ def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.Install
     return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
 
 
+async def restore_plugins(app) -> None:
+    """Put back every locked store that is gone (a config directory copied to
+    a new machine, a cleared run directory, a teammate's newer lock), then
+    load what came back. Off the event loop: it may fetch. One that cannot be
+    restored stays left out, with the reason under `invalid_templates`."""
+    from kraft import apply
+
+    st = app.state
+    missing = tuple(p for p in installed_plugins(st) if not p.quiet and not p.root.is_dir())
+    if not missing:
+        return
+    failed = await asyncio.to_thread(
+        plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+    )
+    _reload_templates(st)
+    apply.notify(app)
+    if failed:
+        logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+
+
 def load_library(
     templates_dir: Path,
     skills_dir: Path | None = None,
@@ -480,6 +500,11 @@ def resolve_chain_or_422(st, chain_template: str | None):
     except TemplateLibraryError as exc:
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
+        for plugin in library.plugins:
+            # Not "unknown chain": its plugin is installed and its store is on the way back.
+            away = not plugin.quiet and not plugin.root.is_dir()
+            if away and f"{plugin.namespace}:" in f"{name} {exc}":
+                raise HTTPException(503, f"plugin {plugin.id} is being restored; retry") from exc
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 

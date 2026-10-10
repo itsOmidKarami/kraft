@@ -3,9 +3,10 @@ snapshot pins them, and every launch reads the pinned store, whatever was
 installed since."""
 
 import json
+import shutil
 
 import pytest
-from support.plugins import AGENT, chain, instance, make_collection, publish
+from support.plugins import AGENT, chain, drop_store, instance, make_collection, publish
 
 from kraft.adapters import agent
 from kraft.executor import dispatch
@@ -172,8 +173,8 @@ def test_a_pinned_version_that_is_gone_is_refused_not_delegated(home):
         _launch(gone)
 
     assert str(stop.value) == (
-        "plugin release@acme 1.0.0: the version this work item started with is no longer "
-        "in the store"
+        "plugin release@acme 1.0.0 could not be read: the version this work item started "
+        "with is no longer in the store"
     )
 
 
@@ -186,3 +187,39 @@ def test_every_launch_is_handed_the_items_pins(home):
 
     assert dispatch.frozen_steering({"materialized_chain": stored})["plugins"] == resolved.plugins
     assert dispatch.frozen_steering({"materialized_chain": None})["plugins"] is None
+
+
+async def test_a_launch_restores_the_pinned_store_it_needs(home):
+    """GC took the old version after the lock moved on, or the run directory
+    was cleared: the item's own version is put back before it is read."""
+    repo, config_dir, plugins_dir = home
+    resolved = _resolved(config_dir, plugins_dir, "mine")
+    old = load.installed(config_dir, plugins_dir)[0].root
+    publish(repo, "release", **_release("1.1.0", "o3"))
+    _update(config_dir, plugins_dir, [ID])
+    drop_store(old)
+    row = {"materialized_chain": _stored(resolved)}
+    with pytest.raises(agent.HarnessUnavailable, match="no longer in the store"):
+        _launch(resolved.plugins)
+
+    await dispatch.restore_pins(row)
+
+    assert "the 1.0.0 method" in _launch(resolved.plugins).method_text
+
+
+async def test_an_unrestorable_pin_stops_the_launch_and_says_why(home):
+    """`HarnessUnavailable` is what dispatch records as the `config` stop."""
+    repo, config_dir, plugins_dir = home
+    resolved = _resolved(config_dir, plugins_dir, "mine")
+    drop_store(load.installed(config_dir, plugins_dir)[0].root)
+    shutil.rmtree(repo)
+    shutil.rmtree(plugins_dir / "mirrors")
+
+    await dispatch.restore_pins({"materialized_chain": _stored(resolved)})
+
+    with pytest.raises(agent.HarnessUnavailable) as stop:
+        _launch(resolved.plugins)
+    assert "plugin release@acme 1.0.0 could not be read: release@acme 1.0.0: locked commit" in str(
+        stop.value
+    )
+    assert "could not be fetched" in str(stop.value)

@@ -527,6 +527,7 @@ async def dispatch(
         push_line=_PUSH.format(branch=store.branch_for(row)),
         message=message,
     )
+    await executor.restore_pins(row)
     try:
         inv = _agent.resolve_agent_task(
             ESCALATION_TASK.model_copy(update={"harness": harness_id}),

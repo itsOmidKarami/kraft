@@ -138,6 +138,20 @@ def fetch(plugins_dir: Path, name: str, url: str, ref: str | None) -> tuple[Path
     return mirror, commit.decode().strip()
 
 
+def fetch_commit(plugins_dir: Path, name: str, url: str, commit: str) -> Path:
+    """The collection's mirror, holding `commit`: fetched by its id from `url`
+    only when the mirror does not have it already. Raises `FetchError` when
+    the remote no longer serves it (history rewritten, branch deleted)."""
+    mirror = mirror_path(plugins_dir, name, url)
+    if mirror.is_dir():
+        try:
+            _git("cat-file", "-e", f"{commit}^{{commit}}", git_dir=mirror)
+            return mirror
+        except FetchError:
+            pass
+    return fetch(plugins_dir, name, url, commit)[0]
+
+
 def pin(mirror: Path, commit: str) -> None:
     """Keep `commit` in the mirror for good: a ref names it, so `git gc` never
     prunes it even after the author rewrites history."""
