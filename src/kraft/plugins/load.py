@@ -38,6 +38,25 @@ class InstalledPlugin:
     #: A plugin left out on purpose (disabled, not yet installed, orphaned in
     #: the lock) is no fault: health does not report it.
     quiet: bool = False
+    #: Where the lock says its files came from: the collection's commit, the
+    #: plugin's directory in it and that directory's tree. None for a
+    #: directory collection, and for a plugin that is not locked.
+    commit: str | None = None
+    tree: str | None = None
+    source: str | None = None
+
+    @property
+    def pin(self) -> dict[str, str | None]:
+        """What a work item records of this plugin: enough to find its store,
+        and to restore it from its commit when the store is gone."""
+        return {
+            "id": self.id,
+            "commit": self.commit,
+            "tree": self.tree,
+            "source": self.source,
+            "digest": f"sha256:{self.root.name}",
+            "version": self.version,
+        }
 
 
 def _reference(value: str, plugin: InstalledPlugin, *, bare_is_own: bool) -> str:
@@ -148,6 +167,9 @@ def installed(
             locked.namespace,
             locked.version,
             store / locked.digest.removeprefix("sha256:"),
+            commit=locked.commit,
+            tree=locked.tree,
+            source=locked.source,
         )
         if not config.entry(plugin_id).enabled:
             found.append(replace(plugin, left_out="is disabled", quiet=True))
@@ -278,3 +300,37 @@ def instance_problem(
         if isinstance(entry, dict) and entry.get("id") == namespace:
             return f"its namespace {namespace!r} is now a repository id"
     return None
+
+
+def for_item(
+    pins: Mapping[str, Mapping[str, str | None]] | None,
+    config_dir: Path | None = None,
+    plugins_root: Path | None = None,
+) -> tuple[InstalledPlugin, ...]:
+    """The plugins one work item reads: the versions its chain was
+    materialized with (`pins`, namespace to `InstalledPlugin.pin`), and the
+    lock's for every namespace it did not pin. A pinned version whose store
+    is gone is known and not loaded: its skills are refused, never handed to
+    the agent as another tool's."""
+    store = (Path(plugins_root) if plugins_root is not None else plugins_dir()) / "store"
+    pinned = []
+    for namespace, pin in (pins or {}).items():
+        plugin_id, digest = str(pin["id"]), str(pin["digest"])
+        root = store / digest.removeprefix("sha256:")
+        pinned.append(
+            InstalledPlugin(
+                plugin_id,
+                plugin_id.split("@", 1)[0],
+                namespace,
+                str(pin["version"]),
+                root,
+                left_out=None
+                if root.is_dir()
+                else "the version this work item started with is no longer in the store",
+                commit=pin.get("commit"),
+                tree=pin.get("tree"),
+                source=pin.get("source"),
+            )
+        )
+    live = [p for p in installed(config_dir, plugins_root) if p.namespace not in (pins or {})]
+    return (*live, *pinned)

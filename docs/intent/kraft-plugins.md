@@ -263,3 +263,9 @@ origin: src/kraft/api/config_check.py §_check_policy
 IF `plugins.yaml` or `plugins.lock` does not read, THEN a reload SHALL keep the plugins the running instance has and SHALL leave the file pending with the reason.
 enforced-by: tests/api/test_deps.py::test_a_reload_refuses_a_plugin_file_that_does_not_read[plugins.yaml], tests/api/test_deps.py::test_a_reload_refuses_a_plugin_file_that_does_not_read[plugins.lock]
 origin: src/kraft/api/deps.py §_reload_templates
+
+## REQ running-item-keeps-its-plugin-versions
+
+WHILE a work item is not terminal, the system SHALL read its plugin skills and plugin agent profiles from the plugin versions its chain was materialized with, and SHALL refuse a skill of a pinned version whose store is gone instead of handing it to the agent.
+enforced-by: tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[local-chain], tests/plugins/test_pins.py::test_a_resolved_chain_pins_the_plugins_it_reads[plugin-chain], tests/plugins/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/plugins/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/plugins/test_pins.py::test_every_launch_is_handed_the_items_pins
+origin: src/kraft/adapters/agent.py §resolve_agent_task
