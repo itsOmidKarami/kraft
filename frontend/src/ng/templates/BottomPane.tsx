@@ -160,7 +160,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   const addInto = (step: string | null, at?: number) => (c: TaskChoice): Op[] => {
     const sid = step ?? nextStepId(ids);
     const taken = handler?.steps.find((s) => s.id === sid)?.tasks.map((t) => t.id) ?? [];
-    const id = uniq("kind" in c ? c.kind : c.extends, taken);
+    const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
     return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }]), { op: "add_task", container, step: sid, id, ...c }];
   };
 

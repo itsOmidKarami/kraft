@@ -37,9 +37,9 @@ function restartTargets(ctx: PaneCtx): string[] {
  *  chip, an override bright with a dot, ✎ to override, ↺ to reset. */
 export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const { r, scope, path } = ctx;
+  const readOnly = useContext(ReadOnly);
   if (kind === "chain") return <ChainConfig ctx={ctx} />;
   const rows: Row[] = sourceRows(r, path);
-  const readOnly = useContext(ReadOnly);
   // A plugin's chain answers no `sources`: what each part sets is in its YAML.
   if (!rows.length && readOnly) return <Note>A plugin's settings are in the YAML tab.</Note>;
   if (!rows.length) return <Note>{r.resolved ? "Nothing to configure here." : "The resolved config shows once the draft resolves."}</Note>;

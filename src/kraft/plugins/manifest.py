@@ -103,11 +103,14 @@ def parse(text: str, where: str) -> dict:
     here too: a JSON escape puts one in a file whose bytes are plain ASCII."""
     try:
         data = json.loads(text)
+        strings = list(_strings(data))
     except ValueError as exc:
         raise ManifestError(f"{where}: is not JSON: {exc}") from exc
+    except RecursionError:
+        raise ManifestError(f"{where}: is nested deeper than a manifest goes") from None
     if not isinstance(data, dict):
         raise ManifestError(f"{where}: expected a JSON object")
-    for string in _strings(data):
+    for string in strings:
         if (bad := hidden_character(string)) is not None:
             raise ManifestError(f"{where}: a string carries {bad}, which a reader cannot see")
     return data

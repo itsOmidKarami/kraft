@@ -87,6 +87,35 @@ def _unique(base: str, taken) -> str:
     return f"{base}_{n}"
 
 
+def plugin_components(st) -> dict[str, dict]:
+    """The loaded plugins' components by section, under their qualified names
+    (`release:base`): what a draft reads through and never writes. Kept with
+    the library it was read from, which a reload replaces."""
+    library = getattr(st, "library", None)
+    if library is None:
+        return {}
+    cached = getattr(st, "_plugin_components", None)
+    if cached is not None and cached[0] is library:
+        return cached[1]
+    out: dict[str, dict] = {}
+    for component in catalogue.components(library, []):
+        if component["plugin"] is not None:
+            out.setdefault(component["kind"], {})[component["name"]] = plain(
+                component["definition"]
+            )
+    st._plugin_components = (library, out)
+    return out
+
+
+def _beside(own: object, shipped: Mapping[str, dict]) -> dict:
+    """A library mapping with the plugins' components in each section."""
+    merged = dict(own) if isinstance(own, dict) else {}
+    for section, components in shipped.items():
+        entries = merged.get(section)
+        merged[section] = {**(entries if isinstance(entries, dict) else {}), **components}
+    return merged
+
+
 def _ids(items: object) -> list:
     return [x.get("id") for x in items if isinstance(x, dict)] if isinstance(items, list) else []
 
@@ -138,12 +167,21 @@ class Draft:
             self.library_raw, self.library = authored.parse(library), authored.load(library)
         except yaml.YAMLError:
             self.library_raw = self.library = {}
+        #: The plugins' components in the shape `self.library` has, to read through.
+        self._shipped = authored.normalise(copy.deepcopy(plugin_components(st)))
         if self.file == authored.LIBRARY:
             self._chain: object = self.library
         else:
             self._chain = authored.load(self.files.get(self.name))
 
     # ── addressing ──
+
+    @property
+    def parents(self) -> Mapping:
+        """What an `extends` may name: the operator's library and, beside it,
+        each loaded plugin's components. Built per use, since an op adds to the
+        operator's own; a plugin's names are qualified, so none collides."""
+        return _beside(self.library, self._shipped)
 
     @property
     def chain(self) -> dict:
@@ -171,14 +209,14 @@ class Draft:
 
     def at(self, path: str) -> dict:
         """The component at `path`, owning every container it inherits on the way."""
-        found = authored.at(self.chain, path, file=self.file, library=self.library, write=True)
+        found = authored.at(self.chain, path, file=self.file, library=self.parents, write=True)
         if found is None:
             raise OpError(f"nothing at {path!r}")
         return found
 
     def own(self, path: str, key: str) -> object:
         try:
-            return authored.own(self.chain, path, key, file=self.file, library=self.library)
+            return authored.own(self.chain, path, key, file=self.file, library=self.parents)
         except KeyError:
             raise OpError(f"nothing at {path!r}") from None
 
@@ -192,10 +230,10 @@ class Draft:
 
     def put(self, path: str, field: str, value: object) -> None:
         self.at(path)
-        authored.put(self.chain, path, field, value, file=self.file, library=self.library)
+        authored.put(self.chain, path, field, value, file=self.file, library=self.parents)
 
     def base_node(self, name: object) -> Mapping:
-        return authored.inherited(self.library, Namespace.NODES, name)
+        return authored.inherited(self.parents, Namespace.NODES, name)
 
     def member(self, path: str) -> tuple[str, list]:
         """Whether `path` is a node, a step or a task, and the list it sits in."""
@@ -262,7 +300,8 @@ class Draft:
             id = node.get("id")
             if not (isinstance(id, str) and node.get("extends")):
                 continue
-            parent = authored.inherited(self.library_raw, Namespace.NODES, node["extends"])
+            written = _beside(self.library_raw, plugin_components(self.st))
+            parent = authored.inherited(written, Namespace.NODES, node["extends"])
             base_change = node.get("on_base_changed")
             containers = {
                 id: node,
@@ -280,7 +319,7 @@ class Draft:
                     theirs = theirs.get(seg) if isinstance(theirs, Mapping) else None
                 other = "steps" if authored.collapses(mine) else "tasks"
                 if isinstance(theirs, Mapping) and theirs.get(other) is not None:
-                    authored.put(self._chain, path, "tasks", None, library=self.library)
+                    authored.put(self._chain, path, "tasks", None, library=self.parents)
 
 
 def _dicts(value: object) -> list[dict]:
@@ -518,7 +557,8 @@ def _new_task(id_base: str | None, kind: str | None, extends: str | None, taken)
         raise OpError("give exactly one of kind and extends")
     if kind is not None and kind not in set(TaskKind):
         raise OpError(f"no task kind {kind!r}")
-    id = id_base if id_base is not None else _unique(kind or extends, taken)
+    # A plugin's component is `release:base`; the task it becomes is `base`.
+    id = id_base if id_base is not None else _unique((kind or extends).rpartition(":")[2], taken)
     return {"id": id, "kind": kind} if kind else {"id": id, "extends": extends}
 
 

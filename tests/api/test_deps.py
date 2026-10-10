@@ -624,12 +624,14 @@ def _other_version(st, tmp_path):
         ("needs_human", True, True),
         ("completed", True, False),
         ("paused", False, False),
+        ("paused", "run_chain", True),
     ],
     ids=[
         "pinned-by-paused-item",
         "pinned-by-stopped-item",
         "pinned-by-ended-item",
         "pinned-by-nothing",
+        "pinned-by-a-retried-items-run-chain",
     ],
 )
 def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
@@ -644,12 +646,13 @@ def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     (st.run_dirs.plugins / "staging" / "half-written").mkdir(parents=True)
     snapshot = {"plugins": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
     stored = json.dumps(snapshot if pinned else {})
+    column = "run_chain" if pinned == "run_chain" else "materialized_chain"
 
     async def an_item():
         await mk_item(st.db)
         await st.db.write(
             lambda c: c.execute(
-                "UPDATE work_items SET materialized_chain = ?, status = ? WHERE id = 'w1'",
+                f"UPDATE work_items SET {column} = ?, status = ? WHERE id = 'w1'",
                 (stored, status),
             )
         )

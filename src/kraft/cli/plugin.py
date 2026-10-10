@@ -243,10 +243,15 @@ def _reload() -> None:
     """Ask a running server to load the new lock. With none running, the next
     start reads it."""
     try:
-        asyncio.run(client.reload_plugins())
+        answer = asyncio.run(client.reload_plugins())
     except ValueError as exc:
         if "no Kraft server" not in str(exc):
             print(f"warning: the running server did not reload: {exc}", file=sys.stderr)
+        return
+    # A reload that answers 200 can still have left a plugin out.
+    for what, why in ((answer or {}).get("invalid_templates") or {}).items():
+        if what == "plugins.yaml" or what.startswith("plugin "):
+            print(f"warning: the running server did not load {what}: {why}", file=sys.stderr)
 
 
 def _edit(
