@@ -421,3 +421,76 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
     worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
     worktree.mkdir(parents=True)
     assert client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
+
+
+# ── installed plugins in the running library ──
+
+
+def _install_release(client, tmp_path, **spec):
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}, **spec}
+    store = install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": plugin}),
+        "release",
+    )
+    deps._reload_templates(st)
+    return store
+
+
+def test_the_running_library_holds_the_installed_plugins(client, tmp_path):
+    _install_release(client, tmp_path)
+    assert "release:ship" in client.app.state.library.chain_ids
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def _edit_a_stored_file(st, store):
+    (store / "library.yaml").chmod(0o644)
+    (store / "library.yaml").write_text("tasks: {}\n")
+
+
+def _delete_the_store(st, store):
+    import shutil
+
+    for path in [store, *store.rglob("*")]:
+        path.chmod(0o755)
+    shutil.rmtree(store)
+
+
+def _disable(st, store):
+    (st.templates_dir / "plugins.yaml").write_text(
+        (st.templates_dir / "plugins.yaml")
+        .read_text()
+        .replace("release@acme: true", "release@acme: false")
+    )
+
+
+def _break_plugins_yaml(st, store):
+    (st.templates_dir / "plugins.yaml").write_text("plugins: [not, a, mapping]\n")
+
+
+@pytest.mark.parametrize(
+    ("change", "key", "why"),
+    [
+        (_edit_a_stored_file, "plugin release@acme", "do not match the locked digest"),
+        (_delete_the_store, "plugin release@acme", "store is missing"),
+        (_disable, None, None),
+        (_break_plugins_yaml, "plugins.yaml", "plugins.yaml"),
+    ],
+    ids=["store-edited", "store-deleted", "disabled-is-no-fault", "plugins-yaml-unreadable"],
+)
+def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, why):
+    """A plugin left out at load degrades health like a chain that does not
+    resolve: the instance is not running what its lock says."""
+    store = _install_release(client, tmp_path)
+    st = client.app.state
+    change(st, store)
+    deps._reload_templates(st)
+    body = client.get("/api/health").json()
+    assert "release:ship" not in st.library.chain_ids
+    assert body["status"] == ("degraded" if key else "ok")
+    if key:
+        assert why in body["invalid_templates"][key]

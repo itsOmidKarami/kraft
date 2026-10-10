@@ -15,12 +15,13 @@ from kraft.cli import common
 
 
 def _render_lint(report: dict) -> str:
-    if report["valid"]:
-        return f"{len(report['chains'])} chain(s), no errors"
-    return "\n".join(
+    lines = [
         f"{issue['file']}:{issue['line']}:{issue['column']}: {issue['message']}"
-        for issue in report["issues"]
-    )
+        for issue in (*report["issues"], *report.get("unchecked", ()))
+    ]
+    if report["valid"]:
+        lines.insert(0, f"{len(report['chains'])} chain(s), no errors")
+    return "\n".join(lines)
 
 
 def _lint_dir_report(path: str) -> dict:
@@ -32,7 +33,7 @@ def _lint_dir_report(path: str) -> dict:
     will not show up here even though the server route would catch it."""
     from kraft.api.config_check import lint_report  # the daemon's modules, only for --dir
 
-    return lint_report(path)
+    return lint_report(path, plugins=None)  # offline: no instance, so no plugins
 
 
 def _cmd_lint(ns: argparse.Namespace) -> None:

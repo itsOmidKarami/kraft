@@ -108,14 +108,21 @@ def path_for(skills_dir: Path | None, name: str, *, where: str) -> Path:
     return _local_path(skills_dir, _own_name(name), where)
 
 
-def _plugin_path(plugin_dirs: Mapping[str, Path] | None, value: str, where: str) -> Path | None:
+def _plugin_path(
+    plugin_dirs: Mapping[str, Path | None] | None, value: str, where: str
+) -> Path | None:
     """The file `<namespace>:<name>` names when the namespace is a loaded Kraft
     plugin's, read from that plugin's store; None when it is not, which leaves
     the reference another tool's."""
     qualifier, _, name = value.partition(":")
-    root = (plugin_dirs or {}).get(qualifier)
-    if root is None:
+    if qualifier not in (plugin_dirs or {}):
         return None
+    root = (plugin_dirs or {})[qualifier]
+    if root is None:
+        raise SkillError(
+            f"{where}: plugin {qualifier!r} is installed but not loaded, so its skill "
+            f"{name!r} cannot be read; `kraft admin health` says why"
+        )
     _bare(name, where)
     path = Path(root) / "skills" / name / "SKILL.md"
     if not _is_file(path):
@@ -127,7 +134,11 @@ def _plugin_path(plugin_dirs: Mapping[str, Path] | None, value: str, where: str)
 
 
 def validate(
-    skills_dir: Path | None, value, *, where: str, plugin_dirs: Mapping[str, Path] | None = None
+    skills_dir: Path | None,
+    value,
+    *,
+    where: str,
+    plugin_dirs: Mapping[str, Path | None] | None = None,
 ) -> None:
     """The value is a usable skill reference, or raise.
 
@@ -145,7 +156,9 @@ def validate(
     _local_path(skills_dir, _own_name(value), where)
 
 
-def read(skills_dir: Path | None, value: str, plugin_dirs: Mapping[str, Path] | None = None) -> str:
+def read(
+    skills_dir: Path | None, value: str, plugin_dirs: Mapping[str, Path | None] | None = None
+) -> str:
     """The method text to inject. Called at dispatch, after `validate`."""
     path = _plugin_path(plugin_dirs, value, "skill") if is_plugin_ref(value) else None
     if path is None and is_plugin_ref(value):

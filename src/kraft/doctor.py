@@ -34,6 +34,7 @@ from kraft.paths import (
     linked_advice,
     linked_pre_2_config_dir,
 )
+from kraft.plugins import load as plugins_load
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
@@ -474,7 +475,9 @@ def _chains_check(templates: Path) -> dict:
     read from disk so it answers with no server running. A chain that does
     not resolve otherwise only shows up as the next intake on it failing."""
     skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
-    report = TemplateLibrary.lint_dir(templates, skills_dir=skills)
+    report = TemplateLibrary.lint_dir(
+        templates, skills_dir=skills, plugins=plugins_load.installed(templates)
+    )
     if report.valid:
         return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
     return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
@@ -543,7 +546,11 @@ def _agent_checks() -> list[dict]:
     harnesses = harness.load(None)
     checks: list[dict] = []
     try:
-        table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
+        table = HarnessProfileTable.from_yaml(
+            live / "harnesses.yaml",
+            harnesses=harnesses.valid,
+            plugins=plugins_load.installed(live),
+        )
     except TemplateEnvironmentError as exc:
         detail = (
             f"{live} does not exist — start `kraft` once to seed it"
@@ -681,7 +688,7 @@ def _resolved_chains(live: Path) -> list:
     """Every chain of the live library that resolves; `[]` when the library
     itself does not load."""
     try:
-        library = TemplateLibrary.from_yaml_dir(live)
+        library = TemplateLibrary.from_yaml_dir(live, plugins=plugins_load.installed(live))
     except TemplateLibraryError:
         return []
     chains = []
@@ -826,7 +833,11 @@ def _launches_direct_asker(entries: list[config.RepoEntry]) -> bool:
     harnesses = harness.load(None)
     direct = _direct_askers(harnesses)
     try:
-        table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
+        table = HarnessProfileTable.from_yaml(
+            live / "harnesses.yaml",
+            harnesses=harnesses.valid,
+            plugins=plugins_load.installed(live),
+        )
     except TemplateEnvironmentError:
         return True
     for chain in _resolved_chains(live):
@@ -1313,7 +1324,7 @@ def _library_steering(live: Path) -> dict[str, str] | None:
     `_chains_check` already reports that failure, and a second copy of it per
     repo helps nobody."""
     try:
-        library = TemplateLibrary.from_yaml_dir(live)
+        library = TemplateLibrary.from_yaml_dir(live, plugins=plugins_load.installed(live))
     except TemplateLibraryError:
         return None
     return {name: profile.instructions for name, profile in library.steering.items()}
