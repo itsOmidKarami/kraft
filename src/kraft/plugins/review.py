@@ -16,7 +16,7 @@ import json
 import re
 import tempfile
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -139,6 +139,23 @@ class _Facts:
     profiles: dict[str, object]
 
 
+def _chain_facts(
+    loaded: TemplateLibrary,
+    chain_ids: Iterable[str],
+    chains: dict[str, object],
+    lists: dict[str, list[str]],
+    order: dict[str, list[tuple[str, str]]],
+) -> None:
+    """Each of `chain_ids` that resolves in `loaded`, flattened into the three maps."""
+    for chain_id in chain_ids:
+        try:
+            dumped = loaded.resolve_chain(chain_id).chain.model_dump(mode="json")
+        except TemplateLibraryError:
+            continue
+        _flatten(dumped, chain_id, chains, lists)
+        order[chain_id] = [(node["id"], node["kind"]) for node in dumped["nodes"]]
+
+
 def _facts(extracted: Extracted | None) -> _Facts:
     if extracted is None:
         return _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
@@ -160,13 +177,8 @@ def _facts(extracted: Extracted | None) -> _Facts:
             )
         except TemplateLibraryError:
             loaded = None  # lint refuses it; there is nothing to compare
-        for chain_id in loaded.chain_ids if loaded else ():
-            try:
-                dumped = loaded.resolve_chain(chain_id).chain.model_dump(mode="json")
-            except TemplateLibraryError:
-                continue
-            _flatten(dumped, chain_id, chains, lists)
-            order[chain_id] = [(node["id"], node["kind"]) for node in dumped["nodes"]]
+        if loaded is not None:
+            _chain_facts(loaded, loaded.chain_ids, chains, lists, order)
     return _Facts(
         version=str(declared.get("version", "")),
         requires=declared.get("requires") if isinstance(declared.get("requires"), dict) else {},
@@ -261,6 +273,41 @@ def _reordered(path: str, before: list[str], after: list[str]) -> tuple[str, str
     return section, f"{path}: order changed, {before} -> {after}"
 
 
+def _chain_diff(was: _Facts, now: _Facts, name: str, reach: list[str], content: list[str]) -> None:
+    """Every changed fact and every reordered list of the resolved chains."""
+    for path in sorted(was.chains.keys() | now.chains.keys()):
+        before, after = was.chains.get(path), now.chains.get(path)
+        if before != after:
+            section, line = _chain_change(path, before, after, was, now, name)
+            (reach if section == "reach" else content).append(line)
+    for path in sorted(was.lists.keys() & now.lists.keys()):
+        common = set(was.lists[path]) & set(now.lists[path])
+        before = [i for i in was.lists[path] if i in common]
+        after = [i for i in now.lists[path] if i in common]
+        if before != after:
+            section, line = _reordered(path, before, after)
+            (reach if section == "reach" else content).append(line)
+
+
+def local_changes(
+    before: TemplateLibrary | None, after: TemplateLibrary, namespace: str
+) -> tuple[list[str], list[str]]:
+    """`(reach, content)` for the instance's own chains: what each one that
+    resolves through the plugin under `namespace` would run differently once
+    `after` replaces `before`. A chain the plugin does not reach has no line."""
+    sides = []
+    for loaded in (before, after):
+        facts = _Facts("", {}, {}, {}, {}, {}, {}, {}, {})
+        if loaded is not None:
+            local = [chain_id for chain_id in loaded.chain_ids if ":" not in chain_id]
+            _chain_facts(loaded, local, facts.chains, facts.lists, facts.order)
+        sides.append(facts)
+    reach: list[str] = []
+    content: list[str] = []
+    _chain_diff(sides[0], sides[1], namespace, reach, content)
+    return reach, content
+
+
 def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
     """What replacing `old` (None on install) with `new` would change."""
     was, now = _facts(old), _facts(new)
@@ -274,18 +321,7 @@ def review(plugin_id: str, old: Extracted | None, new: Extracted) -> Review:
             reach.append(f"moves onto a pre-release: {now.version}")
         if was.requires != now.requires:
             reach.append(f"requires changed: {was.requires} -> {now.requires}")
-    for path in sorted(was.chains.keys() | now.chains.keys()):
-        before, after = was.chains.get(path), now.chains.get(path)
-        if before != after:
-            section, line = _chain_change(path, before, after, was, now, name)
-            (reach if section == "reach" else content).append(line)
-    for path in sorted(was.lists.keys() & now.lists.keys()):
-        common = set(was.lists[path]) & set(now.lists[path])
-        before = [i for i in was.lists[path] if i in common]
-        after = [i for i in now.lists[path] if i in common]
-        if before != after:
-            section, line = _reordered(path, before, after)
-            (reach if section == "reach" else content).append(line)
+    _chain_diff(was, now, name, reach, content)
     for label, before_map, after_map in (
         ("component", was.components, now.components),
         ("steering", was.steering, now.steering),
