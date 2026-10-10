@@ -24,7 +24,8 @@ export interface Card {
   text?: string;
   /** What to do about it, when it is not a button: the forge CLI to sign in (`FORGE_LOGIN_HINT`; `backticks` mark commands). */
   hint?: string;
-  facts: [string, string][];
+  /** Label, value, and for a fact that is another work item, its id: the value opens it. */
+  facts: [string, string, string?][];
 }
 
 const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : null);
@@ -128,8 +129,8 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       const waits = deps.filter((d) => !d.met).length;
       return {
         tone: "info", title: "Blocked", where: waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where,
-        text: waits ? "Kraft starts it when they complete. Unblock stops it waiting for them." : RELEASED.text,
-        facts: deps.map((d) => [d.status.replace("_", " "), d.title]),
+        text: waits ? "Kraft starts it when they complete. Unblock starts it without them." : RELEASED.text,
+        facts: deps.map((d) => [d.status.replace("_", " "), d.title, d.id]),
       };
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${item.current_node_id}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
@@ -176,7 +177,7 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
     // Queued for a slot: Kraft starts it; Pause takes it out of the queue.
     case "queued": return { secondary: null, primary: a("pause", "Pause") };
-    // Blocked behind another item: Kraft starts it; Pause takes it out, Unblock stops it waiting.
+    // Blocked behind another item: Kraft starts it; Pause takes it out, Unblock starts it without them.
     case "blocked": return { secondary: item.dependencies?.some((d) => !d.met) ? a("unblock", "Unblock") : null, primary: a("pause", "Pause") };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
