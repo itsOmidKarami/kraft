@@ -402,6 +402,7 @@ async def restore_plugins(app) -> None:
     # out here too, so it never counts as "loads now".
     fresh = await asyncio.to_thread(installed_plugins, st, verify=True)
     missing = tuple(p for p in fresh if not p.quiet and not p.root.is_dir())
+    loads = {p.id: p.root for p in fresh if p.left_out is None}
     if missing:
         failed = await asyncio.to_thread(
             plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
@@ -410,13 +411,13 @@ async def restore_plugins(app) -> None:
         apply.notify(app)
         if failed:
             logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
-    elif {p.id for p in fresh if p.left_out is None} & {
-        p.id
+    elif any(
+        # The same store the running library left out, loading now. Not a
+        # plugin enabled or re-locked by hand: that edit waits for its reload.
+        p.left_out is not None and not p.quiet and loads.get(p.id) == p.root
         for p in (st.library.plugins if st.library is not None else ())
-        if p.left_out is not None
-    }:
-        # A launch put the store back (`dispatch.restore_pins`): the fresh read
-        # loads a plugin the running library left out. Load it.
+    ):
+        # A launch put the store back (`dispatch.restore_pins`). Load it.
         _reload_templates(st)
         apply.notify(app)
     collect_plugin_stores(st)
