@@ -221,9 +221,10 @@ A task's agent profile SHALL supply the model for its harness's provider and
 the profile's effort at the rung the task's own `model:`/`effort:` occupy: the
 node override, the item override and escalation SHALL still beat it, and it
 SHALL beat the repository's `models:` and the harness's `defaults:`. The
-profile's name SHALL be frozen with the chain and its body SHALL be read from
-`harnesses.yaml` at every launch.
-enforced-by: tests/test_agent_profiles.py::test_a_profile_fills_the_tasks_own_rung, tests/test_agent_profiles.py::test_the_profile_body_is_read_live_and_its_name_is_frozen
+profile's name SHALL be frozen with the chain; the body of a local profile
+SHALL be read from `harnesses.yaml` at every launch, and a plugin profile's
+body from the plugin version the item pinned.
+enforced-by: tests/test_agent_profiles.py::test_a_profile_fills_the_tasks_own_rung, tests/test_agent_profiles.py::test_the_profile_body_is_read_live_and_its_name_is_frozen, tests/plugins/test_pins.py::test_a_launch_reads_the_version_the_item_started_with
 origin: src/kraft/adapters/agent.py §resolve_agent_task -- Kraft-ps1ao. `resolve_invocation` is unchanged; the profile's values enter the binding where `task.model`/`task.effort` did.
 
 ## REQ agent-profile-pairing-is-checked-and-never-substituted
@@ -1896,26 +1897,29 @@ origin: src/kraft/cli/templates.py §_lint_dir_report -- calls `TemplateLibrary.
 
 ## REQ template-library-api-lists-its-components
 
-`GET /templates/library` SHALL list every component the loaded `library.yaml`
-declares with its definition as written, the chains that use it, and the lint
-issues that name it. `PUT /templates/library` SHALL refuse, writing nothing, a
+`GET /templates/library` SHALL list every component the loaded library
+declares, local and from installed plugins, each with its plugin or null, its
+definition as written, the chains that use it, and the lint issues that name it. `PUT /templates/library` SHALL refuse, writing nothing, a
 library that would stop any chain that resolves now from resolving.
-enforced-by: tests/api/test_templates_library.py::test_the_library_lists_every_component_with_the_chains_that_use_it, tests/api/test_templates_library.py::test_a_lint_issue_is_listed_on_the_component_it_names, tests/api/test_templates_library.py::test_a_library_save_that_breaks_a_chain_is_refused_and_writes_nothing, tests/api/test_templates_library.py::test_a_library_save_is_written_verbatim_and_live, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
+enforced-by: tests/api/test_templates_library.py::test_the_library_lists_every_component_with_the_chains_that_use_it, tests/api/test_templates_library.py::test_a_lint_issue_is_listed_on_the_component_it_names, tests/api/test_templates_library.py::test_a_library_save_that_breaks_a_chain_is_refused_and_writes_nothing, tests/api/test_templates_library.py::test_a_library_save_is_written_verbatim_and_live, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503, tests/api/test_plugin_content.py::test_plugin_entries_carry_their_plugin
 origin: src/kraft/templates/catalogue.py §components -- built from the daemon's loaded `st.library` and its own `lint`, never a second parse; `TemplateLibrary.references` records what each chain's `extends` expansion actually follows. Kraft-6xkkm.
 
 ## REQ template-cli-lists-library-components
 
-`kraft admin templates library` SHALL print every library component with its
-kind and the chains that use it, and `kraft admin templates library <id>` one
-component's definition.
-enforced-by: tests/cli/test_admin_templates_library.py::test_the_table_lists_each_component_its_kind_and_the_chains_using_it, tests/cli/test_admin_templates_library.py::test_one_component_prints_its_definition_and_users
+`kraft admin templates library` SHALL print every library component, local
+and from installed plugins, with its kind, the chains that use it and, for a
+plugin's, the plugin it comes from, and `kraft admin templates library <id>`
+one component's definition.
+enforced-by: tests/cli/test_admin_templates_library.py::test_the_table_lists_each_component_its_kind_and_the_chains_using_it, tests/cli/test_admin_templates_library.py::test_one_component_prints_its_definition_and_users, tests/cli/test_admin_templates_library.py::test_a_plugins_chain_and_components_name_their_plugin
 
 ## REQ chain-routes-are-their-own-namespace
 
 A saved chain SHALL be read, saved and resolved under `/templates/chains/{id}`,
 so that no chain id can shadow the library or an inspection route and none is
-reserved. The pre-1.0 flat `/templates/{id}` paths SHALL NOT remain as aliases.
-enforced-by: tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
+reserved; a qualified id (`release:ship`) names a plugin's chain, which the
+routes read and refuse to write (409). The pre-1.0 flat `/templates/{id}`
+paths SHALL NOT remain as aliases.
+enforced-by: tests/api/test_plugin_content.py::test_saving_a_plugin_entry_answers_409[put-chain], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
 origin: src/kraft/api/routes/settings.py §get_template -- before 1.0 so the break happens once.
 
 ## REQ harness-api-lists-and-guards-profiles

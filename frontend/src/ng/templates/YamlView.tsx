@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "../ui/Button";
 import { gutter } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Scope } from "./draft/types";
 import { scopeFile } from "./draft/view";
+import { ReadOnly } from "./plugin";
 import { problemText } from "./problems";
 import { tip } from "../ui/Tooltip";
 
@@ -26,6 +27,7 @@ export function jumpTo(ta: HTMLTextAreaElement | null, scroller: HTMLElement | n
  *  draft. No autocomplete; Tab inserts two spaces. */
 export function YamlView({ draft, scope, published, file: named }: { draft: ConfigDraft; scope: Scope; published: string | null | undefined; /** An area's file (repos, policy, intake); a chain or the library finds its own. */ file?: string }) {
   const view = draft.view!;
+  const readOnly = useContext(ReadOnly);
   const file = named ?? scopeFile(view.files, scope);
   const where = named ? "page" : "canvas";
   const r = view.result;
@@ -59,13 +61,13 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Tab indents, so Escape (or Shift+Tab) is the way out of the editor.
     if (e.key === "Escape") return e.currentTarget.blur();
-    if (e.key !== "Tab" || e.shiftKey) return;
+    if (e.key !== "Tab" || e.shiftKey || readOnly) return;
     e.preventDefault();
     const el = e.currentTarget, a = el.selectionStart, b = el.selectionEnd;
     edit(`${text.slice(0, a)}  ${text.slice(b)}`);
     requestAnimationFrame(() => el.setSelectionRange(a + 2, a + 2));
   };
-  const status = err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "parsed · live draft";
+  const status = readOnly ? "published" : err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "parsed · live draft";
   const width = Math.max(40, ...lines.map((l, i) => l.length + (msgs.has(i) ? 60 : 0))) + 4;
 
   return (
@@ -74,7 +76,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
         <span className="yv-file">{file}</span>
         <span className={`yv-status${err || r.problems.length ? " is-bad" : ""}`} role="status">{status}</span>
         <span className="bp-gap" />
-        <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>
+        {readOnly ? <span className="yv-legend">read-only · it comes from a plugin</span> : <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>}
       </div>
       {err && (
         <div className="yv-err" role="alert">
@@ -105,6 +107,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
               autoCapitalize="off"
               autoComplete="off"
               wrap="off"
+              readOnly={readOnly}
               value={text}
               style={{ height: lines.length * LINE + 8 }}
               onChange={(e) => edit(e.target.value)}

@@ -26,6 +26,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
     select_profile,
 )
 from kraft.config import RepoEntry, git_read
+from kraft.plugins import load as plugins_load
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.vocab import ADVANCING
@@ -199,6 +200,9 @@ def resolve_invocation(
     #: The launch's steering texts, the repository's then the task's, already
     #: resolved from the item's snapshot (`resolve_agent_task`).
     steering_texts: tuple[str, ...] = (),
+    #: Each Kraft plugin namespace this launch knows, to its store; None for
+    #: one that is not loaded. A skill named in one is read there, or refused.
+    plugin_dirs: Mapping[str, Path | None] | None = None,
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
     launch.
@@ -217,7 +221,9 @@ def resolve_invocation(
     # Hook-level only, deliberately: a method is what this *hook* does, where
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
-    method_text = _skill.read(skills_dir, binding["skill"]) if binding.get("skill") else None
+    method_text = (
+        _skill.read(skills_dir, binding["skill"], plugin_dirs) if binding.get("skill") else None
+    )
     # The item's own override wins over the binding's, for both the plain and
     # the escalate model -- but the two never compete with each other: while
     # escalating, only an escalate model (the item's if it set one, else the
@@ -287,8 +293,13 @@ def resolve_agent_task(
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
     item_repo: str | None = None,
     policy: InstancePolicy | None = None,
+    plugins: Mapping[str, Mapping[str, str | None]] | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
+
+    `plugins` are the item's snapshot's plugin pins (`ResolvedChain.plugins`):
+    a plugin skill and a plugin agent profile are read from the version the
+    item started with, and from the lock for a plugin it did not pin.
 
     The typed entry point to `resolve_invocation`'s precedence rules, so the
     executor hands over a model and never a hook dictionary. The dict is built
@@ -348,7 +359,13 @@ def resolve_agent_task(
             f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
     harnesses = harnesses if harnesses is not None else _harness.load(None)
-    table, path = harness_table(harnesses)
+    table, path = harness_table(harnesses, plugins)
+    known = plugins_load.for_item(plugins, path.parent)
+    for plugin in known:
+        if plugin.namespace in (plugins or {}) and plugin.left_out is not None:
+            raise HarnessUnavailable(
+                f"plugin {plugin.id} {plugin.version} could not be read: {plugin.left_out}"
+            )
     profile = select_profile(table.profiles, task.harness, path)
     # The task's own rung: its agent profile, read live, or its own fields.
     model, effort = task.model, task.effort
@@ -366,6 +383,7 @@ def resolve_agent_task(
         },
         repo_entry,
         skills_dir=skills_dir,
+        plugin_dirs={p.namespace: p.root if p.left_out is None else None for p in known},
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,

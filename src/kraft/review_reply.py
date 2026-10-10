@@ -143,6 +143,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     refusal = _overrides.stored_model_refusal(work_item_id, item_override)
     if refusal is not None:
         raise ValueError(refusal)
+    await executor.restore_pins(row)
     try:
         inv = _agent.resolve_agent_task(
             task.task,

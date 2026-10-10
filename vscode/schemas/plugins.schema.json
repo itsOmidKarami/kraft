@@ -1,0 +1,185 @@
+{
+  "$defs": {
+    "CollectionConfig": {
+      "additionalProperties": false,
+      "description": "One `collections:` entry, keyed by the name its `collection.json`\ndeclares. A git collection is fetched at `ref`; a directory collection is\nread in place, so it has no ref and nothing to auto-update.",
+      "oneOf": [
+        {
+          "not": {
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          },
+          "required": [
+            "git"
+          ]
+        },
+        {
+          "not": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref"
+            ]
+          },
+          "properties": {
+            "auto_update": {
+              "const": false
+            },
+            "path": {
+              "pattern": "^/.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ],
+      "properties": {
+        "auto_update": {
+          "default": false,
+          "description": "Update every installed plugin of this collection on server start. A plugin cannot opt out.",
+          "title": "Auto Update",
+          "type": "boolean"
+        },
+        "git": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A URL git clones: https://, ssh://, file:/// or user@host:path.",
+          "pattern": "^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?(/[^\\s\\x00-\\x1f]*)?|ssh://([A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?/[^\\s\\x00-\\x1f]*|file:///[^\\s\\x00-\\x1f]+|[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\\s\\x00-\\x1f-][^\\s\\x00-\\x1f]*)$",
+          "title": "Git"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An absolute directory, in normal form.",
+          "title": "Path"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A branch, tag or commit of a git collection. None: the remote's default branch.",
+          "title": "Ref"
+        }
+      },
+      "title": "CollectionConfig",
+      "type": "object"
+    },
+    "PluginEntry": {
+      "additionalProperties": false,
+      "description": "One installed plugin, in its long form; `true` and `false` are short\nfor `{enabled: true}` and `{enabled: false}`.",
+      "properties": {
+        "as": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The namespace its components are referenced under, in place of its name.",
+          "title": "As"
+        },
+        "auto_update": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only when its collection does not auto-update, and only for a git collection.",
+          "title": "Auto Update"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "PluginEntry",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config/plugins.yaml`.",
+  "properties": {
+    "collections": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "$ref": "#/$defs/CollectionConfig"
+        }
+      },
+      "propertyNames": {
+        "maxLength": 64
+      },
+      "title": "Collections",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "plugins": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]{0,63}@[a-z][a-z0-9_-]{0,63}$": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/PluginEntry"
+            }
+          ]
+        }
+      },
+      "title": "Plugins",
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "title": "Kraft plugins",
+  "type": "object"
+}

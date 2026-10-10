@@ -316,6 +316,7 @@ def test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem(tmp_path, monk
     listed = {p["id"]: p for p in view["agent_profiles"]}
     assert listed["fast"] == {
         "id": "fast",
+        "plugin": None,
         "effort": "low",
         "model": {"claude": "haiku"},
         "providers": {"claude": {"model": "haiku", "effort": "low"}},

@@ -206,6 +206,13 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
     ]
     if data is not None and not isinstance(data, dict):
         problems = [_not_a_mapping(name)]
+    elif library is not None and library.plugin_of(key) is not None:
+        # A plugin's chain is read-only and already in the library: resolved
+        # as loaded, never re-added as a local chain (its id has a `:`).
+        try:
+            resolved = settings._resolved_view(library.resolve_chain(key))
+        except TemplateLibraryError as exc:
+            problems = [{**_not_a_mapping(name), "message": str(exc)}]
     elif data is not None:
         issues = config_check.chain_issues(
             library, path, id, data, getattr(st, "instance_policy", None)

@@ -69,7 +69,7 @@ def _artifact_line(rel: str | None) -> str:
     return f"The document this gate is about: {rel} (relative to this worktree)\n"
 
 
-def _profile_fallback_refusal(task: AgentTask, gate: str) -> str | None:
+def _profile_fallback_refusal(task: AgentTask, gate: str, pins=None) -> str | None:
     """None, or the operator-facing reason `task` must not launch (Kraft-t4y8g):
     its `profile:` names an agent profile that itself carries a `fallback:`
     list.
@@ -96,7 +96,8 @@ def _profile_fallback_refusal(task: AgentTask, gate: str) -> str | None:
     if task.profile is None:
         return None
     try:
-        table, _path = harness_table(_harness.load(None))
+        # The item's pinned plugin versions: the profile the launch will use.
+        table, _path = harness_table(_harness.load(None), pins)
     except HarnessUnavailable:
         # The launch a moment later hits the identical problem and reports
         # it; nothing here needs to say it twice.
@@ -163,7 +164,15 @@ async def review(
             )
         )
         return "undecided", (f"gate {gate!r} declares no agent task to review it; a person decides")
-    if (refusal := _profile_fallback_refusal(auto_review.task, gate)) is not None:
+    item = db.read(
+        lambda c: c.execute(
+            # `run_chain` too: a retried item's pins are the ones its launch reads.
+            "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?",
+            (work_item_id,),
+        ).fetchone()
+    )
+    pins = executor.frozen_steering(item)["plugins"] if item is not None else None
+    if (refusal := _profile_fallback_refusal(auto_review.task, gate, pins)) is not None:
         # Same posture as the kind-check above: an unpaired skip, no
         # `_started`, so `_gate_review_attempts` still counts it as one
         # attempt and the delay poller does not re-arm a dead gate forever.
@@ -262,6 +271,7 @@ async def review(
             f"{auto_review.path}: {refusal}\n",
         )
         return "undecided", refusal
+    await executor.restore_pins(row)
     try:
         inv = _agent.resolve_agent_task(
             auto_review.task,

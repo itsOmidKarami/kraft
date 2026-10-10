@@ -58,7 +58,12 @@ from kraft.policy import (
     WorkItemPolicy,
     deprecated,
 )
-from kraft.templates.environment import FallbackEntry, Identifier, WorkItemTarget
+from kraft.templates.environment import (
+    FallbackEntry,
+    Identifier,
+    QualifiedIdentifier,
+    WorkItemTarget,
+)
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
@@ -419,7 +424,7 @@ class TaskBase(BaseModel):
 
     id: Identifier
     scope: Annotated[TaskScope, _LOOSE] = TaskScope.ONCE
-    steering: list[Identifier] = Field(default_factory=list)
+    steering: list[QualifiedIdentifier] = Field(default_factory=list)
     #: Task-level recovery: the nearest handler for this task's own failure
     #: (`nearest-recovery-handler-wins`). Only a task in one of an execution
     #: node's own steps may declare one; every other position refuses it
@@ -497,7 +502,7 @@ class AgentTask(TaskBase):
     #: The two routes to a model, one per task: `profile:` (an agent profile
     #: in `harnesses.yaml`, read live at launch -- Kraft-ps1ao), or its own
     #: `model:`/`effort:`. `extends` keeps them apart (`displaced_route`).
-    profile: Identifier | None = None
+    profile: QualifiedIdentifier | None = None
     model: StrictStr | None = None
     effort: StrictStr | None = None
     #: Inputs Kraft delivers to this task (`AgentInput`), e.g.
@@ -925,7 +930,7 @@ class Chain(BaseModel):
 
     model_config = _CONFIG
 
-    id: Identifier | None = None
+    id: QualifiedIdentifier | None = None
     description: StrictStr | None = None
     nodes: list[AnyNode] = Field(min_length=1)
     policy: TemplatePolicyOverride | None = None
@@ -1151,6 +1156,11 @@ class ResolvedChain:
     #: resolved": a chain built without a library, or a snapshot stored before
     #: steering was frozen -- a task selecting steering then stops for a human.
     steering: dict[str, str] | None = None
+    #: Each Kraft plugin the chain resolved anything through, namespace to
+    #: `InstalledPlugin.pin`, frozen with the chain: a launch reads these
+    #: versions' skills and agent profiles, whatever was installed since.
+    #: `None` is "never resolved", as for `steering`: the launch reads the lock.
+    plugins: dict[str, dict[str, str | None]] | None = None
 
     @property
     def id(self) -> str | None:
@@ -1161,7 +1171,12 @@ class ResolvedChain:
         return tuple(t.path for node in self.nodes for t in node.tasks())
 
     @classmethod
-    def from_chain(cls, chain: Chain, steering: dict[str, str] | None = None) -> ResolvedChain:
+    def from_chain(
+        cls,
+        chain: Chain,
+        steering: dict[str, str] | None = None,
+        plugins: dict[str, dict[str, str | None]] | None = None,
+    ) -> ResolvedChain:
         nodes = []
         for node in chain.nodes:
             # Every handler and control task sits in its node's scope (or its
@@ -1221,7 +1236,7 @@ class ResolvedChain:
                     scopes=node_scopes,
                 )
             )
-        return cls(chain=chain, nodes=tuple(nodes), steering=steering)
+        return cls(chain=chain, nodes=tuple(nodes), steering=steering, plugins=plugins)
 
     def materialize(
         self,
@@ -1555,7 +1570,9 @@ class ResolvedChain:
             if node.id not in dropped
         ]
         return ResolvedChain.from_chain(
-            self.chain.model_copy(update={"nodes": kept}), steering=self.steering
+            self.chain.model_copy(update={"nodes": kept}),
+            steering=self.steering,
+            plugins=self.plugins,
         )
 
 
@@ -1610,6 +1627,9 @@ class _StoredMaterialization(BaseModel):
     #: `MaterializedChain.repository_steering`. Absent from a snapshot stored
     #: before repository steering was frozen, which reads back as `None`.
     repository_steering: dict[str, dict[str, str]] | None = None
+    #: `ResolvedChain.plugins`. Absent when the chain uses no plugin, and from
+    #: a snapshot stored before plugins were pinned.
+    plugins: dict[str, dict[str, str | None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -1806,6 +1826,7 @@ class MaterializedChain:
             target=self.target,
             policy=self.policy,
             steering=self.chain.steering,
+            plugins=self.chain.plugins or None,
             repository_policies=dict(self.repository_policies),
             untrimmed=self.untrimmed,
             repository_steering=(
@@ -1818,6 +1839,7 @@ class MaterializedChain:
             exclude=({"repository_policies"} if not self.repository_policies else set())
             | ({"untrimmed"} if self.untrimmed is None else set())
             | ({"repository_steering"} if self.repository_steering is None else set())
+            | ({"plugins"} if not self.chain.plugins else set())
         )
 
     @classmethod
@@ -1831,7 +1853,9 @@ class MaterializedChain:
         except ValidationError as exc:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(
-            chain=ResolvedChain.from_chain(stored.chain, steering=stored.steering),
+            chain=ResolvedChain.from_chain(
+                stored.chain, steering=stored.steering, plugins=stored.plugins
+            ),
             target=stored.target,
             policy=stored.policy,
             repository_policies=stored.repository_policies,

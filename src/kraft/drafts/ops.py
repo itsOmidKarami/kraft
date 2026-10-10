@@ -19,7 +19,8 @@ from pydantic import TypeAdapter, ValidationError
 from yaml import YAMLError
 
 from kraft.drafts import authored, resolve, store
-from kraft.templates import positions
+from kraft.plugins import load as plugins_load
+from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import (
     LIBRARY_FILE,
@@ -59,6 +60,10 @@ class OpError(Exception):
         self.extra = extra
 
 
+class PluginReadOnly(OpError):
+    """An op on a plugin's own chain or component: the request answers 409."""
+
+
 def _check_id(id: object, taken) -> str:
     try:
         _IDENTIFIER.validate_python(id)
@@ -80,6 +85,42 @@ def _unique(base: str, taken) -> str:
     while f"{base}_{n}" in taken:
         n += 1
     return f"{base}_{n}"
+
+
+def plugin_components(st) -> dict[str, dict]:
+    """The loaded plugins' components by section, under their qualified names
+    (`release:base`): what a draft reads through and never writes. Kept with
+    the library it was read from, which a reload replaces."""
+    library = getattr(st, "library", None)
+    if library is None or not library.plugins:
+        return {}
+    cached = getattr(st, "_plugin_components", None)
+    if cached is not None and cached[0] is library:
+        return cached[1]
+    out: dict[str, dict] = {}
+    for component in catalogue.components(library, []):
+        if component["plugin"] is not None:
+            out.setdefault(component["kind"], {})[component["name"]] = plain(
+                component["definition"]
+            )
+    st._plugin_components = (library, out)
+    return out
+
+
+def with_plugins(st, own: object) -> dict:
+    """The library mapping `own` (normalised, as `authored.load` gives it)
+    with the plugins' components beside its own: what an `extends` is read
+    through. A copy of theirs, so owning what a node inherits changes nothing."""
+    return _beside(own, authored.normalise(copy.deepcopy(plugin_components(st))))
+
+
+def _beside(own: object, shipped: Mapping[str, dict]) -> dict:
+    """A library mapping with the plugins' components in each section."""
+    merged = dict(own) if isinstance(own, dict) else {}
+    for section, components in shipped.items():
+        entries = merged.get(section)
+        merged[section] = {**(entries if isinstance(entries, dict) else {}), **components}
+    return merged
 
 
 def _ids(items: object) -> list:
@@ -133,12 +174,21 @@ class Draft:
             self.library_raw, self.library = authored.parse(library), authored.load(library)
         except yaml.YAMLError:
             self.library_raw = self.library = {}
+        #: The plugins' components in the shape `self.library` has, to read through.
+        self._shipped = authored.normalise(copy.deepcopy(plugin_components(st)))
         if self.file == authored.LIBRARY:
             self._chain: object = self.library
         else:
             self._chain = authored.load(self.files.get(self.name))
 
     # ── addressing ──
+
+    @property
+    def parents(self) -> Mapping:
+        """What an `extends` may name: the operator's library and, beside it,
+        each loaded plugin's components. Built per use, since an op adds to the
+        operator's own; a plugin's names are qualified, so none collides."""
+        return _beside(self.library, self._shipped)
 
     @property
     def chain(self) -> dict:
@@ -166,14 +216,14 @@ class Draft:
 
     def at(self, path: str) -> dict:
         """The component at `path`, owning every container it inherits on the way."""
-        found = authored.at(self.chain, path, file=self.file, library=self.library, write=True)
+        found = authored.at(self.chain, path, file=self.file, library=self.parents, write=True)
         if found is None:
             raise OpError(f"nothing at {path!r}")
         return found
 
     def own(self, path: str, key: str) -> object:
         try:
-            return authored.own(self.chain, path, key, file=self.file, library=self.library)
+            return authored.own(self.chain, path, key, file=self.file, library=self.parents)
         except KeyError:
             raise OpError(f"nothing at {path!r}") from None
 
@@ -187,10 +237,10 @@ class Draft:
 
     def put(self, path: str, field: str, value: object) -> None:
         self.at(path)
-        authored.put(self.chain, path, field, value, file=self.file, library=self.library)
+        authored.put(self.chain, path, field, value, file=self.file, library=self.parents)
 
     def base_node(self, name: object) -> Mapping:
-        return authored.inherited(self.library, Namespace.NODES, name)
+        return authored.inherited(self.parents, Namespace.NODES, name)
 
     def member(self, path: str) -> tuple[str, list]:
         """Whether `path` is a node, a step or a task, and the list it sits in."""
@@ -257,7 +307,8 @@ class Draft:
             id = node.get("id")
             if not (isinstance(id, str) and node.get("extends")):
                 continue
-            parent = authored.inherited(self.library_raw, Namespace.NODES, node["extends"])
+            written = _beside(self.library_raw, plugin_components(self.st))
+            parent = authored.inherited(written, Namespace.NODES, node["extends"])
             base_change = node.get("on_base_changed")
             containers = {
                 id: node,
@@ -275,7 +326,7 @@ class Draft:
                     theirs = theirs.get(seg) if isinstance(theirs, Mapping) else None
                 other = "steps" if authored.collapses(mine) else "tasks"
                 if isinstance(theirs, Mapping) and theirs.get(other) is not None:
-                    authored.put(self._chain, path, "tasks", None, library=self.library)
+                    authored.put(self._chain, path, "tasks", None, library=self.parents)
 
 
 def _dicts(value: object) -> list[dict]:
@@ -290,7 +341,9 @@ def _expand_library(raw: object, path) -> object:
     # Steering expands nothing; an unwritten profile must not stop the rest.
     components = {k: v for k, v in raw.items() if k != Namespace.STEERING}
     try:
-        library = TemplateLibrary.from_mappings(components, (), library_path=path)
+        library = TemplateLibrary.from_mappings(
+            components, (), library_path=path, plugins=plugins_load.installed(path.parent)
+        )
     except TemplateLibraryError:
         return raw
     out = dict(raw)
@@ -511,7 +564,12 @@ def _new_task(id_base: str | None, kind: str | None, extends: str | None, taken)
         raise OpError("give exactly one of kind and extends")
     if kind is not None and kind not in set(TaskKind):
         raise OpError(f"no task kind {kind!r}")
-    id = id_base if id_base is not None else _unique(kind or extends, taken)
+    # A plugin's component is `release:base`; the task it becomes is `base`.
+    id = (
+        id_base
+        if id_base is not None
+        else _unique((kind or extends).rpartition(":")[2], [*taken, *RESERVED_SEGMENTS])
+    )
     return {"id": id, "kind": kind} if kind else {"id": id, "extends": extends}
 
 
@@ -686,6 +744,18 @@ def new_chain(d: Draft, **source: str) -> None:
     if origin is None:
         d._chain = {"id": d.key, "description": "", "nodes": []}
     else:
+        library = getattr(d.st, "library", None)
+        if isinstance(origin, str) and library is not None and library.plugin_of(origin):
+            # A loaded plugin's chain, as the library holds it: its own bare
+            # references already made `<namespace>:<name>`, so the copy resolves.
+            if origin not in library.chain_ids:
+                raise OpError(f"there is no chain {origin!r} to copy")
+            copied = yaml.safe_dump(plain(library.chain_data(origin)), sort_keys=False)
+            d._chain = authored.load(copied)
+            authored.put(d._chain, "", "id", d.key)
+            d.exists = True
+            d.dirty.add(d.name)
+            return
         # A chain id, never a path: `../../x` read any YAML file Kraft could.
         if not isinstance(origin, str) or not store.AREAS["chains"].valid(origin):
             raise OpError(f"there is no chain {origin!r} to copy")
@@ -896,6 +966,43 @@ def move_to_library(d: Draft, path: str, name: str) -> dict:
     return {"path": _join(section.value, name)}
 
 
+def plain(value: object) -> object:
+    """A library mapping as plain dicts and lists, to serialise."""
+    if isinstance(value, Mapping):
+        return {k: plain(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [plain(v) for v in value]
+    return value
+
+
+def copy_component(d: Draft, ref: str, name: str) -> dict:
+    """A loaded plugin's component (`tasks.release:base`, as the library lists
+    it) into `library.yaml` as `<section>.<name>`: the way to change what a
+    plugin ships. Its plugin-internal references come along qualified, so the
+    copy resolves. The library joins the draft."""
+    library = getattr(d.st, "library", None)
+    section, _, qualified = ref.partition(".") if isinstance(ref, str) else ("", "", "")
+    if library is None or section not in [ns.value for ns in Namespace]:
+        raise OpError(f"there is no plugin component {ref!r} to copy")
+    if library.plugin_of(qualified) is None:
+        raise OpError(f"{ref!r} is not a plugin's component; edit it where it is")
+    if section == Namespace.STEERING.value:
+        found = library.steering.get(qualified)
+        body = None if found is None else found.model_dump(mode="json", exclude_unset=True)
+    else:
+        raw = library.component(Namespace(section), qualified)
+        body = None if raw is None else plain(raw.data)
+    if body is None:
+        raise OpError(f"there is no plugin component {ref!r} to copy")
+    if not isinstance(d.library.get(section), dict):
+        authored.put(d.library, "", section, {}, file=authored.LIBRARY)
+    entries = d.library[section]
+    _check_id(name, entries)
+    entries[name] = body
+    d.dirty.add(LIBRARY_FILE)
+    return {"path": _join(section, name)}
+
+
 #: Every op by name.
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
@@ -915,7 +1022,20 @@ OPS: dict[str, Callable[..., dict | None]] = {
     "set_fragment": set_fragment,
     "add_component": add_component,
     "move_to_library": move_to_library,
+    "copy_component": copy_component,
 }
+
+
+def _refuse_plugin_address(d: Draft, path: object) -> None:
+    """An op that addresses a plugin's own component (`tasks.release:base`) is
+    refused: a plugin's content is read-only. Extending or selecting one is
+    not an address."""
+    library = getattr(d.st, "library", None)
+    if library is None or not isinstance(path, str):
+        return
+    for segment in path.split(PATH_SEPARATOR):
+        if why := catalogue.read_only_message(library, segment):
+            raise PluginReadOnly(why)
 
 
 def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict]:
@@ -929,6 +1049,9 @@ def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict
                 raise OpError(f"no op {name!r}")
             fn = table[op["op"]]
             fields = {k: v for k, v in op.items() if k != "op"}
+            # Every way an op names where it acts.
+            for address in ("path", "container", "node"):
+                _refuse_plugin_address(d, fields.get(address))
             try:
                 inspect.signature(fn).bind(d, **fields)
             except TypeError as exc:

@@ -22,19 +22,27 @@ from kraft.api import api_router, config_check, deps
 from kraft.api.routes import board
 from kraft.drafts import authored, item, ops, policy_caps, resolve, store
 from kraft.policy import PolicyError
-from kraft.templates import revision
+from kraft.templates import catalogue, revision
 from kraft.templates.library import LIBRARY_FILE
 from kraft.templates.models import AgentTask
 from kraft.vocab import ENDED
 
 
-def _area(area: str, key: str) -> store.Area:
+def _area(area: str, key: str, st=None, *, read: bool = False) -> store.Area:
     from kraft.drafts import areas  # here, not at import: `resolve` imports this package
 
     areas.register()
     found = store.AREAS.get(area)
     if found is None:
         raise HTTPException(404, f"no draft area {area!r}")
+    library = getattr(st, "library", None)
+    # Before the key-shape check, which would answer 400 for a qualified id:
+    # a plugin's chain has no draft.
+    if area == "chains" and library is not None:
+        if why := catalogue.read_only_message(library, key):
+            if read:
+                return found  # shown as published, never as a draft
+            raise HTTPException(409, why)
     if not found.valid(key):
         raise HTTPException(400, f"invalid {area} key {key!r}")
     return found
@@ -45,6 +53,12 @@ def _state(st, area: str, key: str, draft: dict | None, history: list[dict]):
     over them), the published ones, and their resolve result."""
     names = {*store.AREAS[area].files(key), *(draft["files"] if draft else ())}
     published = resolve.published(st.templates_dir, sorted(names))
+    library = getattr(st, "library", None)
+    if area == "chains" and library is not None and library.plugin_of(key):
+        # A plugin's chain is in its store, not under config/: shown as the
+        # library holds it, its own references already qualified.
+        if key in library.chain_ids:
+            published[f"chains/{key}.yaml"] = authored.dump(ops.plain(library.chain_data(key)))
     files = {n: t for n, t in published.items() if t is not None}
     files |= draft["files"] if draft else {}
     result = resolve.resolve(
@@ -74,6 +88,14 @@ def _view(st, area: str, key: str, files: dict, published: dict, result: dict) -
         "published": published,
         "updated_at": draft["updated_at"] if draft else None,
         "result": result,
+        # The plugin a chain comes from: the screen shows it and offers no edit.
+        "plugin": catalogue.plugin_view(st.library, key)
+        if area == "chains" and getattr(st, "library", None) is not None
+        else None,
+        # On the library: the loaded plugins' components, in `library.yaml`'s
+        # own shape (`{section: {"release:base": definition}}`), to show beside
+        # the local ones. Never part of `files`: no op or publish touches them.
+        "plugin_library": ops.plugin_components(st) if area == "library" else None,
     }
 
 
@@ -87,7 +109,7 @@ async def list_config_drafts(request: Request):
 async def get_config_draft(area: str, key: str, request: Request):
     """The draft, or the published files and their result when there is none."""
     st = request.app.state
-    found = _area(area, key)
+    found = _area(area, key, request.app.state, read=True)
     draft = st.db.read(lambda c: store.get(c, area, key))
     files, published, result = _state(st, area, key, draft, draft["history"] if draft else [])
     # A config file that is not there yet is still a page to open: ops create it.
@@ -105,7 +127,7 @@ async def put_draft_file(area: str, key: str, file: str, body: FileText, request
     """One file's text as typed, comments kept. One undo step, shared with the
     PUTs to the same file just before it (`store.COALESCE_S`)."""
     st = request.app.state
-    found = _area(area, key)
+    found = _area(area, key, request.app.state)
     old = st.db.read(lambda c: store.get(c, area, key))
     # A file an op joined to the draft (a rename's new file, a chain a library
     # rename rewrote, `move_to_library`'s library) is the draft's to write too.
@@ -146,7 +168,7 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
     written over its own text, comments kept. With `?preview=1`, the result
     without saving."""
     st = request.app.state
-    found = _area(area, key)
+    found = _area(area, key, request.app.state)
     old = st.db.read(lambda c: store.get(c, area, key))
     history = old["history"] if old else []
     current, published, result = _state(st, area, key, old, history)
@@ -162,7 +184,8 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
         written = working.finish()
     except ops.OpError as exc:
         return JSONResponse(
-            status_code=422, content={"detail": str(exc), "op": exc.index, **exc.extra}
+            status_code=409 if isinstance(exc, ops.PluginReadOnly) else 422,
+            content={"detail": str(exc), "op": exc.index, **exc.extra},
         )
     names = {*(old["files"] if old else ()), *working.dirty}
     # Only a file whose comments the write drops is `serialized`: the
@@ -195,7 +218,7 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
 async def undo_draft(area: str, key: str, request: Request):
     """Back one request. Back to the published state drops the draft."""
     st = request.app.state
-    _area(area, key)
+    _area(area, key, request.app.state)
     old = st.db.read(lambda c: store.get(c, area, key))
     if old is None or not old["history"]:
         raise HTTPException(409, "nothing to undo")
@@ -242,7 +265,7 @@ async def publish_draft(area: str, key: str, request: Request):
     """Write the draft over the published files and reload, only if none of
     them changed since it joined the draft and the draft has no problem."""
     st = request.app.state
-    found = _area(area, key)
+    found = _area(area, key, request.app.state)
     draft = st.db.read(lambda c: store.get(c, area, key))
     if draft is None:
         raise HTTPException(404, f"no draft of {area} {key!r}")
@@ -294,7 +317,7 @@ async def rebase_draft(area: str, key: str, request: Request):
     overwrites what changed underneath. No undo entry, no change to the draft's
     text."""
     st = request.app.state
-    _area(area, key)
+    _area(area, key, request.app.state)
     draft = st.db.read(lambda c: store.get(c, area, key))
     if draft is None:
         raise HTTPException(404, f"no draft of {area} {key!r}")
@@ -336,7 +359,7 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
     publish uses), from the draft when there is one, else the published file.
     `set_fragment` is the write side."""
     st = request.app.state
-    _area(area, key)
+    _area(area, key, request.app.state, read=True)
     if path is None:
         raise HTTPException(400, "path is required")
     draft = st.db.read(lambda c: store.get(c, area, key))
@@ -366,7 +389,7 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
     # A throwaway copy of the request's model: owning what the component
     # inherits (as `set_fragment` does) writes nothing.
     found = (
-        authored.at(mapping, path, file=kind, library=library, write=True)
+        authored.at(mapping, path, file=kind, library=ops.with_plugins(st, library), write=True)
         if isinstance(mapping, dict)
         else None
     )
@@ -379,7 +402,7 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
 async def discard_draft(area: str, key: str, request: Request):
     """Final: a discard has no undo."""
     st = request.app.state
-    _area(area, key)
+    _area(area, key, request.app.state)
     if not await st.db.write(lambda c: store.delete(c, area, key)):
         raise HTTPException(404, f"no draft of {area} {key!r}")
     return Response(status_code=204)

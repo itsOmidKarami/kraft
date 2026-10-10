@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Inspector } from "../../graph/Inspector";
 import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
@@ -23,6 +23,7 @@ import { movable } from "../../library/moveToLibrary";
 import { detailOf } from "../../http";
 import "./panes.css";
 import { mod } from "../../keys";
+import { ReadOnly } from "../plugin";
 
 const FIXED_ICON: Partial<Record<PaneKind, string>> = { chain: "workflow", fixloop: "refresh-cw", judge: "scale" };
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];
@@ -72,6 +73,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   }, [path, onRenaming]);
   const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
+  const readOnly = useContext(ReadOnly);
   const r = draft.view!.result;
   const d = describe(r, scope, path);
   // A chain renamed in the draft is titled and crumbed by its new id (R10b-02).
@@ -139,7 +141,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     if (d.kind === "task") return (((resolvedAt(r, parent) ?? authoredAt(r, scope, parent))?.tasks as { id: string }[] | undefined) ?? []).map((x) => x.id);
     return [];
   })();
-  const renameable = !["fixloop", "judge"].includes(d.kind);
+  const renameable = !readOnly && !["fixloop", "judge"].includes(d.kind);
   // Removing a task a node inherits makes this chain own that step's list (Decisions §9 Inherited items).
   const nodeOwn = d.node ? authoredAt(r, scope, d.node) : null;
   const inherits = (d.kind === "task" || d.kind === "step") && !!nodeOwn?.extends && !nodeOwn.steps;
@@ -173,7 +175,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
 
   // R47: an exec node or a task that extends nothing can become a library component.
   const moveWhat = movable(path, own, d.kind);
-  const footer = d.kind === "chain" ? (
+  const footer = readOnly ? undefined : d.kind === "chain" ? (
     asking ? (
       <>
         <span className="tpl-rv-ask">Delete {chain}? It goes when you publish.</span>
@@ -227,7 +229,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         <RenameTitle key={path} what={d.kind === "chain" ? "chain" : d.kind === "gate" ? "gate" : d.kind === "node" ? "node" : d.kind === "step" ? "step" : "task"} id={d.kind === "chain" ? chain : d.id} taken={siblings} refs={refs} refused={refused} chain={d.kind === "chain"} onGo={(id) => void rename(id)} onCancel={endRename} />
       ) : undefined}
       // Nodes, steps and tasks pick an icon; the chain, gates, the fix loop and the judge have fixed ones (Decisions §9 Icons).
-      onIcon={["node", "step", "task", "esc", "review"].includes(d.kind) ? (el) => { at(el); setCard({ t: "icon" }); } : undefined}
+      onIcon={!readOnly && ["node", "step", "task", "esc", "review"].includes(d.kind) ? (el) => { at(el); setCard({ t: "icon" }); } : undefined}
       footer={footer}
     >
       {d.kind === "fixloop" ? (

@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from kraft import config as config_mod
@@ -25,7 +26,9 @@ from kraft.api import config_check, deps
 logger = logging.getLogger(__name__)
 
 WATCH_INTERVAL_S = 5
-CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml")
+#: What `kraft admin plugin` writes; a reload of only these touches nothing else.
+PLUGIN_FILES = ("plugins.yaml", "plugins.lock")
+CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml", *PLUGIN_FILES)
 
 
 def _digest(path: Path) -> str | None:
@@ -56,11 +59,18 @@ def record(st, *names: str) -> None:
         set_loaded(st, name, _digest(st.templates_dir / name))
 
 
-def record_library(st) -> None:
-    """The library file and every chain file, and none that has since gone."""
+def record_library(st, *, plugin_files: bool = True) -> None:
+    """The library file, the plugin files it is built with (unless
+    `plugin_files` is False: they were refused) and every chain file, and none
+    that has since gone."""
     for name in [n for n in getattr(st, "loaded_hashes", {}) if n.startswith("chains/")]:
         del st.loaded_hashes[name]
-    record(st, "library.yaml", *(n for n in _names(st) if n.startswith("chains/")))
+    record(
+        st,
+        "library.yaml",
+        *(PLUGIN_FILES if plugin_files else ()),
+        *(n for n in _names(st) if n.startswith("chains/")),
+    )
 
 
 def _restart_items(st) -> list[dict]:
@@ -138,13 +148,22 @@ async def watcher(app) -> None:
             logger.exception("apply check failed")
 
 
-async def reload(app) -> str | None:
+async def reload(app, only: Sequence[str] | None = None) -> str | None:
     """`policy.yaml`, the library and `intake.yaml` reread into the running server,
     the poller replaced. A policy that does not validate is refused and the
     running one kept (its reason is returned); so is an `intake.yaml` that
     does not load, its reason kept as `st.invalid_intake` for the caller,
-    `/health` and doctor. Either stays pending."""
+    `/health` and doctor. Either stays pending.
+
+    `only` the plugin files rebuilds the library from the lock and leaves a
+    pending hand edit of `policy.yaml` or `intake.yaml` pending: a plugin verb
+    applies its own change, not the operator's."""
     st = app.state
+    if only is not None and set(only) <= set(PLUGIN_FILES):
+        deps._reload_templates(st)
+        notify(app)
+        deps.in_background(app, deps.restore_plugins)
+        return None
     refused = deps.reload_policy(st)
     # A limit added by this reload is judged against a stale measurement until
     # the next tick: measure now, without holding the reload.
@@ -161,6 +180,9 @@ async def reload(app) -> str | None:
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
     notify(app)
+    # A lock pulled into config/ may name a store this machine does not have.
+    # In the background: a restore may fetch for longer than a caller waits.
+    deps.in_background(app, deps.restore_plugins)
     return refused
 
 

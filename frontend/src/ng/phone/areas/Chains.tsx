@@ -6,6 +6,7 @@ import { detailOf, request } from "../../http";
 import { rejectTarget } from "../../item/graph";
 import { listDrafts } from "../../templates/draft/draftApi";
 import { stepsOf, taskName } from "../../item/paths";
+import { pluginLabel } from "../../library/types";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
 
@@ -38,7 +39,7 @@ const nodeSub = (n: ChainNode) => (n.kind === "gate" ? `gate · reject to ${n.re
 /** `/templates/chains`: the chains, read only (W17 brief L.1). */
 export function ChainsList() {
   const { chains, error } = useChains();
-  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : `${c.nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}`, to: `/templates/chains/${encodeURIComponent(c.id)}` }));
+  const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : `${c.nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}`, to: `/templates/chains/${encodeURIComponent(c.id)}`, chips: c.plugin ? [{ label: pluginLabel(c.plugin) }] : undefined }));
   return (
     <AreaScreen title="Chains" sub="The chains an item runs: how it moves from spec to merge." status={{ label: "published" }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
@@ -62,7 +63,7 @@ export function ChainView() {
   const c = chains?.find((x) => x.id === chain);
   const nodes = c?.nodes ?? [];
   return (
-    <AreaScreen title={chain} sub={c ? `${nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}` : undefined} status={draftChanges ? { label: `draft · ${draftChanges} change${draftChanges === 1 ? "" : "s"}`, tone: "warn" } : { label: "published" }} yaml={text ?? ""}>
+    <AreaScreen title={chain} sub={c ? `${c.plugin ? `${pluginLabel(c.plugin)} · ` : ""}${nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}` : undefined} status={draftChanges ? { label: `draft · ${draftChanges} change${draftChanges === 1 ? "" : "s"}`, tone: "warn" } : { label: "published" }} yaml={text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
       <Group title={`Nodes · ${nodes.length}`} rows={nodes.map((n) => ({ key: n.id, label: n.id, mono: true, sub: nodeSub(n), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} foot={FOOT} />

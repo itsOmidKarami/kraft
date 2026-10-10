@@ -119,7 +119,11 @@ def bounded_yaml(text: str, budget: list[int]) -> object:
     build in time exponential in its depth, from a few hundred bytes."""
     loader = yaml.SafeLoader(text)
     try:
-        node = loader.get_single_node()
+        try:
+            node = loader.get_single_node()
+        except RecursionError:
+            # Nesting a parser recurses through is refused like any other bomb.
+            raise YamlTooLarge("YAML nested deeper than a repository's config goes") from None
         if node is None:
             return None
         stack = [node]

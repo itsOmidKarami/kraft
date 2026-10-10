@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from support.plugins import installed
 
+from kraft import harness
 from kraft.templates import environment as te
 
 
@@ -166,7 +168,6 @@ def test_harness_profiles_load_against_their_provider_declarations(tmp_path):
     """`provider-declares-harness-capabilities`: a profile selects only from
     the provider's own declared surface, checked against `kraft.harness` rather
     than against a second copy of that list kept here."""
-    from kraft import harness
 
     harnesses = harness.load(None).valid
     path = tmp_path / "harnesses.yaml"
@@ -185,7 +186,6 @@ def test_harness_profiles_load_against_their_provider_declarations(tmp_path):
 
 
 def test_a_profile_whose_provider_is_not_its_harness_id_is_refused(tmp_path):
-    from kraft import harness
 
     path = tmp_path / "harnesses.yaml"
     path.write_text("harnesses:\n  claude: { provider: not_a_harness }\n")
@@ -197,7 +197,6 @@ def test_a_profile_default_the_provider_does_not_declare_is_refused(tmp_path):
     """`harness-profile-has-safe-instance-configuration`: a profile carries
     configuration, never arbitrary command fragments -- so an option the
     provider never declared cannot ride in as one."""
-    from kraft import harness
 
     path = tmp_path / "harnesses.yaml"
     path.write_text(
@@ -213,11 +212,35 @@ def test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library(tmp_path)
     chain cannot dispatch a single agent task."""
     import yaml as _yaml
 
-    from kraft import harness
-
     table = te.HarnessProfileTable.from_yaml(
         _REPO_ROOT / "config" / "harnesses.yaml", harnesses=harness.load(None).valid
     )
     library = _yaml.safe_load((_REPO_ROOT / "config" / "library.yaml").read_text())
     named = {t["harness"] for t in library["tasks"].values() if t.get("harness")}
     assert named and named <= set(table.profiles), sorted(named - set(table.profiles))
+
+
+@pytest.mark.parametrize(
+    "local",
+    [
+        {},
+        {"strong": {"model": {"codex": "m"}, "fallback": [{"profile": "release:deep"}]}},
+    ],
+    ids=["qualified", "fallback-entry"],
+)
+def test_plugin_profiles(tmp_path, local):
+    """A plugin's agent profiles join the table under `<namespace>:<name>`, and
+    a local profile's fallback may name one."""
+
+    from kraft import harness
+
+    plugin = installed(tmp_path, "release", profiles={"deep": {"model": {"codex": "p"}}})
+    table = te.HarnessProfileTable.from_mapping(
+        {"profiles": local},
+        tmp_path / "harnesses.yaml",
+        harnesses=harness.load(None).valid,
+        plugins=[plugin],
+    )
+    assert table.agent_profiles["release:deep"].model == {"codex": "p"}
+    for profile in local:
+        assert table.agent_profiles[profile].fallback[0].profile == "release:deep"

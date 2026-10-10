@@ -1,5 +1,6 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
+import { ReadOnly } from "../plugin";
 
 /** A text field that sends on a pause (Decided 3): the page's `field(…, pause)`
  *  debounces, blur flushes. It follows the server's value while not focused.
@@ -30,6 +31,8 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
   useEffect(() => {
     if (!focused) setText(value);
   }, [value]);
+  const readOnly = useContext(ReadOnly);
+  if (readOnly) return <Kv k={label} v={value || "not set"} mono={mono} muted={!value} />;
   // A closed set's typed value that is not listed is kept here, never sent.
   const listed = choices?.length ? choices : null;
   // A required one is not sent empty either: clearing it on the way to
@@ -99,6 +102,8 @@ export function SelectRow({ label, value, options, onPick, sub, bad, check }: {
   check?: { label: string; on: boolean; onToggle: () => void };
 }) {
   const id = useId();
+  const readOnly = useContext(ReadOnly);
+  if (readOnly) return <Kv k={label} v={`${options.find((o) => o.value === value)?.label ?? value}${check?.on ? ` · ${check.label}` : ""}`} />;
   return (
     <div className="tpl-pf">
       <label htmlFor={id} className="tpl-pf-label">{label}</label>

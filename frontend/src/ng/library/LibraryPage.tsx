@@ -17,7 +17,9 @@ import { LibraryList } from "./LibraryList";
 import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
 import { ProblemWhere } from "./ProblemWhere";
-import { listRows } from "./rows";
+import { listRows, withPlugins } from "./rows";
+import { PluginBadge, ReadOnly } from "../templates/plugin";
+import { LIBRARY_FILE } from "../templates/draft/view";
 import { parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 
@@ -55,10 +57,15 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [collapsed, setCollapsed] = useState(false);
   const [frame, mainW, mainH] = useBox();
   const size = useResizable("library", mainW);
-  const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null), [r, published]);
+  const plugins = draft.view!.plugin_library;
+  const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null, plugins), [r, published, plugins]);
+  const merged = useMemo(() => withPlugins(r, plugins), [r, plugins]);
   const sel = parseRef(refId);
   const id = sel ? `${sel.section}.${sel.name}` : undefined;
   const row = rows.find((x) => x.id === id);
+  // A plugin's component is read through the same accessors, over the plugins' library beside the draft's: nothing
+  // in it is the draft's, so it has no change and no problem, and every write to it would answer 409.
+  const shownDraft = useMemo(() => (row?.plugin ? { ...draft, view: { ...draft.view!, result: { ...r, model: { ...r.model, [LIBRARY_FILE]: merged }, problems: [], changes: [] } } } : draft), [row?.plugin, draft, r, merged]);
   // What the pane shows now, for a rename that lands after another pick.
   const shown = useRef("");
   shown.current = sub ?? row?.id ?? "";
@@ -92,19 +99,20 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   // A component the published library does not list (one just added) has no uses yet.
   const uses = published === null || published === "failed" ? null : published.components.find((c) => c.id === id)?.used_by_paths ?? [];
   // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
-  const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: ((r.model["library.yaml"] ?? {}) as Record<string, Record<string, Record<string, unknown>>>)[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, r]);
+  const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: merged[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, merged]);
 
-  // ⌘Z undoes the last request, outside a text field.
+  // ⌘Z undoes the last request, outside a text field. Not over a plugin's component: nothing shown there would change.
   const undo = draft.undo;
+  const readOnly = !!row?.plugin;
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
+      if (readOnly || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
       e.preventDefault();
       undo();
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
-  }, [undo]);
+  }, [undo, readOnly]);
 
   const add = async (section: Section, name: string, kind?: string) => {
     const a = await draft.ops([{ op: "add_component", section, name, ...(kind ? { kind } : {}) }], { quiet: true });
@@ -137,6 +145,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             <span className="lib-ref">{sel.name}</span>
           </>
         )}
+        {row?.plugin && <PluginBadge plugin={row.plugin} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <span className="lib-published">published</span>}
@@ -165,10 +174,10 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           </div>
         )}
         {surface === "canvas" && row && (
-          <>
+          <ReadOnly.Provider value={!!row.plugin}>
             <LibraryCanvas
               key={row.id}
-              draft={draft}
+              draft={shownDraft}
               row={row}
               uses={uses}
               path={sub ?? row.id}
@@ -182,7 +191,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             />
             {uses && <p className="lib-used-line">{uses.length ? `used by ${[...new Set(uses.map((u) => u.chain))].join(", ")}` : "not used by any chain"}</p>}
             {review ? null : <LibraryPane
-              draft={draft}
+              draft={shownDraft}
               path={sub ?? row.id}
               uses={uses}
               names={rows.filter((x) => x.section === row.section).map((x) => x.name)}
@@ -209,7 +218,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onCollapse={collapse}
               onExpand={() => expand()}
             />}
-          </>
+          </ReadOnly.Provider>
         )}
         {surface === "canvas" && review && (
           <ReviewPane

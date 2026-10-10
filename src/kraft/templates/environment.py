@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import yaml
 from pydantic import (
@@ -32,6 +32,9 @@ from pydantic import (
 
 from kraft.harness import Harness
 
+if TYPE_CHECKING:
+    from kraft.plugins.load import InstalledPlugin
+
 #: One identifier rule for both sides of every reference: the harness-profile
 #: id an `AgentTask.harness` names, the repository id a workspace member
 #: mounts, the chain id a repository defaults to. `kraft.templates.models`
@@ -41,6 +44,12 @@ from kraft.harness import Harness
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
+
+#: A reference that may name a plugin's declaration: `ship` or `release:ship`.
+#: What a file declares stays `Identifier`; only references take this.
+_QUALIFIED = re.compile(r"^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$")
+
+QualifiedIdentifier = Annotated[StrictStr, Field(pattern=_QUALIFIED.pattern)]
 
 
 class TemplateEnvironmentError(Exception):
@@ -367,7 +376,7 @@ class FallbackEntry(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     harness: Identifier | None = None
-    profile: Identifier | None = None
+    profile: QualifiedIdentifier | None = None
     model: StrictStr | None = None
     effort: StrictStr | None = None
 
@@ -455,12 +464,18 @@ class AgentProfile:
 
     @classmethod
     def from_input(
-        cls, id: str, parsed: AgentProfileInput, *, harnesses: Mapping[str, Harness]
+        cls,
+        id: str,
+        parsed: AgentProfileInput,
+        *,
+        harnesses: Mapping[str, Harness],
+        qualified: bool = False,
     ) -> AgentProfile:
-        if not _IDENTIFIER.match(id):
+        # A local profile id is bare; only a plugin's arrives qualified.
+        rule = _QUALIFIED if qualified else _IDENTIFIER
+        if not rule.match(id):
             raise TemplateEnvironmentError(
-                f"profile id {id!r} must match {_IDENTIFIER.pattern} to be nameable by a "
-                f"task's 'profile:'"
+                f"profile id {id!r} must match {rule.pattern} to be nameable by a task's 'profile:'"
             )
         if parsed.providers is not None:
             providers = {p: ProviderEntry(e.model, e.effort) for p, e in parsed.providers.items()}
@@ -531,6 +546,49 @@ def _section(data: object, section: str, path: Path) -> dict[str, object]:
     return raw
 
 
+def _agent_profiles(
+    section: Mapping[str, object],
+    path: Path,
+    harnesses: Mapping[str, Harness],
+    namespace: str | None = None,
+) -> dict[str, AgentProfile]:
+    """One file's `profiles:` section as agent profiles; under `namespace:` for
+    a plugin's."""
+    found: dict[str, AgentProfile] = {}
+    for name, body in section.items():
+        id = f"{namespace}:{name}" if namespace else name
+        try:
+            parsed = AgentProfileInput.model_validate(body or {})
+            found[id] = AgentProfile.from_input(
+                id, parsed, harnesses=harnesses, qualified=namespace is not None
+            )
+        except ValidationError as exc:
+            raise TemplateEnvironmentError(f"{path}: profiles.{name}: {_first_error(exc)}") from exc
+        except TemplateEnvironmentError as exc:
+            raise TemplateEnvironmentError(f"{path}: {exc}") from exc
+    return found
+
+
+def _plugin_profiles(
+    plugin: InstalledPlugin, harnesses: Mapping[str, Harness]
+) -> dict[str, AgentProfile]:
+    """A plugin's `profiles.yaml`, under its namespace. Only its `profiles:`
+    section is read: a plugin never chooses an executable, so a `harnesses:`
+    section in it has no reader here."""
+    # Imported here: `kraft.config` imports this module.
+    from kraft.config import bounded_yaml
+    from kraft.plugins.load import qualify
+
+    path = plugin.root / "profiles.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        data = qualify(bounded_yaml(path.read_text(), [20_000]), plugin)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
+    return _agent_profiles(_section(data, "profiles", path), path, harnesses, plugin.namespace)
+
+
 @dataclass(frozen=True)
 class HarnessProfileTable:
     """One `harnesses.yaml`: the configured provider instances an agent task's
@@ -543,7 +601,11 @@ class HarnessProfileTable:
 
     @classmethod
     def from_yaml(
-        cls, path: str | Path, *, harnesses: Mapping[str, Harness]
+        cls,
+        path: str | Path,
+        *,
+        harnesses: Mapping[str, Harness],
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> HarnessProfileTable:
         """Read `harnesses:` from `path` and validate each profile against the
         provider it names.
@@ -559,11 +621,16 @@ class HarnessProfileTable:
             data = yaml.safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError) as exc:
             raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
-        return cls.from_mapping(data, path, harnesses=harnesses)
+        return cls.from_mapping(data, path, harnesses=harnesses, plugins=plugins)
 
     @classmethod
     def from_mapping(
-        cls, data: object, path: str | Path, *, harnesses: Mapping[str, Harness]
+        cls,
+        data: object,
+        path: str | Path,
+        *,
+        harnesses: Mapping[str, Harness],
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> HarnessProfileTable:
         """`from_yaml` for a file's already-parsed content -- a candidate the
         Harnesses screen would save as `path` -- so a save is checked by the
@@ -587,19 +654,10 @@ class HarnessProfileTable:
                 profiles[id] = HarnessProfile.from_input(id, parsed, harness=harness)
             except TemplateEnvironmentError as exc:
                 raise TemplateEnvironmentError(f"{path}: {exc}") from exc
-        agent_profiles: dict[str, AgentProfile] = {}
-        for id, body in _section(data, "profiles", path).items():
-            try:
-                parsed_profile = AgentProfileInput.model_validate(body or {})
-                agent_profiles[id] = AgentProfile.from_input(
-                    id, parsed_profile, harnesses=harnesses
-                )
-            except ValidationError as exc:
-                raise TemplateEnvironmentError(
-                    f"{path}: profiles.{id}: {_first_error(exc)}"
-                ) from exc
-            except TemplateEnvironmentError as exc:
-                raise TemplateEnvironmentError(f"{path}: {exc}") from exc
+        agent_profiles = _agent_profiles(_section(data, "profiles", path), path, harnesses)
+        for plugin in plugins:
+            if plugin.left_out is None:
+                agent_profiles |= _plugin_profiles(plugin, harnesses)
         for p in agent_profiles.values():
             for n, entry in enumerate(p.fallback):
                 if entry.profile is not None and entry.profile not in agent_profiles:

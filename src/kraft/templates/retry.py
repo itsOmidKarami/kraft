@@ -145,7 +145,9 @@ def validate_retry_override(
         raise RetryOverrideError(
             _explain(exc), field=f"task_config.{field}" if task_config else f"policy.{field}"
         ) from exc
-    resolved = ResolvedChain.from_chain(patched, steering=chain.chain.steering)
+    resolved = ResolvedChain.from_chain(
+        patched, steering=chain.chain.steering, plugins=chain.chain.plugins
+    )
     try:
         # The item's own layer is part of the bounds (Kraft-ab1bh).
         resolved.check_scopes(chain.policy, chain.item_policy)

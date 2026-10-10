@@ -393,3 +393,32 @@ async def test_set_attachments_refuses_an_item_that_started_after_the_caller_rea
     assert row["attachments"] is None
     types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0))]
     assert "attachments_changed" not in types
+
+
+@pytest.mark.parametrize(
+    "snapshot, payload",
+    [
+        ({"plugins": {"release": {"id": "release@acme", "version": "1.4.0"}}}, None),
+        ({}, {}),
+        (None, {}),
+    ],
+    ids=["pinned-plugins", "no-plugins", "no-snapshot"],
+)
+async def test_chain_loaded_records_the_plugin_versions_the_item_runs_on(
+    database, snapshot, payload
+):
+    """The item's history shows which plugin versions it ran."""
+    await mk_item(database)
+    stored = None if snapshot is None else json.dumps(snapshot)
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET materialized_chain = ? WHERE id = 'w1'", (stored,)
+        )
+    )
+
+    await database.write(lambda c: store.load_chain(c, "w1", "env_setup"))
+
+    (loaded,) = [
+        e for e in database.read(lambda c: events.read_after(c, 0)) if e["type"] == "chain_loaded"
+    ]
+    assert loaded["payload"] == (snapshot if payload is None else payload)

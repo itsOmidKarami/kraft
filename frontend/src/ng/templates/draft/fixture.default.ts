@@ -12,6 +12,7 @@ export const DEFAULT_VIEW = {
   "chains/default.yaml": "0000000000000000000000000000000000000000000000000000000000000000"
  },
  "updated_at": null,
+ "plugin": null,
  "result": {
   "model": {
    "chains/default.yaml": {

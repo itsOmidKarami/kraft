@@ -336,3 +336,23 @@ def test_harness_status_lists_every_provider_with_whether_its_executable_is_foun
     assert (rows["codex"]["executable_found"], rows["amp"]["executable_found"]) == (True, False)
     assert rows["codex"]["efforts"] == ["minimal", "low", "medium", "high", "xhigh"]
     assert "version" not in rows["codex"]
+
+
+def test_the_profiles_view_lists_an_installed_plugins_profiles(client, tmp_path):
+    from support.plugins import AGENT, install, make_collection
+
+    from kraft.api import deps
+
+    st = client.app.state
+    release = {
+        "library": {"tasks": {"base": AGENT}},
+        "profiles": {"deep": {"model": {"codex": "m"}}},
+    }
+    install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": release}),
+        "release",
+    )
+    deps._reload_templates(st)
+    assert "release:deep" in client.get("/api/harnesses/profiles").text

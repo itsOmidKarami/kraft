@@ -35,12 +35,15 @@ The answer carries:
 | `invalid_templates`, `invalid_policy`, `invalid_intake` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`. |
 | `storage` | `null` without `storage.worktrees.limit`, else `{state, used_bytes, quota_bytes, limit_bytes, measured_at, too_recent}`. `state` is `ok`, `over_quota` or `held`, and `held` makes `status` `degraded`. `too_recent` counts finished items the last automatic clean-up left because they ended less than `min_age` ago. |
 | `intake_off` | Whether [auto-intake](/concepts/vocabulary#auto-intake) and `intake.yaml`'s schedules are off for it. |
+| `plugin_updates` | Each auto-updating plugin's last update, by plugin id: `{at, outcome, kind, message}`. Empty when none has run. See [Auto-update](/reference/configuration/plugins#auto-update). |
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
 | `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
+
+A plugin that is installed and did not load is under `invalid_templates`, as `plugin <id>` with the reason, and `status` is `degraded`. A held or failed entry of `plugin_updates` leaves `status` as it is.
 
 `intake_off` is `true` when the server started on an `intake.yaml` that does not load. A [trigger](/concepts/vocabulary#trigger) left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
 

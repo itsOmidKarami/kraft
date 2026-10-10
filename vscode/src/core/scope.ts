@@ -3,6 +3,7 @@ import { posix, win32 } from "node:path";
 export const FILES: ReadonlySet<string> = new Set([
   "library.yaml", "policy.yaml", "harnesses.yaml", "repos.yaml",
   "intake.yaml", "access.yaml", "sandbox.yaml", "theme.yaml", "notify.yaml", "detectors.yaml",
+  "plugins.yaml",
 ]);
 const CHAIN = /^chains\/[a-z][a-z0-9_-]*\.yaml$/;
 

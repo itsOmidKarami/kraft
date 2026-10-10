@@ -39,3 +39,21 @@ def test_an_unknown_component_is_a_kraft_message_and_exit_1(app, capsys):
         cli.main(["admin", "templates", "library", "tasks.nope"])
     assert caught.value.code == 1
     assert "404" in capsys.readouterr().err
+
+
+def test_a_plugins_chain_and_components_name_their_plugin():
+    """A qualified id is followed by the plugin it comes from; a local one is not."""
+    from kraft.cli import templates
+
+    plugin = {"id": "release@acme", "version": "1.4.0"}
+    theirs = {"id": "tasks.release:base", "kind": "tasks", "used_by": [], "plugin": plugin}
+    mine = {**theirs, "id": "tasks.mine", "plugin": None}
+    detail = {**theirs, "issues": [], "definition": {}}
+
+    table = templates._render_components({"components": [theirs, mine]})
+    chain = {"id": "release:ship", "text": "nodes: []\n", "plugin": plugin}
+
+    assert "tasks.release:base (release@acme 1.4.0)" in table and "tasks.mine (" not in table
+    assert "tasks.release:base (release@acme 1.4.0)" in templates._render_component(detail)
+    assert templates._render_chain_text(chain) == "# release:ship (release@acme 1.4.0)\nnodes: []"
+    assert templates._render_chain_text({**chain, "plugin": None}) == "nodes: []"

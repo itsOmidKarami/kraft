@@ -1008,7 +1008,9 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
             "the document instead",
         )
     base = (
-        ResolvedChain.from_chain(untrimmed, steering=previous.chain.steering)
+        ResolvedChain.from_chain(
+            untrimmed, steering=previous.chain.steering, plugins=previous.chain.plugins
+        )
         if untrimmed is not None
         else previous.chain
     )

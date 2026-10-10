@@ -21,6 +21,7 @@ import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
+import { PluginBadge, ReadOnly } from "./plugin";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
@@ -67,6 +68,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const view = draft.view!;
   const scope = draft.scope;
   const r = view.result;
+  // A plugin's chain is read here and copied, never edited: every write answers 409.
+  const plugin = view.plugin ?? null;
+  const readOnly = !!plugin;
   const [frame, canvasW, areaH] = useBox();
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
@@ -131,13 +135,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const undo = draft.undo;
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
+      if (readOnly || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
       e.preventDefault();
       undo();
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
-  }, [undo]);
+  }, [undo, readOnly]);
 
   // ⌥←/⌥→ moves the selected node, or step in a node view, one place (Decisions §9 Reorder).
   const moveSel = useRef<(dir: -1 | 1) => void>(() => {});
@@ -215,7 +219,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     const a = await postOps("chains", to.id, [{ op: "new_chain", ...(to.kind === "dup" ? { from: chain } : {}) }]);
     if (a.status !== 200) return showToast(detailOf(a.body));
     draftsChanged();
-    showToast(to.kind === "dup" ? `Duplicated as ${to.id}` : `New chain ${to.id} · add its first node with +`);
+    showToast(to.kind === "dup" ? `${readOnly ? "Copied to your library" : "Duplicated"} as ${to.id}` : `New chain ${to.id} · add its first node with +`);
     navigate(chainUrl(to.id));
   };
   const requestGo = (to: SwitchTo) => {
@@ -256,7 +260,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   };
   moveSel.current = (dir) => {
     const cur = s.sel as TSel;
-    if (review || surface !== "canvas") return;
+    if (readOnly || review || surface !== "canvas") return;
     if (s.level === "chain" && cur.kind === "node") {
       const i = authoredNodes(r, scope).findIndex((x) => x.id === cur.node);
       const to = i + dir;
@@ -284,10 +288,12 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const isGate = !!selNode && sel.kind === "node" && kindOf(r, selNode) === "gate";
 
   return (
+    <ReadOnly.Provider value={readOnly}>
     <div className="tpl-page" ref={frame}>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
-        <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} />
+        <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} />
+        {plugin && <PluginBadge plugin={plugin} />}
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>
@@ -319,13 +325,15 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             {surface === "yaml" ? "⇄ Canvas" : "YAML"}
           </Button>
         )}
-        {s.level === "chain" && !review && surface === "canvas" && (
+        {!readOnly && s.level === "chain" && !review && surface === "canvas" && (
           <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
             <Pencil size={14} aria-hidden />
           </IconButton>
         )}
         {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
-        <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>
+        {readOnly
+          ? <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>
+          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (
@@ -502,5 +510,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         </Dialog>
       )}
     </div>
+    </ReadOnly.Provider>
   );
 }

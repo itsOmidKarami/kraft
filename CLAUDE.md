@@ -46,7 +46,8 @@ non-MCP agent gets the same surface; `item abandon`, `item archive` and
 `item restore` are the `item` verbs with no tool. `--json` prints the raw API
 payload on every verb except `view watch`, `repo path`, and the `admin` ones
 that manage the server process (`start`, `stop`, `restart`, the service verbs,
-`update`, `mcp`, `permission-hook`) and `admin init` (it accepts `--json` and
+`update`, `mcp`, `permission-hook`), `admin plugin enable` and `disable`, and
+`admin init` (it accepts `--json` and
 ignores it).
 
 ```bash
@@ -102,6 +103,11 @@ kraft admin templates lint                   # check every chain in the library;
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin templates library [ID]           # the library's components
 kraft admin harnesses [ID]                   # harness profiles and the tasks that select each
+kraft admin plugin validate PATH             # check a collection or plugin directory; installs nothing, exit 1 on any problem
+kraft admin plugin collection add SOURCE [--ref REF] [--auto-update] / list / update [NAME] / auto-update NAME on|off / remove NAME
+kraft admin plugin install PLUGIN@COLLECTION [--as ALIAS] [--auto-update] [--re-install] [-y]  # shows a review; writes nothing until accepted
+kraft admin plugin update [PLUGIN@COLLECTION ...] [-y | --check]  # --check exits 0 current, 1 waiting, 2 refused, 3 could not check
+kraft admin plugin auto-update PLUGIN@COLLECTION on|off / enable|disable PLUGIN@COLLECTION / uninstall PLUGIN@COLLECTION / list
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```

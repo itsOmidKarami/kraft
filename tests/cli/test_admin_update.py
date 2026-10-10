@@ -211,3 +211,46 @@ def test_a_1_5_candidate_install_updates_to_the_2_0_candidate(monkeypatch, tmp_p
     cli.main(["admin", "update"])
     assert installed == ["v2.0.0rc1"]
     assert "kraft 1.5.0rc14 -> v2.0.0rc1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "release, argv, installs, says",
+    [
+        ("v3.0.0", [], False, "release@acme 1.0.0 needs Kraft 2.x"),
+        ("v3.0.0", ["-y"], True, "release@acme 1.0.0 needs Kraft 2.x"),
+        ("v2.9.0", [], True, None),
+    ],
+    ids=["next-major-asks", "next-major-accepted", "same-major-says-nothing"],
+)
+def test_a_major_update_lists_the_plugins_it_would_drop(
+    monkeypatch, tmp_path, capsys, release, argv, installs, says
+):
+    """A plugin runs on one Kraft major: the operator hears which ones a new
+    major leaves out before it is installed, and nothing is installed on a no."""
+    from support.plugins import AGENT, chain, home, install, make_collection
+
+    config_dir = home(tmp_path)
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    collection = make_collection(tmp_path, {"release": plugin})
+    install(config_dir, tmp_path / "run" / "plugins", collection, "release")
+    installed = []
+    monkeypatch.setattr(update, "latest", lambda **_k: update.Release(release, "u"))
+    monkeypatch.setattr(update, "installed", lambda: "2.4.0")
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: None)
+    monkeypatch.setattr(update, "perform", lambda *_a, **_k: installed.append(1) or 0)
+
+    try:
+        cli.main(["admin", "update", *argv])
+        refused = None
+    except SystemExit as exc:
+        refused = str(exc.code)
+
+    said = capsys.readouterr().err
+    assert bool(installed) == installs
+    assert (says in said) if says else ("would stop loading" not in said)
+    assert (refused is not None) == (not installs)
+    if refused:
+        assert "nothing installed" in refused

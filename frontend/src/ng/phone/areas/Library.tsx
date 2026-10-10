@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { SECTION_LABEL, SECTIONS, parseRef, refUrl, type PublishedLibrary, type Section } from "../../library/types";
+import { SECTION_LABEL, SECTIONS, parseRef, pluginLabel, refUrl, type PublishedLibrary, type Section } from "../../library/types";
 import { listRows } from "../../library/rows";
 import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
@@ -51,7 +51,7 @@ export function LibraryList() {
     for (const [k, v] of Object.entries(patch)) (v ? next.set(k, v) : next.delete(k));
     setParams(next, { replace: true });
   };
-  const rows = useMemo(() => (draft.view ? listRows(draft.view.result, published?.components ?? null) : []).filter((r) => r.section === kind && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))), [draft.view, published, kind, q]);
+  const rows = useMemo(() => (draft.view ? listRows(draft.view.result, published?.components ?? null, draft.view.plugin_library) : []).filter((r) => r.section === kind && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))), [draft.view, published, kind, q]);
   return (
     <AreaScreen title="Library" sub="Nodes, steps, tasks and steering that chains and repos reuse." draft={draft}>
       <label className="ph-search-field ph-area-search">
@@ -61,7 +61,7 @@ export function LibraryList() {
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
       {draft.view && rows.length === 0 && <p className="ph-empty">{q ? "Nothing matches." : `No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>}
       <Group
-        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
+        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.plugin ? [{ label: pluginLabel(r.plugin) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
       />
     </AreaScreen>
   );
@@ -75,7 +75,9 @@ export function LibraryComponentView() {
   const published = usePublished();
   const { edit, node: sheet } = useEditor();
   const path = ref ?? "";
-  const own = draft.view && parsed ? authoredAt(draft.view.result, draft.scope, path) : null;
+  // A plugin's component is not in the draft: it is read from the plugins' library, and nothing here edits it.
+  const shipped = (parsed && draft.view?.plugin_library?.[parsed.section]?.[parsed.name]) || null;
+  const own = shipped ?? (draft.view && parsed ? authoredAt(draft.view.result, draft.scope, path) : null);
   const send = async (op: Record<string, unknown>) => {
     const a = await draft.ops([op as never], { quiet: true });
     return a.status === 200 ? null : detailOf(a.body);
@@ -85,6 +87,7 @@ export function LibraryComponentView() {
 
   const settings: RowSpec[] = ownRows(own).map(({ field, value }): RowSpec => {
     const base: RowSpec = { key: field, label: field, mono: true, changed: changed(field) };
+    if (shipped) return { ...base, value: show(value) };
     if (typeof value === "boolean") return { ...base, sw: value, onSwitch: (on) => void setField(field, on) };
     // An action or a target is one of the values the draft lists, not free text.
     const choices = field === "ref" || field === "target" ? draft.view?.result.choices?.[field] ?? [] : [];
@@ -94,16 +97,17 @@ export function LibraryComponentView() {
     return { ...base, value: show(value) };
   });
   const instructions = typeof own?.instructions === "string" ? own.instructions : null;
-  const uses = published?.components.find((c) => c.id === path)?.used_by_paths ?? [];
+  const pub = published?.components.find((c) => c.id === path);
+  const uses = pub?.used_by_paths ?? [];
   const problems = (draft.view?.result.problems ?? []).filter((p) => p.path === path || p.path.startsWith(`${path}.`) || p.component === path);
 
   return (
-    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? SECTION_LABEL[parsed.section].replace(/s$/, "") : undefined} draft={draft}>
+    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.plugin ? ` · ${pluginLabel(pub.plugin)}` : ""}` : undefined} draft={draft}>
       {draft.view && !own && <p className="ph-empty">There is no component {path}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problems.map((p, i): RowSpec => ({ key: `p${i}`, label: p.message.replace(/^Value error, /, ""), sub: [p.chain && `breaks ${p.chain}`, p.repo && `repo ${p.repo}`].filter(Boolean).join(" · ") || undefined }))} />}
       {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...settings]} />}
       {instructions !== null && (
-        <Group title="Instructions" rows={[{ label: instructions.trim() ? instructions : "Required.", mono: false, onEdit: () => edit({ kind: "text", title: "Instructions", value: instructions, set: (v) => (v.trim() ? setField("instructions", v) : Promise.resolve("Instructions can't be empty.")) }) }]} note="Added to what an agent task reads at launch, after the repository's own steering." />
+        <Group title="Instructions" rows={[{ label: instructions.trim() ? instructions : "Required.", mono: false, onEdit: shipped ? undefined : () => edit({ kind: "text", title: "Instructions", value: instructions, set: (v) => (v.trim() ? setField("instructions", v) : Promise.resolve("Instructions can't be empty.")) }) }]} note="Added to what an agent task reads at launch, after the repository's own steering." />
       )}
       {parsed && <Group title="Used in" rows={uses.length ? uses.map((u, i): RowSpec => ({ key: `${u.chain}:${u.path}:${i}`, label: u.chain, mono: true, sub: `${u.path}${u.via ? ` via ${u.via}` : ""}`, to: `/templates/chains/${encodeURIComponent(u.chain)}` })) : [{ label: published ? "Not used by any chain." : "Reading…" }]} />}
       {sheet}

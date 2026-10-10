@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { ChainStrip } from "../graph/ChainStrip";
 import { GateView } from "../graph/GateView";
 import type { ChainNode } from "../graph/layout";
@@ -13,6 +13,7 @@ import { authoredAt, authoredNodes, changeAt, kindOf, nodeGlyph, normalise, prob
 import { ExtendMenu } from "./menus/ExtendMenu";
 import { IdCard } from "./menus/IdCard";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
+import { ReadOnly } from "./plugin";
 import { problemWord } from "./problems";
 import type { TSel } from "./sel";
 
@@ -58,6 +59,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
   const own = (lib ? (libStep ? ({ ...authoredAt(r, scope, `steps.${libStep}`), id: libStep } as NodeA) : authoredAt(r, scope, node)) : nodes.find((n) => n.id === node)) as NodeA | undefined | null;
   const [menu, setMenu] = useState<Menu | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  const readOnly = useContext(ReadOnly);
   const anchor = useRef<HTMLElement | null>(null);
   const open = (m: Menu, el: HTMLElement | null) => {
     anchor.current = el;
@@ -97,7 +99,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
             doc={typeof g.artifact === "string" ? { label: g.artifact, onClick: () => onOpen(node) } : undefined}
             reject={target ? { id: target, onClick: () => onFocusNode(target) } : undefined}
             right={reserve}
-            onAdd={rev ? undefined : () => open({ t: "slot", slot: "auto_review", title: "Add a reviewer" }, document.querySelector<HTMLElement>(".gateview-item.is-add"))}
+            onAdd={rev || readOnly ? undefined : () => open({ t: "slot", slot: "auto_review", title: "Add a reviewer" }, document.querySelector<HTMLElement>(".gateview-item.is-add"))}
             onReviewer={() => onOpen(revPath)}
             onGate={() => onOpen(node)}
             onBackground={onBackground}
@@ -120,9 +122,9 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
       mark: markOf(changeAt(r, sp)?.kind),
       prob: problemsAt(r, sp).length > 0,
       // A library step is one step: nothing before or after it, but tasks may run beside its own.
-      seamBefore: !libStep,
-      seamBelow: s.tasks.length > 0,
-      slot: s.tasks.length ? undefined : { label: "add a task" },
+      seamBefore: !libStep && !readOnly,
+      seamBelow: s.tasks.length > 0 && !readOnly,
+      slot: s.tasks.length || readOnly ? undefined : { label: "add a task" },
       tasks: s.tasks.map((t): GraphItem => {
         const tp = `${sp}.${t.id}`;
         const probs = problemsAt(r, tp);
@@ -147,7 +149,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
     if (!menu || menu.t !== "task") return;
     const step = menu.step ?? nextStepId(ids);
     const taken = steps.find((s) => s.id === step)?.tasks.map((x) => x.id) ?? [];
-    const id = uniq("kind" in c ? c.kind : c.extends, taken);
+    const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
     const ops: Op[] = menu.step ? [] : [{ op: "add_step", container: node, at: menu.at ?? ids.length, id: step }];
     ops.push({ op: "add_task", container: node, step, id, ...c });
     if (!(await send(ops))) return;
@@ -181,7 +183,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
             name={node}
             steps={graphSteps}
             selected={sel}
-            seamAfter={!libStep}
+            seamAfter={!libStep && !readOnly}
             reserve={reserve}
             onSelect={(s) => onPick(pathOfSel(s))}
             onOpen={(s) => onOpen(pathOfSel(s))}
@@ -193,6 +195,8 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
           />
         ) : extend ? (
           <div className="tpl-empty-node"><p>Extends <code>{extend}</code>. {lib ? <><button type="button" className="tpl-phrase" onClick={() => onFocusNode(extend)}>Open it</button> to see its steps.</> : "Its steps show once the draft resolves."}</p></div>
+        ) : readOnly ? (
+          <div className="tpl-empty-node"><p>This node is empty.</p></div>
         ) : (
           // Decisions §9 New exec node: the two phrases are the actions.
           <div className="tpl-empty-node" onKeyDown={(e) => e.key === "Escape" && onEscape()}>

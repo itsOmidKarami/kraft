@@ -34,7 +34,12 @@ def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
         "UPDATE work_items SET current_node_id = ?, updated_at = ? WHERE id = ?",
         (first_node_id, _now(), work_item_id),
     )
-    events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {})
+    # The plugin versions the item runs on, so its history shows them.
+    row = conn.execute(
+        "SELECT materialized_chain FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    pins = json.loads(row[0]).get("plugins") if row and row[0] else None
+    events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {"plugins": pins} if pins else {})
 
 
 def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:

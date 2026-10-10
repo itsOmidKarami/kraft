@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itsomidkarami.github.io/kraft/schemas/collection.schema.json",
+  "title": "Kraft collection",
+  "description": "The .kraft/collection.json at a collection's root: who publishes it and which of its directories are Kraft plugins.",
+  "type": "object",
+  "required": [
+    "name",
+    "owner",
+    "plugins"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "$ref": "#/$defs/identifier",
+      "description": "The collection's id: its key in plugins.yaml and the part after @ in plugin ids (release@acme)."
+    },
+    "description": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "object",
+      "required": [
+        "name",
+        "email"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Entry names must be unique and no source may be inside another; Kraft checks both, JSON Schema cannot.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "maxLength": 64,
+      "description": "A Kraft name: lowercase ASCII letter first, then letters, digits, _ or -; at most 64 characters."
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier",
+          "description": "The plugin's name. The plugin.json in the source directory must declare the same name."
+        },
+        "source": {
+          "type": "string",
+          "description": "The plugin's directory, relative to the collection root (the repo root, or the directory added for a directory collection): ./ followed by one or more segments, with no . or .. segment, no empty segment, no trailing /, no \\ or control character, and not inside .kraft/ in any letter case.",
+          "pattern": "^\\./[^/\\u0000-\\u001f\\\\]+(/[^/\\u0000-\\u001f\\\\]+)*$",
+          "not": {
+            "pattern": "^\\./(.*/)?(\\.{1,2}|\\.[Kk][Rr][Aa][Ff][Tt])(/|$)"
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

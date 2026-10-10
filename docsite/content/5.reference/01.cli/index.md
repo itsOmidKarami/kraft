@@ -120,6 +120,7 @@ These verbs do not print the payload:
 | `admin start`, `stop`, `restart`, `update` | None; these print status lines. |
 | `admin install-service`, `uninstall-service` | None. |
 | `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
+| `admin plugin enable`, `disable` | `kraft admin plugin list --json` (these print one line). |
 | `admin init` | None. It accepts `--json` and ignores it; it prints one `kraft: wrote PATH` line per file. |
 
 ### Without `--json`

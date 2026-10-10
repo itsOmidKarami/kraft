@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import json
 import os
+import shutil
 import sqlite3
+import time
 import warnings
 from contextlib import closing
 from pathlib import Path
@@ -421,3 +424,377 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
     worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
     worktree.mkdir(parents=True)
     assert client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
+
+
+# ── installed plugins in the running library ──
+
+
+def _install_release(client, tmp_path, **spec):
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}, **spec}
+    store = install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": plugin}),
+        "release",
+    )
+    deps._reload_templates(st)
+    return store
+
+
+def test_the_running_library_holds_the_installed_plugins(client, tmp_path):
+    _install_release(client, tmp_path)
+    assert "release:ship" in client.app.state.library.chain_ids
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def _edit_a_stored_file(st, store):
+    (store / "library.yaml").chmod(0o644)
+    (store / "library.yaml").write_text("tasks: {}\n")
+
+
+def _delete_the_store(st, store):
+    for path in [store, *store.rglob("*")]:
+        path.chmod(0o755)
+    shutil.rmtree(store)
+
+
+def _disable(st, store):
+    (st.templates_dir / "plugins.yaml").write_text(
+        (st.templates_dir / "plugins.yaml")
+        .read_text()
+        .replace("release@acme: true", "release@acme: false")
+    )
+
+
+def _break_plugins_yaml(st, store):
+    (st.templates_dir / "plugins.yaml").write_text("plugins: [not, a, mapping]\n")
+
+
+@pytest.mark.parametrize(
+    ("change", "key", "why", "kept"),
+    [
+        (_edit_a_stored_file, "plugin release@acme", "do not match the locked digest", False),
+        (_delete_the_store, "plugin release@acme", "store is missing", False),
+        (_disable, None, None, False),
+        # A file that does not read is refused: what is running stays.
+        (_break_plugins_yaml, "plugins.yaml", "plugins.yaml", True),
+    ],
+    ids=["store-edited", "store-deleted", "disabled-is-no-fault", "plugins-yaml-unreadable"],
+)
+def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, why, kept):
+    """A plugin left out at load degrades health like a chain that does not
+    resolve: the instance is not running what its lock says."""
+    store = _install_release(client, tmp_path)
+    st = client.app.state
+    change(st, store)
+    deps._reload_templates(st)
+    body = client.get("/api/health").json()
+    assert ("release:ship" in st.library.chain_ids) is kept
+    assert body["status"] == ("degraded" if key else "ok")
+    if key:
+        assert why in body["invalid_templates"][key]
+
+
+def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
+    """A plugin verb applies its own change: an unsaved-to-the-server edit of
+    `policy.yaml` is not taken along."""
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": release}),
+        "release",
+    )
+    policy = st.templates_dir / "policy.yaml"
+    policy.write_text(policy.read_text() + "\n# edited by hand\n")
+    # A lock a teammate's pull brought in is a pending reload like any hand edit.
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [
+        "policy.yaml",
+        "plugins.yaml",
+        "plugins.lock",
+    ]
+
+    r = client.post("/api/templates/reload", json={"only": ["plugins.yaml", "plugins.lock"]})
+
+    assert r.status_code == 200 and "release:ship" in r.json()["valid"]
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
+    assert client.post("/api/templates/reload", json={"only": ["policy.yaml"]}).status_code == 422
+    client.post("/api/templates/reload")
+    assert client.get("/api/apply").json()["reload"] == []
+
+
+@pytest.mark.parametrize("file", ["plugins.yaml", "plugins.lock"])
+def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, file):
+    """The running instance keeps its plugins, and the file stays pending with
+    the reason, until it reads again."""
+    from support.plugins import AGENT, chain, install, make_collection
+
+    st = client.app.state
+    release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    install(
+        st.templates_dir,
+        st.run_dirs.plugins,
+        make_collection(tmp_path, {"release": release}),
+        "release",
+    )
+    client.post("/api/templates/reload")
+    assert "release:ship" in st.library.chain_ids
+    path = st.templates_dir / file
+    good = path.read_text()
+    path.write_text("not_a_key: 1\n")
+
+    body = client.post("/api/templates/reload").json()
+
+    assert "release:ship" in body["valid"]
+    assert "plugins.yaml" in body["invalid_templates"]
+    assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [file]
+    path.write_text(good)
+    client.post("/api/templates/reload")
+    assert client.get("/api/apply").json()["reload"] == []
+
+
+def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client, tmp_path):
+    """A config directory copied to a new machine, or a teammate's lock pulled in."""
+    from support.plugins import drop_store
+
+    store = _install_release(client, tmp_path)
+    drop_store(store)
+    deps._reload_templates(client.app.state)
+    assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
+
+    client.post("/api/templates/reload")
+    _plugin_task_done(client)
+
+    assert store.is_dir() and "release:ship" in client.app.state.library.chain_ids
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path, monkeypatch):
+    """The server started without it (offline, say) and left the plugin out;
+    a work item pinned to it then restored the store by itself."""
+    st = client.app.state
+    store = _install_release(client, tmp_path)
+    store.chmod(0o755)  # a store is read-only, and a directory moves only if writable
+    away = store.rename(tmp_path / "away")
+    deps._reload_templates(st)
+    assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
+    away.rename(store)
+
+    client.portal.call(deps.restore_plugins, client.app)
+
+    assert "release:ship" in st.library.chain_ids
+    assert client.get("/api/health").json()["status"] == "ok"
+    _edit_a_stored_file(st, store)  # left out for another reason, its store present
+    deps._reload_templates(st)
+    monkeypatch.setattr(deps, "_reload_templates", lambda st: pytest.fail("reloaded"))
+    client.portal.call(deps.restore_plugins, client.app)
+
+
+def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
+    from support.plugins import drop_store
+
+    st = client.app.state
+    store = _install_release(client, tmp_path)
+    with pytest.raises(HTTPException) as no_such_chain:
+        deps.resolve_chain_or_422(st, "release:nope")
+    assert no_such_chain.value.status_code == 422
+    drop_store(store)
+    deps._reload_templates(st)
+
+    with pytest.raises(HTTPException) as away:
+        deps.resolve_chain_or_422(st, "release:ship")
+    with pytest.raises(HTTPException) as unknown:
+        deps.resolve_chain_or_422(st, "nope")
+    with pytest.raises(HTTPException) as longer_name:
+        # `release:` is the end of this name, not the plugin's namespace.
+        deps.resolve_chain_or_422(st, "pre-release:ship")
+
+    assert (away.value.status_code, away.value.detail) == (
+        503,
+        "plugin release@acme is being restored; retry",
+    )
+    assert unknown.value.status_code == longer_name.value.status_code == 422
+
+
+def _plugin_task_done(client):
+    """Wait for the server's background plugin task: a reload starts one."""
+
+    async def done():
+        await client.app.state.restore_task
+
+    client.portal.call(done)
+
+
+def _other_version(st, tmp_path):
+    """A second extracted plugin in the store that the lock does not name."""
+    from support.plugins import extracted
+
+    from kraft.plugins import fetch
+
+    return fetch.write_store(st.run_dirs.plugins, extracted(skills={"old": "an older method"}))
+
+
+@pytest.mark.parametrize(
+    "status, pinned, kept",
+    [
+        ("paused", True, True),
+        ("needs_human", True, True),
+        ("completed", True, False),
+        ("paused", False, False),
+        ("paused", "run_chain", True),
+    ],
+    ids=[
+        "pinned-by-paused-item",
+        "pinned-by-stopped-item",
+        "pinned-by-ended-item",
+        "pinned-by-nothing",
+        "pinned-by-a-retried-items-run-chain",
+    ],
+)
+def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
+    client, tmp_path, status, pinned, kept
+):
+
+    from support.store_fixtures import mk_item
+
+    st = client.app.state
+    locked = _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+    (st.run_dirs.plugins / "staging" / "half-written").mkdir(parents=True)
+    snapshot = {"plugins": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
+    stored = json.dumps(snapshot if pinned else {})
+    column = "run_chain" if pinned == "run_chain" else "materialized_chain"
+
+    async def an_item():
+        await mk_item(st.db)
+        await st.db.write(
+            lambda c: c.execute(
+                f"UPDATE work_items SET {column} = ?, status = ? WHERE id = 'w1'",
+                (stored, status),
+            )
+        )
+
+    client.portal.call(an_item)
+
+    removed = client.portal.call(deps.collect_plugin_stores, st)
+
+    assert (old.is_dir(), removed) == (kept, [] if kept else [old.name])
+    assert locked.is_dir() and not (st.run_dirs.plugins / "staging").exists()
+
+
+def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, tmp_path):
+    st = client.app.state
+    locked = _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+    lock = st.templates_dir / "plugins.lock"
+    good = lock.read_text()
+    lock.write_text("plugins: [\n")
+    client.post("/api/templates/reload")
+    _plugin_task_done(client)
+    assert old.is_dir()
+
+    lock.write_text(good)
+    client.post("/api/templates/reload")
+    _plugin_task_done(client)
+
+    assert not old.exists()
+    # No library is loaded to say what it reads: the lock alone keeps its stores.
+    (st.templates_dir / "library.yaml").write_text("tasks: [\n")
+    client.post("/api/templates/reload")
+    _plugin_task_done(client)
+    assert st.library is None and locked.is_dir()
+
+
+def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
+    """It runs on the event loop: a lock someone holds is skipped, and the
+    next collection takes what this one left."""
+    from kraft.plugins import update as plugin_update
+
+    st = client.app.state
+    _install_release(client, tmp_path)
+    old = _other_version(st, tmp_path)
+
+    started = time.monotonic()
+    with plugin_update.write_lock(st.run_dirs.plugins):
+        assert client.portal.call(deps.collect_plugin_stores, st) == []
+    assert old.is_dir() and time.monotonic() - started < plugin_update.LOCK_WAIT_S / 2
+
+    assert client.portal.call(deps.collect_plugin_stores, st) == [old.name]
+
+
+def test_a_plugin_background_task_that_fails_says_so(client, caplog):
+    """Nobody awaits it: what it raises is logged, not dropped."""
+
+    async def breaks(app):
+        raise OSError("disk full")
+
+    async def run():
+        await deps.in_background(client.app, breaks)
+
+    client.portal.call(run)
+
+    assert "plugin background task failed" in caplog.text and "disk full" in caplog.text
+
+
+def test_a_running_server_checks_for_auto_updates_again(client, monkeypatch):
+    """Not only at start: a server run as a service may not restart for weeks."""
+    checks = []
+
+    async def check(app):
+        checks.append(app)
+
+    async def two_checks():
+        task = asyncio.ensure_future(deps.auto_update_daily(client.app))
+        while len(checks) < 2:
+            await asyncio.sleep(0.01)
+        task.cancel()
+
+    assert not client.app.state.plugin_update_task.done()
+    monkeypatch.setattr(deps, "AUTO_UPDATE_EVERY_S", 0.01)
+    monkeypatch.setattr(deps, "auto_update_plugins", check)
+
+    client.portal.call(asyncio.wait_for, two_checks(), 5)
+
+    assert checks[:2] == [client.app, client.app]
+
+
+def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
+    """After a start: the update is applied, the library is rebuilt on it, the
+    old store goes, and health reports the outcome without being degraded."""
+    from support.plugins import publish
+
+    st = client.app.state
+    old = _install_release(client, tmp_path)
+    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
+    written["plugins"]["release@acme"] = {"auto_update": True}
+    (st.templates_dir / "plugins.yaml").write_text(yaml.safe_dump(written))
+    repo = Path(written["collections"]["acme"]["git"].removeprefix("file://"))
+    publish(repo, "release", version="1.1.0", skills={"notes": "new in 1.1.0"})
+
+    client.portal.call(deps.auto_update_plugins, client.app)
+
+    assert [p.version for p in st.library.plugins] == ["1.1.0"] and not old.exists()
+    health = client.get("/api/health").json()
+    assert (health["status"], health["plugin_updates"]["release@acme"]["outcome"]) == (
+        "ok",
+        "applied",
+    )
+
+
+def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
+    from kraft.plugins import update as plugin_update
+
+    st = client.app.state
+    _install_release(client, tmp_path)
+    held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
+    (st.run_dirs.plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held}))
+
+    health = client.get("/api/health").json()
+
+    assert (health["status"], health["plugin_updates"]) == ("ok", {"release@acme": held})

@@ -15,12 +15,13 @@ from kraft.cli import common
 
 
 def _render_lint(report: dict) -> str:
-    if report["valid"]:
-        return f"{len(report['chains'])} chain(s), no errors"
-    return "\n".join(
+    lines = [
         f"{issue['file']}:{issue['line']}:{issue['column']}: {issue['message']}"
-        for issue in report["issues"]
-    )
+        for issue in (*report["issues"], *report.get("unchecked", ()))
+    ]
+    if report["valid"]:
+        lines.insert(0, f"{len(report['chains'])} chain(s), no errors")
+    return "\n".join(lines)
 
 
 def _lint_dir_report(path: str) -> dict:
@@ -32,7 +33,7 @@ def _lint_dir_report(path: str) -> dict:
     will not show up here even though the server route would catch it."""
     from kraft.api.config_check import lint_report  # the daemon's modules, only for --dir
 
-    return lint_report(path)
+    return lint_report(path, plugins=None)  # offline: no instance, so no plugins
 
 
 def _cmd_lint(ns: argparse.Namespace) -> None:
@@ -49,16 +50,31 @@ def _cmd_show(ns: argparse.Namespace) -> None:
         common.emit(payload, lambda p: yaml.safe_dump(p["chain"], sort_keys=False), ns.json)
     else:
         payload = asyncio.run(client.template(ns.template_id))
-        common.emit(payload, lambda p: p["text"].rstrip("\n"), ns.json)
+        common.emit(payload, _render_chain_text, ns.json)
+
+
+def _render_chain_text(payload: dict) -> str:
+    """A chain file as written; a plugin's is headed by where it comes from."""
+    header = f"# {_named(payload)}\n" if payload.get("plugin") else ""
+    return header + payload["text"].rstrip("\n")
+
+
+def _named(entry: dict) -> str:
+    """An id, followed by the plugin it comes from: `release:ship (release@acme 1.4.0)`."""
+    plugin = entry.get("plugin")
+    return entry["id"] + (f" ({plugin['id']} {plugin['version']})" if plugin else "")
 
 
 def _render_components(payload: dict) -> str:
-    rows = [{**c, "used_by": ", ".join(c["used_by"]) or "-"} for c in payload["components"]]
+    rows = [
+        {**c, "id": _named(c), "used_by": ", ".join(c["used_by"]) or "-"}
+        for c in payload["components"]
+    ]
     return render.table(rows, [("ID", "id"), ("KIND", "kind"), ("USED BY", "used_by")])
 
 
 def _render_component(c: dict) -> str:
-    pairs = [("id", c["id"]), ("used by", ", ".join(c["used_by"]) or "no chain")]
+    pairs = [("id", _named(c)), ("used by", ", ".join(c["used_by"]) or "no chain")]
     pairs += [("issue", f"{i['chain'] or i['file']}: {i['message']}") for i in c["issues"]]
     definition = yaml.safe_dump(c["definition"], sort_keys=False).rstrip("\n")
     return f"{render.kv(pairs)}\ndefinition:\n{definition}"

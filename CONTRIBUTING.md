@@ -364,6 +364,7 @@ Page rules:
 | The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/5.reference/06.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/5.reference/05.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/5.reference/09.mcp-tools.md` |
+| A Kraft plugin's or collection's format, `plugins.yaml`, `plugins.lock`, or how a plugin loads, updates or is restored (`src/kraft/plugins/`, `src/kraft/cli/plugin.py`) | `docsite/content/5.reference/03.configuration/12.plugins.md` (the facts), `docsite/content/3.guides/2.customize/4.share-chains-with-plugins.md` (the steps), `docsite/content/5.reference/01.cli/5.admin.md` (a `kraft admin plugin` verb), and `docsite/content/6.project/1.security.md` when it changes what a plugin may carry |
 | A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.day-to-day/4.agent-integration.md` |
 | A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/11.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |

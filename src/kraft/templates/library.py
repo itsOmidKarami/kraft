@@ -17,7 +17,9 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import json
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +28,8 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
+from kraft.config import bounded_yaml
+from kraft.plugins.load import InstalledPlugin, qualify
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import positions
 from kraft.templates.models import (
@@ -47,6 +51,10 @@ LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
 #: Every pre-V1 home was seeded with one, and V1 has no reader for it.
 LEGACY_REGISTRY = "registry.yaml"
+
+#: How many YAML nodes one plugin file may expand to (`config.bounded_yaml`):
+#: the same budget a repository's own config gets.
+PLUGIN_YAML_NODES = 20_000
 
 
 def is_pre_v1(path: str | Path) -> bool:
@@ -79,11 +87,14 @@ class TemplateLibraryError(Exception):
         loc: tuple[object, ...] | None = None,
         related: tuple[Path, tuple[object, ...]] | None = None,
         errors: tuple[tuple[tuple[object, ...], str], ...] = (),
+        plugin_ref: bool = False,
     ) -> None:
         super().__init__(message)
         self.loc = loc
         self.related = related
         self.errors = errors
+        #: The failure is a reference into a plugin namespace that is not loaded.
+        self.plugin_ref = plugin_ref
 
 
 @dataclass(frozen=True)
@@ -103,6 +114,8 @@ class TemplateIssue:
     mark: Position | None = None
     #: `TemplateLibraryError.errors`: every schema failure, when there were several.
     errors: tuple[tuple[tuple[object, ...], str], ...] = ()
+    #: `TemplateLibraryError.plugin_ref`.
+    plugin_ref: bool = False
 
     def __str__(self) -> str:
         return f"{self.chain or self.file}: {self.message}"
@@ -117,6 +130,7 @@ class TemplateIssue:
             related=getattr(exc, "related", None),
             mark=positions.yaml_mark(exc),
             errors=getattr(exc, "errors", ()),
+            plugin_ref=getattr(exc, "plugin_ref", False),
         )
 
 
@@ -127,6 +141,8 @@ class LintReport:
 
     chains: tuple[str, ...]
     issues: tuple[TemplateIssue, ...]
+    #: Offline only: chains left unjudged because they reference a plugin.
+    unchecked: tuple[TemplateIssue, ...] = ()
 
     @property
     def valid(self) -> bool:
@@ -191,9 +207,12 @@ def _merge(parent: object, child: object) -> object:
     return child
 
 
-def _read(path: Path) -> Mapping[str, object]:
+def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
+    """One YAML file as a mapping. `bounded` for a file a plugin's author
+    wrote: alias expansion is budgeted, where the operator's own file is not."""
     try:
-        data = yaml.safe_load(path.read_text())
+        text = path.read_text()
+        data = bounded_yaml(text, [PLUGIN_YAML_NODES]) if bounded else yaml.safe_load(text)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
     if data is None:
@@ -203,6 +222,16 @@ def _read(path: Path) -> Mapping[str, object]:
     return data
 
 
+def _refuse_qualified(path: Path, what: str, name: object) -> None:
+    """A declaration is bare, in local files and in a plugin's own: `:` only
+    ever appears in a reference to a plugin's declaration."""
+    if ":" in str(name):
+        raise TemplateLibraryError(
+            f"{path}: {what} {name!r}: a name is declared bare; '<plugin>:<name>' is how a "
+            "plugin's declaration is referenced"
+        )
+
+
 def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Mapping[str, object]:
     section = data.get(namespace.value) or {}
     if not isinstance(section, Mapping):
@@ -210,6 +239,7 @@ def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Ma
             f"{path}: {namespace.value!r} must be a mapping of name to definition"
         )
     for name, body in section.items():
+        _refuse_qualified(path, f"{namespace.value} key", name)
         if not isinstance(body, Mapping):
             raise TemplateLibraryError(f"{path}: {namespace.value}.{name} must be a mapping")
     return section
@@ -222,16 +252,27 @@ def _chain_id(chain_path: Path, body: Mapping[str, object]) -> str:
     return id
 
 
+def _steering_profile(body: object, source: ComponentSource) -> SteeringProfile:
+    try:
+        return SteeringProfile.model_validate(body)
+    except ValidationError as exc:
+        raise TemplateLibraryError(
+            f"{source}: {first_error(exc)}",
+            loc=(Namespace.STEERING.value, source.name, *exc.errors()[0]["loc"]),
+        ) from exc
+
+
 class TemplateLibrary:
     """One template directory's authored configuration: reusable components,
     named steering profiles, and the selectable chains."""
 
     def __init__(
         self,
-        components: Mapping[Namespace, Mapping[str, RawComponent]],
+        components: dict[Namespace, dict[str, RawComponent]],
         chains: Mapping[str, RawComponent],
-        steering: Mapping[str, SteeringProfile],
+        steering: dict[str, SteeringProfile],
         skills_dir: Path | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> None:
         self._components = components
         self._chains = dict(chains)
@@ -239,6 +280,18 @@ class TemplateLibrary:
         #: Where an operator may overlay a method file (`kraft.skill`); `None`
         #: means the bundled methods only.
         self.skills_dir = skills_dir
+        #: The installed plugins whose declarations sit in the maps above under
+        #: `<namespace>:<name>`.
+        self.plugins = tuple(plugins)
+        #: Namespace to store directory, for `skill.validate`.
+        #: None for a plugin that is known but not loaded: a reference into it
+        #: is refused, never handed to the agent as another tool's skill.
+        self.plugin_dirs: dict[str, Path | None] = {}
+        for plugin in self.plugins:
+            if plugin.left_out is None:
+                self.plugin_dirs[plugin.namespace] = plugin.root
+            else:
+                self.plugin_dirs.setdefault(plugin.namespace, None)
 
     @classmethod
     def from_yaml_dir(
@@ -247,6 +300,7 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         issues: list[TemplateIssue] | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
@@ -269,7 +323,11 @@ class TemplateLibrary:
         if not library_path.is_file():
             raise TemplateLibraryError(f"{library_path}: no {LIBRARY_FILE} to read")
         library = cls.from_mappings(
-            _read(library_path), (), library_path=library_path, skills_dir=skills_dir
+            _read(library_path),
+            (),
+            library_path=library_path,
+            skills_dir=skills_dir,
+            plugins=plugins,
         )
         for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
             try:
@@ -288,6 +346,7 @@ class TemplateLibrary:
         *,
         library_path: Path,
         skills_dir: Path | None = None,
+        plugins: Sequence[InstalledPlugin] = (),
     ) -> TemplateLibrary:
         """A library from already-parsed mappings: `library` is `library.yaml`'s
         content and each chain is paired with the file it is named after --
@@ -301,21 +360,42 @@ class TemplateLibrary:
             for namespace in _EXTENDABLE
         }
 
-        steering: dict[str, SteeringProfile] = {}
-        for name, body in _section(library_path, library, Namespace.STEERING).items():
-            source = ComponentSource(library_path, Namespace.STEERING, name)
-            try:
-                steering[name] = SteeringProfile.model_validate(body)
-            except ValidationError as exc:
-                raise TemplateLibraryError(
-                    f"{source}: {first_error(exc)}",
-                    loc=(Namespace.STEERING.value, name, *exc.errors()[0]["loc"]),
-                ) from exc
+        steering = {
+            name: _steering_profile(body, ComponentSource(library_path, Namespace.STEERING, name))
+            for name, body in _section(library_path, library, Namespace.STEERING).items()
+        }
 
-        built = cls(components, {}, steering, skills_dir)
+        built = cls(components, {}, steering, skills_dir, plugins)
+        for plugin in plugins:
+            if plugin.left_out is None:
+                built._add_plugin(plugin)
         for chain_path, body in chains:
             built._add_chain(chain_path, body)
         return built
+
+    def _add_plugin(self, plugin: InstalledPlugin) -> None:
+        """One plugin's `library.yaml` and `chains/`, under its namespace. Its
+        own references are qualified first (`plugins.load.qualify`), so the
+        resolver only ever sees qualified names. Every `ComponentSource` is the
+        file in the plugin's store: that is the file an error names."""
+        library_path = plugin.root / LIBRARY_FILE
+        library = (
+            qualify(_read(library_path, bounded=True), plugin) if library_path.is_file() else {}
+        )
+        assert isinstance(library, Mapping)
+        for namespace in _EXTENDABLE:
+            for name, body in _section(library_path, library, namespace).items():
+                self._components[namespace][f"{plugin.namespace}:{name}"] = RawComponent(
+                    body, ComponentSource(library_path, namespace, name)
+                )
+        for name, body in _section(library_path, library, Namespace.STEERING).items():
+            self.steering[f"{plugin.namespace}:{name}"] = _steering_profile(
+                body, ComponentSource(library_path, Namespace.STEERING, name)
+            )
+        for chain_path in sorted((plugin.root / CHAINS_DIR).glob("*.yaml")):
+            body = qualify(_read(chain_path, bounded=True), plugin)
+            assert isinstance(body, Mapping)
+            self._add_chain(chain_path, body, plugin=plugin)
 
     def with_library(self, library: Mapping[str, object], library_path: Path) -> TemplateLibrary:
         """This library's chains against a replacement `library.yaml` content:
@@ -323,10 +403,43 @@ class TemplateLibrary:
         changed."""
         return TemplateLibrary.from_mappings(
             library,
-            [(raw.source.file, raw.data) for raw in self._chains.values()],
+            # A plugin's chains come back with its layer, not as local chains.
+            [(raw.source.file, raw.data) for id, raw in self._chains.items() if ":" not in id],
             library_path=library_path,
             skills_dir=self.skills_dir,
+            plugins=self.plugins,
         )
+
+    def plugin_of(self, name: str) -> InstalledPlugin | None:
+        """The loaded plugin a qualified chain or component name comes from
+        (`release:ship`, or the `release:base` of `tasks.release:base`); None
+        for a local name. A plugin's declarations are read-only."""
+        qualifier, colon, _ = name.rpartition(".")[2].partition(":")
+        if not colon:
+            return None
+        return next(
+            (p for p in self.plugins if p.left_out is None and p.namespace == qualifier), None
+        )
+
+    def with_plugins(self, plugins: Sequence[InstalledPlugin]) -> TemplateLibrary:
+        """This library's own components and chains with `plugins` in place of
+        the plugins it was built with: what a work item that pinned other
+        versions resolves against (`plugins.load.for_item`). `self` is not
+        changed."""
+        built = TemplateLibrary(
+            {
+                ns: {name: raw for name, raw in entries.items() if ":" not in name}
+                for ns, entries in self._components.items()
+            },
+            {id: raw for id, raw in self._chains.items() if ":" not in id},
+            {name: profile for name, profile in self.steering.items() if ":" not in name},
+            self.skills_dir,
+            plugins,
+        )
+        for plugin in plugins:
+            if plugin.left_out is None:
+                built._add_plugin(plugin)
+        return built
 
     def with_chain(
         self, chain_path: Path, body: Mapping[str, object]
@@ -334,12 +447,23 @@ class TemplateLibrary:
         """This library plus one unsaved chain, and the chain's id. A chain of
         the same id is shadowed, which is how a saved chain's edit is checked
         before it is saved. `self` is not changed."""
-        candidate = TemplateLibrary(self._components, self._chains, self.steering, self.skills_dir)
+        candidate = TemplateLibrary(
+            self._components, self._chains, self.steering, self.skills_dir, self.plugins
+        )
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
 
-    def _add_chain(self, chain_path: Path, body: Mapping[str, object]) -> str:
+    def _add_chain(
+        self,
+        chain_path: Path,
+        body: Mapping[str, object],
+        *,
+        plugin: InstalledPlugin | None = None,
+    ) -> str:
         id = _chain_id(chain_path, body)
+        _refuse_qualified(chain_path, "chain id", id)
+        if plugin is not None:
+            id = f"{plugin.namespace}:{id}"
         if id in self._chains:
             # One selectable chain per file: two files claiming one id would
             # otherwise make the loser's chain vanish from `chain_ids`.
@@ -404,23 +528,36 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         instance_policy: InstancePolicy | None = None,
+        plugins: Sequence[InstalledPlugin] | None = (),
     ) -> LintReport:
         """Everything wrong with the template directory at `path` -- every
         chain file that does not parse and every chain that does not resolve,
         or the one `library.yaml` failure that leaves nothing to resolve
-        against (`template-lint-reports-library-validity`). Reads; never writes."""
+        against (`template-lint-reports-library-validity`). Reads; never writes.
+        `plugins=None` is the offline lint: chains that reference a plugin
+        namespace are returned as `unchecked`."""
         root = Path(path)
         issues: list[TemplateIssue] = []
         try:
-            library = cls.from_yaml_dir(root, skills_dir=skills_dir, issues=issues)
+            library = cls.from_yaml_dir(
+                root, skills_dir=skills_dir, issues=issues, plugins=plugins or ()
+            )
         except TemplateLibraryError as exc:
             return LintReport(
                 chains=(), issues=(TemplateIssue.from_error(root / LIBRARY_FILE, None, exc),)
             )
         issues += library.lint(instance_policy)
-        failed = {issue.chain for issue in issues}
+        # `None` is the offline lint (`--dir`): no plugins are known, so a
+        # reference into a plugin namespace is unjudged, not wrong.
+        unchecked = [i for i in issues if i.plugin_ref] if plugins is None else []
+        issues = [i for i in issues if i not in unchecked]
+        failed = {issue.chain for issue in (*issues, *unchecked)}
         return LintReport(
-            chains=tuple(id for id in library.chain_ids if id not in failed), issues=tuple(issues)
+            chains=tuple(id for id in library.chain_ids if id not in failed),
+            issues=tuple(issues),
+            unchecked=tuple(
+                replace(i, message=f"{i.message}: not checked (plugin)") for i in unchecked
+            ),
         )
 
     def lint(self, instance_policy: InstancePolicy | None = None) -> list[TemplateIssue]:
@@ -501,15 +638,22 @@ class TemplateLibrary:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}",
                             **resolution.path_location(task.path),
+                            plugin_ref=":" in name,
                         )
                 # A skill that names no method is refused here, where lint and
                 # intake see it, never discovered by an agent at launch
-                # (Kraft-vhcop). Another plugin's skill cannot be looked up
-                # from here; `skill.UNAVAILABLE` has the agent stop on it.
+                # (Kraft-vhcop). A loaded Kraft plugin's skill is looked up in
+                # its store; another tool's cannot be, and `skill.UNAVAILABLE`
+                # has the agent stop on it.
                 selected = getattr(task.task, "skill", None)
                 if selected is not None:
                     try:
-                        _skill.validate(self.skills_dir, selected, where=task.path)
+                        _skill.validate(
+                            self.skills_dir,
+                            selected,
+                            where=task.path,
+                            plugin_dirs=self.plugin_dirs,
+                        )
                     except _skill.SkillError as exc:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects skill {selected!r}, "
@@ -526,7 +670,26 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
+            plugins=self._pins(id, resolved),
         )
+
+    def _pins(self, id: str, resolved: ResolvedChain) -> dict[str, dict[str, str | None]]:
+        """The loaded plugins chain `id` reads anything from: the chain itself,
+        a component it extends or selects, or a skill or agent profile one of
+        its tasks names."""
+        named = " ".join(
+            [
+                f"{id} ",
+                *(name for names in self.references(id).values() for name in names),
+                json.dumps(resolved.chain.model_dump(mode="json")),
+            ]
+        )
+        return {
+            plugin.namespace: plugin.pin
+            for plugin in self.plugins
+            if plugin.left_out is None
+            and re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", named)
+        }
 
 
 @dataclass(frozen=True)
@@ -826,6 +989,7 @@ class _Resolution:
         raise TemplateLibraryError(
             f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
             loc=(*loc, "extends"),
+            plugin_ref=":" in name,
         )
 
     def _reject_kind_change(

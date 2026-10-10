@@ -177,6 +177,12 @@ class RunDirs:
         return self.base / "results"
 
     @property
+    def plugins(self) -> Path:
+        """Kraft plugins: `mirrors/` (one bare mirror per git collection),
+        `store/<digest>/` (one extracted plugin each) and `staging/`."""
+        return self.base / "plugins"
+
+    @property
     def pid(self) -> Path:
         """The running server's pid, for `kraft admin stop`.
 

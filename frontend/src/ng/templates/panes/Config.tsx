@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
@@ -12,6 +12,7 @@ import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 import { useProviders, type ProviderStatus } from "../../harnesses/useProviders";
 import { harnessChoices, steeringChoices } from "../choices";
 import { useLibrary } from "../useLibrary";
+import { ReadOnly } from "../plugin";
 import type { Harnesses } from "../../../types";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
@@ -36,8 +37,11 @@ function restartTargets(ctx: PaneCtx): string[] {
  *  chip, an override bright with a dot, ✎ to override, ↺ to reset. */
 export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const { r, scope, path } = ctx;
+  const readOnly = useContext(ReadOnly);
   if (kind === "chain") return <ChainConfig ctx={ctx} />;
   const rows: Row[] = sourceRows(r, path);
+  // A plugin's chain answers no `sources`: what each part sets is in its YAML.
+  if (!rows.length && readOnly) return <Note>A plugin's settings are in the YAML tab.</Note>;
   if (!rows.length) return <Note>{r.resolved ? "Nothing to configure here." : "The resolved config shows once the draft resolves."}</Note>;
   // A node with a fix loop cannot be read only (the prototype's lock).
   const node = kind === "node" ? resolvedAt(r, path) : null;
@@ -71,6 +75,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
   const own = row.source === "chain" || row.source === undefined;
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const readOnly = useContext(ReadOnly);
   const label = meta.label;
   // `on_base_changed` is edited by its one key (the server writes the mapping).
   const target = row.field === "on_base_changed" ? "on_base_changed.restart_from" : row.field;
@@ -91,7 +96,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
   return (
     <div className={`cfg-row${own ? " is-own" : ""}`}>
       <span className="cfg-k">{label}</span>
-      {meta.kind === "bool" ? (
+      {meta.kind === "bool" && !readOnly ? (
         // A yes/no field is a switch: one click sets it.
         <span className="cfg-v"><Switch label={label} checked={!!row.value} disabled={!!row.locked} onChange={(on) => ctx.draft.field(ctx.path, row.field, on)} /></span>
       ) : editing === null ? (
@@ -101,7 +106,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
       )}
       {own && row.source !== undefined && <span className="cfg-dot" aria-label="overridden here" />}
       {row.source !== undefined && <span className={`cfg-chip${own ? " is-own" : ""}`} title={row.source}>{sourceWord(row.source)}</span>}
-      {row.locked ? (
+      {readOnly ? null : row.locked ? (
         <span className="cfg-lock" title={row.locked}>locked</span>
       ) : meta.elsewhere ? (
         <>

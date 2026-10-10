@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itsomidkarami.github.io/kraft/schemas/plugin.schema.json",
+  "title": "Kraft plugin",
+  "description": "The .kraft/plugin.json in a plugin's directory: its name, version and what it needs from the instance. Its components sit beside it in fixed places: library.yaml, chains/, skills/ and profiles.yaml.",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "requires"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "$ref": "#/$defs/identifier",
+      "description": "The same name as this plugin's entry in collection.json. References to its contents use it as a prefix (release:ship), unless the operator installs the plugin under another name with --as."
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$",
+      "description": "SemVer 2.0.0 without build metadata: MAJOR.MINOR.PATCH with an optional pre-release suffix (1.4.0, 2.0.0-rc.1). Installed instances update only when it changes; a lower value by SemVer precedence is reviewed as a downgrade.",
+      "examples": [
+        "1.4.0",
+        "2.0.0-rc.1"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": "object",
+      "required": [
+        "name",
+        "email"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "license": {
+      "type": "string"
+    },
+    "requires": {
+      "type": "object",
+      "required": [
+        "kraft"
+      ],
+      "description": "What the plugin needs from the instance. Checked at validate, install, update and load. Unknown keys are refused: a requirement this Kraft cannot check must not pass as met.",
+      "properties": {
+        "kraft": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?$",
+          "description": "MAJOR or MAJOR.MINOR. \"2.4\" means at least 2.4.0 and below 3.0.0; \"2\" means any 2.x.",
+          "examples": [
+            "2",
+            "2.4"
+          ]
+        },
+        "harnesses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "description": "Harness ids the instance's harnesses.yaml must define. A plugin task's harness: and fallback[].harness may name only these."
+        },
+        "profiles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "description": "Instance agent profiles the plugin's tasks select by bare name."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "maxLength": 64,
+      "description": "A Kraft name: lowercase ASCII letter first, then letters, digits, _ or -; at most 64 characters."
+    }
+  }
+}

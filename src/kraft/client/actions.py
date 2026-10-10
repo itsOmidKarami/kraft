@@ -691,3 +691,9 @@ async def reload_templates() -> dict:
     """Reread the template library from disk into the running server, no
     restart."""
     return await transport._act("/templates/reload")
+
+
+async def reload_plugins() -> dict:
+    """Rebuild the running server's library from `plugins.lock`, leaving any
+    pending edit of the other config files pending."""
+    return await transport._act("/templates/reload", {"only": ["plugins.yaml", "plugins.lock"]})

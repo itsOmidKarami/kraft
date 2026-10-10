@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { useContext, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
 import { ChevronDown, ChevronUp, GitCompare, RefreshCw, Siren, Zap } from "lucide-react";
 import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import type { NodeStep } from "../graph/nodeLayout";
@@ -11,6 +11,7 @@ import type { Scope } from "./draft/types";
 import { authoredAt, changeAt, normalise, problemsAt, valueAt, type NodeA, type Step, type Task } from "./draft/view";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
+import { ReadOnly } from "./plugin";
 import { problemWord } from "./problems";
 import { autoEscalates } from "./escalateWords";
 import { tip } from "../ui/Tooltip";
@@ -81,6 +82,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   onLeave: () => void;
 }) {
   const r = draft.view!.result;
+  const readOnly = useContext(ReadOnly);
   // The library draft has no resolved chain: its node is drawn as written (R18). `node` is a canonical path, dots and all.
   const n = (scope.area === "library" ? normalise(authoredAt(r, scope, node)) : draft.resolvedNode(node)) as (NodeA & Record<string, unknown>) | null;
   const conflict = (n?.on_base_changed as Record<string, unknown> | null | undefined) ?? null;
@@ -145,9 +147,9 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   const steps: NodeStep[] = (handler?.steps ?? []).map((s) => ({
     id: s.id,
     label: handler!.steps.length === 1 && s.id === "main" ? " " : s.id,
-    seamBefore: shown !== "escalation",
-    seamBelow: s.tasks.length > 0,
-    slot: s.tasks.length ? undefined : { label: "add a task" },
+    seamBefore: shown !== "escalation" && !readOnly,
+    seamBelow: s.tasks.length > 0 && !readOnly,
+    slot: s.tasks.length || readOnly ? undefined : { label: "add a task" },
     tasks: s.tasks.map((t) => item(`${container}.${s.id}.${t.id}`, t)),
   }));
   const ids = steps.map((s) => s.id);
@@ -158,7 +160,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   const addInto = (step: string | null, at?: number) => (c: TaskChoice): Op[] => {
     const sid = step ?? nextStepId(ids);
     const taken = handler?.steps.find((s) => s.id === sid)?.tasks.map((t) => t.id) ?? [];
-    const id = uniq("kind" in c ? c.kind : c.extends, taken);
+    const id = uniq("kind" in c ? c.kind : c.extends.split(":").pop()!, taken);
     return [...(step ? [] : [{ op: "add_step", container, at: at ?? ids.length, id: sid }]), { op: "add_task", container, step: sid, id, ...c }];
   };
 
@@ -186,7 +188,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
     if (shown === "escalation") return void draft.ops([{ op: "remove", path: `${node}.escalation` }]).then(onLeave);
     void draft.ops([{ op: "remove_handler", path: shown === "on_failure" ? owner.path : node, kind: shown }]).then(onLeave);
   };
-  const hasRemove = shown === "escalation" ? !!esc : !!handler;
+  const hasRemove = !readOnly && (shown === "escalation" ? !!esc : !!handler);
   const selIn = (path: string) => selPath === path;
   const pathOf = (s: NodeSel) => `${container}.${s.step}${s.task ? `.${s.task}` : ""}`;
   const sel: NodeSel | undefined = selPath.startsWith(`${container}.`) ? (() => {
@@ -249,7 +251,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
                   <div className="bp-judge">
                     {judge ? (
                       <button type="button" className={`bp-judge-btn${selIn(judgePath) ? " is-sel" : ""}`} onClick={() => onPick(judgePath)} onDoubleClick={() => onOpen(judgePath)}>judge · from attempt 2</button>
-                    ) : (
+                    ) : readOnly ? null : (
                       <button type="button" className="bp-judge-btn is-slot" onClick={(e) => openMenu(e.currentTarget, "Add a judge", (c) => [{ op: "add_task", slot: "judge", node, ...c }], true)}>+ add a judge</button>
                     )}
                   </div>
@@ -258,7 +260,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
                   name={LABEL[shown]}
                   steps={steps}
                   selected={sel}
-                  seamAfter
+                  seamAfter={!readOnly}
                   onSelect={(s) => onPick(pathOf(s))}
                   onOpen={(s) => onOpen(pathOf(s))}
                   onExpand={(s) => onOpen(pathOf(s))}
@@ -271,8 +273,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
               <div className="bp-empty">
                 <p className="bp-empty-box">
                   {empty.a}
-                  <button type="button" className="tpl-phrase" onClick={(e) => empty.go(e.currentTarget)}>{empty.link}</button>
-                  {empty.b}
+                  {!readOnly && <><button type="button" className="tpl-phrase" onClick={(e) => empty.go(e.currentTarget)}>{empty.link}</button>{empty.b}</>}
                 </p>
                 <p className="bp-empty-note">{empty.note}</p>
               </div>

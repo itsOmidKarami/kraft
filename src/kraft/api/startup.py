@@ -36,6 +36,7 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
+from kraft.plugins import load as plugins_load
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker.egress import EgressProxy
@@ -109,7 +110,13 @@ async def lifespan(app: FastAPI):
             )
     except OSError:
         logger.exception("theme migration failed; theme.yaml left as it was")
-    library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
+    # From the lock and the store alone: startup never waits on the network.
+    library, invalid_library = deps.load_library(
+        templates_dir,
+        app.state.skills_dir,
+        plugins_load.installed(templates_dir, run_dirs.plugins, verify=True),
+    )
+    app.state.plugins_problem = plugins_load.config_problem(templates_dir)
     # Now, not with the rest of app.state below: reattach's launch factory
     # reads it, for an item filed before repository steering was frozen.
     app.state.library = library
@@ -329,6 +336,9 @@ async def lifespan(app: FastAPI):
     # restart (Kraft-ygnw6). A tick with no triggers files nothing.
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
+    # After the library is loaded from the lock: a start never waits on the network.
+    deps.in_background(app, deps.auto_update_plugins)
+    app.state.plugin_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
     try:
         yield
     finally:
@@ -369,7 +379,11 @@ async def lifespan(app: FastAPI):
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
-        await asyncio.gather(app.state.apply_task, return_exceptions=True)
+        # The daily task first: it is what starts the next restore_task.
+        app.state.plugin_update_task.cancel()
+        await asyncio.gather(app.state.plugin_update_task, return_exceptions=True)
+        app.state.restore_task.cancel()
+        await asyncio.gather(app.state.apply_task, app.state.restore_task, return_exceptions=True)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()

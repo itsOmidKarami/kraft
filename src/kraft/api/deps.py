@@ -15,6 +15,7 @@ import functools
 import json
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -26,6 +27,7 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters.forge import git as forge_git
 from kraft.config import RepoEntry
+from kraft.plugins import load as plugins_load
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -316,8 +318,13 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
 def _reload_templates(st) -> None:
     from kraft import apply
 
-    apply.record_library(st)
-    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
+    st.plugins_problem = plugins_load.config_problem(st.templates_dir)
+    # A plugins.yaml or plugins.lock that does not read is refused: the plugins
+    # already running stay, and the two files stay pending with the reason.
+    refused = st.plugins_problem is not None and st.library is not None
+    apply.record_library(st, plugin_files=not refused)
+    plugins = st.library.plugins if refused else installed_plugins(st, verify=True)
+    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir, plugins)
     lint_loaded(st)
 
 
@@ -367,11 +374,137 @@ def invalid_templates(st) -> dict[str, str]:
     invalid = {LIBRARY_FILE: "; ".join(st.invalid_library)} if st.invalid_library else {}
     for id, message in (getattr(st, "invalid_chains", None) or {}).items():
         invalid[f"chain {id}"] = message
+    # The instance is not running what its lock says: degraded, like a chain
+    # that does not resolve. A plugin left out on purpose is no fault.
+    for plugin in st.library.plugins if st.library else ():
+        if plugin.left_out is not None and not plugin.quiet:
+            invalid[f"plugin {plugin.id}"] = plugin.left_out
+    if why := getattr(st, "plugins_problem", None):
+        invalid["plugins.yaml"] = why
     return invalid
 
 
+def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.InstalledPlugin, ...]:
+    """The plugins this instance has installed, loadable or not."""
+    return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
+
+
+async def restore_plugins(app) -> None:
+    """Put back every locked store that is gone (a config directory copied to
+    a new machine, a cleared run directory, a teammate's newer lock), then
+    load what came back and collect what nothing reads. Off the event loop:
+    it may fetch. One that cannot be restored stays left out, with the reason
+    under `invalid_templates`."""
+    from kraft import apply
+
+    st = app.state
+    # `verify`, as the library load reads: a store edited in place stays left
+    # out here too, so it never counts as "loads now".
+    fresh = await asyncio.to_thread(installed_plugins, st, verify=True)
+    missing = tuple(p for p in fresh if not p.quiet and not p.root.is_dir())
+    if missing:
+        failed = await asyncio.to_thread(
+            plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+        )
+        _reload_templates(st)
+        apply.notify(app)
+        if failed:
+            logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+    elif {p.id for p in fresh if p.left_out is None} & {
+        p.id
+        for p in (st.library.plugins if st.library is not None else ())
+        if p.left_out is not None
+    }:
+        # A launch put the store back (`dispatch.restore_pins`): the fresh read
+        # loads a plugin the running library left out. Load it.
+        _reload_templates(st)
+        apply.notify(app)
+    collect_plugin_stores(st)
+
+
+async def auto_update_plugins(app) -> None:
+    """What the server does about plugins once it is up, in the background so
+    a start never waits on the network: restore what is missing, then take
+    the updates that plugins set to auto-update may take on their own."""
+    from kraft import apply
+    from kraft.plugins import update as plugin_update
+
+    st = app.state
+    await restore_plugins(app)
+    outcomes = await asyncio.to_thread(
+        plugin_update.auto_update, st.templates_dir, st.run_dirs.plugins
+    )
+    if any(o["outcome"] == "applied" for o in outcomes.values()):
+        _reload_templates(st)
+        apply.notify(app)
+        collect_plugin_stores(st)
+
+
+def in_background(app, work) -> asyncio.Task:
+    """Run `work(app)` (one of the two above) as the server's plugin task.
+    Nobody awaits it, so what it raises is logged here, never dropped."""
+
+    async def logged() -> None:
+        try:
+            await work(app)
+        except Exception:  # noqa: BLE001 -- a background task must say why it died
+            logger.exception("plugin background task failed")
+
+    app.state.restore_task = asyncio.ensure_future(logged())
+    return app.state.restore_task
+
+
+#: Between two auto-update checks of a running server.
+AUTO_UPDATE_EVERY_S = 24 * 60 * 60
+
+
+async def auto_update_daily(app) -> None:
+    """Check again once a day: a server run as a service may not restart for
+    weeks, and the check at start would be its only one."""
+    while True:
+        await asyncio.sleep(AUTO_UPDATE_EVERY_S)
+        await in_background(app, auto_update_plugins)
+
+
+def collect_plugin_stores(st) -> list[str]:
+    """Delete each plugin store that none of these names: the lock, the
+    library this server has loaded, or the snapshot of a work item that has
+    not ended (a paused or stopped one can still be retried onto it). A
+    directory collection's store is the lock's, so it stays while installed.
+    Nothing is deleted while the lock cannot be read, while another plugin
+    change is running, or when the store cannot be written."""
+    from kraft.plugins import update as plugin_update
+    from kraft.plugins.config import PluginsLock
+
+    def keep() -> set[str]:
+        # Asked under the update lock: an install that just finished is in the lock.
+        locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
+        kept = {entry.digest.removeprefix("sha256:") for entry in locked}
+        kept |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+        ended = sorted(ENDED)
+        rows = st.db.read(
+            lambda c: c.execute(
+                # A retried item runs on `run_chain`, and a revision adds its pins there.
+                "SELECT materialized_chain, run_chain FROM work_items "
+                f"WHERE status NOT IN ({', '.join('?' * len(ended))})",
+                ended,
+            ).fetchall()
+        )
+        for stored in (snapshot for row in rows for snapshot in row if snapshot):
+            for pin in (json.loads(stored).get("plugins") or {}).values():
+                kept.add(str(pin["digest"]).removeprefix("sha256:"))
+        return kept
+
+    try:
+        return plugins_load.gc(keep, st.run_dirs.plugins)
+    except (config_mod.ConfigError, plugin_update.Busy, OSError):
+        return []
+
+
 def load_library(
-    templates_dir: Path, skills_dir: Path | None = None
+    templates_dir: Path,
+    skills_dir: Path | None = None,
+    plugins: tuple[plugins_load.InstalledPlugin, ...] = (),
 ) -> tuple[TemplateLibrary | None, list[str]]:
     """The V1 template library for `templates_dir`, and why it is missing.
 
@@ -381,7 +514,10 @@ def load_library(
     for `None`; nothing falls back to the legacy loader.
     """
     try:
-        return TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir), []
+        library = TemplateLibrary.from_yaml_dir(
+            templates_dir, skills_dir=skills_dir, plugins=plugins
+        )
+        return library, []
     except TemplateLibraryError as exc:
         logger.warning("template library unreadable: %s", exc)
         return None, [str(exc)]
@@ -457,6 +593,12 @@ def resolve_chain_or_422(st, chain_template: str | None):
     except TemplateLibraryError as exc:
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
+        for plugin in library.plugins:
+            # Not "unknown chain": its plugin is installed and its store is on the way back.
+            away = not plugin.quiet and not plugin.root.is_dir()
+            named = re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", f"{name} {exc}")
+            if away and named:
+                raise HTTPException(503, f"plugin {plugin.id} is being restored; retry") from exc
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 

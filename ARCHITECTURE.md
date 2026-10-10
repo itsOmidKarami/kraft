@@ -20,6 +20,13 @@ are on the
 Its source is
 [`docsite/content/6.project/6.source-map.md`](docsite/content/6.project/6.source-map.md).
 
+Kraft plugins, the chains and components an instance installs from a
+collection, are handled by `src/kraft/plugins/`. It fetches a collection into a
+bare mirror, extracts each plugin into a content-addressed store under
+`run/plugins/`, and hands the template library a read-only layer per plugin.
+See
+[Plugins and collections](https://itsomidkarami.github.io/kraft/reference/configuration/plugins).
+
 For how one work item moves from filing to merge, and its seven statuses, see
 [How a work item runs](https://itsomidkarami.github.io/kraft/concepts/how-a-work-item-runs).
 For the vocabulary, see

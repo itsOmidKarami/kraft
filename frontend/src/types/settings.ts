@@ -106,6 +106,8 @@ export interface ProbeStop {
  *  resolving. */
 export interface TemplateSummary {
   id: string;
+  /** The plugin it comes from, read-only here; null or absent for the instance's own. */
+  plugin?: Plugin | null;
   nodes: ChainNode[];
   gates: number;
   /** Absent or null when the chain resolves. */
@@ -113,6 +115,12 @@ export interface TemplateSummary {
   /** Per node id, the library components that node is built from
    *  (`tasks.implementer`). A node that uses none is absent. */
   uses?: Record<string, string[]>;
+}
+
+/** The plugin a chain or library component is loaded from. */
+export interface Plugin {
+  id: string;
+  version: string;
 }
 
 /** One reusable component of `library.yaml` (`GET /templates/library`). */
@@ -127,6 +135,7 @@ export interface LibraryComponent {
   /** The chain ids that use it, directly or through another component. */
   used_by: string[];
   issues: TemplateIssue[];
+  plugin?: Plugin | null;
 }
 
 /** `library.yaml`'s text, which the Library screen edits, and its components. */
@@ -231,6 +240,7 @@ export interface ChainFile {
   file: string;
   text: string;
   chain: Record<string, unknown>;
+  plugin?: Plugin | null;
 }
 
 /** A problem `GET /templates/lint` or `POST /templates/resolve` reports. */
