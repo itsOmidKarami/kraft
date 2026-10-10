@@ -96,7 +96,7 @@ def test_a_plugin_may_set_limits(policy):
     """Limits are not permissions: how long, how much and how many times are
     the author's to set, and a task named like a field is still a task."""
     library = {"tasks": {"base": {**AGENT, "policy": policy}, "policy": AGENT, "harness": AGENT}}
-    update.check(_manifest(), _files(library, {"ship": chain("base")}))
+    assert update.problems(_manifest(), _files(library, {"ship": chain("base")})) == []
 
 
 @pytest.mark.parametrize(
