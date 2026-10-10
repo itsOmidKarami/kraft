@@ -101,17 +101,18 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
   const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: merged[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, merged]);
 
-  // ⌘Z undoes the last request, outside a text field.
+  // ⌘Z undoes the last request, outside a text field. Not over a plugin's component: nothing shown there would change.
   const undo = draft.undo;
+  const readOnly = !!row?.plugin;
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
+      if (readOnly || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
       e.preventDefault();
       undo();
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
-  }, [undo]);
+  }, [undo, readOnly]);
 
   const add = async (section: Section, name: string, kind?: string) => {
     const a = await draft.ops([{ op: "add_component", section, name, ...(kind ? { kind } : {}) }], { quiet: true });

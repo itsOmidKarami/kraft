@@ -41,14 +41,20 @@ def _library_op(client):
     return client.post("/api/drafts/library/library/ops", json={"ops": [op]})
 
 
+def _library_op_by_container(client):
+    op = {"op": "add_step", "container": "nodes.release:build", "id": "extra"}
+    return client.post("/api/drafts/library/library/ops", json={"ops": [op]})
+
+
 @pytest.mark.parametrize(
     "write, names",
     [
         (_put_chain, "release:ship"),
         (_chains_draft, "release:ship"),
         (_library_op, "release:base"),
+        (_library_op_by_container, "release:build"),
     ],
-    ids=["put-chain", "chains-draft", "library-op"],
+    ids=["put-chain", "chains-draft", "library-op", "library-op-by-container"],
 )
 def test_saving_a_plugin_entry_answers_409(loaded, write, names):
     """409 with the way out, not the 400 a qualified id's shape would get."""

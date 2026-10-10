@@ -56,6 +56,20 @@ describe("A plugin's component in the Library", () => {
     expect(posts()).toEqual([]);
   });
 
+  it("⌘Z over a plugin's component undoes nothing: the draft's last request is not on screen", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...libView({}, true), plugin_library: SHIPPED }));
+    const undo = vi.spyOn(d, "undo").mockImplementation(() => ok({ ...libView({}, true), plugin_library: SHIPPED }) as never);
+    mount(REF);
+    expect(await screen.findByRole("heading", { name: "release:base" })).toBeInTheDocument();
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    expect(undo).not.toHaveBeenCalled();
+
+    await userEvent.click(within(screen.getByRole("listbox", { name: "Library components" })).getByRole("option", { name: /^implementer/ }));
+    await screen.findByRole("complementary", { name: "implementer pane" });
+    await userEvent.keyboard("{Meta>}z{/Meta}");
+    await waitFor(() => expect(undo).toHaveBeenCalled());
+  });
+
   it("Copy to my library asks for a name, sends copy_component with the listed ref, and opens the copy", async () => {
     answer = { status: 200, body: { ...libView({ model: { [LIB_FILE]: { ...LIB_MODEL, tasks: { ...LIB_MODEL.tasks, notes: SHIPPED.tasks["release:base"] } } } }, true), plugin_library: SHIPPED, ops: [{ op: "copy_component", result: { path: "tasks.notes" } }] } };
     mount(REF);
