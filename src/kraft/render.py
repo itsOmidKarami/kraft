@@ -513,6 +513,15 @@ def health_block(payload: dict) -> str:
         pairs.append(("invalid policy", str(payload["invalid_policy"])))
     if payload.get("invalid_intake"):
         pairs.append(("invalid intake", str(payload["invalid_intake"])))
+    stored = payload.get("storage")
+    if stored:
+        pairs.append(
+            (
+                "storage",
+                f"{human_size(stored['used_bytes'])} of "
+                f"{human_size(stored['limit_bytes'])} ({stored['state'].replace('_', ' ')})",
+            )
+        )
     for error in index.get("errors") or []:
         pairs.append(("index error", str(error)))
     reattach = payload.get("reattach_summary") or {}

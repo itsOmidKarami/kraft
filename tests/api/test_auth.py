@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from support.api import _hold_storage
 
 from kraft import auth as auth_mod
 from kraft.api.routes import auth as routes_auth
@@ -121,6 +122,26 @@ def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(clien
 def test_health_ok_with_valid_policy(client):
     h = client.get("/api/health").json()
     assert h["invalid_policy"] == []
+
+
+@pytest.mark.parametrize(
+    ("used", "state"),
+    [(80, "ok"), (90, "over_quota"), (101, "held")],
+    ids=["ok", "over-quota", "held"],
+)
+def test_health_reports_storage_and_degrades_only_when_held(client, used, state):
+    _hold_storage(client, used=used, limit=100)
+
+    health = client.get("/api/health").json()
+
+    assert health["storage"]["state"] == state
+    assert (health["storage"]["used_bytes"], health["storage"]["limit_bytes"]) == (used, 100)
+    assert health["storage"]["quota_bytes"] == 80
+    assert (health["status"] == "degraded") == (state == "held")
+
+
+def test_health_storage_is_null_without_a_limit(client):
+    assert client.get("/api/health").json()["storage"] is None
 
 
 def test_health_reports_port_and_version(client):

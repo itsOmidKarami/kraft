@@ -117,6 +117,21 @@ def state_of(policy, used: Usage | None) -> str | None:
     return "ok"
 
 
+def health(st) -> dict | None:
+    """`/health`'s `storage`; None without a limit or before the first walk."""
+    used = usage(st)
+    state = state_of(st.policy, used)
+    if state is None:
+        return None
+    return {
+        "state": state,
+        "used_bytes": used.governed,
+        "quota_bytes": st.policy.storage_quota_bytes,
+        "limit_bytes": st.policy.storage_limit_bytes,
+        "measured_at": used.measured_at,
+    }
+
+
 def holds(st, wid: str) -> bool:
     """Whether starting `wid` must wait for space. Only a start that would
     create a worktree: an item that has one adds little by continuing, and

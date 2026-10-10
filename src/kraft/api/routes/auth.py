@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from kraft import auth as auth_mod
+from kraft import storage
 from kraft import update as update_mod
 from kraft.api import api_router, deps
 from kraft.worker import reattach as reattach_mod
@@ -117,11 +118,16 @@ async def health(request: Request):
     # An `intake.yaml` that does not load leaves auto-intake off and its
     # schedules unfired, which nothing else would say (R12E-03).
     invalid_intake = getattr(st, "invalid_intake", None)
+    storage_health = storage.health(st)
+    held = (storage_health or {}).get("state") == "held"
     return {
-        "status": "degraded" if (invalid or invalid_policy or invalid_intake) else "ok",
+        "status": "degraded" if (invalid or invalid_policy or invalid_intake or held) else "ok",
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
+        # public: totals only. None without `storage.worktrees.limit`. `held`
+        # degrades: starts that need a new worktree are waiting on disk space.
+        "storage": storage_health,
         # True when the server started on that file, so auto-intake and its
         # schedules are off (a trigger left in policy.yaml still fires); False
         # when a reload refused it and the running ones are kept.

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration
+from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
 from kraft import policy as policy_mod
 from kraft.adapters import forge
 from kraft.api import config_check
@@ -111,6 +111,21 @@ async def run_checks() -> list[dict]:
     return checks
 
 
+def _storage_line(payload: dict) -> tuple[str, str] | None:
+    """`/health`'s `storage` as (state, one sentence), or None without a limit."""
+    s = payload.get("storage")
+    if not s:
+        return None
+    size = render.human_size
+    used = f"worktrees use {size(s['used_bytes'])} of {size(s['limit_bytes'])}"
+    free = "archive finished items to make room (the board's Done group, or Settings › Storage)"
+    if s["state"] == "held":
+        return "held", f"{used}: starts that need a new worktree are held; {free}"
+    if s["state"] == "over_quota":
+        return "over_quota", f"{used}, over the {size(s['quota_bytes'])} quota; {free}"
+    return "ok", used
+
+
 def _health_checks(payload: dict) -> list[dict]:
     """`/health`, one line per degraded reason.
 
@@ -137,6 +152,9 @@ def _health_checks(payload: dict) -> list[dict]:
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
         reasons.append(f"orphaned agent sessions: {', '.join(orphaned)}")
+    stored = _storage_line(payload)
+    if stored and stored[0] == "held":
+        reasons.append(f"storage: {stored[1]}")
     # Semantic search is an opt-in extra (`available` is whether it imports),
     # so /health stays `ok` without it and so does doctor: an ok line carrying
     # the advice, never a FAIL on something the operator never asked for
@@ -150,10 +168,15 @@ def _health_checks(payload: dict) -> list[dict]:
         extra = _check("embeddings", False, f"installed but broken: {embeddings['reason']}")
     else:
         extra = _check("embeddings", True, f"available ({embeddings.get('model')})")
+    tail = (
+        [extra, _check("storage", True, stored[1], warn=stored[0] == "over_quota")]
+        if stored and stored[0] != "held"
+        else [extra]
+    )
     if not reasons:
         status = str(payload.get("status", "?"))
-        return [_check("health", payload.get("status") == "ok", status), extra]
-    return [*(_check("health", False, reason) for reason in reasons), extra]
+        return [_check("health", payload.get("status") == "ok", status), *tail]
+    return [*(_check("health", False, reason) for reason in reasons), *tail]
 
 
 def _restart_check(payload: dict) -> dict:
