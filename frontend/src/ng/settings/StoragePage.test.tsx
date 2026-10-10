@@ -180,6 +180,28 @@ describe("Settings › Storage worktrees", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus());
   });
 
+  it("keeps a clean-up's figures when a slower Refresh answers after its re-read, and measures until that Refresh settles", async () => {
+    const answers: Record<string, [number, unknown]> = { "GET /storage": [200, storageUsage()], "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": bulkOk("w1", "w4") };
+    const held = holdFetch(/refresh=1/, answers);
+    mount();
+    await screen.findByText(/12G used/);
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Select Cache embeddings" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Old spike" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clean up selected" }));
+    const dialog = await screen.findByRole("dialog");
+    const after = storageUsage();
+    answers["GET /storage"] = [200, storageUsage({ items: [after.items[0]], reclaimable_bytes: 0, used_bytes: 9 * GB, state: "over_quota" })];
+    await userEvent.click(await within(dialog).findByRole("button", { name: "Archive 2 items and free 3G" }));
+    expect(await screen.findByText(/9G used/)).toBeInTheDocument();
+    // The re-read answered first, and the Refresh is still out.
+    expect(screen.getByRole("button", { name: "Measuring…" })).toBeDisabled();
+    held[0](storageUsage());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
+    expect(screen.getByText(/9G used/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Select Old spike" })).toBeNull();
+  });
+
   it("sends every reclaimable id from Clean up all", async () => {
     const calls = stubFetch({ "GET /storage": [200, storageUsage()], "POST /storage/preview": [200, storagePreview()] });
     mount();

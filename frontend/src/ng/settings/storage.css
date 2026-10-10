@@ -24,3 +24,6 @@
 .set-st-title:hover { text-decoration: underline; }
 .set-st-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .set-st-tag { font-size: 10.5px; color: var(--text-muted); }
+/* "Where it goes": the label column fits its longest label; the About page's 130px does not. */
+.set-about-kv.set-st-kv { grid-template-columns: max-content minmax(0, 1fr); }
+@media (max-width: 767px) { .set-about-kv.set-st-kv { grid-template-columns: minmax(0, 1fr); } }

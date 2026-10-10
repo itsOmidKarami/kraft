@@ -29,8 +29,10 @@ def _policy(limit=None, quota=None, min_age_s=None) -> policy.Policy:
     )
 
 
-def _usage(governed, items=None) -> storage.Usage:
-    return storage.Usage("2026-01-01T00:00:00+00:00", governed, dict(items or {}), {})
+def _usage(governed, items=None, categories=None) -> storage.Usage:
+    return storage.Usage(
+        "2026-01-01T00:00:00+00:00", governed, dict(items or {}), dict(categories or {})
+    )
 
 
 def test_measure_of_an_empty_run_folder_is_zero(tmp_path):
@@ -113,11 +115,22 @@ def test_only_a_start_that_would_make_a_worktree_is_held(tmp_path):
 
 
 def test_forget_takes_an_items_bytes_off_the_cache():
-    st = SimpleNamespace(storage_usage=_usage(120, {"a": 40, "b": 80}))
+    st = SimpleNamespace(
+        storage_usage=_usage(
+            120, {"a": 40, "b": 80}, {"worktrees": 100, "sandboxes": 20, "logs": 5}
+        )
+    )
     storage.forget(st, "a")
-    assert (st.storage_usage.governed, st.storage_usage.items) == (80, {"b": 80})
+    got = st.storage_usage
+    assert (got.governed, got.items) == (80, {"b": 80})
+    assert got.categories == {"worktrees": 60, "sandboxes": 20, "logs": 5}
+    # More than `worktrees` holds: the rest comes off `sandboxes`, never below zero.
+    storage.forget(st, "b")
+    got = st.storage_usage
+    assert (got.governed, got.items) == (0, {})
+    assert got.categories == {"worktrees": 0, "sandboxes": 0, "logs": 5}
     storage.forget(st, "never-measured")
-    assert st.storage_usage.governed == 80
+    assert st.storage_usage.governed == 0
 
 
 async def test_refresh_runs_one_walk_for_two_callers(tmp_path, monkeypatch):

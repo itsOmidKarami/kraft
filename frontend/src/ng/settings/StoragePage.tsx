@@ -33,13 +33,23 @@ export function StoragePage() {
   const [cleaning, setCleaning] = useState<string[] | null>(null);
   const refreshBtn = useRef<HTMLButtonElement>(null);
   const rescueFocus = useRef(false);
+  // The newest call, and the newest one that set `measuring` (a quiet one never does).
+  const latest = useRef(0);
+  const loud = useRef(0);
 
   // `quiet`: the re-read after a clean-up. The server answers from its cache, so
   // nothing says "measuring" and Refresh stays a button focus can return to.
+  // Only the latest call's answer is applied: a slow Refresh must not put back what a later read took off.
+  // `measuring` is cleared by the latest call that set it, even when a quiet read has since overtaken it.
   const load = useCallback(async (refresh: boolean, quiet = false) => {
-    if (!quiet) setMeasuring(true);
+    const mine = ++latest.current;
+    if (!quiet) {
+      loud.current = mine;
+      setMeasuring(true);
+    }
     const r = await request<StorageUsage>(`/storage${refresh ? "?refresh=1" : ""}`);
-    setMeasuring(false);
+    if (mine === loud.current) setMeasuring(false);
+    if (mine !== latest.current) return;
     // A failed read keeps the last figures: they are older, not wrong.
     if (r.status !== 200) return setError(detailOf(r.body));
     setError(null);
@@ -111,7 +121,7 @@ export function StoragePage() {
 
         {data && (
           <Block id="set-st-totals" title="Where it goes" card>
-            <dl className="set-about-kv">
+            <dl className="set-about-kv set-st-kv">
               {CATEGORIES.map(([key, label]) => (
                 <Fragment key={key}>
                   <dt>{label}</dt>
