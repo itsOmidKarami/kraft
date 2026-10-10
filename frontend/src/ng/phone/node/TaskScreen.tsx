@@ -34,6 +34,8 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
   // A changed-test-scope task runs a session per scope: they are its scopes, not attempts at it.
   const view = !esc && !loop && isScopeTask(item, path) ? scopesView(item, path, r ?? 1, now) : null;
   const chips = view?.rows.flatMap((row) => row.chips) ?? [];
+  // One repository: nothing to tell apart or put in order, so it is not named, as the desktop's frame has it.
+  const solo = view?.rows.length === 1;
   // A run the round made of a scope before its newest one: no scope names it any more.
   const earlier = view ? sessions.filter((s) => !chips.some((c) => c.session?.id === s.id)) : [];
   // An escalation's picker is per thread: it shows that thread through its last turn.
@@ -78,10 +80,11 @@ export function TaskScreen({ item, version, docs, place, node: nodeId, now, setP
         )}
         {view && tab === "overview" && (
           <Block title="Scopes">
-            <p className="ph-note">{roundWords(view).scopes} · {roundWords(view).repos}</p>
+            <p className="ph-note">{roundWords(view).scopes}{!solo && ` · ${roundWords(view).repos}`}</p>
             {view.rows.map((row) => (
               <div key={row.name} className="ph-scope-repo">
-                <p className="ph-note"><span className="ph-mono">{row.name}</span> · {row.note}</p>
+                {/* With no scopes the note is all a lone repository has to say: waiting, or not reached. */}
+                {(!solo || !row.chips.length) && <p className="ph-note">{!solo && <><span className="ph-mono">{row.name}</span> · </>}{row.note}</p>}
                 <div className="ph-list">
                   {row.chips.map((c) => (
                     <button key={c.key} type="button" className="ph-row ph-task-row" onClick={() => navigate(placeUrl(item.id, { node: nodeId, sel: place.sel, round: place.round, scope: c.key }))}>

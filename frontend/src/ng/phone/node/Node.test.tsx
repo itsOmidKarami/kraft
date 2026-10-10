@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scoped, scopeRun, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -369,10 +369,9 @@ describe("the task screen (E)", () => {
     it("lists its scopes by repository in place of attempts, says how the round went, and keeps an earlier run", async () => {
       mount(it0(), TESTS);
       const scopes = (await screen.findByText("Scopes")).closest("section")!;
-      expect(within(scopes).getByText("kraft-web").parentElement).toHaveTextContent("kraft-web · failed · 48s");
       expect(within(scopes).getAllByRole("button").map((b) => b.textContent)).toEqual(["just test-apidone · 24s", "just test-webfailed · 24s", "just test-e2ewaiting", "earlier run 1 · failed"]);
-      expect(scopes).toHaveTextContent("1 of 3 scopes passed");
-      expect(scopes).toHaveTextContent("1 of 1 reached · run in order, stop at the first failure");
+      // One repository is not counted, as it is not named.
+      expect(scopes.querySelector("p")).toHaveTextContent(/^1 of 3 scopes passed$/);
       expect(screen.queryByRole("group", { name: "Attempts" })).toBeNull();
       await userEvent.click(within(scopes).getByRole("button", { name: /earlier run 1/ }));
       expect(where()).toContain("attempt=7");
@@ -384,10 +383,11 @@ describe("the task screen (E)", () => {
       expect(where()).toBe(`${TESTS}&${key("just test-api")}`);
       expect(await screen.findByRole("heading", { level: 1, name: "just test-api" })).toBeInTheDocument();
       expect(screen.getByText("test scope · round 1 · passed 24s")).toBeInTheDocument();
-      expect(screen.getByText("kraft-cb59 › verification › tests › test_changed_scopes › kraft-web")).toBeInTheDocument();
+      expect(screen.getByText("kraft-cb59 › verification › tests › test_changed_scopes")).toBeInTheDocument();
       const facts = document.querySelector(".ph-facts") as HTMLElement;
       const row = (k: string) => within(facts).getByText(k).nextElementSibling!.textContent;
-      expect([row("status"), row("command"), row("paths"), row("repo"), row("execution")]).toEqual(["passed · 24s", "just test-api", "api/**", "kraft-web", "sequential"]);
+      expect([row("status"), row("command"), row("paths"), row("execution")]).toEqual(["passed · 24s", "just test-api", "api/**", "sequential"]);
+      expect(within(facts).queryByText("repo")).toBeNull();
       expect(screen.getByRole("button", { name: "Task" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("tab", { name: "Log" }));
       await waitFor(() => expect(calls.some((c) => c.path === `/worker-sessions/${api[1].id}/log`)).toBe(true));
@@ -395,6 +395,16 @@ describe("the task screen (E)", () => {
       await userEvent.click(screen.getByRole("tab", { name: "Overview" }));
       await userEvent.click(screen.getByRole("button", { name: "test_changed_scopes" }));
       await waitFor(() => expect(where()).toBe(TESTS));
+    });
+
+    it("names a scope's repository, and counts repositories, when the item has several", async () => {
+      const several = scoped([scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { chain_definition: { template_id: "default", nodes }, materialized_chain: scopeChain("sequential", WORKSPACE) });
+      mount(several, TESTS);
+      const scopes = (await screen.findByText("Scopes")).closest("section")!;
+      expect(scopes.querySelector("p")).toHaveTextContent("1 of 2 scopes passed · 2 of 3 reached · run in order, stop at the first failure");
+      await userEvent.click(within(scopes).getByRole("button", { name: /just test-b/ }));
+      expect(await screen.findByText("kraft-cb59 › verification › tests › test_changed_scopes › pkg")).toBeInTheDocument();
+      expect(within(document.querySelector(".ph-facts") as HTMLElement).getByText("repo").nextElementSibling).toHaveTextContent("pkg");
     });
 
     it.each([
@@ -412,6 +422,18 @@ describe("the task screen (E)", () => {
     mount(item("running"), `${TASK}&scope=%3Ajust+test-api`);
     expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
     expect(screen.getByText(/agent task · running now/)).toBeInTheDocument();
+  });
+
+  it.each([
+    // One repository: nothing to tell apart, so it is not named (as the desktop's frame has it).
+    ["one repository is its scopes alone", () => [scopeRun(null, "just test-api", 0, "done")], {}, []],
+    ["one repository with nothing run still says why", () => [], {}, ["not reached"]],
+    ["several are each named, with how they went", () => [scopeRun("ws", "just test-a", 0, "done"), scopeRun("pkg", "just test-b", 0, "failed")], { materialized_chain: scopeChain("sequential", WORKSPACE) }, ["ws · done · 24s", "pkg · failed · 24s", "web · not reached · pkg failed"]],
+  ])("heads a changed-test-scope task's scopes by repository only when there are several: %s", async (_n, runs, over, lines) => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, tasks: ["verification.checks.lint", SCOPE_PATH], steps: [["verification.checks.lint"], [SCOPE_PATH]] } : n));
+    mount(scoped(runs(), { chain_definition: { template_id: "default", nodes }, ...over }), `/work-items/w1/nodes/verification?sel=${SCOPE_PATH}`);
+    const scopes = (await screen.findByText("Scopes")).closest("section")!;
+    expect([...scopes.querySelectorAll(".ph-scope-repo > p")].map((p) => p.textContent)).toEqual(lines);
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {

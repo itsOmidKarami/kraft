@@ -22,6 +22,8 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
   // A scope the round has no chip for: its repository ran without it, or was not reached at all.
   const repo = hit?.row ?? view.rows.find((r) => (r.id ?? "") === place.scope.slice(0, at));
   const dropped = !hit && !!repo && repo.chips.length > 0;
+  // One repository: nothing to tell apart, so the screen does not name it, as the desktop's frame does not.
+  const several = view.rows.length > 1;
   const s = hit?.chip.session;
   const tab = s && place.tab === "log" ? "log" : "overview";
   const toTask = () => setPlace({ scope: undefined, tab: undefined });
@@ -32,7 +34,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
       <ScreenHeader />
       <div className="ph-content">
         <div className="ph-node-head">
-          <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId} › {place.sel.step} › {place.sel.task}{repo ? ` › ${repo.name}` : ""}</p>
+          <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId} › {place.sel.step} › {place.sel.task}{several && repo ? ` › ${repo.name}` : ""}</p>
           <h1 className="ph-node-title">{hit ? (hit.chip.setup ? hit.chip.name : hit.chip.command) : place.scope.slice(at + 1) || place.scope}</h1>
           <p className={`ph-node-sub${hit?.chip.state === "failed" ? " ph-tone-bad" : hit?.chip.state === "running" ? " ph-tone-info" : ""}`}>
             {hit?.chip.setup ? "area setup" : "test scope"} · round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : dropped ? "not picked" : "not reached"}
@@ -48,7 +50,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
             ["status", statusWords(hit.chip)],
             ["command", mono(hit.chip.command)],
             ...(hit.chip.paths ? ([["paths", mono(hit.chip.paths)]] as [string, React.ReactNode][]) : []),
-            ["repo", mono(hit.row.name)],
+            ...(several ? ([["repo", mono(hit.row.name)]] as [string, React.ReactNode][]) : []),
             ["task", <button key="t" type="button" className="ph-linkbtn ph-mono" onClick={toTask}>{place.sel.task}</button>],
             ["execution", mono(view.execution)],
             ...(others.length ? ([["other rounds", others.join(" · ")]] as [string, React.ReactNode][]) : []),
