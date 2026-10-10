@@ -35,7 +35,7 @@ describe("Settings › Storage, usage", () => {
     expect((bar.querySelector(".set-st-fill") as HTMLElement).style.width).toBe("50%");
     expect([...bar.querySelectorAll<HTMLElement>(".set-st-mark")].map((m) => m.style.left)).toEqual(["80%", "100%"]);
     expect(screen.getByText(/5G used · quota 8G · limit 10G/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Change them/ })).toHaveAttribute("href", "/settings/policy/housekeeping");
+    expect(screen.getByRole("link", { name: "Edit the quota and limit in Policy › Housekeeping" })).toHaveAttribute("href", "/settings/policy/housekeeping");
   });
 
   it("shows usage and a link to the Housekeeping rows when no limit is set", async () => {

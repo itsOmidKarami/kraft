@@ -101,7 +101,7 @@ export function StoragePage() {
                 </div>
                 <p className="set-hint">
                   {humanSize(used)} used · quota {humanSize(data.quota_bytes ?? 0)} · limit {humanSize(limit)}{" "}
-                  <Link className="set-link" to={HOUSEKEEPING}>Change them</Link>
+                  <Link className="set-link" to={HOUSEKEEPING} aria-label="Edit the quota and limit in Policy › Housekeeping">Edit</Link>
                 </p>
               </>
             ) : (
