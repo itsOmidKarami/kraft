@@ -5,6 +5,7 @@ import ipaddress
 import re
 import socket
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from fastapi import HTTPException, Query, Request
@@ -411,16 +412,21 @@ async def parse_template_yaml(body: ParseBody):
     return {"chain": data, "error": None}
 
 
+class ReloadBody(BaseModel):
+    #: The plugin files alone (`apply.PLUGIN_FILES`): what a plugin verb asks for.
+    only: list[Literal["plugins.yaml", "plugins.lock"]] | None = None
+
+
 # Refusing a policy that does not validate: Kraft-m86uq.
 @api_router.post("/templates/reload")
-async def reload_templates_endpoint(request: Request):
+async def reload_templates_endpoint(request: Request, body: ReloadBody | None = None):
     """Reread the V1 library from disk into the running server. A library that
     does not load is reported, not raised: the daemon keeps running degraded,
     exactly as it would have started. `policy.yaml` is reread first, since a
     chain past a `maxima:` ceiling is a lint issue; a policy that does not
     validate is refused and the running one kept."""
     st = request.app.state
-    refused_policy = await apply_mod.reload(request.app)
+    refused_policy = await apply_mod.reload(request.app, only=body.only if body else None)
     ids = st.library.chain_ids if st.library is not None else ()
     valid = sorted(id for id in ids if id not in st.invalid_chains)
     return {
