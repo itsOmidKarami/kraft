@@ -173,7 +173,8 @@ describe("a node the chain ran again", () => {
     expect(sub("code_review")).toBe("agent task · round 1 of 3 · done 4m");
     // Another pass has its own rounds: the round picked in this one does not carry over.
     await pickPass(2);
-    expect(screen.getByRole("button", { name: "round 1 of 3 · latest" })).toBeInTheDocument();
     expect(sub("code_review")).toMatch(/^agent task · round 1 of 3 · running/);
+    await pickPass(1);
+    expect(screen.getByRole("button", { name: "round 2 of 3 · latest" })).toBeInTheDocument();
   });
 });

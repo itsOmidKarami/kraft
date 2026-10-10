@@ -197,8 +197,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   };
   escape.current = back;
   const pane = paneContent({
-    // The chain's own pane is the item as it stands, whichever pass of a node is shown.
-    item: sel.kind === "chain" ? item : shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
+    item: shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),

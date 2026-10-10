@@ -52,13 +52,12 @@ export const passWords = (item: ItemDetail, node: string, picked?: number) => {
   return n ? `pass ${n} of ${passesOf(item, node).length}` : "";
 };
 
-/** The item as an earlier pass of `node` left it: the node's later sessions and scope runs are gone, so every reader
- *  of the node shows that pass, and nothing of it is in flight (no stop on it, not the node the run stands on). The
- *  newest pass, or none picked, is the item itself. */
+/** The item as an earlier pass of `node` left it: the node's later sessions are gone, so that pass is the one the
+ *  node is on to every reader of it, and nothing of it is in flight (no stop on it, not the node the run stands on).
+ *  The newest pass, or none picked, is the item itself. */
 export function asOfPass(item: ItemDetail, node: string, pass?: number): ItemDetail {
   if (!pass || pass >= passesOf(item, node).length) return item;
-  const later = (x: { node_id: string; pass?: number }) => x.node_id === node && (x.pass ?? 1) > pass;
-  return { ...item, stop: null, current_node_id: null, worker_sessions: item.worker_sessions.filter((s) => !later(s)), scope_runs: item.scope_runs?.filter((r) => !later(r)) };
+  return { ...item, stop: null, current_node_id: null, worker_sessions: item.worker_sessions.filter((s) => s.node_id !== node || (s.pass ?? 1) <= pass) };
 }
 
 /** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */

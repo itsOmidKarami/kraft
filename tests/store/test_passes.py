@@ -155,6 +155,13 @@ CASES = [
         id="a-round-drop-inside-a-rejected-pass",
     ),
     pytest.param(
+        [_s(1, round=2), _s(6, round=-1), _s(7, round=0)],
+        [REJECT],
+        [1, 2, 2],
+        [{"pass": 1}, {"pass": 2, "reason": "reject", "gate": "gate"}],
+        id="a-new-pass-forgets-the-round-the-last-one-reached",
+    ),
+    pytest.param(
         [_s(1, round=2), _s(6, round=0)],
         [REJECT],
         [1, 2],

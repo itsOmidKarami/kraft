@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from kraft import events
+from kraft import events, store
 
 from .test_board_stop import _exit_session, _paused_item, _run, _verified_item
 
@@ -271,6 +271,37 @@ def test_detail_keeps_each_pass_of_a_node_under_its_own_number(client, repo, tmp
         "new": 2,
     }
     assert detail["node_passes"] == {"verify": [{"pass": 1}, {"pass": 2, **why}]}
+
+
+def test_detail_scope_runs_gives_picks_nothing_has_started_from_to_the_nodes_newest_pass(
+    client, repo, tmp_path
+):
+    """The node is on its second pass and the scope task has picked and started nothing in it yet:
+    the picks are that pass's, and do not stand in for the first pass's round of the same number."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd"])
+    _session(tmp_path, wid, "old", "fe-cmd", "failed")
+    _run(lambda c: events.append(c, wid, "gate_rejected", {"gate": "g", "node": "verify"}))
+    _run(
+        lambda c: store.create_session(
+            c,
+            id="lint",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point="verify.main.lint",
+            log_path="/l",
+            result_path="/r",
+            head_sha="abc",
+        )
+    )
+    _picks(wid, "ws", 0, ["fe-cmd"])
+
+    got = client.get(f"/api/work-items/{wid}").json()["scope_runs"]
+
+    assert [(r["pass"], r["session_id"], r.get("pending")) for r in got] == [
+        (1, "old", None),
+        (2, None, True),
+    ]
 
 
 def test_detail_names_no_passes_for_a_node_that_ran_once(client, repo, tmp_path):
