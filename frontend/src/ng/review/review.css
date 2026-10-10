@@ -60,9 +60,11 @@
 .rv-file-row.is-nested { padding-left: 20px; }
 .rv-file-row.is-on { background: var(--line); }
 .rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
-.rv-viewed { flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); font-size: 11px; cursor: pointer; }
-.rv-viewed.is-on { color: var(--ok); }
-.rv-viewed:is(:hover, :focus-visible) { background: var(--line); }
+.rv-file-icon { flex: none; color: var(--text-muted); }
+.rv-file-icon[data-lang="python"] { color: var(--info); }
+.rv-file-icon[data-lang="clike"] { color: var(--warn); }
+.rv-file-icon[data-lang="shell"] { color: var(--ok); }
+.rv-file-row.is-viewed > :is(.rv-file-icon, .rv-file-name) { opacity: 0.55; }
 .rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .rv-file-row.is-on .rv-file-name { color: var(--text); }
 .rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 10.5px; text-align: center; }
@@ -91,7 +93,9 @@
 .rv-lines { width: max-content; min-width: 100%; font: 12px/1.6 ui-monospace, Menlo, monospace; }
 .rv-files.is-wrap .rv-lines { width: auto; }
 .rv-lines:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.rv-hunk { padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; white-space: pre; }
+.rv-hunk { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; white-space: pre; }
+.rv-expand { display: inline-flex; gap: 2px; }
+.rv-expand > .icon-btn { min-width: 22px; min-height: 18px; }
 .rv-row { display: flex; align-items: stretch; min-width: 100%; }
 .rv-row.is-split > .rv-half { flex: 1 1 50%; min-width: 0; display: flex; }
 .rv-row.is-split > .rv-half + .rv-half { border-left: 1px solid var(--line); }

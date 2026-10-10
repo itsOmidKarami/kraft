@@ -387,6 +387,22 @@ describe("DiffView", () => {
     }
   });
 
+  it("offers the unchanged lines before a hunk and after the last, where there are any", () => {
+    const onExpand = vi.fn();
+    const { rerender } = render(<View onExpand={onExpand} />);
+    // Three lines sit above the hunk: too few for the arrows that show a step.
+    fireEvent.click(screen.getByRole("button", { name: "Show all 3 hidden lines" }));
+    expect(screen.queryByRole("button", { name: "Show 20 more lines above" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 20 more lines below" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show the rest of the file" }));
+    expect(onExpand.mock.calls).toEqual([["search/cache.py", 0, "all"], ["search/cache.py", 1, "down"], ["search/cache.py", 1, "all"]]);
+    // The file was read and ends with the hunk: nothing after it to show.
+    rerender(<View onExpand={onExpand} patch={new Map([...patch].map(([k, f]) => [k, { ...f, rest: 0 }]))} />);
+    expect(screen.getAllByRole("button", { name: /^Show / })).toHaveLength(1);
+    rerender(<View />);
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+  });
+
   it("collapses to the header, with the open thread count", () => {
     const onCollapse = vi.fn();
     render(<View collapsed={new Set(["search/cache.py"])} onCollapse={onCollapse} />);

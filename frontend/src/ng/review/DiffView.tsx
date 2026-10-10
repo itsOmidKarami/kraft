@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { CompareFile } from "../../types";
-import { EllipsisVertical, MessageSquare, Plus } from "../icons";
+import { ChevronDown, ChevronUp, ChevronsUpDown, EllipsisVertical, MessageSquare, Plus } from "../icons";
 import { IconButton } from "../ui/IconButton";
 import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
+import { hiddenBefore, STEP, type Grow } from "./expand";
 import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
 import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type LineIndex, type LineRange } from "./range";
@@ -65,6 +66,8 @@ export interface DiffViewProps {
   truncated: { bytes: number; files: number } | null;
   /** An ended item takes no comment (the server refuses it): no line picks, no file comment button. */
   readOnly?: boolean;
+  /** Show unchanged lines in the gap before hunk `gap` of a file (after its last hunk, at the hunk count). Absent: no arrows. */
+  onExpand?: (path: string, gap: number, how: Grow) => void;
 }
 
 /** The diff column's content (prototype 419–492). The split view always
@@ -119,6 +122,9 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const range = useMemo(() => picked && rangeOfPick(picked, index), [picked, index]);
   const isPicked = (a: Anchor) => !!range && inRange(range, a, index);
   const commented = p.commented?.(file.path) ?? NO_RANGES;
+  // An added or a deleted file is all in its diff: nothing more to show.
+  const canExpand = !!p.onExpand && pf.status !== "added" && pf.status !== "deleted";
+  const hidden = useMemo(() => hiddenBefore(pf), [pf]);
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
     let h = -1;
@@ -246,7 +252,8 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null) };
+    const onExpand = (gap: number, how: Grow) => () => live.current.p.onExpand?.(path, gap, how);
+    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null), onExpand };
   }, [file.path]);
   const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean; edit: boolean } | null>(null);
 
@@ -319,6 +326,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
                   key={i}
                   row={r}
                   hunk={hunkOf[i]}
+                  hidden={r.t === "hunk" && canExpand ? hidden[hunkOf[i]] : 0}
                   // Only the rows the pick touches see it, so the rest skip the render.
                   pick={picked && anchors[i].some(isPicked) ? picked : null}
                   range={picked && anchors[i].some(isPicked) ? range : null}
@@ -329,6 +337,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
                   slots={p.after ? anchors[i].map((a) => p.after!(file.path, a)) : NONE}
                 />
               ))}
+              {canExpand && pf.rest !== 0 && <div className="rv-hunk"><Expander gap={pf.hunks.length} hidden={pf.rest ?? null} tail g={gutter} /></div>}
             </div>
           )}
         </div>
@@ -357,6 +366,20 @@ interface Gutter {
   onPlus: (a: Anchor) => () => void;
   onOver: (e: MouseEvent) => void;
   onLeave: () => void;
+  onExpand: (gap: number, how: Grow) => () => void;
+}
+
+/** The arrows on a hunk's row, for the unchanged lines before it; `tail` is the row after the last hunk,
+ *  whose `hidden` is null until the file was read. A short gap has only the one that shows it all. */
+function Expander({ gap, hidden, tail, g }: { gap: number; hidden: number | null; tail?: boolean; g: Gutter }) {
+  const many = hidden === null || hidden > STEP;
+  return (
+    <span className="rv-expand">
+      {many && gap > 0 && <IconButton label={`Show ${STEP} more lines below`} onClick={g.onExpand(gap, "down")}><ChevronDown size={13} aria-hidden /></IconButton>}
+      {many && !tail && <IconButton label={`Show ${STEP} more lines above`} onClick={g.onExpand(gap, "up")}><ChevronUp size={13} aria-hidden /></IconButton>}
+      <IconButton label={hidden === null ? "Show the rest of the file" : `Show all ${hidden} hidden ${hidden === 1 ? "line" : "lines"}`} onClick={g.onExpand(gap, "all")}><ChevronsUpDown size={13} aria-hidden /></IconButton>
+    </span>
+  );
 }
 
 const NONE: ReactNode[] = [];
@@ -402,6 +425,8 @@ const endsOf = (r: LineRange | null, as: Anchor[]) => ({
 interface RowProps {
   row: Row;
   hunk: number;
+  /** A hunk row's unchanged lines before it that an arrow can show; 0 for none. */
+  hidden: number;
   /** The pick and its range, when it covers a line of this row; else null. */
   pick: Pick | null;
   range: LineRange | null;
@@ -414,8 +439,8 @@ interface RowProps {
   slots: ReactNode[];
 }
 
-const RowView = memo(function RowView({ row, hunk, pick, range, picked, commented, readOnly, g, slots }: RowProps) {
-  if (row.t === "hunk") return <div className="rv-hunk rv-mono">{row.text}</div>;
+const RowView = memo(function RowView({ row, hunk, hidden, pick, range, picked, commented, readOnly, g, slots }: RowProps) {
+  if (row.t === "hunk") return <div className="rv-hunk rv-mono">{hidden > 0 && <Expander gap={hunk} hidden={hidden} g={g} />}{row.text}</div>;
   const kind = (c: Cell | null) => (c ? (c.kind === "+" ? " is-add" : c.kind === "-" ? " is-del" : "") : " is-none");
   const marks = (as: Anchor[]) => `${as.some((a) => has(picked, a)) ? " is-picked" : ""}${as.some((a) => has(commented, a)) ? " is-commented" : ""}`;
   const anchors = anchorsOf(row);
@@ -463,6 +488,6 @@ const RowView = memo(function RowView({ row, hunk, pick, range, picked, commente
       {tail}
     </>
   );
-}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.pick === b.pick && a.range === b.range && a.picked === b.picked && a.commented === b.commented && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
+}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.hidden === b.hidden && a.pick === b.pick && a.range === b.range && a.picked === b.picked && a.commented === b.commented && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
 
 const AfterSlot = ({ node }: { node: ReactNode }) => (node ? <div className="rv-after">{node}</div> : null);

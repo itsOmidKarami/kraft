@@ -22,7 +22,7 @@ import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
 import { useReviewPlace } from "./url";
-import { useArtifact, useCompare, useThreads, useViewed } from "./useReview";
+import { useArtifact, useCompare, useExpanded, useThreads, useViewed } from "./useReview";
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
 import "./review.css";
@@ -57,12 +57,24 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const [treeOpen, setTreeOpen] = useState(!overlay);
   useEffect(() => setTreeOpen(!overlay), [overlay]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const setFold = (path: string, folded: boolean) => setCollapsed((s) => {
+    const n = new Set(s);
+    if (folded) n.add(path);
+    else n.delete(path);
+    return n;
+  });
   const [picked, setPicked] = useState<Pick | null>(null);
   const viewed = useViewed(item.id, place.to, compare);
+  // A file marked viewed folds away, and opens again when the mark is taken off.
+  const setViewed = (path: string, v: boolean) => {
+    setFold(path, v);
+    void viewed.toggle(path, v);
+  };
   const all = compare.state === "ready" ? compare.data.files : [];
   const files = byNodes(all, place.nodes);
   const diffText = compare.state === "ready" ? compare.data.diff : "";
-  const patch = useMemo(() => new Map(parsePatch(diffText).map((f) => [f.path, f])), [diffText]);
+  const parsed = useMemo(() => new Map(parsePatch(diffText).map((f) => [f.path, f])), [diffText]);
+  const { patch, expand } = useExpanded(item.id, place.from, place.to, !diff.prefs.show_whitespace, parsed);
   const notShown = new Set(compare.state === "ready" && compare.data.truncated ? all.filter((f) => !patch.has(f.path)).map((f) => f.path) : []);
   const threadList = threads.state === "ready" ? threads.data : [];
   // With no file chosen, the tree's first: what one-file mode shows.
@@ -145,7 +157,6 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
             selected={current}
             isViewed={viewed.isViewed}
             onSelect={select}
-            onViewed={viewed.toggle}
             error={viewed.error}
           />
         )}
@@ -163,15 +174,10 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               patch={patch}
               prefs={diff.prefs}
               collapsed={collapsed}
-              onCollapse={(path, c) => setCollapsed((s) => {
-                const n = new Set(s);
-                if (c) n.add(path);
-                else n.delete(path);
-                return n;
-              })}
+              onCollapse={setFold}
               selected={current}
               isViewed={viewed.isViewed}
-              onViewed={viewed.toggle}
+              onViewed={setViewed}
               threadCount={(path) => threadList.filter((t) => t.file_path === path && unresolved(t)).length}
               picked={picked}
               onPick={setPicked}
@@ -181,11 +187,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               }}
               onCompose={comments.openPick}
               onFileComment={(path) => {
-                setCollapsed((s) => {
-                  const n = new Set(s);
-                  n.delete(path);
-                  return n;
-                });
+                setFold(path, false);
                 comments.openFile(path);
               }}
               after={comments.after}
@@ -193,6 +195,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               top={comments.top}
               truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
               readOnly={ended}
+              onExpand={(path, gap, how) => void expand(path, gap, how)}
             />
           )}
           {compare.state === "ready" && comments.elsewhere}

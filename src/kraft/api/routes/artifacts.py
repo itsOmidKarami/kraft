@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
 from kraft import events, review, store
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 #: Diff bodies larger than this are cut at a file boundary. Protects the
 #: browser; not a user decision, so not policy.
 DIFF_MAX_BYTES = 1_000_000
+#: The most context lines `/compare` asks git for: enough for a whole file.
+CONTEXT_MAX_LINES = 1_000_000
 
 
 def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
@@ -208,9 +210,16 @@ async def unmark_viewed(wid: str, request: Request):
 # The review flow spec, §2.
 @api_router.get("/work-items/{wid}/compare")
 async def compare_work_item(
-    wid: str, request: Request, nodes: str | None = None, ignore_whitespace: bool = False
+    wid: str,
+    request: Request,
+    nodes: str | None = None,
+    ignore_whitespace: bool = False,
+    file: str | None = None,
+    context: int | None = Query(None, ge=0, le=CONTEXT_MAX_LINES),
 ):
-    """Any two review targets of the pending gate, diffed."""
+    """Any two review targets of the pending gate, diffed. `file` keeps one
+    file and `context` widens its hunks: how the review page reads the
+    unchanged lines around a change."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     q = request.query_params
@@ -224,7 +233,7 @@ async def compare_work_item(
     from_sha, from_base = _resolve_target(st, row, gate, frm)
     to_sha, to_base = _resolve_target(st, row, gate, to)
     change = review.read_change(
-        worktree, from_sha, head=to_sha, ignore_whitespace=ignore_whitespace
+        worktree, from_sha, head=to_sha, context=context, ignore_whitespace=ignore_whitespace
     )
     if change is None:
         raise HTTPException(500, "git could not diff these two targets")
@@ -254,6 +263,9 @@ async def compare_work_item(
             for n in wanted
         ]
         diff = review.filter_diff(diff, keep)
+    if file:
+        files = [f for f in files if f["path"] == file]
+        diff = review.filter_diff(diff, {file})
     diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)
     return {
         "from": {"target": frm, "sha": from_sha},

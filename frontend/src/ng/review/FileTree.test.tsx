@@ -13,7 +13,6 @@ afterEach(() => vi.restoreAllMocks());
 
 const tree = (o: Partial<Parameters<typeof FileTree>[0]> = {}) => {
   const onSelect = vi.fn();
-  const onViewed = vi.fn();
   render(
     <FileTree
       files={FILES}
@@ -23,12 +22,11 @@ const tree = (o: Partial<Parameters<typeof FileTree>[0]> = {}) => {
       selected="search/embed.py"
       isViewed={(p) => FILES.find((f) => f.path === p)!.viewed}
       onSelect={onSelect}
-      onViewed={onViewed}
       error={null}
       {...o}
     />,
   );
-  return { onSelect, onViewed };
+  return { onSelect };
 };
 
 describe("FileTree", () => {
@@ -37,13 +35,14 @@ describe("FileTree", () => {
     expect(screen.getByText("1 file")).toBeInTheDocument();
   });
 
-  it("groups by folder, top level last; counts, open threads, viewed, the cut and untracked files", () => {
+  it("groups by folder, top level last; counts, open threads, viewed, each kind's icon, the cut and untracked files", () => {
     tree();
     expect(screen.getAllByRole("button", { expanded: true }).map((b) => b.textContent)).toEqual(["▾search/", "▾tests/"]);
-    expect([...document.querySelectorAll(".rv-file-name")].map((b) => b.getAttribute("title"))).toEqual(["search/cache.py", "search/embed.py", "tests/test_cache.py", "pyproject.toml"]);
+    expect([...document.querySelectorAll(".rv-file-name")].map((b) => b.getAttribute("title"))).toEqual(["search/cache.py", "search/embed.py (viewed)", "tests/test_cache.py", "pyproject.toml"]);
+    expect([...document.querySelectorAll(".rv-file-icon")].map((i) => i.getAttribute("data-lang"))).toEqual(["python", "python", "python", "yaml"]);
+    expect([...document.querySelectorAll(".rv-file-row.is-viewed .rv-file-name")].map((b) => b.textContent)).toEqual(["embed.py"]);
     expect(screen.getByText("4 files")).toBeInTheDocument();
     expect(screen.getByTitle("2 open threads")).toHaveTextContent("2");
-    expect(screen.getByRole("button", { name: "Viewed search/embed.py" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /^pyproject.toml/ })).toHaveTextContent("not shown");
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
     expect(screen.getByText("1 of 4 viewed")).toBeInTheDocument();
@@ -51,16 +50,14 @@ describe("FileTree", () => {
     expect(screen.getByRole("button", { name: "embed.py" })).toHaveAttribute("aria-current", "true");
   });
 
-  it("folds a folder, filters by path, selects and marks", () => {
-    const { onSelect, onViewed } = tree();
+  it("folds a folder, filters by path and selects", () => {
+    const { onSelect } = tree();
     fireEvent.click(screen.getByRole("button", { name: "search/" }));
     expect(screen.queryByRole("button", { name: "cache.py" })).toBeNull();
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter files" }), { target: { value: "test" } });
     expect(screen.queryByRole("button", { name: "search/" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "test_cache.py" }));
     expect(onSelect).toHaveBeenCalledWith("tests/test_cache.py");
-    fireEvent.click(screen.getByRole("button", { name: "Viewed tests/test_cache.py" }));
-    expect(onViewed).toHaveBeenCalledWith("tests/test_cache.py", true);
   });
 });
 

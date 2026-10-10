@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { plural } from "../../format";
 import type { CompareFile, ReviewThread } from "../../types";
+import { File, FileCode, FileCog, FileTerminal, FileText } from "../icons";
 import { folders, threadSummary, unresolved } from "./model";
-import { tip } from "../ui/Tooltip";
+import { languageOf, type Lang } from "./tokenize";
 
-/** The file list beside the diff (prototype 412–417): counts, threads and
- *  viewed per file, folders that fold, a filter (GAP §2 #3). */
+/** A file's icon, by the language the diff reads it as. */
+const ICON: Record<Lang, typeof File> = { clike: FileCode, python: FileCode, shell: FileTerminal, yaml: FileCog, markdown: FileText, plain: File };
+
+/** The file list beside the diff (prototype 412–417): counts and threads per
+ *  file, each with its kind's icon and dimmed once viewed (the mark itself is
+ *  set on the file's header), folders that fold, a filter (GAP §2 #3). */
 export function FileTree(p: {
   files: CompareFile[];
   untracked: string[];
@@ -15,8 +20,6 @@ export function FileTree(p: {
   selected: string | null;
   isViewed: (path: string) => boolean;
   onSelect: (path: string) => void;
-  /** Absent: the marks are shown, not changed (the gate review's list). */
-  onViewed?: (path: string, viewed: boolean) => void;
   error: string | null;
 }) {
   const [filter, setFilter] = useState("");
@@ -53,16 +56,12 @@ export function FileTree(p: {
               files.map((f) => {
                 const v = p.isViewed(f.path);
                 const n = open(f.path);
+                const lang = languageOf(f.path);
+                const Icon = ICON[lang];
                 return (
-                  <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}`}>
-                    {p.onViewed ? (
-                      <button type="button" className={`rv-viewed${v ? " is-on" : ""}`} aria-pressed={v} {...tip(`Viewed ${f.path}`, v ? "Viewed" : "Mark viewed")} onClick={() => p.onViewed!(f.path, !v)}>
-                        {v ? "✓" : "○"}
-                      </button>
-                    ) : (
-                      <span className={`rv-viewed${v ? " is-on" : ""}`} title={v ? "Viewed" : "Not viewed"} aria-label={v ? "viewed" : undefined}>{v ? "✓" : "○"}</span>
-                    )}
-                    <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
+                  <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}${v ? " is-viewed" : ""}`}>
+                    <Icon className="rv-file-icon" data-lang={lang} size={13} aria-hidden />
+                    <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={v ? `${f.path} (viewed)` : f.path} onClick={() => p.onSelect(f.path)}>
                       <span className="rv-mono">{f.path.slice(dir.length)}</span>
                       {p.notShown.has(f.path) && <span className="rv-muted"> not shown</span>}
                     </button>
