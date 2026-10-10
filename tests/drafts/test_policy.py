@@ -234,8 +234,8 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
     [
         ("housekeeping", "archive.after_days", -1, "housekeeping"),
         ("housekeeping", "max_concurrent", 0, "housekeeping"),
-        ("housekeeping", "storage.worktrees.quota", "8G", "housekeeping"),
         ("findings", "findings.loop_severities", ["info"], "loops"),
+        ("housekeeping", "storage.worktrees.quota", "8G", "housekeeping"),
     ],
 )
 def test_a_value_put_policy_refuses_is_a_problem_in_its_group(client, scope, key, value, group):
