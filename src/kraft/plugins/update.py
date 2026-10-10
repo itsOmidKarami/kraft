@@ -346,14 +346,18 @@ def _catalogue(
     where = manifest.COLLECTION_JSON
     if collection.git is not None:
         mirror, commit = fetch.fetch(plugins_dir, name, collection.git, collection.ref)
-        text = fetch.read_file(mirror, commit, where, fetch.MAX_JSON).decode()
+        data = fetch.read_file(mirror, commit, where, fetch.MAX_JSON)
         source = fetch.redact(collection.git)
     else:
         mirror, commit, source = None, None, str(collection.path)
         try:
-            text = (Path(source) / where).read_text()
+            data = (Path(source) / where).read_bytes()
         except OSError as exc:
             raise fetch.FetchError("refused", f"{source}: {exc}") from exc
+    try:
+        text = data.decode()
+    except UnicodeDecodeError as exc:
+        raise fetch.PluginRefused(f"{source}: {where} is not valid UTF-8") from exc
     listed = manifest.collection(manifest.parse(text, where), where)
     if listed.name != name:
         raise fetch.PluginRefused(

@@ -544,6 +544,21 @@ def test_a_collection_that_cannot_be_fetched_fails_only_its_plugins(acme, tmp_pa
     assert list(read_yaml(home[0] / "plugins.yaml")["plugins"]) == [ID]
 
 
+def test_a_collection_that_is_not_utf8_fails_only_its_plugins(acme, tmp_path):
+    repo, home = acme
+    bad = tmp_path / "bad"
+    (bad / ".kraft").mkdir(parents=True)
+    (bad / ".kraft" / "collection.json").write_bytes(b"\xff\xfe")
+    config = read_yaml(home[0] / "plugins.yaml")
+    config["collections"]["bad"] = {"path": str(bad)}
+    write_yaml(home[0] / "plugins.yaml", config)
+
+    results = _run(home, [ID, "x@bad"], install=[ID, "x@bad"])
+
+    assert (results[ID].outcome, results["x@bad"].outcome) == ("applied", "refused")
+    assert "not valid UTF-8" in results["x@bad"].problems[0]
+
+
 def test_a_second_writer_waits_then_fails(acme, monkeypatch):
     repo, home = acme
     monkeypatch.setattr(update, "LOCK_WAIT_S", 0.2)
