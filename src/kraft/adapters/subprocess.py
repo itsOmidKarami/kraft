@@ -476,18 +476,25 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
     `PermissionError` for a zombie-only group instead, which is why this
     passed locally and failed pause/resume, SIGTERM shutdown and the e2e
     pause flow in CI (Kraft-rki).
+
+    The first liveness check is a second SIGTERM, not a probe: a member forked
+    while the first one was being delivered (the launch wrapper's `sleep`, on a
+    cancel straight after launch) misses it and would otherwise outlive the
+    whole `grace` -- a pause or skip then paid it, flaking under load.
     """
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         return
     deadline = time.monotonic() + grace
+    probe = signal.SIGTERM
     while time.monotonic() < deadline:
         await asyncio.sleep(0.2)
         if reap is not None:
             reap()
         try:
-            os.killpg(pgid, 0)
+            os.killpg(pgid, probe)
+            probe = 0
         except (ProcessLookupError, PermissionError):
             return
     try:
