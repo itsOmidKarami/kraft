@@ -13,6 +13,8 @@
 .ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; min-width: 44px; padding: 0; border: 0; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
 .ph-brief + .ph-linkbtn { margin: -10px 0; }
 .ph-underline { text-decoration: underline; text-underline-offset: 3px; }
+/* A state card's fact that opens another item: the fact's own text, not the link button's. */
+.ph-linkbtn.ph-factlink { color: inherit; font: inherit; text-align: left; }
 .ph-add { color: var(--ok); }
 .ph-del { color: var(--bad); }
 .ph-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--text-sub); cursor: pointer; }

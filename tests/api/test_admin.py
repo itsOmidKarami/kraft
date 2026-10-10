@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import plistlib
 import sys
+import threading
 
 import pytest
 import yaml
@@ -107,10 +108,10 @@ def test_reload_rereads_intake_and_clears_what_it_loaded(client, templates_dir):
 def test_reload_that_adds_a_storage_limit_measures_at_once(client, templates_dir, monkeypatch):
     """Nothing measured while no limit was set, so the new limit would be
     judged against a stale figure until the next ten-minute tick."""
-    walks = []
+    walked = threading.Event()
 
     def measure(base, stop=None):
-        walks.append(base)
+        walked.set()
         return storage.Usage("2026-01-01T00:00:00+00:00", 0, {}, {})
 
     monkeypatch.setattr(storage, "measure", measure)
@@ -121,7 +122,8 @@ def test_reload_that_adds_a_storage_limit_measures_at_once(client, templates_dir
     assert client.post("/api/apply/reload").status_code == 200
 
     assert client.app.state.policy.storage_limit_bytes == 10 * 1024**3
-    assert walks
+    # The reload kicks the walk and answers without waiting for it.
+    assert walked.wait(10)
 
 
 def test_templates_reload_is_the_same_reload(client, templates_dir):
