@@ -1019,6 +1019,32 @@ def budget_cap(st, row) -> dict:
     }
 
 
+def _sessions_out(sessions, skipped: frozenset[str], nodes: dict[str, str]) -> list[dict]:
+    """The item's sessions as the API gives them. `skipped` marks the newest
+    session of a task under a skipped path, or of a node skipped after it
+    began, unless it had already finished: its stored status is only where the
+    skip found it. A fanned-out task has a newest session per repository, and
+    an escalation turn is no task of the node: a node skip does not mark it."""
+    newest = {(s["hook_point"], s["repository"]): s["id"] for s in sessions}
+
+    def cut_short(s) -> bool:
+        hook = s["hook_point"]
+        return (
+            newest[hook, s["repository"]] == s["id"]
+            and not s["status"].startswith("done")
+            and (
+                any(hook == p or hook.startswith(p + ".") for p in skipped)
+                or (
+                    hook.startswith(s["node_id"] + ".")
+                    and not hook.endswith(".escalation")
+                    and s["created_at"] < nodes.get(s["node_id"], "")
+                )
+            )
+        )
+
+    return [{**{k: s[k] for k in s.keys()}, "skipped": cut_short(s)} for s in sessions]
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -1030,6 +1056,8 @@ async def get_work_item(wid: str, request: Request):
             "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
         ).fetchall()
     )
+    skipped = st.db.read(lambda c: store.skipped_paths(c, wid))
+    skipped_nodes = st.db.read(lambda c: store.skipped_nodes(c, wid))
     pending = _pending_gate(st, wid)
     stop_payload, escalated = _stop_episode(st, wid)
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
@@ -1068,12 +1096,12 @@ async def get_work_item(wid: str, request: Request):
         # Which pass of its node each session ran in (`store.number_passes`);
         # an escalation turn is in none.
         "worker_sessions": [
-            {
-                **{k: s[k] for k in s.keys()},
-                **({"pass": n} if (n := passes[0].get(s["id"])) else {}),
-            }
-            for s in sessions
+            {**s, **({"pass": n} if (n := passes[0].get(s["id"])) else {})}
+            for s in _sessions_out(sessions, skipped, skipped_nodes)
         ],
+        # Every task or step path a person skipped in this run: a task under
+        # one that never ran has no session to carry `skipped`.
+        "skipped_paths": sorted(skipped),
         # What started each pass after a node's first, for the nodes that ran
         # more than once: one pass is nothing to tell apart.
         "node_passes": {node: ps for node, ps in passes[1].items() if len(ps) > 1},

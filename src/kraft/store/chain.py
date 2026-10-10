@@ -8,7 +8,7 @@ from kraft import events
 from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-from kraft.vocab import ChainEvent, GateEvent, SessionEvent, SettingsEvent
+from kraft.vocab import ChainEvent, GateEvent, SessionEvent, SessionStatus, SettingsEvent
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -197,9 +197,14 @@ def skip_node(
     interrupts a live attempt — marked `paused` here, *before* the caller's
     `_terminate` signals them, so the adapter's death handler reads a session
     it expected to stop rather than one that just failed (`pause_work_item`'s
-    ordering, same race).
+    ordering, same race). A session the node left parked on an external wait is
+    closed the same way: no walk observes that wait again.
     """
     now = _now()
+    parked = conn.execute(
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ?",
+        (work_item_id, node_id, SessionStatus.WAITING),
+    ).fetchall()
     if not write_status(
         conn,
         "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
@@ -212,7 +217,7 @@ def skip_node(
         ChainEvent.NODE_SKIPPED,
         {"node_id": node_id, "gate": gate, "note": note},
     )
-    for sid in session_ids or []:
+    for sid in dict.fromkeys([*(session_ids or []), *(r[0] for r in parked)]):
         conn.execute(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
@@ -235,9 +240,17 @@ def skip_scope(
     marked `paused` here, before the caller signals them, the same ordering
     `skip_node` keeps. The item's own status is untouched -- a sibling of the
     skipped task may still be running, and the walk it belongs to goes on.
+
+    A session the scope left parked on an external wait is closed the same way:
+    no walk observes that wait again, so nothing else would ever end it.
     """
     now = _now()
-    for sid in session_ids or []:
+    parked = conn.execute(
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND status = ? "
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        (work_item_id, SessionStatus.WAITING, path, path + ".", path + "."),
+    ).fetchall()
+    for sid in [*(session_ids or []), *(r[0] for r in parked)]:
         conn.execute(
             "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
             (now, sid),
@@ -257,6 +270,19 @@ def skipped_paths(conn: sqlite3.Connection, work_item_id: str) -> frozenset[str]
         (work_item_id, ChainEvent.SCOPE_SKIPPED, work_item_id),
     ).fetchall()
     return frozenset(r[0] for r in rows)
+
+
+def skipped_nodes(conn: sqlite3.Connection, work_item_id: str) -> dict[str, str]:
+    """Each node skipped in the current run fork, and when: a session of it
+    from before then was cut short by the skip, one after is a later pass."""
+    rows = conn.execute(
+        "SELECT json_extract(payload, '$.node_id'), created_at FROM events "
+        "WHERE work_item_id = ? AND type = ? AND seq > ("
+        "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
+        ") ORDER BY seq",
+        (work_item_id, ChainEvent.NODE_SKIPPED, work_item_id),
+    ).fetchall()
+    return dict(rows)
 
 
 def materialized_chain_of(row):

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { asOfPass, footerState, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
+import { asOfPass, footerState, lookWord, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
 import { notStarted } from "./chainValues";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
@@ -30,6 +30,13 @@ describe("nodeGraph", () => {
     expect(g.steps[1].tasks[0]).toMatchObject({ running: true, taskKind: "agent" });
     expect(g.loop).toEqual({ tone: "active", label: "round 2", tasks: [] });
     expect(g.onFailure).toBe("repair_pass");
+  });
+
+  it("draws a skipped task as skipped, whether the skip cut its session short or it never ran", () => {
+    const item = detail({ skipped_paths: ["verification.checks"], worker_sessions: [s("verification.checks.lint", { status: "paused", skipped: true })] });
+    const g = nodeGraph(item, node, NOW);
+    expect(g.steps[0].tasks.map((t) => [t.id, t.state, t.meta, lookWord(t)])).toEqual([["lint", "done", "skipped", "skipped"], ["typecheck", "done", "skipped", "skipped"]]);
+    expect(g.steps[1].tasks[0].state).toBe("todo");
   });
 
   it("draws a task by its kind in the frozen chain, before it has run (WI-3)", () => {

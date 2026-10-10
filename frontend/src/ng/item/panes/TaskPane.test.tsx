@@ -238,6 +238,16 @@ describe("task pane", () => {
     expect(within(pane("code_review")).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("counts a skipped task as settled in the node and step panes, whether the skip cut it short or it never ran", () => {
+    const skipped = { ...item, skipped_paths: ["verification.checks", "verification.review"], worker_sessions: [sess("verification.checks.lint", 1, { status: "paused", skipped: true })] };
+    const { unmount } = mount("/work-items/w1/nodes/verification", skipped);
+    expect(within(pane("verification")).getByText(/2 of 2 tasks/)).toBeInTheDocument();
+    expect(within(pane("verification")).getAllByText("✓")).toHaveLength(2);
+    unmount();
+    mount("/work-items/w1/nodes/verification?sel=verification.review", skipped);
+    expect(within(pane("review")).getByText("status").nextSibling).toHaveTextContent("done");
+  });
+
   it.each([
     ["the node the run stands on: Skip task before it runs", "verification", "verification.review.code_review", "code_review", true],
     ["a later node: nothing to skip yet", "verification", "merge_request.open.open_draft", "open_draft", false],
