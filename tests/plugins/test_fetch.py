@@ -205,3 +205,49 @@ def test_only_the_layout_is_extracted(tmp_path, plugins_dir):
         assert set(extracted.files) == wanted
         assert extracted.skipped == ("chains/Ship.yaml",)
         assert extracted.files["chains/two.yaml"] == ("100644", same.encode())
+
+
+def test_the_digest_frames_each_file():
+    """Path, mode and content are separate fields: bytes cannot move between
+    a path and a file, and an executable bit is part of what was reviewed."""
+    one = {"chains/a.yaml": ("100644", b"bc")}
+    assert fetch.digest(one) != fetch.digest({"chains/a.yamlb": ("100644", b"c")})
+    assert fetch.digest(one) != fetch.digest({"chains/a.yaml": ("100755", b"bc")})
+    assert fetch.digest(one).startswith("sha256:") and len(fetch.digest(one)) == 71
+    two = {"b": ("100644", b"1"), "a": ("100644", b"2")}
+    assert fetch.digest_manifest(two).split(b"\0")[0] == b"a"
+
+
+#: A skill with CRLF line endings under `text=auto`: a checkout would convert it.
+_CRLF = {"release": {"skills": {"x": "one\r\ntwo\n"}, "files": {".gitattributes": "* text=auto\n"}}}
+
+
+@pytest.mark.parametrize("autocrlf", ["true", "false"])
+def test_the_digest_is_the_same_whatever_the_git_config(
+    tmp_path, plugins_dir, monkeypatch, autocrlf
+):
+    """Raw blobs, not a checkout: line-ending conversion never applies, so the
+    bytes extracted are the bytes committed under either setting."""
+    config = tmp_path / "gitconfig"
+    config.write_text(f"[core]\n\tautocrlf = {autocrlf}\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    collection = make_collection(tmp_path, _CRLF)
+    committed = git(collection, "rev-parse", "HEAD:plugins/release/skills/x/SKILL.md")
+    data = _extract(collection, plugins_dir).files["skills/x/SKILL.md"][1]
+    # git's own id of the bytes extracted equals the committed blob's.
+    probe = tmp_path / "probe"
+    probe.write_bytes(data)
+    assert git(collection, "hash-object", "--no-filters", str(probe)) == committed
+
+
+def test_a_store_is_addressed_by_its_content(collection, plugins_dir):
+    extracted = _extract(collection, plugins_dir)
+    store = fetch.write_store(plugins_dir, extracted)
+    assert store == plugins_dir / "store" / fetch.digest(extracted.files).removeprefix("sha256:")
+    assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
+    assert (store / fetch.DIGEST_FILE).read_bytes() == fetch.digest_manifest(extracted.files)
+    assert not (store / "library.yaml").stat().st_mode & 0o222
+    # The same content from a directory collection is the same store.
+    again = fetch.write_store(plugins_dir, fetch.extract_dir(collection / "plugins/release"))
+    assert again == store
+    assert list((plugins_dir / "staging").iterdir()) == []

@@ -12,9 +12,11 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import stat
 import subprocess
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +32,7 @@ MAX_JSON = 256 << 10
 MAX_SKILL = 256 << 10
 MAX_FILES = 500
 MAX_TOTAL = 20 << 20
+DIGEST_FILE = ".kraft-digest"
 
 _REGULAR = ("100644", "100755")
 _LFS = b"version https://git-lfs.github.com/spec/"
@@ -294,3 +297,58 @@ def extract_dir(root: Path) -> Extracted:
         _check_bytes(where, rel, data)
         files[rel] = (found[rel][0], data)
     return Extracted(files, tuple(skipped))
+
+
+def digest_manifest(files: Mapping[str, tuple[str, bytes]]) -> bytes:
+    """One line per file, sorted by the path's bytes: path, mode and the
+    SHA-256 of the content, NUL-separated. Paths are lowercase ASCII, so the
+    order and the bytes are the same on every machine."""
+    return b"".join(
+        rel.encode()
+        + b"\0"
+        + mode.encode()
+        + b"\0"
+        + hashlib.sha256(data).hexdigest().encode()
+        + b"\n"
+        for rel, (mode, data) in sorted(files.items(), key=lambda item: item[0].encode())
+    )
+
+
+def digest(files: Mapping[str, tuple[str, bytes]]) -> str:
+    return "sha256:" + hashlib.sha256(digest_manifest(files)).hexdigest()
+
+
+def write_store(plugins_dir: Path, extracted: Extracted) -> Path:
+    """`extracted` as `store/<digest>/`, addressed by its content alone, so two
+    installs of the same content share it. Written in `staging/` and renamed
+    into place (one filesystem, so the rename is atomic), then never changed:
+    files and directories are read-only. The digest's manifest sits beside the
+    files as `.kraft-digest`, outside the hashed set."""
+    final = plugins_dir / "store" / digest(extracted.files).removeprefix("sha256:")
+    if final.is_dir():
+        return final
+    staging = plugins_dir / "staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(dir=staging))
+    for rel, (mode, data) in extracted.files.items():
+        path = tmp / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(0o555 if mode == "100755" else 0o444)
+    (tmp / DIGEST_FILE).write_bytes(digest_manifest(extracted.files))
+    (tmp / DIGEST_FILE).chmod(0o444)
+    folders = [p for p in tmp.rglob("*") if p.is_dir()]
+    try:
+        # Renamed while still writable: macOS refuses to move a read-only
+        # directory to another parent.
+        os.rename(tmp, final)
+    except OSError:
+        # Another writer renamed the same content into place first.
+        if not final.is_dir():
+            raise
+        shutil.rmtree(tmp)
+        return final
+    for folder in (final, *(final / p.relative_to(tmp) for p in folders)):
+        folder.chmod(0o555)
+    return final
