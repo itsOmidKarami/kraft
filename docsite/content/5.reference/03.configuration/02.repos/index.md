@@ -90,6 +90,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `automated_review` | mapping | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for: `bot: <login>` or `check: <name>`. See [Automated review](#automated-review). |
 | `ci_checks` | boolean | `true` | Set `false` on a repo with no CI, so both CI waits pass at once instead of waiting on checks that never come. See [`ci_checks`](#ci_checks). |
+| `library_auto_update` | boolean | `false` | Take text-only changes to this repo's accepted [repo library](/reference/configuration/repo-libraries#automatic-updates) without a person. |
 
 ## Field details
 

@@ -44,8 +44,8 @@ origin: src/kraft/addons/repo_library.py §accept
 
 ## REQ a-change-waits-for-a-person
 
-WHEN an accepted repo library changes, the system SHALL report the change as waiting and SHALL NOT apply it.
-enforced-by: tests/addons/test_repo_library.py::test_the_daily_check_reports_and_applies_nothing[a-change], tests/test_doctor_addons.py::test_the_repo_libraries_row[waiting]
+WHERE an entry does not set `library_auto_update: true`, WHEN its accepted repo library changes, the system SHALL report the change as waiting and SHALL NOT apply it.
+enforced-by: tests/addons/test_repo_library.py::test_the_daily_check_reports_and_applies_nothing[a-change], tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[not-opted-in], tests/test_doctor_addons.py::test_the_repo_libraries_row[waiting]
 origin: src/kraft/addons/repo_library.py §check_all
 
 ## REQ an-unaccepted-repo-is-not-asked-about
@@ -63,7 +63,7 @@ origin: src/kraft/api/deps.py §chain_template_for
 ## REQ a-worker-does-not-take-a-repo-library
 
 IF a worker runs `kraft repo library`, THEN the system SHALL refuse.
-enforced-by: tests/cli/test_repos.py::test_a_worker_may_not_take_a_repo_library
+enforced-by: tests/cli/test_repos_library.py::test_a_worker_may_not_take_a_repo_library
 origin: src/kraft/cli/repo.py §_cmd_library
 
 ## REQ a-named-repo-library-holds-its-repo
@@ -71,3 +71,57 @@ origin: src/kraft/cli/repo.py §_cmd_library
 IF local configuration names a repo library's namespace, THEN the system SHALL refuse to disconnect the repository and list each reference.
 enforced-by: tests/api/test_repos_library.py::test_disconnect_is_refused_while_something_names_the_library
 origin: src/kraft/api/routes/repos.py §remove_repo
+
+## REQ an-opted-in-repo-takes-text-changes
+
+WHERE an entry sets `library_auto_update: true`, WHEN its accepted library changes in prompt, skill or steering text only, the system SHALL apply the change without a person and load it.
+enforced-by: tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[text-only], tests/api/test_deps_repo_library.py::test_an_opted_in_repo_takes_a_text_change_when_the_server_checks
+origin: src/kraft/addons/repo_library.py §_unattended
+
+## REQ a-reach-line-holds-an-unattended-apply
+
+IF a changed repo library's review has a Reach line, THEN the system SHALL keep serving the accepted version and report the change as held.
+enforced-by: tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[a-reach-line], tests/test_doctor_addons.py::test_the_repo_libraries_row[held]
+origin: src/kraft/addons/repo_library.py §_unattended
+
+## REQ a-change-of-shape-waits-for-a-person
+
+IF a change alters any chain other than in its text, or adds or removes a chain, THEN the system SHALL NOT apply it without a person.
+enforced-by: tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-node-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-chain-added], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-judges-prompt], tests/addons/test_repo_library.py::test_a_local_chain_that_changes_shape_through_the_library_holds, tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[a-chain-added]
+origin: src/kraft/addons/repo_library.py §_holds
+
+## REQ a-deciding-tasks-text-waits-for-a-person
+
+IF a change alters the text of a skill or steering profile that a gate's `auto_review`, a `judge` or an `escalation` reads, THEN the system SHALL NOT apply it without a person.
+enforced-by: tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-reviewers-skill], tests/addons/test_repo_library.py::test_what_holds_a_change_with_no_reach_line[a-reviewers-steering], tests/addons/test_repo_library.py::test_the_daily_check_applies_text_and_holds_the_rest[a-reviewers-skill]
+origin: src/kraft/addons/repo_library.py §_holds
+
+## REQ a-moved-remote-is-reach
+
+IF the remote's URL or its default branch's name differs from what was accepted, THEN the system SHALL say so as a Reach line.
+enforced-by: tests/addons/test_repo_library.py::test_a_change_from_somewhere_else_is_said_as_reach[another-url], tests/addons/test_repo_library.py::test_a_change_from_somewhere_else_is_said_as_reach[another-default-branch]
+origin: src/kraft/addons/repo_library.py §check
+
+## REQ a-moved-default-chain-is-reach
+
+IF a change gives or takes away the repository's default chain, THEN the system SHALL say so as a Reach line.
+enforced-by: tests/addons/test_repo_library.py::test_a_change_that_moves_the_repos_default_chain_is_reach[gains-default], tests/addons/test_repo_library.py::test_a_change_that_moves_the_repos_default_chain_is_reach[loses-default], tests/addons/test_repo_library.py::test_a_change_that_moves_the_repos_default_chain_is_reach[the-entry-names-another]
+origin: src/kraft/addons/repo_library.py §check
+
+## REQ nothing-is-first-loaded-or-dropped-unattended
+
+The system SHALL NOT accept a first load, or drop a library, without a person.
+enforced-by: tests/addons/test_repo_library.py::test_an_opted_in_entry_never_drops_or_guesses[library-gone], tests/addons/test_repo_library.py::test_a_first_load_has_no_holds_of_its_own, tests/addons/test_repo_library.py::test_the_daily_check_asks_about_no_library_nobody_accepted
+origin: src/kraft/addons/repo_library.py §check_all
+
+## REQ the-key-is-asked-for-once
+
+WHEN a person accepts a first load at a prompt, the system SHALL ask once whether later text changes may be taken unattended, SHALL say what that trusts, and SHALL set the key only on a yes.
+enforced-by: tests/cli/test_repos_library.py::test_a_first_accept_asks_once_about_later_changes[yes], tests/cli/test_repos_library.py::test_a_first_accept_asks_once_about_later_changes[no], tests/cli/test_repos_library.py::test_a_first_accept_asks_once_about_later_changes[enter-is-no], tests/cli/test_repos_library.py::test_a_first_accept_asks_once_about_later_changes[the-yes-flag-is-not-asked], tests/cli/test_repos_library.py::test_a_later_accept_is_not_asked_again
+origin: src/kraft/cli/repo.py §_ask_auto_update
+
+## REQ an-unbounded-auto-update-is-warned-about
+
+WHERE an entry sets `library_auto_update: true` on an instance with no `maxima:`, `allowed_tools` or `sandbox`, doctor SHALL warn.
+enforced-by: tests/test_doctor_addons.py::test_the_repo_libraries_row_warns_about_unbounded_auto_update[no-bounds], tests/test_doctor_addons.py::test_the_repo_libraries_row_warns_about_unbounded_auto_update[maxima], tests/test_doctor_addons.py::test_the_repo_libraries_row_warns_about_unbounded_auto_update[sandbox]
+origin: src/kraft/doctor.py §_repo_libraries_check
