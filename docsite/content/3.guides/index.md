@@ -15,6 +15,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - **An item stopped on a cap.** Read [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap).
 - **You want the board on your phone.** Read [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone), then [Remote access](/guides/run/remote-access).
 - **You are upgrading Kraft, backing it up, or going back a version.** Read [Upgrade Kraft](/guides/run/upgrade-kraft), [Back up and restore the database](/guides/run/back-up-and-restore) or [Roll back to 1.4](/guides/run/roll-back).
+- **You want your team to run the same chains, or to install someone else's.** Read [Share chains with plugins](/guides/customize/share-chains-with-plugins).
 - **You want to change the chain, a [harness](/concepts/vocabulary#harness) or the server.** Pick from the groups below.
 
 ## In this section

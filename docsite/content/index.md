@@ -164,7 +164,7 @@ variant: ghost
 ---
 to: /guides
 title: Guides
-description: Use Kraft from your agent, run Kraft Lite, reach the board from a phone, add a harness.
+description: Use Kraft from your agent, run Kraft Lite, write your own chain, share chains as plugins, reach the board from a phone, add a harness.
 variant: ghost
 ---
 ::::

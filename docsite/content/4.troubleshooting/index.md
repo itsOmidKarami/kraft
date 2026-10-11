@@ -2,7 +2,7 @@
 title: Troubleshooting
 navigation:
   title: Overview
-description: Where to look when a work item stopped, the server will not start, or a doctor row fails.
+description: Where to look when a work item stopped, the server will not start, a doctor row fails, or a plugin is refused.
 ---
 
 Find the message you are looking at in the first column, then follow its link.
@@ -23,8 +23,9 @@ Find the message you are looking at in the first column, then follow its link.
 | `kraft: refusing to start`, or a port that is already in use | [Kraft won't start: port already in use](/troubleshooting/starting-and-reaching-kraft#kraft-wont-start-port-already-in-use) |
 | A webhook or proxy gets 403 `unexpected Host` | [A webhook or proxy gets 403 "unexpected Host"](/troubleshooting/starting-and-reaching-kraft#a-webhook-or-proxy-gets-403-unexpected-host) |
 | A `kraft admin doctor` row that prints `FAIL` or `warn` | [Doctor failures](/troubleshooting/doctor-failures#doctor-rows) |
+| A `kraft admin plugin` verb that refuses, such as `no collection 'acme' under collections` or `namespace 'release' is taken`, or an error from `kraft admin plugin validate` | [Plugin problems](/troubleshooting/plugin-problems) |
 | A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where the pages moved](/guides/run/upgrade-from-1-4#where-the-pages-moved) |
-| A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, Kraft Lite or the permission gate | [FAQ](/get-started/faq) |
+| A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, sharing chains with plugins, Kraft Lite or the permission gate | [FAQ](/get-started/faq) |
 | None of these matches | [Getting help](/project/status-and-support#getting-help) |
 
 ## In this section
@@ -34,3 +35,4 @@ Find the message you are looking at in the first column, then follow its link.
 - [Starting and reaching Kraft](/troubleshooting/starting-and-reaching-kraft): a missing `kraft` command, a taken port, and a rejected `Host`.
 - [Doctor failures](/troubleshooting/doctor-failures): every row `kraft admin doctor` can print, and how to clear it.
 - [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit, workspace-member and nested-repository stops of a sandboxed item.
+- [Plugin problems](/troubleshooting/plugin-problems): what `kraft admin plugin` prints when it refuses a collection, install, update or removal, and what `validate` reports in a plugin you wrote.

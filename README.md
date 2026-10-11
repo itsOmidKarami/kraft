@@ -73,7 +73,9 @@ Each work item follows a
 [chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary): a list of
 nodes such as write the spec, write the plan, implement, verify and open the
 pull request. Some nodes run your coding agent, some run a command, and some
-stop and wait for you. Chains are YAML files you can edit. How the pieces fit
+stop and wait for you. Chains are YAML files you can edit, and a team can share
+them as [Kraft plugins](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins)
+that each instance installs from a git repository. How the pieces fit
 together is in
 [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 
@@ -128,6 +130,10 @@ If you drive Kraft from one of them, install the Claude Code plugin (or run
 `kraft admin init`) as well: the shipped chains run their workers on Claude
 Code.
 
+That plugin gives your agent `/kraft:*` commands. It is not a
+[Kraft plugin](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins),
+which adds chains to a Kraft instance and installs with `kraft admin plugin`.
+
 Start the server and leave it running in its own terminal:
 
 ```bash
@@ -176,6 +182,7 @@ board renders live, not a separate pipeline.
 - [CLI reference](https://itsomidkarami.github.io/kraft/reference/cli): every `kraft` verb.
 - [Configuration](https://itsomidkarami.github.io/kraft/reference/configuration): `repos.yaml`, `policy.yaml`, `access.yaml`, and the state directory (`$KRAFT_HOME`).
 - [Agent integration](https://itsomidkarami.github.io/kraft/guides/agent-integration): MCP tools and skills.
+- [Share chains with plugins](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins): publish chains, skills and agent profiles from a git repository, and install a team's.
 - [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://itsomidkarami.github.io/kraft/reference/triggers): start a chain from a schedule or an HTTP call.
 - [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
