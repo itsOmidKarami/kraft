@@ -408,7 +408,8 @@ def invalid_templates(st) -> dict[str, str]:
     # that does not resolve. An add-on left out on purpose is no fault.
     for addon in st.library.addons if st.library else ():
         if addon.left_out is not None and not addon.quiet:
-            invalid[f"add-on {addon.id}"] = addon.left_out
+            key = f"repo library {addon.repo_id}" if addon.repo_id else f"add-on {addon.id}"
+            invalid[key] = addon.left_out
     if why := getattr(st, "addons_problem", None):
         invalid["addons.yaml"] = why
     return invalid
@@ -559,7 +560,7 @@ async def collect_addon_stores(st) -> list[str]:
     The database and the loaded library are read here, on the loop (`db.read`
     is not for another thread); the file work runs in a worker thread."""
     from kraft.addons import update as addon_update
-    from kraft.addons.config import AddonsLock
+    from kraft.addons.config import AddonsLock, RepoLibrariesLock
 
     ended = sorted(ENDED)
     rows = st.db.read(
@@ -578,7 +579,8 @@ async def collect_addon_stores(st) -> list[str]:
     def keep() -> set[str]:
         # Asked under the update lock: an install that just finished is in the lock.
         locked = AddonsLock.load(st.templates_dir / AddonsLock.FILE).addons.values()
-        return {entry.digest.removeprefix("sha256:") for entry in locked} | kept
+        repos = RepoLibrariesLock.load(st.templates_dir / RepoLibrariesLock.FILE).repos.values()
+        return {e.digest.removeprefix("sha256:") for e in (*locked, *repos)} | kept
 
     try:
         return await _in_thread(st, addons_load.gc, keep, st.run_dirs.addons)

@@ -9,12 +9,22 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.addons import AGENT, chain, drop_store, home, install, make_collection
+from support.addons import (
+    AGENT,
+    accept_repo_library,
+    chain,
+    drop_store,
+    home,
+    install,
+    make_collection,
+    repo_with_library,
+)
+from support.addons import instance as make_instance
 from support.harness import git
 
 import kraft
 from kraft import harness, update
-from kraft.addons import fetch, load
+from kraft.addons import fetch, load, manifest
 from kraft.addons.config import AddonsConfig
 from kraft.config import read_yaml, write_yaml
 from kraft.templates.environment import HarnessProfileTable
@@ -510,3 +520,86 @@ def test_an_installed_addon_knows_whose_repo_library_it_is(tmp_path, addon_id, r
 
     assert addon.repo_id == repo_id
     assert load.repo_library_id("app") == "library@repo:app"
+
+
+@pytest.fixture
+def accepted(tmp_path):
+    """A home with `app`'s repo library accepted: `(repo, (config_dir, addons_dir))`."""
+    repo = repo_with_library(tmp_path)
+    found = make_instance(tmp_path)
+    accept_repo_library(*found, repo, "app")
+    return repo, found
+
+
+def test_an_accepted_repo_library_loads_under_the_repo_id(accepted):
+    _repo, found = accepted
+
+    (library,) = load.installed(*found, verify=True)
+
+    assert (library.id, library.namespace, library.repo_id, library.left_out) == (
+        "library@repo:app",
+        "app",
+        "app",
+        None,
+    )
+    templates = TemplateLibrary.from_yaml_dir(found[0], addons=[library])
+    assert "app:ship" in templates.chain_ids
+
+
+def _disconnect(found):
+    write_yaml(found[0] / "repos.yaml", {"repos": []})
+
+
+def _take_the_id(found):
+    repos = read_yaml(found[0] / "repos.yaml")
+    repos["repos"][0]["id"] = "other"
+    write_yaml(found[0] / "repos.yaml", repos)
+
+
+def _drop_the_harness(found):
+    write_yaml(found[0] / "harnesses.yaml", {"harnesses": {}})
+
+
+@pytest.mark.parametrize(
+    "change, left_out, quiet",
+    [
+        pytest.param(_disconnect, "no longer connected", True, id="repository-gone"),
+        pytest.param(_take_the_id, "no longer connected", True, id="id-renamed"),
+        pytest.param(_drop_the_harness, "requires harness 'codex'", False, id="harness-removed"),
+    ],
+)
+def test_why_a_repo_library_is_left_out(accepted, change, left_out, quiet):
+    _repo, found = accepted
+
+    change(found)
+
+    (library,) = load.installed(*found)
+    assert left_out in library.left_out
+    assert library.quiet is quiet
+
+
+def test_a_repo_library_is_not_left_out_for_owning_its_repo_id(accepted):
+    _repo, found = accepted
+    requires = manifest.Requires(kraft="2")
+
+    assert load.instance_problem("app", requires, found[0], repo_library=True) is None
+    assert "is now a repository id" in load.instance_problem("app", requires, found[0])
+
+
+def test_a_missing_repo_library_store_is_restored_from_the_checkout(accepted):
+    _repo, found = accepted
+    (library,) = load.installed(*found)
+    drop_store(library.root)
+
+    load.restore(library, *found)
+
+    assert load.installed(*found, verify=True)[0].left_out is None
+
+
+def test_installed_notices_a_changed_repo_library_lock(accepted):
+    _repo, found = accepted
+    assert len(load.installed(*found)) == 1
+
+    write_yaml(found[0] / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
+
+    assert load.installed(*found) == ()

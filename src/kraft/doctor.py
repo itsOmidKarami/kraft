@@ -532,7 +532,7 @@ def _addon_checks(templates: Path) -> list[dict]:
     root = addons_load.addons_dir()
     listed = AddonsConfig.load(templates / AddonsConfig.FILE)
     lock = AddonsLock.load(templates / AddonsLock.FILE)
-    found = addons_load.installed(templates, root, verify=True)
+    found = [p for p in addons_load.installed(templates, root, verify=True) if p.repo_id is None]
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
     notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
     auto = []

@@ -724,6 +724,8 @@ def _cmd_list(ns: argparse.Namespace) -> None:
         raise _refuse(str(exc)) from exc
     rows = []
     for addon in load.installed(config_dir, addons_dir):
+        if addon.repo_id is not None:
+            continue  # `kraft repo library` is how a repo library is listed and taken
         collection = config.collections.get(addon.id.split("@", 1)[1])
         listed = addon.id in config.addons
         entry = config.entry(addon.id) if listed else None

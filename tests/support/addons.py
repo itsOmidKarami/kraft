@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 
-from kraft.addons import fetch, manifest
+from kraft.addons import fetch, manifest, repo_library
 from kraft.addons.load import InstalledAddon
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
@@ -314,3 +315,27 @@ def repo_with_library(tmp_path: Path, name: str = "app", **spec) -> Path:
     with_origin(repo)
     repo_library_files(repo, **spec)
     return repo
+
+
+def accept_repo_library(config_dir: Path, addons_dir: Path, repo: Path, repo_id: str) -> Path:
+    """What accepting `repo`'s library leaves behind, without its review: the
+    store, a `repo-libraries.lock` entry, and `repo` in `repos.yaml` under
+    `repo_id`. Returns the store directory."""
+    found = repo_library.remote(repo)
+    extracted = repo_library.extract(repo, found.commit)
+    store = fetch.write_store(addons_dir, extracted)
+    repos = read_yaml(config_dir / "repos.yaml", {"repos": []})
+    if not any(r.get("id") == repo_id for r in repos["repos"]):
+        repos["repos"].append({"path": str(repo), "id": repo_id})
+        write_yaml(config_dir / "repos.yaml", repos)
+    lock = read_yaml(config_dir / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
+    lock["repos"][repo_id] = {
+        "git": found.url,
+        "branch": found.branch,
+        "commit": found.commit,
+        "tree": extracted.tree,
+        "digest": fetch.digest(extracted.files),
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    write_yaml(config_dir / "repo-libraries.lock", lock)
+    return store

@@ -351,3 +351,20 @@ def test_an_edit_that_drops_an_addon_is_reported(with_release, file, edit, says)
     issues = config_check.check(file, yaml.safe_dump(data), config_check.context(st))
 
     assert [says in i.message for i in issues] == [True], [i.message for i in issues]
+
+
+def test_an_edit_that_drops_a_repo_librarys_id_is_reported(client, tmp_path):
+    from support.addons import accept_repo_library, repo_with_library
+
+    st = client.app.state
+    accept_repo_library(st.templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")
+    deps._reload_templates(st)
+    written = yaml.safe_load((st.templates_dir / "repos.yaml").read_text())
+    assert config_check.check("repos.yaml", yaml.safe_dump(written), config_check.context(st)) == []
+    del written["repos"][0]["id"]
+
+    issues = config_check.check("repos.yaml", yaml.safe_dump(written), config_check.context(st))
+
+    assert [i.message for i in issues] == [
+        "would leave repo library app out: repository id 'app' is no longer in repos.yaml"
+    ]

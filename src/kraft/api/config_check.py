@@ -24,7 +24,7 @@ from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
 from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
-from kraft.addons.config import AddonsConfig, AddonsLock
+from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
 from kraft.executor import fallback
 from kraft.templates import positions
 from kraft.templates.environment import (
@@ -59,6 +59,7 @@ FILES = frozenset(
         "notify.yaml",
         "addons.yaml",
         "addons.lock",
+        "repo-libraries.lock",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -662,11 +663,15 @@ def _check_harnesses(path, data, ctx):
                 loc = loc or _first_loc(model, body, (section, name))
         return [TemplateIssue(path, None, why, loc=loc)]
     return [
-        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}")
+        TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
         for addon in ctx.addons
         if addon.left_out is None
         and (why := _unmet_requires(addon, ctx, harnesses=data)) is not None
     ]
+
+
+def _what(addon) -> str:
+    return f"repo library {addon.repo_id}" if addon.repo_id else f"add-on {addon.id}"
 
 
 def _unmet_requires(
@@ -684,7 +689,12 @@ def _unmet_requires(
     except (OSError, ValueError, addon_manifest.ManifestError):
         return None  # already not loading; the load says why
     return addons_load.instance_problem(
-        addon.namespace, declared.requires, ctx.templates_dir, harnesses, repos
+        addon.namespace,
+        declared.requires,
+        ctx.templates_dir,
+        harnesses,
+        repos,
+        repo_library=addon.repo_id is not None,
     )
 
 
@@ -769,6 +779,14 @@ def _check_lock(path, data, ctx):
     return []
 
 
+def _check_repo_lock(path, data, ctx):
+    try:
+        RepoLibrariesLock.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    return []
+
+
 # ── repos ──
 
 
@@ -787,7 +805,7 @@ def _check_repos(path, data, ctx):
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
     return [
-        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}")
+        TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
         for addon in ctx.addons
         if addon.left_out is None and (why := _unmet_requires(addon, ctx, repos=data)) is not None
     ]
@@ -804,4 +822,5 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "notify.yaml": _check_notify,
     "addons.yaml": _check_addons,
     "addons.lock": _check_lock,
+    "repo-libraries.lock": _check_repo_lock,
 }

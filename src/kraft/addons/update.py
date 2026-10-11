@@ -535,9 +535,11 @@ def update(
                     )
                 if why := load.instance_problem(namespace, found.requires, config_dir):
                     raise Refused([why])
-                others = set(holders) | {
-                    config.namespace(o) for o in config.addons if o != addon_id
-                }
+                others = (
+                    set(holders)
+                    | {config.namespace(o) for o in config.addons if o != addon_id}
+                    | {p.namespace for p in loaded if p.repo_id is not None}
+                )
                 check(
                     found,
                     extracted.files,

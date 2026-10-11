@@ -115,14 +115,15 @@ def addons_dir() -> Path:
 
 
 def config_problem(config_dir: Path) -> str | None:
-    """Why `addons.yaml` or `addons.lock` in `config_dir` cannot be read, or
-    None. While one cannot, no add-on loads."""
-    from kraft.addons.config import AddonsConfig, AddonsLock
+    """Why `addons.yaml`, `addons.lock` or `repo-libraries.lock` in
+    `config_dir` cannot be read, or None. While one cannot, no add-on loads."""
+    from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
     from kraft.config import ConfigError
 
     try:
         AddonsConfig.load(Path(config_dir) / AddonsConfig.FILE)
         AddonsLock.load(Path(config_dir) / AddonsLock.FILE)
+        RepoLibrariesLock.load(Path(config_dir) / RepoLibrariesLock.FILE)
     except ConfigError as exc:
         return str(exc)
     return None
@@ -145,7 +146,7 @@ def stamp(path: Path) -> tuple | None:
 
 def signature(config_dir: Path, found: tuple[InstalledAddon, ...] = ()) -> tuple:
     """Everything `installed()` reads, as stat triples (None: absent), so an
-    unchanged answer can be told without re-parsing: the five config files,
+    unchanged answer can be told without re-parsing: the six config files,
     the harness overlay directory, `found`'s stores (existence, manifest,
     digest file), the restore failures `_why_left_out` quotes, and this
     Kraft's version, which decides `requires.kraft`."""
@@ -153,7 +154,14 @@ def signature(config_dir: Path, found: tuple[InstalledAddon, ...] = ()) -> tuple
     from kraft.addons import fetch, manifest
 
     config_dir = Path(config_dir)
-    names = ("addons.yaml", "addons.lock", "harnesses.yaml", "repos.yaml", "policy.yaml")
+    names = (
+        "addons.yaml",
+        "addons.lock",
+        "repo-libraries.lock",
+        "harnesses.yaml",
+        "repos.yaml",
+        "policy.yaml",
+    )
     store_files = (manifest.ADDON_JSON, fetch.DIGEST_FILE)
     try:
         overlaid = sorted(paths.default_harnesses_dir().glob("*.yaml"))
@@ -262,7 +270,41 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
                     quiet=True,
                 )
             )
+    found += _repo_libraries(config_dir, store, verify)
     return tuple(found)
+
+
+def _repo_libraries(config_dir: Path, store: Path, verify: bool) -> list[InstalledAddon]:
+    """Each repository's accepted repo library, as the add-on it is stored as.
+    One whose repository is no longer in `repos.yaml` under that id is known
+    and not loaded, and is no fault: the next accept or disconnect drops it."""
+    from kraft.addons.config import RepoLibrariesLock
+    from kraft.config import ConfigError, read_yaml
+
+    try:
+        lock = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE)
+        entries = read_yaml(config_dir / "repos.yaml", {}).get("repos")
+    except ConfigError:
+        return []  # `config_problem`, or repos.yaml's own check, says why
+    connected = {e.get("id") for e in entries or () if isinstance(e, dict)}
+    out = []
+    for repo_id, locked in lock.repos.items():
+        digest = locked.digest.removeprefix("sha256:")
+        addon = InstalledAddon(
+            repo_library_id(repo_id),
+            "library",
+            repo_id,
+            digest[:12],
+            store / digest,
+            commit=locked.commit,
+            tree=locked.tree,
+            source="./.kraft",
+        )
+        if repo_id not in connected:
+            out.append(replace(addon, left_out="its repository is no longer connected", quiet=True))
+        else:
+            out.append(replace(addon, left_out=_why_left_out(addon, config_dir, verify)))
+    return out
 
 
 def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str | None:
@@ -293,10 +335,12 @@ def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str 
     except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
         return f"its store cannot be read: {exc}"
     running = update.installed()
-    if not manifest.is_source_build(running):
+    if addon.repo_id is None and not manifest.is_source_build(running):
         if why := manifest.kraft_compatible(declared.requires.kraft, running):
             return why
-    if why := instance_problem(addon.namespace, declared.requires, config_dir):
+    if why := instance_problem(
+        addon.namespace, declared.requires, config_dir, repo_library=addon.repo_id is not None
+    ):
         return why
     try:
         harnesses = read_yaml(config_dir / "harnesses.yaml")
@@ -347,13 +391,15 @@ def instance_problem(
     config_dir: Path,
     harnesses: Mapping | None = None,
     repos: Mapping | None = None,
+    repo_library: bool = False,
 ) -> str | None:
     """Why this instance cannot hold an add-on under `namespace` that declares
     `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
     does not define, or a repository whose id is the namespace. None when it
     can. Asked at load and of every install or update candidate. `harnesses`
     is a `harnesses.yaml` to judge in place of the file, `repos` likewise a
-    `repos.yaml`: an edit not saved yet."""
+    `repos.yaml`: an edit not saved yet. `repo_library`: the namespace is a
+    repository's own id, which must be there."""
     from kraft.config import ConfigError, read_yaml
 
     try:
@@ -372,9 +418,13 @@ def instance_problem(
             if not isinstance(defined, dict) or name not in defined:
                 return f"requires {what} {name!r}, which harnesses.yaml does not define"
     entries = repos.get("repos")
-    for entry in entries if isinstance(entries, list) else ():
-        if isinstance(entry, dict) and entry.get("id") == namespace:
-            return f"its namespace {namespace!r} is now a repository id"
+    entries = entries if isinstance(entries, list) else ()
+    ids = {e.get("id") for e in entries if isinstance(e, dict)}
+    if repo_library:
+        if namespace not in ids:
+            return f"repository id {namespace!r} is no longer in repos.yaml"
+    elif namespace in ids:
+        return f"its namespace {namespace!r} is now a repository id"
     return None
 
 
@@ -451,6 +501,8 @@ def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
     from kraft.addons.config import AddonsConfig
     from kraft.config import ConfigError
 
+    if addon.repo_id is not None:
+        return _restore_repo_library(addon, config_dir, root)
     what = f"{addon.id} {addon.version}"
     collection_name = addon.id.split("@", 1)[1]
     try:
@@ -497,6 +549,35 @@ def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
         with update.write_lock(root):
             return fetch.write_store(root, extracted)
     except (update.Busy, OSError) as exc:  # a full disk or a read-only run directory
+        raise RestoreError(f"{what}: {exc}") from exc
+
+
+def _restore_repo_library(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
+    from kraft.addons import fetch, repo_library, update
+    from kraft.config import ConfigError, load_repos
+
+    what = f"repo library {addon.repo_id}"
+    try:
+        entry = next(
+            (r for r in load_repos(config_dir / "repos.yaml") if r.id == addon.repo_id), None
+        )
+    except ConfigError as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if entry is None or addon.commit is None:
+        raise RestoreError(f"{what}: its repository is no longer connected")
+    try:
+        extracted = repo_library.extract(Path(entry.path), addon.commit)
+    except (OSError, fetch.FetchError, fetch.AddonRefused) as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if extracted is None or fetch.digest(extracted.files) != f"sha256:{addon.root.name}":
+        raise RestoreError(
+            f"{what}: commit {addon.commit[:12]} no longer gives the accepted files; "
+            "run `kraft repo library`"
+        )
+    try:
+        with update.write_lock(root):
+            return fetch.write_store(root, extracted)
+    except (update.Busy, OSError) as exc:
         raise RestoreError(f"{what}: {exc}") from exc
 
 
@@ -561,7 +642,7 @@ def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
 
     out = []
     for addon in installed(config_dir):
-        if addon.left_out is not None:
+        if addon.left_out is not None or addon.repo_id is not None:
             continue
         try:
             declared = manifest.addon(

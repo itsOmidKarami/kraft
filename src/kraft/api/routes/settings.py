@@ -427,7 +427,7 @@ async def parse_template_yaml(body: ParseBody):
 
 class ReloadBody(BaseModel):
     #: The add-on files alone (`apply.ADDON_FILES`): what an add-on verb asks for.
-    only: list[Literal["addons.yaml", "addons.lock"]] | None = None
+    only: list[Literal["addons.yaml", "addons.lock", "repo-libraries.lock"]] | None = None
 
 
 # Refusing a policy that does not validate: Kraft-m86uq.

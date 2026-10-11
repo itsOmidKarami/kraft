@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 WATCH_INTERVAL_S = 5
 #: What `kraft admin addon` writes; a reload of only these touches nothing else.
-ADDON_FILES = ("addons.yaml", "addons.lock")
+ADDON_FILES = ("addons.yaml", "addons.lock", "repo-libraries.lock")
 CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml", *ADDON_FILES)
 
 

@@ -21,12 +21,14 @@ from fastapi import HTTPException
 from support import permissions
 from support.addons import (
     AGENT,
+    accept_repo_library,
     chain,
     drop_store,
     extracted,
     install,
     make_collection,
     publish,
+    repo_with_library,
 )
 from support.store_fixtures import mk_item
 
@@ -503,6 +505,22 @@ def test_health_names_an_addon_that_did_not_load(client, tmp_path, change, key, 
     assert body["status"] == ("degraded" if key else "ok")
     if key:
         assert why in body["invalid_templates"][key]
+
+
+def test_health_names_a_repo_library_that_did_not_load(client, tmp_path):
+    """A repo library is keyed by its repository, not by an add-on id."""
+    st = client.app.state
+    accept_repo_library(st.templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")
+    deps._reload_templates(st)
+    assert "app:ship" in st.library.chain_ids
+    assert client.get("/api/health").json()["status"] == "ok"
+
+    (st.templates_dir / "harnesses.yaml").write_text(yaml.safe_dump({"harnesses": {}}))
+    deps._reload_templates(st)
+
+    body = client.get("/api/health").json()
+    assert body["status"] == "degraded"
+    assert "requires harness 'codex'" in body["invalid_templates"]["repo library app"]
 
 
 def test_an_addon_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
