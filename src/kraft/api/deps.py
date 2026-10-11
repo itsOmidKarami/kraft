@@ -315,17 +315,47 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
         )
 
 
-def _reload_templates(st) -> None:
+def _begin_reload(st) -> bool:
+    """On the loop, before the read: say why plugins.yaml and plugins.lock do
+    not read, and record what is about to be loaded (recorded first, so a file
+    edited during the read stays pending). Returns whether the plugin files
+    were refused: the plugins already running stay, and the two files stay
+    pending with the reason."""
     from kraft import apply
 
     st.plugins_problem = plugins_load.config_problem(st.templates_dir)
-    # A plugins.yaml or plugins.lock that does not read is refused: the plugins
-    # already running stay, and the two files stay pending with the reason.
     refused = st.plugins_problem is not None and st.library is not None
     apply.record_library(st, plugin_files=not refused)
+    st.reload_generation = getattr(st, "reload_generation", 0) + 1
+    return refused
+
+
+def _read_library(st, refused: bool) -> tuple[TemplateLibrary | None, list[str]]:
+    """The heavy half: re-hash every stored file and parse the library. Writes
+    nothing on `st`, so it may run in a worker thread."""
     plugins = st.library.plugins if refused else installed_plugins(st, verify=True)
-    st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir, plugins)
+    return load_library(st.templates_dir, st.skills_dir, plugins)
+
+
+def _publish_library(st, library: TemplateLibrary | None, invalid: list[str]) -> None:
+    st.library, st.invalid_library = library, invalid
     lint_loaded(st)
+
+
+def _reload_templates(st) -> None:
+    _publish_library(st, *_read_library(st, _begin_reload(st)))
+
+
+async def reload_templates(st) -> None:
+    """`_reload_templates` with its read in a worker thread, for a caller that
+    is async anyway: re-hashing every stored file would hold the loop."""
+    refused = _begin_reload(st)
+    generation = st.reload_generation
+    library, invalid = await _in_thread(st, _read_library, st, refused)
+    if st.reload_generation != generation:
+        # A reload that began during the read has published what is on disk now.
+        return
+    _publish_library(st, library, invalid)
 
 
 def read_policy(templates_dir: Path) -> tuple[Policy, InstancePolicy]:
@@ -389,6 +419,44 @@ def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.Install
     return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
 
 
+#: One `FETCH_TIMEOUT_S` (60 s, `plugins/fetch.py`) plus margin: how long
+#: shutdown waits for a plugin worker thread that is mid-fetch.
+PLUGIN_SHUTDOWN_GRACE_S = 70
+
+
+async def _in_thread(st, fn, *args, **kwargs):
+    """`fn(*args, **kwargs)` in a worker thread, recorded in `st.plugin_threads`
+    and shielded: cancelling the awaiting task leaves the future in the set,
+    so shutdown can wait for the thread it cannot interrupt. A fn that takes
+    `cancel=` is handed `st.plugin_cancel` by its caller."""
+    future = asyncio.get_running_loop().run_in_executor(
+        None, functools.partial(fn, *args, **kwargs)
+    )
+    future.kraft_label = getattr(fn, "__name__", repr(fn))
+    st.plugin_threads.add(future)
+    future.add_done_callback(st.plugin_threads.discard)
+    return await asyncio.shield(future)
+
+
+async def stop_plugin_work(st) -> None:
+    """Shutdown: stop every plugin background task, then wait for its thread.
+    A thread cannot be interrupted: `plugin_cancel` makes it stop between
+    plugins, and one still mid-fetch after the grace is logged and left (the
+    process is going; each of its writes is atomic)."""
+    st.plugin_cancel.set()
+    tasks = list(st.plugin_tasks)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    if st.plugin_threads:
+        _, alive = await asyncio.wait(set(st.plugin_threads), timeout=PLUGIN_SHUTDOWN_GRACE_S)
+        for future in alive:
+            logger.warning(
+                "plugin worker thread still running at shutdown, left to end: %s",
+                getattr(future, "kraft_label", "?"),
+            )
+
+
 async def restore_plugins(app) -> None:
     """Put back every locked store that is gone (a config directory copied to
     a new machine, a cleared run directory, a teammate's newer lock), then
@@ -400,14 +468,19 @@ async def restore_plugins(app) -> None:
     st = app.state
     # `verify`, as the library load reads: a store edited in place stays left
     # out here too, so it never counts as "loads now".
-    fresh = await asyncio.to_thread(installed_plugins, st, verify=True)
+    fresh = await _in_thread(st, installed_plugins, st, verify=True)
     missing = tuple(p for p in fresh if not p.quiet and not p.root.is_dir())
     loads = {p.id for p in fresh if p.left_out is None}
     if missing:
-        failed = await asyncio.to_thread(
-            plugins_load.restore_missing, missing, st.templates_dir, st.run_dirs.plugins
+        failed = await _in_thread(
+            st,
+            plugins_load.restore_missing,
+            missing,
+            st.templates_dir,
+            st.run_dirs.plugins,
+            cancel=st.plugin_cancel,
         )
-        _reload_templates(st)
+        await reload_templates(st)
         apply.notify(app)
         if failed:
             logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
@@ -418,9 +491,9 @@ async def restore_plugins(app) -> None:
         for p in (st.library.plugins if st.library is not None else ())
     ):
         # A launch put the store back (`dispatch.restore_pins`). Load it.
-        _reload_templates(st)
+        await reload_templates(st)
         apply.notify(app)
-    collect_plugin_stores(st)
+    await collect_plugin_stores(st)
 
 
 async def auto_update_plugins(app) -> None:
@@ -432,13 +505,17 @@ async def auto_update_plugins(app) -> None:
 
     st = app.state
     await restore_plugins(app)
-    outcomes = await asyncio.to_thread(
-        plugin_update.auto_update, st.templates_dir, st.run_dirs.plugins
+    outcomes = await _in_thread(
+        st,
+        plugin_update.auto_update,
+        st.templates_dir,
+        st.run_dirs.plugins,
+        cancel=st.plugin_cancel,
     )
     if any(o["outcome"] == "applied" for o in outcomes.values()):
-        _reload_templates(st)
+        await reload_templates(st)
         apply.notify(app)
-        collect_plugin_stores(st)
+        await collect_plugin_stores(st)
 
 
 def in_background(app, work) -> asyncio.Task:
@@ -451,8 +528,12 @@ def in_background(app, work) -> asyncio.Task:
         except Exception:  # noqa: BLE001 -- a background task must say why it died
             logger.exception("plugin background task failed")
 
-    app.state.restore_task = asyncio.ensure_future(logged())
-    return app.state.restore_task
+    task = asyncio.ensure_future(logged())
+    # A set, not a handle: a reload starts a second task while the first runs,
+    # and shutdown must reach both.
+    app.state.plugin_tasks.add(task)
+    task.add_done_callback(app.state.plugin_tasks.discard)
+    return task
 
 
 #: Between two auto-update checks of a running server.
@@ -467,37 +548,40 @@ async def auto_update_daily(app) -> None:
         await in_background(app, auto_update_plugins)
 
 
-def collect_plugin_stores(st) -> list[str]:
+async def collect_plugin_stores(st) -> list[str]:
     """Delete each plugin store that none of these names: the lock, the
     library this server has loaded, or the snapshot of a work item that has
     not ended (a paused or stopped one can still be retried onto it). A
     directory collection's store is the lock's, so it stays while installed.
     Nothing is deleted while the lock cannot be read, while another plugin
-    change is running, or when the store cannot be written."""
+    change is running, or when the store cannot be written.
+
+    The database and the loaded library are read here, on the loop (`db.read`
+    is not for another thread); the file work runs in a worker thread."""
     from kraft.plugins import update as plugin_update
     from kraft.plugins.config import PluginsLock
+
+    ended = sorted(ENDED)
+    rows = st.db.read(
+        lambda c: c.execute(
+            # A retried item runs on `run_chain`, and a revision adds its pins there.
+            "SELECT materialized_chain, run_chain FROM work_items "
+            f"WHERE status NOT IN ({', '.join('?' * len(ended))})",
+            ended,
+        ).fetchall()
+    )
+    kept = {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+    for stored in (snapshot for row in rows for snapshot in row if snapshot):
+        for pin in (json.loads(stored).get("plugins") or {}).values():
+            kept.add(str(pin["digest"]).removeprefix("sha256:"))
 
     def keep() -> set[str]:
         # Asked under the update lock: an install that just finished is in the lock.
         locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
-        kept = {entry.digest.removeprefix("sha256:") for entry in locked}
-        kept |= {p.root.name for p in (st.library.plugins if st.library is not None else ())}
-        ended = sorted(ENDED)
-        rows = st.db.read(
-            lambda c: c.execute(
-                # A retried item runs on `run_chain`, and a revision adds its pins there.
-                "SELECT materialized_chain, run_chain FROM work_items "
-                f"WHERE status NOT IN ({', '.join('?' * len(ended))})",
-                ended,
-            ).fetchall()
-        )
-        for stored in (snapshot for row in rows for snapshot in row if snapshot):
-            for pin in (json.loads(stored).get("plugins") or {}).values():
-                kept.add(str(pin["digest"]).removeprefix("sha256:"))
-        return kept
+        return {entry.digest.removeprefix("sha256:") for entry in locked} | kept
 
     try:
-        return plugins_load.gc(keep, st.run_dirs.plugins)
+        return await _in_thread(st, plugins_load.gc, keep, st.run_dirs.plugins)
     except (config_mod.ConfigError, plugin_update.Busy, OSError):
         return []
 

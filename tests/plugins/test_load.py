@@ -3,6 +3,8 @@ pins, from the store, and never one that fails a load-time check."""
 
 import ast
 import shutil
+import threading
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -297,10 +299,6 @@ def _edit_policy(config, plugins, store):
     _maximum(config, 5)
 
 
-def _drop_the_store(config, plugins, store):
-    drop_store(store)
-
-
 def _mark_unrestored(config, plugins, store):
     load._unrestored[store.name] = "x"
 
@@ -313,8 +311,8 @@ def _mark_unrestored(config, plugins, store):
         (None, _edit_harnesses),
         (None, _edit_repos),
         (None, _edit_policy),
-        (None, _drop_the_store),
-        (_drop_the_store, _mark_unrestored),
+        (None, lambda config, plugins, store: drop_store(store)),
+        (lambda config, plugins, store: drop_store(store), _mark_unrestored),
     ],
     ids=[
         "plugins-yaml",
@@ -435,6 +433,25 @@ def test_a_store_that_cannot_be_restored_says_why(tmp_path, happens, why):
     if happens is _remote_gone:
         assert "kraft admin plugin install release@acme --re-install" in failed["release@acme"]
         assert "could not be restored: release@acme 1.0.0" in _one(config, plugins).left_out
+
+
+def test_restore_missing_stops_between_plugins_once_cancelled(tmp_path, monkeypatch):
+    """A shutdown during the first restore: the second is not started."""
+    _repo, config, plugins, found, _publish = _locked(tmp_path)
+    second = replace(found, id="tools@acme")
+    cancel = threading.Event()
+    restored = []
+
+    def restore(plugin, *_a):
+        restored.append(plugin.id)
+        cancel.set()
+
+    monkeypatch.setattr(load, "restore", restore)
+
+    failed = load.restore_missing((found, second), config, plugins, cancel=cancel)
+
+    assert restored == [found.id]
+    assert failed == {second.id: "cancelled"}
 
 
 @pytest.mark.parametrize("changed", [False, True], ids=["unchanged", "changed"])

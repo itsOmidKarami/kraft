@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -336,6 +337,11 @@ async def lifespan(app: FastAPI):
     # restart (Kraft-ygnw6). A tick with no triggers files nothing.
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
+    # Every background plugin task (`deps.in_background`), so shutdown reaches all.
+    app.state.plugin_tasks = set()
+    # Set at shutdown: the worker threads of those tasks stop between plugins.
+    app.state.plugin_cancel = threading.Event()
+    app.state.plugin_threads = set()
     # After the library is loaded from the lock: a start never waits on the network.
     deps.in_background(app, deps.auto_update_plugins)
     app.state.plugin_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
@@ -379,11 +385,11 @@ async def lifespan(app: FastAPI):
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
-        # The daily task first: it is what starts the next restore_task.
+        # The daily task first: it is what starts the next plugin task.
         app.state.plugin_update_task.cancel()
         await asyncio.gather(app.state.plugin_update_task, return_exceptions=True)
-        app.state.restore_task.cancel()
-        await asyncio.gather(app.state.apply_task, app.state.restore_task, return_exceptions=True)
+        await asyncio.gather(app.state.apply_task, return_exceptions=True)
+        await deps.stop_plugin_work(app.state)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()

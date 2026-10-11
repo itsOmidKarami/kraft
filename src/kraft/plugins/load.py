@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -490,12 +491,18 @@ def restore_missing(
     plugins: tuple[InstalledPlugin, ...],
     config_dir: Path | None = None,
     plugins_root: Path | None = None,
+    cancel: threading.Event | None = None,
 ) -> dict[str, str]:
     """Restore every store of `plugins` that is gone; plugin id to why, for
-    each that could not be. A plugin left out on purpose is not restored."""
+    each that could not be. A plugin left out on purpose is not restored.
+    `cancel` (set at shutdown) is checked before each: the rest are reported
+    `cancelled`, and a restore already running finishes, its write atomic."""
     failed: dict[str, str] = {}
     for plugin in plugins:
         if plugin.quiet:
+            continue
+        if cancel is not None and cancel.is_set():
+            failed[plugin.id] = "cancelled"
             continue
         try:
             restore(plugin, config_dir, plugins_root)

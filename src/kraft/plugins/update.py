@@ -17,6 +17,7 @@ from __future__ import annotations
 import fcntl
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -710,7 +711,9 @@ def read_status(plugins_root: Path) -> dict[str, dict]:
 
 
 def auto_update(
-    config_dir: Path | None = None, plugins_root: Path | None = None
+    config_dir: Path | None = None,
+    plugins_root: Path | None = None,
+    cancel: threading.Event | None = None,
 ) -> dict[str, dict]:
     """Update every locked plugin whose auto-update is on (its collection's, or
     its own), applying only what `may_apply_unattended` allows, and record
@@ -718,7 +721,9 @@ def auto_update(
     `failed` (with `kind`: `network`, `auth`, `refused` or `busy`). Never
     installs, never re-installs, and never applies a ref or alias changed by
     hand: those wait for a person's `update`. A collection none of whose
-    plugins auto-update is not fetched."""
+    plugins auto-update is not fetched. `cancel` (set at shutdown) is checked
+    before each collection: the rest are reported `cancelled`, and not
+    recorded, so a restart does not read a stop as a failure."""
     import json
 
     from kraft import paths
@@ -762,9 +767,22 @@ def auto_update(
             held[review.plugin_id] = why
         return why is None
 
-    results = (
-        update(ids, accept=accept, config_dir=config_dir, plugins_root=plugins_root) if ids else []
-    )
+    by_collection: dict[str, list[str]] = {}
+    for plugin_id in ids:
+        by_collection.setdefault(plugin_id.split("@", 1)[1], []).append(plugin_id)
+    results: list[Result] = []
+    for collection_ids in by_collection.values():
+        if cancel is not None and cancel.is_set():
+            for plugin_id in collection_ids:
+                outcomes[plugin_id] = {
+                    "outcome": "failed",
+                    "kind": "cancelled",
+                    "message": "stopped at shutdown",
+                }
+            continue
+        results += update(
+            collection_ids, accept=accept, config_dir=config_dir, plugins_root=plugins_root
+        )
     for result in results:
         said = "; ".join(result.problems)
         outcomes[result.plugin_id] = {
@@ -778,11 +796,12 @@ def auto_update(
             "refused": {"outcome": "failed", "kind": "refused", "message": said},
             "failed": {"outcome": "failed", "kind": result.kind, "message": said},
         }[result.outcome]
-    if outcomes:
+    recorded = {i: o for i, o in outcomes.items() if o.get("kind") != "cancelled"}
+    if recorded:
         now = datetime.now(UTC).isoformat(timespec="seconds")
         status = read_status(plugins_root) | {
             plugin_id: {"at": now, "kind": None, "message": None, **outcome}
-            for plugin_id, outcome in outcomes.items()
+            for plugin_id, outcome in recorded.items()
         }
         plugins_root.mkdir(parents=True, exist_ok=True)
         write_text(plugins_root / STATUS_FILE, json.dumps(status, indent=2) + "\n")

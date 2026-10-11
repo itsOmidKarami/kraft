@@ -155,12 +155,13 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
     does not load, its reason kept as `st.invalid_intake` for the caller,
     `/health` and doctor. Either stays pending.
 
-    `only` the plugin files rebuilds the library from the lock and leaves a
-    pending hand edit of `policy.yaml` or `intake.yaml` pending: a plugin verb
-    applies its own change, not the operator's."""
+    `only` the plugin files rereads the library and `chains/` along with them
+    (what `record_library` then records as loaded, so the pending list stays
+    truthful) and leaves a pending hand edit of `policy.yaml` or `intake.yaml`
+    pending: a plugin verb applies its own change, not the operator's."""
     st = app.state
     if only is not None and set(only) <= set(PLUGIN_FILES):
-        deps._reload_templates(st)
+        await deps.reload_templates(st)
         notify(app)
         deps.in_background(app, deps.restore_plugins)
         return None
@@ -168,7 +169,7 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
     # A limit added by this reload is judged against a stale measurement until
     # the next tick: measure now, without holding the reload.
     storage.kick(app)
-    deps._reload_templates(st)
+    await deps.reload_templates(st)
     digest = _digest(st.templates_dir / "intake.yaml")
     try:
         st.intake = config_mod.Intake.load(st.templates_dir / "intake.yaml").model_dump()

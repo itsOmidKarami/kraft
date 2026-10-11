@@ -592,7 +592,7 @@ def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path,
     assert "release:ship" in st.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
 
-    def no_reload(st):
+    async def no_reload(st):
         pytest.fail("reloaded")
 
     plugins_yaml = st.templates_dir / "plugins.yaml"  # disabled, then enabled by hand
@@ -602,11 +602,11 @@ def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path,
     deps._reload_templates(st)
     plugins_yaml.write_text(yaml.safe_dump(listed).replace("false", "true"))
     with monkeypatch.context() as held:
-        held.setattr(deps, "_reload_templates", no_reload)
+        held.setattr(deps, "reload_templates", no_reload)
         client.portal.call(deps.restore_plugins, client.app)
     _edit_a_stored_file(st, store)  # left out for another reason, its store present
     deps._reload_templates(st)
-    monkeypatch.setattr(deps, "_reload_templates", no_reload)
+    monkeypatch.setattr(deps, "reload_templates", no_reload)
     client.portal.call(deps.restore_plugins, client.app)
 
 
@@ -638,7 +638,7 @@ def _plugin_task_done(client):
     """Wait for the server's background plugin task: a reload starts one."""
 
     async def done():
-        await client.app.state.restore_task
+        await asyncio.gather(*client.app.state.plugin_tasks)
 
     client.portal.call(done)
 
@@ -718,8 +718,8 @@ def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, t
 
 
 def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
-    """It runs on the event loop: a lock someone holds is skipped, and the
-    next collection takes what this one left."""
+    """A lock someone holds is skipped, not waited for, and the next
+    collection takes what this one left."""
     st = client.app.state
     _install_release(client, tmp_path)
     old = _other_version(st, tmp_path)
