@@ -431,11 +431,13 @@ def _say_library(found: dict) -> None:
 
 
 def _take_library(path: str | None, *, ask: bool, yes: bool) -> dict:
-    """Check `path`'s repo library, show it, and take it on a yes."""
+    """Check `path`'s repo library, show it, and take it on a yes. A first
+    load taken at the prompt is followed by one question about later changes."""
     found = asyncio.run(client.repo_library(path))
     _say_library(found)
     if found["outcome"] != "waiting":
         return found
+    asked = False
     if not yes:
         if not ask:
             return found
@@ -443,9 +445,27 @@ def _take_library(path: str | None, *, ask: bool, yes: bool) -> dict:
         if answer.strip().lower() not in ("y", "yes"):
             _print("  nothing taken")
             return found
+        asked = True
     took = asyncio.run(client.accept_repo_library(path, found["digest"]))
     _print(f"repo library {took['id']} taken")
+    if asked and found.get("first") and not found.get("auto_update"):
+        _ask_auto_update(took["path"], found.get("branch") or "its default branch")
     return took
+
+
+def _ask_auto_update(path: str, branch: str) -> None:
+    """Once, after a first load: may later text changes be taken unattended."""
+    _print("  take later changes to its prompts, skills and steering without asking?")
+    _print(f"  Whoever can merge to {branch} then changes what this repo's agents are told,")
+    _print("  Kraft's own merges included. Any other change still waits for you.")
+    if input("  [y/N] ").strip().lower() not in ("y", "yes"):
+        return
+    try:
+        asyncio.run(client.update_repo(path, {"library_auto_update": True}))
+    except ValueError as exc:
+        _print(f"  not saved: {exc}")
+        return
+    _print("  later text changes will be taken automatically")
 
 
 def _offer_library(path: str, *, ask: bool) -> None:

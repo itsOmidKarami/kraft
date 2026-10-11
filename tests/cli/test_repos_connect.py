@@ -235,28 +235,44 @@ def test_connect_says_the_commands_it_was_given_not_the_probes_advice(app, capsy
 
 
 @pytest.mark.parametrize(
-    "flags, terminal, outcome, says",
+    "flags, terminal, typed, outcome, says",
     [
-        pytest.param([], True, "current", "repo library app taken", id="a-terminal-is-asked"),
         pytest.param(
-            ["-y"], True, "waiting", "run `kraft repo library` to review it", id="yes-never-accepts"
+            [], True, ["y", "n"], "current", "repo library app taken", id="a-terminal-is-asked"
+        ),
+        pytest.param(
+            [],
+            True,
+            ["y", "y"],
+            "current",
+            "later text changes will be taken automatically",
+            id="a-terminal-may-opt-in",
+        ),
+        pytest.param(
+            ["-y"],
+            True,
+            [],
+            "waiting",
+            "run `kraft repo library` to review it",
+            id="yes-never-accepts",
         ),
         pytest.param(
             [],
             False,
+            [],
             "waiting",
             "run `kraft repo library` to review it",
             id="no-terminal-never-accepts",
         ),
-        pytest.param(["--json"], True, "waiting", None, id="json-never-accepts"),
+        pytest.param(["--json"], True, [], "waiting", None, id="json-never-accepts"),
     ],
 )
 def test_connect_offers_the_repo_library(
-    app, tmp_path, capsys, monkeypatch, flags, terminal, outcome, says
+    app, tmp_path, capsys, monkeypatch, flags, terminal, typed, outcome, says
 ):
     repo = repo_with_library(tmp_path)
     if terminal:
-        a_terminal(monkeypatch, "y")
+        a_terminal(monkeypatch, typed)
 
     cli.main(["repo", "connect", str(repo), "--no-tests", *flags])
 

@@ -352,8 +352,21 @@ def library_outcome(repo: Path) -> str:
     return asyncio.run(client.repo_library(str(repo)))["outcome"]
 
 
-def a_terminal(monkeypatch, typed: str) -> None:
-    """stdin and stdout are a terminal, and every prompt is answered `typed`."""
+def a_terminal(monkeypatch, typed: str | list[str]) -> None:
+    """stdin and stdout are a terminal. Every prompt is answered `typed`, or,
+    given a list, each prompt takes the next answer and a prompt past the end
+    fails the test."""
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt="": typed)
+    if isinstance(typed, str):
+        monkeypatch.setattr("builtins.input", lambda _prompt="": typed)
+        return
+    answers = iter(typed)
+
+    def answer(prompt=""):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise AssertionError(f"an unexpected prompt: {prompt}") from None
+
+    monkeypatch.setattr("builtins.input", answer)
