@@ -29,10 +29,12 @@ import yaml
 from kraft.addons import fetch, load, manifest, update
 from kraft.addons.config import RESERVED_NAMESPACE, RepoLibrariesLock, RepoLockEntry
 from kraft.config import GIT_READ_ENV, ConfigError, bounded_yaml, load_repos, write_text
+from kraft.templates.library import TemplateLibraryError
 from kraft.worker.sandbox import harden_host_git_env
 
 if TYPE_CHECKING:
     from kraft.addons.review import Review
+    from kraft.templates.library import TemplateLibrary
 
 #: The name every repo library's derived manifest carries. Inside the files it
 #: is the library's own qualifier (`library:base`), as an add-on's name is.
@@ -189,6 +191,9 @@ class Check:
     digest: str | None = None
     locked: str | None = None
     extracted: fetch.Extracted | None = None
+    #: Why a change may not be applied without a person although its review
+    #: has no Reach line. A person may still take it. Empty on a first load.
+    holds: tuple[str, ...] = ()
 
 
 def _short(digest: str) -> str:
@@ -206,6 +211,103 @@ def _id_problem(repo_id: str, addons: list[load.InstalledAddon]) -> str | None:
         if addon.repo_id is None and addon.namespace == repo_id:
             return f"repository id {repo_id!r} is the namespace of add-on {addon.id}; {fix}"
     return None
+
+
+#: The keys of a resolved chain that hold words an agent or a person reads,
+#: and the keys under which a task decides a gate.
+_TEXT = frozenset({"prompt", "message", "description", "icon"})
+_DECIDING = frozenset({"auto_review", "judge", "escalation"})
+
+
+def _shape(value: object, deciding: bool = False) -> object:
+    """A resolved chain with its text blanked: what is left is what runs.
+    Text inside a deciding task is kept, so a change to it is a change of
+    shape."""
+    if isinstance(value, dict):
+        return {
+            key: None
+            if key in _TEXT and not deciding
+            else _shape(item, deciding or key in _DECIDING)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_shape(item, deciding) for item in value]
+    return value
+
+
+def _read_by_deciding(value: object, deciding: bool = False) -> set[str]:
+    """Every skill and steering profile a deciding task of this chain names."""
+    out: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            inside = deciding or key in _DECIDING
+            if inside and key == "skill" and isinstance(item, str):
+                out.add(item)
+            elif inside and key == "steering" and isinstance(item, list):
+                out.update(name for name in item if isinstance(name, str))
+            out |= _read_by_deciding(item, inside)
+    elif isinstance(value, list):
+        for item in value:
+            out |= _read_by_deciding(item, deciding)
+    return out
+
+
+def _steering_texts(extracted: fetch.Extracted) -> dict:
+    entry = extracted.files.get("library.yaml")
+    try:
+        data = bounded_yaml(entry[1].decode(), [20_000]) if entry else {}
+    except (ValueError, yaml.YAMLError):
+        return {}
+    section = data.get("steering") if isinstance(data, dict) else None
+    return section if isinstance(section, dict) else {}
+
+
+def _holds(
+    before: TemplateLibrary | None,
+    after: TemplateLibrary | None,
+    repo_id: str,
+    old: fetch.Extracted,
+    new: fetch.Extracted,
+) -> tuple[str, ...]:
+    """Why replacing `old` with `new` waits for a person although nothing in
+    its review is Reach: a chain of the library's or of the instance's own
+    would run differently, or the words of a skill or steering profile that a
+    deciding task reads changed."""
+    if before is None or after is None:
+        return ("the library does not resolve to compare with",)
+    reasons: list[str] = []
+    read: set[str] = set()
+    own = f"{repo_id}:"
+    ids = {i for i in (*before.chain_ids, *after.chain_ids) if ":" not in i or i.startswith(own)}
+    for chain_id in sorted(ids):
+        sides = []
+        for library in (before, after):
+            try:
+                sides.append(library.resolve_chain(chain_id).chain.model_dump(mode="json"))
+            except TemplateLibraryError:
+                sides.append(None)
+        if _shape(sides[0]) != _shape(sides[1]):
+            reasons.append(f"chain {chain_id} changes more than text")
+        for side in sides:
+            read |= _read_by_deciding(side)
+    was, now = _steering_texts(old), _steering_texts(new)
+    changed = [
+        ("steering", key) for key in sorted(was.keys() | now.keys()) if was.get(key) != now.get(key)
+    ]
+    skills = sorted(
+        {rel.split("/")[1] for rel in (*old.files, *new.files) if rel.startswith("skills/")}
+    )
+    changed += [
+        ("skill", name)
+        for name in skills
+        if old.files.get(f"skills/{name}/SKILL.md") != new.files.get(f"skills/{name}/SKILL.md")
+    ]
+    reasons += [
+        f"{kind} {own}{name} is read by a task that decides a gate"
+        for kind, name in changed
+        if f"{own}{name}" in read
+    ]
+    return tuple(reasons)
 
 
 def check(
@@ -300,6 +402,9 @@ def check(
                 refused(*(why.replace(str(root), addon_id) for why in broken)),
                 review=reviewed,
             )
+        holds = (
+            _holds(state.library, after.library, repo_id, old, extracted) if old is not None else ()
+        )
         if was is None:
             reach += [
                 f"{where}: {key} {value!r} is now read from this repo library"
@@ -323,6 +428,7 @@ def check(
     return replace(
         base,
         outcome="waiting",
+        holds=holds,
         review=replace(
             reviewed,
             old_version=_short(was) if was else None,

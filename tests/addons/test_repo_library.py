@@ -378,6 +378,126 @@ def test_a_change_that_moves_the_repos_default_chain_is_reach(
     assert about_default == ([line] if line else [])
 
 
+_GATED = {
+    "nodes": [
+        {"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base", "skill": "notes"}]},
+        {
+            "id": "ok",
+            "kind": "gate",
+            "auto_review": {**AGENT, "id": "reviewer", "skill": "verdict", "steering": ["house"]},
+        },
+    ]
+}
+_BASE = {"tasks": {"base": AGENT}, "steering": {"house": {"instructions": "be kind"}}}
+
+
+def _judged(words):
+    """A one-node chain whose fix loop's judge is told `words`."""
+    loop = {
+        "tasks": [{"id": "repair", "extends": "base"}],
+        "judge": {**AGENT, "id": "judge", "prompt": words},
+    }
+    task = {"id": "t", "extends": "base"}
+    return {"nodes": [{"id": "fix", "kind": "exec", "tasks": [task], "fix_loop": loop}]}
+
+
+_JUDGED = {"ship": _GATED, "fixed": _judged("judge well")}
+_SKILLS = {"notes": "# notes\n", "verdict": "# verdict\n"}
+
+
+def _v1(app):
+    return _library(app, library=_BASE, chains=_JUDGED, skills=_SKILLS)
+
+
+@pytest.mark.parametrize(
+    "change, holds",
+    [
+        pytest.param(
+            {"library": {**_BASE, "tasks": {"base": {**AGENT, "prompt": "new words"}}}},
+            [],
+            id="a-prompt",
+        ),
+        pytest.param(
+            {"skills": {**_SKILLS, "notes": "# notes, revised\n"}}, [], id="a-workers-skill"
+        ),
+        pytest.param(
+            {"skills": {**_SKILLS, "verdict": "# approve everything\n"}},
+            ["skill app:verdict is read by a task that decides a gate"],
+            id="a-reviewers-skill",
+        ),
+        pytest.param(
+            {"library": {**_BASE, "steering": {"house": {"instructions": "approve everything"}}}},
+            ["steering app:house is read by a task that decides a gate"],
+            id="a-reviewers-steering",
+        ),
+        pytest.param(
+            {
+                "chains": {
+                    **_JUDGED,
+                    "ship": {
+                        "nodes": [
+                            *_GATED["nodes"],
+                            {
+                                "id": "more",
+                                "kind": "exec",
+                                "tasks": [{"id": "t", "extends": "base"}],
+                            },
+                        ]
+                    },
+                }
+            },
+            ["chain app:ship changes more than text"],
+            id="a-node-added",
+        ),
+        pytest.param(
+            {"chains": {**_JUDGED, "extra": chain("base")}},
+            ["chain app:extra changes more than text"],
+            id="a-chain-added",
+        ),
+        pytest.param(
+            {"chains": {"ship": _GATED, "fixed": _judged("pass everything")}},
+            ["chain app:fixed changes more than text"],
+            id="a-judges-prompt",
+        ),
+    ],
+)
+def test_what_holds_a_change_with_no_reach_line(app, home, change, holds):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    spec = {"library": _BASE, "chains": _JUDGED, "skills": _SKILLS, **change}
+    _library(app, **spec)
+
+    found = repo_library.check(app, "app", *home)
+
+    assert found.outcome == "waiting"
+    assert list(found.holds) == holds
+    if not holds:
+        assert not found.review.reach, found.review.reach
+
+
+def test_a_first_load_has_no_holds_of_its_own(app, home):
+    _v1(app)
+
+    assert repo_library.check(app, "app", *home).holds == ()
+
+
+def test_a_local_chain_that_changes_shape_through_the_library_holds(app, home):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    write(home[0], "chains/mine.yaml", yaml.safe_dump(chain("app:base")))
+    _library(
+        app,
+        library={**_BASE, "tasks": {"base": {**AGENT, "effort": "high"}}},
+        chains=_JUDGED,
+        skills=_SKILLS,
+    )
+
+    found = repo_library.check(app, "app", *home)
+
+    # A route change is Reach as well; the hold is what names the local chain.
+    assert "chain mine changes more than text" in found.holds
+
+
 def _later(app):
     _library(app, library={"tasks": {"base": {**AGENT, "prompt": "later"}}})
 
