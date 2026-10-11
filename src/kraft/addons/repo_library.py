@@ -14,6 +14,7 @@ branches, remote-tracking refs or files is read.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -35,6 +36,8 @@ from kraft.worker.sandbox import harden_host_git_env
 if TYPE_CHECKING:
     from kraft.addons.review import Review
     from kraft.templates.library import TemplateLibrary
+
+logger = logging.getLogger(__name__)
 
 #: The name every repo library's derived manifest carries. Inside the files it
 #: is the library's own qualifier (`library:base`), as an add-on's name is.
@@ -482,12 +485,57 @@ def drop(repo_id: str, config_dir: Path, addons_root: Path) -> bool:
     return True
 
 
+def _opted_in(config_dir: Path, repo_id: str) -> bool:
+    """Whether `repo_id`'s entry sets `library_auto_update`, read now: a
+    check may have taken a minute, and the key may have been cleared in it."""
+    try:
+        entries = load_repos(config_dir / "repos.yaml")
+    except ConfigError:
+        return False
+    return any(r.id == repo_id and r.library_auto_update for r in entries)
+
+
+def _unattended(found: Check, config_dir: Path, addons_root: Path) -> dict | None:
+    """What an opted-in entry does with a waiting change: `applied`, `held`
+    with why, or `failed` when the lock is busy. None when the entry has not
+    opted in, which leaves the change `waiting`."""
+    from kraft.addons import review as review_mod
+
+    if not _opted_in(config_dir, found.repo_id):
+        return None
+    why = update.may_apply_unattended(found.review)
+    reasons = [why] if why else list(found.holds)
+    if reasons:
+        more = f"; and {len(reasons) - 3} more" if len(reasons) > 3 else ""
+        return {
+            "outcome": "held",
+            "message": "; ".join(reasons[:3]) + more + "; run `kraft repo library`",
+        }
+    try:
+        accept(found, config_dir, addons_root)
+    except update.Busy as exc:
+        return {"outcome": "failed", "kind": "busy", "message": str(exc)}
+    logger.info(
+        "repo library %s updated unattended:\n%s", found.repo_id, review_mod.render(found.review)
+    )
+    return {"outcome": "applied"}
+
+
+def _waiting(found: Check) -> dict:
+    # `content[0]` is "read from <url> at <commit>": not what changed.
+    lines = [*found.review.reach, *found.review.content[1:]][:3]
+    said = "; ".join(line.splitlines()[0] for line in lines if line)
+    return {"outcome": "waiting", "message": said or "its files changed"}
+
+
 def check_all(
     config_dir: Path, addons_root: Path, cancel: threading.Event | None = None
 ) -> dict[str, dict]:
     """Ask the remote about every accepted repo library whose repository is
     still connected, and record what it said in `status.json`: `up to date`,
-    `waiting` or `failed`. Applies nothing: a person takes a waiting change
+    `waiting`, `applied`, `held` or `failed`. A change is applied only for an
+    entry that sets `library_auto_update`, when its review has no Reach line
+    and the check found nothing that holds it; anything else a person takes
     with `kraft repo library`. A repository nobody accepted a library for is
     not asked about. `cancel` (set at shutdown) stops between repositories."""
     try:
@@ -506,10 +554,7 @@ def check_all(
         if found.outcome == "current":
             outcome: dict = {"outcome": "up to date"}
         elif found.outcome == "waiting":
-            # `content[0]` is "read from <url> at <commit>": not what changed.
-            lines = [*found.review.reach, *found.review.content[1:]][:3]
-            said = "; ".join(line.splitlines()[0] for line in lines if line)
-            outcome = {"outcome": "waiting", "message": said or "its files changed"}
+            outcome = _unattended(found, config_dir, addons_root) or _waiting(found)
         elif found.outcome == "none":
             outcome = {"outcome": "waiting", "message": "origin no longer has a repo library"}
         else:

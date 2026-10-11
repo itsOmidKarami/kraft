@@ -500,7 +500,9 @@ async def restore_addons(app) -> None:
 async def auto_update_addons(app) -> None:
     """What the server does about add-ons once it is up, in the background so
     a start never waits on the network: restore what is missing, then take
-    the updates that add-ons set to auto-update may take on their own."""
+    the updates that add-ons set to auto-update may take on their own, then
+    check each accepted repo library and take what an opted-in entry may take
+    on its own."""
     from kraft import apply
     from kraft.addons import repo_library
     from kraft.addons import update as addon_update
@@ -518,14 +520,19 @@ async def auto_update_addons(app) -> None:
         await reload_templates(st)
         apply.notify(app)
         await collect_addon_stores(st)
-    # Reports what waits and applies nothing: a person takes it with `kraft repo library`.
-    await _in_thread(
+    # A repo library is applied only for an entry that opted in, and only
+    # when nothing but text changed; everything else is recorded for doctor.
+    checked = await _in_thread(
         st,
         repo_library.check_all,
         st.templates_dir,
         st.run_dirs.addons,
         cancel=st.addon_cancel,
     )
+    if any(o["outcome"] == "applied" for o in checked.values()):
+        await reload_templates(st)
+        apply.notify(app)
+        await collect_addon_stores(st)
 
 
 def in_background(app, work) -> asyncio.Task:

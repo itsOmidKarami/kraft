@@ -3,9 +3,11 @@ that did not load, and the chain an item with no chain runs."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import yaml
-from support.addons import accept_repo_library, repo_with_library
+from support.addons import AGENT, accept_repo_library, repo_library_files, repo_with_library
 from support.harness import entry_of
 
 from kraft.api import deps
@@ -25,6 +27,22 @@ def test_health_names_a_repo_library_that_did_not_load(client, tmp_path):
     body = client.get("/api/health").json()
     assert body["status"] == "degraded"
     assert "requires harness 'codex'" in body["invalid_templates"]["repo library app"]
+
+
+def test_an_opted_in_repo_takes_a_text_change_when_the_server_checks(client, tmp_path):
+    st = client.app.state
+    repo = repo_with_library(tmp_path)
+    accept_repo_library(st.templates_dir, st.run_dirs.addons, repo, "app")
+    repos = yaml.safe_load((st.templates_dir / "repos.yaml").read_text())
+    repos["repos"][0]["library_auto_update"] = True
+    (st.templates_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    deps._reload_templates(st)
+    repo_library_files(repo, library={"tasks": {"base": {**AGENT, "prompt": "new words"}}})
+
+    client.portal.call(deps.auto_update_addons, client.app)
+
+    chain = st.library.resolve_chain("app:ship").chain.model_dump(mode="json")
+    assert "new words" in json.dumps(chain)
 
 
 class _Library:

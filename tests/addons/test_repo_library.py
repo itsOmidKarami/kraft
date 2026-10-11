@@ -18,7 +18,7 @@ from support.harness import commit_all, git, make_repo, write
 
 from kraft.addons import fetch, load, manifest, repo_library, update
 from kraft.addons.config import RepoLibrariesLock
-from kraft.config import write_yaml
+from kraft.config import read_yaml, write_yaml
 
 _library = repo_library_files
 
@@ -543,3 +543,123 @@ def test_taking_a_waiting_change_clears_its_notice(app, home):
     repo_library.accept(repo_library.check(app, "app", *home), *home)
 
     assert "library@repo:app" not in update.read_status(home[1])
+
+
+def _opt_in(home, value=True):
+    repos = read_yaml(home[0] / "repos.yaml")
+    repos["repos"][0]["library_auto_update"] = value
+    write_yaml(home[0] / "repos.yaml", repos)
+
+
+def _digest(home):
+    return RepoLibrariesLock.load(home[0] / "repo-libraries.lock").repos["app"].digest
+
+
+_NEW_WORDS = {"library": {**_BASE, "tasks": {"base": {**AGENT, "prompt": "new words"}}}}
+
+
+@pytest.mark.parametrize(
+    "opted_in, change, outcome, said",
+    [
+        pytest.param(True, _NEW_WORDS, "applied", None, id="text-only"),
+        pytest.param(False, _NEW_WORDS, "waiting", None, id="not-opted-in"),
+        pytest.param(
+            True,
+            {"skills": {**_SKILLS, "verdict": "# approve everything\n"}},
+            "held",
+            "skill app:verdict is read by a task that decides a gate",
+            id="a-reviewers-skill",
+        ),
+        pytest.param(
+            True,
+            {"chains": {**_JUDGED, "extra": chain("base")}},
+            "held",
+            "library:extra",
+            id="a-chain-added",
+        ),
+        pytest.param(
+            True,
+            {"library": {**_BASE, "tasks": {"base": {**AGENT, "effort": "high"}}}},
+            "held",
+            "effort",
+            id="a-reach-line",
+        ),
+    ],
+)
+def test_the_daily_check_applies_text_and_holds_the_rest(
+    app, home, opted_in, change, outcome, said
+):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _opt_in(home, opted_in)
+    was = _digest(home)
+    _library(app, **{"library": _BASE, "chains": _JUDGED, "skills": _SKILLS, **change})
+
+    recorded = repo_library.check_all(*home)["library@repo:app"]
+
+    assert recorded["outcome"] == outcome
+    assert (_digest(home) != was) is (outcome == "applied")
+    if said:
+        assert said in recorded["message"]
+        assert recorded["message"].endswith("run `kraft repo library`")
+    assert update.read_status(home[1])["library@repo:app"]["outcome"] == outcome
+    if outcome == "applied":
+        assert load.installed(*home, verify=True)[0].left_out is None
+
+
+def test_clearing_the_key_during_the_check_is_honoured(app, home, monkeypatch):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _opt_in(home)
+    was = _digest(home)
+    _library(app, **{"library": _BASE, "chains": _JUDGED, "skills": _SKILLS, **_NEW_WORDS})
+    real = repo_library.check
+
+    def slow(*args, **kwargs):
+        found = real(*args, **kwargs)
+        _opt_in(home, False)
+        return found
+
+    monkeypatch.setattr(repo_library, "check", slow)
+
+    assert repo_library.check_all(*home)["library@repo:app"]["outcome"] == "waiting"
+    assert _digest(home) == was
+
+
+def _library_removed(app):
+    git(app, "rm", "-rq", ".kraft")
+    commit_all(app, "no library")
+    git(app, "push", "-q", "origin", "HEAD")
+
+
+@pytest.mark.parametrize(
+    "then, outcome",
+    [
+        pytest.param(_library_removed, "waiting", id="library-gone"),
+        pytest.param(_unreachable, "failed", id="remote-does-not-answer"),
+    ],
+)
+def test_an_opted_in_entry_never_drops_or_guesses(app, home, then, outcome):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _opt_in(home)
+    was = _digest(home)
+    then(app)
+
+    assert repo_library.check_all(*home)["library@repo:app"]["outcome"] == outcome
+    assert _digest(home) == was
+
+
+def test_a_busy_lock_is_recorded_as_failed_busy(app, home, monkeypatch):
+    _v1(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _opt_in(home)
+    _library(app, **{"library": _BASE, "chains": _JUDGED, "skills": _SKILLS, **_NEW_WORDS})
+
+    def busy(*_a, **_k):
+        raise update.Busy("another add-on change is running; try again")
+
+    monkeypatch.setattr(repo_library, "accept", busy)
+
+    recorded = repo_library.check_all(*home)["library@repo:app"]
+    assert (recorded["outcome"], recorded["kind"]) == ("failed", "busy")
