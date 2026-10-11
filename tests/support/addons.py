@@ -278,3 +278,39 @@ def pinned_chain(nodes, pins: dict, *, repo):
     from support.harness import v1_chain, v1_resolved
 
     return v1_chain(replace(v1_resolved(nodes), addons=pins), repo=repo)
+
+
+def with_origin(repo: Path) -> Path:
+    """Give `repo` an `origin`: a bare clone beside it, holding what `repo`
+    has committed. Push again (`git(repo, "push", "-q", "origin", "HEAD")`)
+    to move the remote."""
+    bare = repo.parent / f"{repo.name}-origin.git"
+    git(repo.parent, "clone", "-q", "--bare", str(repo), str(bare))
+    git(repo, "remote", "add", "origin", bare.as_uri())
+    return bare
+
+
+def repo_library_files(repo: Path, *, library=None, chains=None, skills=None, extra=None) -> str:
+    """Commit a repo library to `repo` and push it to `origin`: `library.yaml`
+    (one task `base` by default), one chain file per entry of `chains` (`ship`
+    by default), `skills` as name to `SKILL.md` text, and `extra` as path to
+    raw text for anything else. Returns the commit."""
+    write(repo, ".kraft/library.yaml", yaml.safe_dump(library or {"tasks": {"base": AGENT}}))
+    for name, body in (chains or {"ship": chain("base")}).items():
+        write(repo, f".kraft/chains/{name}.yaml", yaml.safe_dump(body))
+    for name, text in (skills or {}).items():
+        write(repo, f".kraft/skills/{name}/SKILL.md", text)
+    for rel, text in (extra or {}).items():
+        write(repo, rel, text)
+    head = commit_all(repo, "repo library")
+    git(repo, "push", "-q", "origin", "HEAD")
+    return head
+
+
+def repo_with_library(tmp_path: Path, name: str = "app", **spec) -> Path:
+    """A committed repository with an `origin` and a repo library pushed to it
+    (`spec` is what `repo_library_files` takes)."""
+    repo = make_repo(tmp_path, name)
+    with_origin(repo)
+    repo_library_files(repo, **spec)
+    return repo
