@@ -151,6 +151,9 @@ def _self_signed(directory: Path) -> tuple[Path, Path]:
     return cert_path, key_path
 
 
+_PORT_ATTEMPTS = 3
+
+
 def _free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -162,7 +165,20 @@ def start(cli: str, directory: Path) -> Registry:
     than mounted (podman machine shares no arbitrary host path). The port is
     chosen here, not by the runtime: Docker Desktop's VM listens on a
     different one from the host's for an ephemeral publish."""
-    cert, key = _self_signed(directory)
+    cert, _ = _self_signed(directory)
+    for attempt in range(_PORT_ATTEMPTS):
+        try:
+            return _start_once(cli, directory, cert)
+        except AssertionError as error:
+            # `_free_port` closes its socket before the runtime binds the
+            # number, so a parallel worker can take it in between.
+            taken = "already allocated" in str(error) or "already in use" in str(error)
+            if not taken or attempt == _PORT_ATTEMPTS - 1:
+                raise
+    raise AssertionError("unreachable")
+
+
+def _start_once(cli: str, directory: Path, cert: Path) -> Registry:
     port = _free_port()
     container = _run(
         cli,
