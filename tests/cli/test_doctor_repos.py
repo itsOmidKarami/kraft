@@ -28,7 +28,8 @@ def test_a_disconnected_repo_path_fails(app, tmp_path, monkeypatch):
     repo = make_repo(tmp_path, name="gone")
     asyncio.run(client.ensure_repo(str(repo)))
     (repo / ".git").rename(repo / "not-git")
-    row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("repo "))
+    rows = asyncio.run(doctor.run_checks())
+    row = next(r for r in rows if r["name"].startswith("repo ") and r["name"] != "repo libraries")
     assert not row["ok"]
     assert "no longer a git repo" in row["detail"]
 
@@ -120,7 +121,9 @@ def test_doctor_passes_a_repo_entry_carrying_a_renamed_key(app, tmp_path):
     checks = asyncio.run(doctor.run_checks())
 
     assert not [r for r in checks if r["name"].startswith("keys ")]
-    assert any(r["name"].startswith("repo ") and r["ok"] for r in checks)
+    assert any(
+        r["name"].startswith("repo ") and r["name"] != "repo libraries" and r["ok"] for r in checks
+    )
 
 
 def test_doctor_fails_when_a_forge_task_has_no_forge_recorded(app, tmp_path):
