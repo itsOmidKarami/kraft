@@ -24,6 +24,7 @@ Find the message you are looking at in the first column, then follow its link.
 | A webhook or proxy gets 403 `unexpected Host` | [A webhook or proxy gets 403 "unexpected Host"](/troubleshooting/starting-and-reaching-kraft#a-webhook-or-proxy-gets-403-unexpected-host) |
 | A `kraft admin doctor` row that prints `FAIL` or `warn` | [Doctor failures](/troubleshooting/doctor-failures#doctor-rows) |
 | A `kraft admin plugin` verb that refuses, such as `no collection 'acme' under collections` or `namespace 'release' is taken`, or an error from `kraft admin plugin validate` | [Plugin problems](/troubleshooting/plugin-problems) |
+| `could not start ...` with `plugin <id> <version> could not be read: ...` | [`plugin ... could not be read`](/troubleshooting/stop-reasons-in-detail#plugin-could-not-be-read) |
 | A page that is not where you left it, or a theme that looks different, after an upgrade from 1.4 | [Where the pages moved](/guides/run/upgrade-from-1-4#where-the-pages-moved) |
 | A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, sharing chains with plugins, Kraft Lite or the permission gate | [FAQ](/get-started/faq) |
 | None of these matches | [Getting help](/project/status-and-support#getting-help) |

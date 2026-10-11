@@ -73,10 +73,10 @@ Each work item follows a
 [chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary): a list of
 nodes such as write the spec, write the plan, implement, verify and open the
 pull request. Some nodes run your coding agent, some run a command, and some
-stop and wait for you. Chains are YAML files you can edit, and a team can share
-them as [Kraft plugins](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins)
-that each instance installs from a git repository. How the pieces fit
-together is in
+stop and wait for you. Chains are YAML files you can edit. A team can share
+chains as [Kraft plugins](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins),
+which each instance installs from a git repository or a directory. How the
+pieces fit together is in
 [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 
 ## Requirements
@@ -130,9 +130,9 @@ If you drive Kraft from one of them, install the Claude Code plugin (or run
 `kraft admin init`) as well: the shipped chains run their workers on Claude
 Code.
 
-That plugin gives your agent `/kraft:*` commands. It is not a
+That plugin gives your agent `/kraft:*` commands. It is separate from a
 [Kraft plugin](https://itsomidkarami.github.io/kraft/next/guides/customize/share-chains-with-plugins),
-which adds chains to a Kraft instance and installs with `kraft admin plugin`.
+a package of chains an instance installs with `kraft admin plugin`.
 
 Start the server and leave it running in its own terminal:
 
