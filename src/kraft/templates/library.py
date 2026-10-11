@@ -227,8 +227,8 @@ def _refuse_qualified(path: Path, what: str, name: object) -> None:
     ever appears in a reference to an add-on's declaration."""
     if ":" in str(name):
         raise TemplateLibraryError(
-            f"{path}: {what} {name!r}: a name is declared bare; '<addon>:<name>' is how a "
-            "add-on's declaration is referenced"
+            f"{path}: {what} {name!r}: a name is declared bare; '<addon>:<name>' is how "
+            "an add-on's declaration is referenced"
         )
 
 
