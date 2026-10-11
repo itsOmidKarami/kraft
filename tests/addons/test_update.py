@@ -777,3 +777,18 @@ def test_an_id_that_is_not_installed_is_refused(acme, addon_id):
         "refused",
         ("is not in addons.yaml; install it first",),
     )
+
+
+def test_references_reads_an_unsaved_repos_yaml(tmp_path):
+    config_dir, _ = instance(tmp_path)
+    write_yaml(config_dir / "repos.yaml", {"repos": [{"path": "/a", "default_chain": "x:one"}]})
+
+    saved = [value for _w, _k, _kind, value in update.references(config_dir)]
+    unsaved = [
+        value
+        for _w, _k, _kind, value in update.references(
+            config_dir, repos={"repos": [{"path": "/a", "default_chain": "y:two"}]}
+        )
+    ]
+
+    assert (saved, unsaved) == (["x:one"], ["y:two"])

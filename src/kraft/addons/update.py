@@ -336,16 +336,19 @@ def state_of(config_dir: Path, addons: Sequence[load.InstalledAddon]) -> State:
     )
 
 
-def references(config_dir: Path) -> Iterator[tuple[str, str, str, str]]:
+def references(config_dir: Path, repos: dict | None = None) -> Iterator[tuple[str, str, str, str]]:
     """`(where, key, kind, value)` for every qualified reference the instance's
     own files make: its library and chains, and the chain, steering and
     fallback references of `repos.yaml`, `intake.yaml`, `policy.yaml` and
     `harnesses.yaml`. `kind` is what the others must resolve as; None for a
-    library reference, which lint judges."""
+    library reference, which lint judges. `repos` is a `repos.yaml` to read in
+    place of the file: an edit not saved yet."""
     local = ["library.yaml", *sorted(f"chains/{p.name}" for p in config_dir.glob("chains/*.yaml"))]
     for rel in (*local, "repos.yaml", "intake.yaml", "policy.yaml", "harnesses.yaml"):
         try:
-            data = read_yaml(config_dir / rel)
+            data = (
+                repos if rel == "repos.yaml" and repos is not None else read_yaml(config_dir / rel)
+            )
         except ConfigError:
             continue  # that file's own check says why
         keys = (

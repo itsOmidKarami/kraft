@@ -19,6 +19,7 @@ from kraft import detect
 from kraft.addons import repo_library
 from kraft.addons import review as addon_review
 from kraft.addons import update as addon_update
+from kraft.addons.config import RepoLibrariesLock
 from kraft.api import api_router, deps
 from kraft.store import open_counts_by_repo
 
@@ -644,11 +645,41 @@ async def remove_repo(request: Request, path: str):
             "cancel or abandon them first (kraft item complete, cancel, or abandon --yes)",
         )
     kept = [r for r in repos if r["path"] != entry["path"]]
+    repo_id = entry.get("id")
+    try:
+        accepted = RepoLibrariesLock.load(st.templates_dir / RepoLibrariesLock.FILE).repos
+    except config_mod.ConfigError:
+        accepted = {}  # that file's own check says why; it must not block a disconnect
+    held = bool(repo_id and repo_id in accepted)
+    if held:
+        named = [
+            f"{where}: {key} {value!r}"
+            for where, key, _kind, value in addon_update.references(
+                st.templates_dir, repos={"repos": kept, "workspaces": _workspaces(st)}
+            )
+            if addon_update._qualifier(value) == repo_id
+        ]
+        if named:
+            raise HTTPException(
+                409,
+                f"{entry['path']}'s repo library is still named: {'; '.join(named)}; "
+                "change those first",
+            )
     # A workspace still naming it would no longer load; refused, not dropped.
     # Steering is not re-checked: a profile removed from the library must not
     # block a disconnect.
     _validate_repos(st, kept, steering=False)
+    if held:
+        try:
+            await deps._in_thread(
+                st, repo_library.drop, repo_id, st.templates_dir, st.run_dirs.addons
+            )
+        except addon_update.Busy as exc:
+            raise HTTPException(409, str(exc)) from exc
     config_mod.save_repos(deps.repos_path(st), kept)
+    if held:
+        await deps.reload_templates(st)
+        apply_mod.notify(request.app)
     # Mirror of the connect-time scan. A repo with work items stays in
     # `Indexer.repos()` and is simply re-ingested by the next rescan.
     await st.indexer.purge_repo(entry["path"])

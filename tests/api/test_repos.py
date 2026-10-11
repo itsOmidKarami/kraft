@@ -849,3 +849,38 @@ def test_a_repo_with_no_library_answers_none(tmp_path, client):
 
     assert client.get("/api/repos/library", params={"path": str(repo)}).json()["outcome"] == "none"
     assert client.get("/api/repos/library", params={"path": "/nope"}).status_code == 404
+
+
+def _accepted(tmp_path, client):
+    repo = _with_library(tmp_path, client)
+    seen = client.get("/api/repos/library", params={"path": str(repo)}).json()
+    client.post("/api/repos/library", params={"path": str(repo)}, json={"digest": seen["digest"]})
+    return repo
+
+
+def test_disconnect_forgets_the_repo_library(tmp_path, client, templates_dir):
+    repo = _accepted(tmp_path, client)
+
+    assert client.delete("/api/repos", params={"path": str(repo)}).status_code == 204
+
+    assert RepoLibrariesLock.load(templates_dir / "repo-libraries.lock").repos == {}
+    assert "repo library app" not in client.get("/api/health").json().get("invalid_templates", {})
+
+
+def test_disconnect_is_refused_while_something_names_the_library(tmp_path, client, templates_dir):
+    repo = _accepted(tmp_path, client)
+    other = make_repo(tmp_path, "other")
+    client.post("/api/repos", json={"path": str(other), "default_chain": "app:ship"})
+
+    answer = client.delete("/api/repos", params={"path": str(repo)})
+
+    assert answer.status_code == 409
+    assert "default_chain 'app:ship'" in answer.json()["detail"]
+    assert "app" in RepoLibrariesLock.load(templates_dir / "repo-libraries.lock").repos
+
+
+def test_its_own_default_chain_does_not_hold_a_repo(tmp_path, client):
+    repo = _accepted(tmp_path, client)
+    client.patch("/api/repos", params={"path": str(repo)}, json={"default_chain": "app:ship"})
+
+    assert client.delete("/api/repos", params={"path": str(repo)}).status_code == 204
