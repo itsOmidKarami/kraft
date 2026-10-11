@@ -296,6 +296,7 @@ async def _check_library(st, path: str) -> tuple[list[dict], dict, repo_library.
             st.run_dirs.addons,
             repos={"repos": repos},
             default_chain=entry.get("default_chain"),
+            steering=entry.get("steering") or (),
         )
     except config_mod.ConfigError as exc:
         raise HTTPException(422, str(exc)) from exc

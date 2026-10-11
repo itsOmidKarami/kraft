@@ -475,6 +475,20 @@ def test_what_holds_a_change_with_no_reach_line(app, home, change, holds):
         assert not found.review.reach, found.review.reach
 
 
+def test_a_steering_profile_the_entry_lists_holds_though_no_chain_names_it(app, home):
+    steering = {"house": {"instructions": "be kind"}, "tone": {"instructions": "a"}}
+    _library(app, library={**_BASE, "steering": steering}, chains=_JUDGED, skills=_SKILLS)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    steering = {**steering, "tone": {"instructions": "b"}}
+    _library(app, library={**_BASE, "steering": steering}, chains=_JUDGED, skills=_SKILLS)
+
+    unlisted = repo_library.check(app, "app", *home)
+    listed = repo_library.check(app, "app", *home, steering=["app:tone"])
+
+    assert unlisted.holds == ()
+    assert list(listed.holds) == ["steering app:tone is read by a task that decides a gate"]
+
+
 def test_a_first_load_has_no_holds_of_its_own(app, home):
     _v1(app)
 

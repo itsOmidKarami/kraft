@@ -19,7 +19,7 @@ import os
 import subprocess
 import tempfile
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -271,15 +271,17 @@ def _holds(
     repo_id: str,
     old: fetch.Extracted,
     new: fetch.Extracted,
+    steering: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Why replacing `old` with `new` waits for a person although nothing in
     its review is Reach: a chain of the library's or of the instance's own
     would run differently, or the words of a skill or steering profile that a
-    deciding task reads changed."""
+    deciding task reads changed. `steering` is the entry's own `steering:`,
+    injected into every launch, deciding tasks included."""
     if before is None or after is None:
         return ("the library does not resolve to compare with",)
     reasons: list[str] = []
-    read: set[str] = set()
+    read: set[str] = set(steering)
     own = f"{repo_id}:"
     ids = {i for i in (*before.chain_ids, *after.chain_ids) if ":" not in i or i.startswith(own)}
     for chain_id in sorted(ids):
@@ -321,12 +323,13 @@ def check(
     *,
     repos: dict | None = None,
     default_chain: str | None = None,
+    steering: Sequence[str] = (),
 ) -> Check:
     """Ask the remote, and judge what it has as an add-on update is judged.
     Writes nothing. `repos` is a `repos.yaml` to judge in place of the file:
     the entry's id may be minted and not saved yet. `default_chain` is the
     entry's own, which decides whether a `default` chain here becomes the
-    repo's."""
+    repo's. `steering` is the entry's own `steering:` names."""
     from kraft.addons import review as review_mod
 
     addon_id = load.repo_library_id(repo_id)
@@ -406,7 +409,9 @@ def check(
                 review=reviewed,
             )
         holds = (
-            _holds(state.library, after.library, repo_id, old, extracted) if old is not None else ()
+            _holds(state.library, after.library, repo_id, old, extracted, steering)
+            if old is not None
+            else ()
         )
         if was is None:
             reach += [
@@ -549,7 +554,12 @@ def check_all(
             continue
         entry = entries[repo_id]
         found = check(
-            Path(entry.path), repo_id, config_dir, addons_root, default_chain=entry.default_chain
+            Path(entry.path),
+            repo_id,
+            config_dir,
+            addons_root,
+            default_chain=entry.default_chain,
+            steering=entry.steering,
         )
         if found.outcome == "current":
             outcome: dict = {"outcome": "up to date"}
