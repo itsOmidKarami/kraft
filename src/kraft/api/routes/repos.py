@@ -13,8 +13,12 @@ import yaml
 from fastapi import HTTPException, Request
 from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 
+from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft.addons import repo_library
+from kraft.addons import review as addon_review
+from kraft.addons import update as addon_update
 from kraft.api import api_router, deps
 from kraft.store import open_counts_by_repo
 
@@ -246,6 +250,85 @@ def _validate_repos(
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+
+class LibraryAccept(BaseModel):
+    #: The candidate the person reviewed: `GET /repos/library`'s `digest`.
+    digest: str
+
+
+def _library_view(entry: dict, found: repo_library.Check) -> dict:
+    review = found.review
+    return {
+        "path": entry["path"],
+        "id": found.repo_id,
+        "outcome": found.outcome,
+        "digest": found.digest,
+        "review": review
+        and {
+            "reach": list(review.reach),
+            "content": list(review.content),
+            "text": addon_review.render(review),
+        },
+        "problems": list(found.problems),
+        "kind": found.kind,
+    }
+
+
+async def _check_library(st, path: str) -> tuple[list[dict], dict, repo_library.Check]:
+    """The entries, the one at `path` with an id minted in memory when it has
+    none, and its repo library checked against that unsaved `repos.yaml`."""
+    repos, entry = _editable_repos(st, path)
+    if entry is None:
+        raise HTTPException(404, f"{path} is not connected")
+    repo_id = _repository_id(entry, repos)
+    try:
+        found = await deps._in_thread(
+            st,
+            repo_library.check,
+            Path(entry["path"]),
+            repo_id,
+            st.templates_dir,
+            st.run_dirs.addons,
+            repos={"repos": repos},
+        )
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return repos, entry, found
+
+
+# Both library routes are declared above any `/repos/{...}` route, so `library`
+# is never read as a parameter.
+@api_router.get("/repos/library")
+async def repo_library_review(request: Request, path: str):
+    _repos, entry, found = await _check_library(request.app.state, path)
+    return _library_view(entry, found)
+
+
+@api_router.post("/repos/library")
+async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
+    st = request.app.state
+    if getattr(st, "connecting", None) is None:
+        st.connecting = asyncio.Lock()
+    async with st.connecting:
+        repos, entry, found = await _check_library(st, path)
+        if found.outcome != "waiting" or found.digest != body.digest:
+            raise HTTPException(
+                409, "the repo library is not the one you reviewed; run `kraft repo library` again"
+            )
+        # The id first: a crash before the lock leaves an entry with an id and
+        # nothing accepted, which the next check reads as a first load.
+        _validate_repos(st, repos)
+        config_mod.save_repos(deps.repos_path(st), repos)
+        try:
+            await deps._in_thread(
+                st, repo_library.accept, found, st.templates_dir, st.run_dirs.addons
+            )
+        except addon_update.Busy as exc:
+            raise HTTPException(409, str(exc)) from exc
+    await deps.reload_templates(st)
+    apply_mod.notify(request.app)
+    return {**_library_view(entry, found), "outcome": "accepted"}
 
 
 @api_router.get("/repos")

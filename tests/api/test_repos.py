@@ -15,6 +15,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from support.addons import repo_with_library
 from support.api import _client
 from support.harness import (
     commit_all,
@@ -28,6 +29,7 @@ from support.harness import (
 
 from kraft import db as kdb
 from kraft import events, store
+from kraft.addons.config import RepoLibrariesLock
 from kraft.api.routes.repos import RepoBody, RepoPatch
 from kraft.paths import RunDirs
 
@@ -790,3 +792,60 @@ def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, 
             for i in range(count)
         }
     assert pinned["core.hooksPath"] == os.devnull
+
+
+def _with_library(tmp_path, client):
+    repo = repo_with_library(tmp_path)
+    assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
+    return repo
+
+
+def test_a_repo_library_is_reviewed_then_accepted(tmp_path, client, templates_dir):
+    repo = _with_library(tmp_path, client)
+
+    seen = client.get("/api/repos/library", params={"path": str(repo)}).json()
+
+    assert (seen["outcome"], seen["id"]) == ("waiting", "app")
+    assert "Content:" in seen["review"]["text"]
+    assert not (templates_dir / "repo-libraries.lock").exists()
+
+    took = client.post(
+        "/api/repos/library", params={"path": str(repo)}, json={"digest": seen["digest"]}
+    )
+
+    assert took.status_code == 200
+    assert took.json()["outcome"] == "accepted"
+    assert "app" in RepoLibrariesLock.load(templates_dir / "repo-libraries.lock").repos
+    assert client.get("/api/repos").json()["repos"][0]["id"] == "app"
+    health = client.get("/api/health").json()
+    assert "repo library app" not in health.get("invalid_templates", {})
+    again = client.get("/api/repos/library", params={"path": str(repo)}).json()
+    assert again["outcome"] == "current"
+
+
+@pytest.mark.parametrize(
+    "digest, status",
+    [
+        pytest.param("sha256:" + "0" * 64, 409, id="another-digest"),
+        pytest.param(None, 422, id="no-digest"),
+    ],
+)
+def test_accepting_what_was_not_reviewed_writes_nothing(
+    tmp_path, client, templates_dir, digest, status
+):
+    repo = _with_library(tmp_path, client)
+
+    body = {"digest": digest} if digest else {}
+    answer = client.post("/api/repos/library", params={"path": str(repo)}, json=body)
+
+    assert answer.status_code == status
+    assert not (templates_dir / "repo-libraries.lock").exists()
+    assert not client.get("/api/repos").json()["repos"][0].get("id")
+
+
+def test_a_repo_with_no_library_answers_none(tmp_path, client):
+    repo = make_repo(tmp_path, "plain")
+    client.post("/api/repos", json={"path": str(repo)})
+
+    assert client.get("/api/repos/library", params={"path": str(repo)}).json()["outcome"] == "none"
+    assert client.get("/api/repos/library", params={"path": "/nope"}).status_code == 404
