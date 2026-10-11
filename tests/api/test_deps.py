@@ -790,10 +790,10 @@ def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
 
 
 def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
-    st = client.app.state
+    plugins = client.app.state.run_dirs.plugins
     _install_release(client, tmp_path)
     held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
-    (st.run_dirs.plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held}))
+    (plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held, "x": 1}))
 
     health = client.get("/api/health").json()
     assert health["status"] == "ok"
