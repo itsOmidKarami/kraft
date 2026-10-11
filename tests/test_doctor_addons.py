@@ -16,7 +16,7 @@ from support.addons import (
 
 from kraft import doctor
 from kraft.addons import update
-from kraft.config import write_yaml
+from kraft.config import read_yaml, write_yaml
 
 ID = "release@acme"
 
@@ -150,6 +150,16 @@ def test_a_bounded_instance_with_a_current_addon_has_nothing_to_say(installed):
             id="waiting",
         ),
         pytest.param(
+            {
+                "outcome": "held",
+                "message": "chain app:extra changes more than text; run `kraft repo library`",
+            },
+            "app: a change is held "
+            "(chain app:extra changes more than text; run `kraft repo library`)",
+            id="held",
+        ),
+        pytest.param({"outcome": "applied"}, "1 loaded", id="applied"),
+        pytest.param(
             {"outcome": "failed", "kind": "auth", "message": "Permission denied"},
             "app: could not be checked (auth: Permission denied)",
             id="failed",
@@ -168,6 +178,35 @@ def test_the_repo_libraries_row(tmp_path, monkeypatch, status, expected):
 
     assert row["ok"] is True
     assert expected in row["detail"]
+
+
+@pytest.mark.parametrize(
+    "policy, warns",
+    [
+        pytest.param({}, True, id="no-bounds"),
+        pytest.param({"maxima": {"budget_usd": 5}}, False, id="maxima"),
+        pytest.param({"defaults": {"sandbox": {"backend": "docker"}}}, False, id="sandbox"),
+    ],
+)
+def test_the_repo_libraries_row_warns_about_unbounded_auto_update(
+    tmp_path, monkeypatch, policy, warns
+):
+    repo = repo_with_library(tmp_path)
+    config_dir, addons_dir = instance(tmp_path)
+    accept_repo_library(config_dir, addons_dir, repo, "app")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    repos = read_yaml(config_dir / "repos.yaml")
+    repos["repos"][0]["library_auto_update"] = True
+    write_yaml(config_dir / "repos.yaml", repos)
+    write_yaml(config_dir / "policy.yaml", policy)
+
+    row = _rows(config_dir)["repo libraries"]
+
+    assert row["ok"] is True
+    assert row["warn"] is warns
+    assert (
+        "auto-update(s) on an instance with no allowed_tools, sandbox" in row["detail"]
+    ) is warns
 
 
 def test_a_repo_library_that_does_not_load_fails_its_row(tmp_path, monkeypatch):

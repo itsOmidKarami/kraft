@@ -593,9 +593,8 @@ def _addon_checks(templates: Path) -> list[dict]:
     except config.ConfigError:
         policy = {}
     defaults = policy.get("defaults") if isinstance(policy.get("defaults"), dict) else {}
-    if auto and not (
-        policy.get("maxima") or defaults.get("allowed_tools") or defaults.get("sandbox")
-    ):
+    bounded = bool(policy.get("maxima") or defaults.get("allowed_tools") or defaults.get("sandbox"))
+    if auto and not bounded:
         waiting.append(
             f"{', '.join(auto)} auto-update(s) on an instance with no allowed_tools, sandbox "
             "or maxima: in policy.yaml: an update can change what a run does unattended"
@@ -604,12 +603,24 @@ def _addon_checks(templates: Path) -> list[dict]:
         updates = _check("add-on updates", True, "; ".join(waiting), warn=True)
     else:
         updates = _check("add-on updates", True, f"{len(auto)} add-on(s) auto-update")
-    return [addons, updates, _repo_libraries_check([p for p in everything if p.repo_id], status)]
+    try:
+        opted_in = sorted(
+            r.id
+            for r in config.load_repos(templates / "repos.yaml")
+            if r.id and r.library_auto_update
+        )
+    except config.ConfigError:
+        opted_in = []  # repos.yaml's own row says why
+    libraries = [p for p in everything if p.repo_id]
+    return [addons, updates, _repo_libraries_check(libraries, status, opted_in, bounded)]
 
 
-def _repo_libraries_check(libraries: list, status: dict) -> dict:
-    """Each accepted repo library: what does not load, and what the last check
-    of its remote found waiting or could not read."""
+def _repo_libraries_check(
+    libraries: list, status: dict, opted_in: list[str], bounded: bool
+) -> dict:
+    """Each accepted repo library: what does not load, what the last check of
+    its remote found waiting, held or could not read, and whether one updates
+    itself on an instance that bounds nothing."""
     faults = [f"{p.repo_id}: {p.left_out}" for p in libraries if p.left_out and not p.quiet]
     said = []
     for p in libraries:
@@ -619,10 +630,18 @@ def _repo_libraries_check(libraries: list, status: dict) -> dict:
                 f"{p.repo_id}: a change is waiting ({entry.get('message')}); "
                 "run `kraft repo library`"
             )
+        elif entry.get("outcome") == "held":
+            said.append(f"{p.repo_id}: a change is held ({entry.get('message')})")
         elif entry.get("outcome") == "failed":
             said.append(
                 f"{p.repo_id}: could not be checked ({entry.get('kind')}: {entry.get('message')})"
             )
+    auto = [repo_id for repo_id in opted_in if any(p.repo_id == repo_id for p in libraries)]
+    if auto and not bounded:
+        said.append(
+            f"{', '.join(auto)} auto-update(s) on an instance with no allowed_tools, sandbox "
+            "or maxima: in policy.yaml: an update can change what a run does unattended"
+        )
     if faults:
         return _check("repo libraries", False, "; ".join(faults + said))
     if said:
