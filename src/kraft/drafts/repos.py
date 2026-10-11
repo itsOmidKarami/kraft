@@ -152,7 +152,7 @@ def _view(st, entry: RepoEntry, instance) -> tuple[dict, list[dict]]:
         problems.append(_problem(entry.path, exc.field, f"{entry.path}: {exc}"))
     set_keys = set(override.model_dump(exclude_none=True)) if override else set()
     fields = TemplatePolicyOverride.model_fields
-    chain = entry.default_chain or "default"
+    chain = deps.chain_template_for(entry, None, getattr(st, "library", None)) or "default"
     view = {
         "path": entry.path,
         "name": entry.name,

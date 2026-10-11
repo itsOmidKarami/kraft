@@ -645,7 +645,13 @@ async def duplicate_work_item(wid: str, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     row = deps._work_item_row(st, wid)
-    chain_template, chain = deps.intake_chain_or_422(st, row["repo"], row["chain_template"])
+    if row["chain_template"] is None:
+        # Not the repo library's `default` now: the copy runs what the original ran.
+        deps.library_or_503(st)
+        deps.connected_or_422(st, row["repo"])
+        chain_template, chain = None, deps.resolve_chain_or_422(st, None)
+    else:
+        chain_template, chain = deps.intake_chain_or_422(st, row["repo"], row["chain_template"])
     attachments = _duplicate_attachments(row)
     attachment_kinds = frozenset(a["kind"] for a in attachments)
     # `materialize`/`intake` always take a real target, the same as `POST

@@ -154,7 +154,7 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
             "; ".join(getattr(st, "invalid_library", None) or ["config/library.yaml"]),
         )
         return None
-    chain = deps.resolve_chain(st, deps.chain_template_for(repo, None))
+    chain = deps.resolve_chain(st, deps.chain_template_for(repo, None, st.library))
     if chain is None:
         logger.warning("auto-intake: %s has no valid chain, skipping", repo.path)
         return None

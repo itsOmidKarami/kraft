@@ -327,9 +327,12 @@ def accept_repo_library(config_dir: Path, addons_dir: Path, repo: Path, repo_id:
     extracted = repo_library.extract(repo, found.commit)
     store = fetch.write_store(addons_dir, extracted)
     repos = read_yaml(config_dir / "repos.yaml", {"repos": []})
-    if not any(r.get("id") == repo_id for r in repos["repos"]):
+    entry = next((r for r in repos["repos"] if r.get("path") == str(repo)), None)
+    if entry is None:
         repos["repos"].append({"path": str(repo), "id": repo_id})
-        write_yaml(config_dir / "repos.yaml", repos)
+    else:
+        entry["id"] = repo_id
+    write_yaml(config_dir / "repos.yaml", repos)
     lock = read_yaml(config_dir / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
     lock["repos"][repo_id] = {
         "git": found.url,

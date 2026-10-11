@@ -624,20 +624,30 @@ def library_or_503(st):
     return st.library
 
 
-def chain_template_for(entry: RepoEntry, chain_template: str | None) -> str | None:
+def chain_template_for(
+    entry: RepoEntry, chain_template: str | None, library: TemplateLibrary | None = None
+) -> str | None:
     """The template an item filed in `entry`'s repo runs, as the row stores it:
-    the caller's own, else the repo's `default_chain`, else None --
-    the `default` template, un-chosen (Kraft-cd47). Every intake door asks this
-    one function (Kraft-9efnk.11). A workspace item asks its root repo.
+    the caller's own; else the repo's `default_chain`, unless that is unset or
+    `default`; else `<repo id>:default` when `library` holds the repo
+    library's chain of that id; else None -- the `default` template,
+    un-chosen (Kraft-cd47). Every intake door asks this one function
+    (Kraft-9efnk.11). A workspace item asks its root repo.
 
-    A repo default other than `default` is stored by name, not as None: every
-    reader of the row (the board, the stage graph, analytics) reads None as
-    `default`, so a None here would misreport the chain the item runs.
+    `default` counts as unset: connecting through the API writes it into every
+    entry. A repo default other than `default` is stored by name, not as None:
+    every reader of the row (the board, the stage graph, analytics) reads None
+    as `default`, so a None here would misreport the chain the item runs.
     """
     if chain_template is not None:
         return chain_template
     default = entry.default_chain
-    return None if default in (None, "default") else default
+    if default not in (None, "default"):
+        return default
+    own = f"{entry.id}:default" if entry.id else None
+    if own and library is not None and own in library.chain_ids:
+        return own
+    return None
 
 
 def resolve_chain(st, chain_template: str | None):
@@ -692,7 +702,7 @@ def intake_chain_or_422(st, repo: str, chain_template: str | None):
     store, and the chain it resolves. The library is checked first, so a broken
     one answers 503 before the repo lookup can answer 422."""
     library_or_503(st)
-    stored = chain_template_for(connected_or_422(st, repo), chain_template)
+    stored = chain_template_for(connected_or_422(st, repo), chain_template, st.library)
     return stored, resolve_chain_or_422(st, stored)
 
 

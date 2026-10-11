@@ -30,6 +30,7 @@ from support.addons import (
     publish,
     repo_with_library,
 )
+from support.harness import entry_of
 from support.store_fixtures import mk_item
 
 from kraft import config as config_mod
@@ -816,3 +817,39 @@ def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_p
     health = client.get("/api/health").json()
     assert health["status"] == "ok"
     assert health["addon_updates"] == {"release@acme": {"outcome": "held", "kind": None}}
+
+
+class _Library:
+    def __init__(self, *chains):
+        self.chain_ids = chains
+
+
+@pytest.mark.parametrize(
+    "entry, asked, chains, stored",
+    [
+        pytest.param({"id": "app"}, None, ("app:default",), "app:default", id="the-repos-default"),
+        pytest.param(
+            {"id": "app", "default_chain": "default"},
+            None,
+            ("app:default",),
+            "app:default",
+            id="default-counts-as-unset",
+        ),
+        pytest.param(
+            {"id": "app", "default_chain": "quick"},
+            None,
+            ("app:default",),
+            "quick",
+            id="the-entrys-own-wins",
+        ),
+        pytest.param({"id": "app"}, "other", ("app:default",), "other", id="asked-wins"),
+        pytest.param({"id": "app"}, None, ("app:ship",), None, id="library-without-default"),
+        pytest.param({}, None, ("app:default",), None, id="no-id"),
+        pytest.param({"id": "app"}, None, None, None, id="no-library"),
+    ],
+)
+def test_which_chain_an_item_with_no_chain_runs(tmp_path, entry, asked, chains, stored):
+    repo_entry = entry_of({"path": str(tmp_path), **entry})
+    library = None if chains is None else _Library(*chains)
+
+    assert deps.chain_template_for(repo_entry, asked, library) == stored

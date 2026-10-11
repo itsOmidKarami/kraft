@@ -284,3 +284,20 @@ def test_drop_forgets_the_accepted_version(app, home):
     assert repo_library.drop("app", *home) is True
     assert repo_library.drop("app", *home) is False
     assert load.installed(*home) == ()
+
+
+@pytest.mark.parametrize(
+    "default_chain, said",
+    [
+        pytest.param(None, True, id="unset"),
+        pytest.param("default", True, id="default"),
+        pytest.param("quick", False, id="the-entry-names-another"),
+    ],
+)
+def test_a_first_load_says_when_it_becomes_the_repos_default(app, home, default_chain, said):
+    _library(app, chains={"default": chain("base")})
+
+    found = repo_library.check(app, "app", *home, default_chain=default_chain)
+
+    line = "becomes the chain new items in this repo run: app:default"
+    assert (line in found.review.reach) is said

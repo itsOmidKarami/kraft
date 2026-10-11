@@ -214,10 +214,13 @@ def check(
     addons_root: Path,
     *,
     repos: dict | None = None,
+    default_chain: str | None = None,
 ) -> Check:
     """Ask the remote, and judge what it has as an add-on update is judged.
     Writes nothing. `repos` is a `repos.yaml` to judge in place of the file:
-    the entry's id may be minted and not saved yet."""
+    the entry's id may be minted and not saved yet. `default_chain` is the
+    entry's own, which decides whether a `default` chain here becomes the
+    repo's."""
     from kraft.addons import review as review_mod
 
     addon_id = load.repo_library_id(repo_id)
@@ -296,6 +299,13 @@ def check(
                 for where, key, _kind, value in update.references(config_dir)
                 if update._qualifier(value) == repo_id
             ]
+            own = f"{repo_id}:default"
+            if (
+                default_chain in (None, "default")
+                and after.library is not None
+                and own in after.library.chain_ids
+            ):
+                reach.append(f"becomes the chain new items in this repo run: {own}")
         if after.library is not None:
             more_reach, more_content = review_mod.local_changes(
                 state.library, after.library, repo_id

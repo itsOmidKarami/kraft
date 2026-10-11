@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.addons import AGENT, accept_repo_library, chain, repo_library_files, with_origin
 from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import make_repo_with_engineering
+
+from kraft.api import deps
 
 # --- B3: duplicate ----------------------------------------------------------
 
@@ -120,6 +123,27 @@ def test_duplicate_carries_the_listed_fields_and_nothing_else(
     assert Path(dup["attachments"][0]["source"]).is_relative_to(
         client.app.state.run_dirs.attachments / new_id
     )
+
+
+def test_a_duplicate_keeps_the_chain_the_original_ran_not_the_repo_librarys(
+    client, repo, templates_dir
+):
+    """A stored `None` is the instance's `default`; a repo library accepted
+    since must not change what the copy runs."""
+    before = _paused(client, repo)
+    with_origin(repo)
+    repo_library_files(repo, chains={"default": chain("base")}, library={"tasks": {"base": AGENT}})
+    st = client.app.state
+    accept_repo_library(templates_dir, st.run_dirs.addons, repo, "app")
+    deps._reload_templates(st)
+    assert client.get(f"/api/work-items/{_paused(client, repo)}").json()["chain_template"] == (
+        "app:default"
+    )
+
+    r = client.post(f"/api/work-items/{before}/duplicate")
+
+    assert r.status_code == 201, r.text
+    assert client.get(f"/api/work-items/{r.json()['id']}").json()["chain_template"] is None
 
 
 def test_duplicate_works_from_a_cancelled_source(client, repo):
