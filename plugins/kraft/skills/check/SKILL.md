@@ -48,13 +48,15 @@ things are stale" rather than a string they have to parse themselves.
 
 For every agent task in the live library and chains
 (`~/.kraft/config/library.yaml` and `chains/*.yaml`) whose `skill: X` names
-a skill where `X` contains a `:` - a reference into this agent's own plugin
-system, not a method Kraft ships - check `X` against the skills currently
-available to you (the list your own session already has). The Kraft server
-cannot answer this, by design; you can, because you are the agent that would
-have to load it. `kraft admin templates show ID --resolved` prints
-each task with the `skill:` it inherited, so read that rather than the raw
-files.
+a skill where `X` contains a `:`, first set aside what Kraft resolves itself:
+`kraft:` (a method Kraft ships) and a namespace that `kraft admin addon list`
+shows (an add-on's skill, read from its store; doctor and lint check those).
+What is left is a reference into this agent's own plugin system. Check each
+such `X` against the skills currently available to you (the list your own
+session already has). The Kraft server cannot answer this, by design; you can,
+because you are the agent that would have to load it.
+`kraft admin templates show ID --resolved` prints each task with the `skill:`
+it inherited, so read that rather than the raw files.
 
 List any `X` not in your available-skills list under its own "not installed
 for this agent" heading. This is a per-agent fact, not a per-repo one - the
