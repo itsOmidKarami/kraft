@@ -455,8 +455,9 @@ def _rate_limit_rejection(log_path: Path, *, reader: str | None) -> _usage.RateL
 
 
 async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None = None) -> None:
-    """SIGTERM `pgid`, then SIGKILL whatever is still there after `grace`
-    seconds. `serve.py`'s `_terminate` is the model this copies.
+    """SIGTERM `pgid` (again at the first liveness check), then SIGKILL
+    whatever is still there after `grace` seconds. `frontend/e2e/serve.py`'s
+    `_terminate` is the model this copies.
 
     The session's own child is already gone by the time this runs — this is
     for what it backgrounded into the same group and never waited on itself
@@ -478,9 +479,10 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
     pause flow in CI (Kraft-rki).
 
     The first liveness check is a second SIGTERM, not a probe: a member forked
-    while the first one was being delivered (the launch wrapper's `sleep`, on a
-    cancel straight after launch) misses it and would otherwise outlive the
-    whole `grace` -- a pause or skip then paid it, flaking under load.
+    while the first one was being delivered (what `_wrap_with_exit_file`'s `sh`
+    forks for the worker's command, on a cancel straight after launch) misses it
+    and would otherwise outlive the whole `grace` -- a pause or skip then paid
+    it, flaking under load.
     """
     try:
         os.killpg(pgid, signal.SIGTERM)

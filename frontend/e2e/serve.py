@@ -126,6 +126,9 @@ def _raise_interrupt(_signum, _frame) -> None:
 
 def _terminate(proc: subprocess.Popen) -> None:
     """Signal the whole process group so detached agent/git children die too."""
+    # Kraft's kill resends SIGTERM to the group 0.2s after the first; the
+    # handler would raise again out of `proc.wait` and skip the SIGKILL below.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except (ProcessLookupError, PermissionError):

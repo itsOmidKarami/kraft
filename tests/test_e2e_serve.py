@@ -11,6 +11,8 @@ embeddings while the fixture instance it displaced had vector search working.
 from __future__ import annotations
 
 import importlib.util
+import os
+import signal
 import socket
 import sys
 from pathlib import Path
@@ -191,3 +193,20 @@ def test_two_ephemeral_resolutions_do_not_collide_once_the_first_is_bound(serve,
         assert port_b != port_a
     finally:
         holder.close()
+
+
+def test_a_second_sigterm_during_teardown_does_not_abort_it(serve, monkeypatch):
+    """Kraft's group kill resends SIGTERM; the handler raising out of
+    `proc.wait` skipped the SIGKILL fallback and printed a traceback."""
+    monkeypatch.setattr(serve.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(serve.os, "killpg", lambda pgid, sig: None)
+    proc = SimpleNamespace(pid=1, wait=lambda timeout=None: os.kill(os.getpid(), signal.SIGTERM))
+    before = signal.signal(signal.SIGTERM, serve._raise_interrupt)
+    interrupted = False
+    try:
+        serve._terminate(proc)
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        signal.signal(signal.SIGTERM, before)
+    assert not interrupted, "the second SIGTERM interrupted the teardown"
