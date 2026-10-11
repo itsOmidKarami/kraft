@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from kraft.addons.config import AddonsConfig, AddonsLock
+from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
 from kraft.config import ConfigError, write_yaml
 
 URL = "https://github.com/acme/kraft-addons.git"
@@ -147,3 +147,33 @@ def test_the_lock_round_trips(tmp_path):
     path = tmp_path / "addons.lock"
     write_yaml(path, lock.model_dump(mode="json"))
     assert AddonsLock.load(path) == lock
+
+
+_REPO_LOCK = {
+    "git": "https://example.com/app.git",
+    "branch": "main",
+    "commit": "a" * 40,
+    "tree": "b" * 40,
+    "digest": "sha256:" + "c" * 64,
+    "updated_at": "2026-10-11T00:00:00Z",
+}
+
+
+@pytest.mark.parametrize(
+    "change, why",
+    [
+        pytest.param({}, None, id="reads"),
+        pytest.param({"commit": "main"}, "commit", id="commit-is-not-an-oid"),
+        pytest.param({"extra": 1}, "extra", id="unknown-key"),
+    ],
+)
+def test_the_repo_library_lock(tmp_path, change, why):
+    path = tmp_path / "repo-libraries.lock"
+    write_yaml(path, {"lock_version": 1, "repos": {"app": {**_REPO_LOCK, **change}}})
+
+    if why is None:
+        assert RepoLibrariesLock.load(path).repos["app"].branch == "main"
+        assert RepoLibrariesLock.load(tmp_path / "absent.lock").repos == {}
+    else:
+        with pytest.raises(ConfigError, match=why):
+            RepoLibrariesLock.load(path)

@@ -14,7 +14,14 @@ import threading
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+
+#: A repo library's id is `library@repo:<repository id>`. `:` is in no
+#: collection name, so `addons.yaml` can never hold one.
+_REPO = "repo:"
+
+
+def repo_library_id(repo_id: str) -> str:
+    return f"library@{_REPO}{repo_id}"
 
 
 @dataclass(frozen=True)
@@ -32,8 +39,6 @@ class InstalledAddon:
     #: Its extracted files, in the fixed layout: `library.yaml`, `chains/`,
     #: `skills/`, `profiles.yaml`.
     root: Path
-    #: Who sees it. Repo collections will add a second value.
-    scope: Literal["instance"] = "instance"
     #: Why this add-on is known to the instance but not loaded; None when it loads.
     left_out: str | None = None
     #: An add-on left out on purpose (disabled, not yet installed, orphaned in
@@ -58,6 +63,12 @@ class InstalledAddon:
             "digest": f"sha256:{self.root.name}",
             "version": self.version,
         }
+
+    @property
+    def repo_id(self) -> str | None:
+        """The repository this is the repo library of; None for an add-on."""
+        collection = self.id.partition("@")[2]
+        return collection.removeprefix(_REPO) if collection.startswith(_REPO) else None
 
 
 def _reference(value: str, addon: InstalledAddon, *, bare_is_own: bool) -> str:

@@ -496,3 +496,17 @@ def test_a_store_that_cannot_be_written_is_a_failed_restore_not_a_crash(tmp_path
     failed = load.restore_missing((found,), config, addons)
 
     assert "No space left on device" in failed["release@acme"]
+
+
+@pytest.mark.parametrize(
+    "addon_id, repo_id",
+    [
+        pytest.param("release@acme", None, id="an-add-on"),
+        pytest.param("library@repo:app", "app", id="a-repo-library"),
+    ],
+)
+def test_an_installed_addon_knows_whose_repo_library_it_is(tmp_path, addon_id, repo_id):
+    addon = load.InstalledAddon(addon_id, addon_id.split("@")[0], "ns", "1.0.0", tmp_path)
+
+    assert addon.repo_id == repo_id
+    assert load.repo_library_id("app") == "library@repo:app"

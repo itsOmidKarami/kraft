@@ -304,3 +304,32 @@ class AddonsLock(_Model):
 
     lock_version: Literal[1] = 1
     addons: dict[AddonId, LockEntry] = {}
+
+
+class RepoLockEntry(_Model):
+    """What one repository's repo library resolved to when a person accepted it."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    #: `origin`'s URL, credentials removed, and its default branch, as the
+    #: remote answered then. Another URL or branch is a change a person reviews.
+    git: StrictStr
+    branch: StrictStr
+    commit: Annotated[StrictStr, Field(pattern=_OID)]
+    #: The tree of `.kraft/` in `commit`.
+    tree: Annotated[StrictStr, Field(pattern=_OID)]
+    digest: Annotated[StrictStr, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    # Not strict: written back by `model_dump(mode="json")`, it reads as a string.
+    updated_at: Annotated[AwareDatetime, Field(strict=False)]
+
+
+class RepoLibrariesLock(_Model):
+    """`config/repo-libraries.lock`: the repo library each connected
+    repository was accepted at, by repository id. Its own file, so a Kraft
+    that predates repo libraries still reads `addons.lock`."""
+
+    FILE: ClassVar[str] = "repo-libraries.lock"
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    lock_version: Literal[1] = 1
+    repos: dict[Name, RepoLockEntry] = {}
