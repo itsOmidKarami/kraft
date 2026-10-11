@@ -126,8 +126,8 @@ claude plugin install kraft@kraft
 
 Codex, Cursor and Antigravity install the same plugin; their commands are on
 the [install guide's agent tabs](https://itsomidkarami.github.io/kraft/get-started/install#connect-your-agent).
-If you drive Kraft from one of them, install the Claude Code plugin (or run
-`kraft admin init`) as well: the shipped chains run their workers on Claude
+If you drive Kraft from one of them, install the plugin in Claude Code too (or run
+`kraft admin init`): the shipped chains run their workers on Claude
 Code.
 
 That plugin gives your agent `/kraft:*` commands. It is separate from a
@@ -187,8 +187,8 @@ board renders live, not a separate pipeline.
 - [Triggers](https://itsomidkarami.github.io/kraft/reference/triggers): start a chain from a schedule or an HTTP call.
 - [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
-Kraft Lite, a separate plugin, runs a chain inside a single agent session
-with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
+Kraft Lite, a separate plugin for your agent, runs a chain inside a single
+agent session with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
 
 ## Project status
 
