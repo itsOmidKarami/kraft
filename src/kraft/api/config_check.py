@@ -5,6 +5,8 @@ call the same functions, so a check and a save cannot disagree."""
 from __future__ import annotations
 
 import functools
+import json
+import os
 import re
 import tempfile
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -689,10 +691,35 @@ def _unmet_requires(
 # ── plugins ──
 
 
+#: Per templates dir: the key the last lint of a pending `plugins.yaml` edit
+#: was made under, and its issues. Replaced whole; one entry per directory.
+_plugins_lint: dict[str, tuple[str, list[TemplateIssue]]] = {}
+
+
+def _lint_inputs(templates_dir: Path) -> list:
+    """Stamps of the files, besides the plugin state `plugins_load.signature`
+    covers, that a lint of the instance reads: its library, chains, policy,
+    harnesses, repos and intake files, and the local skills."""
+    from kraft.paths import default_skills_dir
+
+    skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
+    files = [
+        templates_dir / name
+        for name in ("library.yaml", "policy.yaml", "harnesses.yaml", "repos.yaml", "intake.yaml")
+    ]
+    files += sorted(templates_dir.glob(f"{CHAINS_DIR}/*.yaml")) + sorted(skills.glob("*/SKILL.md"))
+    return [(str(p), plugins_load.stamp(p)) for p in files]
+
+
 def _check_plugins(path, data, ctx):
     """A hand edit of `plugins.yaml`: the file itself, then what it would stop
     resolving. Disabling or dropping an entry unloads its plugin, and a new
-    entry reserves its namespace before anything is installed under it."""
+    entry reserves its namespace before anything is installed under it.
+
+    The two full lints this costs are kept per edit: `apply.notify` asks again
+    every few seconds while the edit is pending, and nothing it reads has
+    changed between the asks."""
+    global _plugins_lint
     from kraft.plugins import update as plugin_update
 
     try:
@@ -701,22 +728,37 @@ def _check_plugins(path, data, ctx):
         return [_pydantic_issue(path, exc)]
     root = ctx.plugins_dir or plugins_load.plugins_dir()
     now = plugins_load.installed(ctx.templates_dir, root)
+    key = json.dumps(
+        [
+            data,
+            plugins_load.signature(ctx.templates_dir, now),
+            str(root),
+            _lint_inputs(ctx.templates_dir),
+        ],
+        sort_keys=True,
+        default=str,
+    )
+    cached = _plugins_lint.get(str(ctx.templates_dir))
+    if cached is not None and cached[0] == key:
+        return list(cached[1])
     then = plugins_load.installed(ctx.templates_dir, root, config=config)
 
     def loads(plugins):
         return {(p.id, p.namespace, p.left_out is None) for p in plugins}
 
-    if loads(now) == loads(then):
-        return []
-    try:
-        broken = plugin_update.breaks(
-            plugin_update.state_of(ctx.templates_dir, now),
-            plugin_update.state_of(ctx.templates_dir, then),
-            ctx.templates_dir,
-        )
-    except policy_mod.PolicyError:
-        return []  # policy.yaml's own check says why
-    return [TemplateIssue(path, None, why, loc=("plugins",)) for why in broken]
+    issues: list[TemplateIssue] = []
+    if loads(now) != loads(then):
+        try:
+            broken = plugin_update.breaks(
+                plugin_update.state_of(ctx.templates_dir, now),
+                plugin_update.state_of(ctx.templates_dir, then),
+                ctx.templates_dir,
+            )
+        except policy_mod.PolicyError:
+            return []  # policy.yaml's own check says why; not kept
+        issues = [TemplateIssue(path, None, why, loc=("plugins",)) for why in broken]
+    _plugins_lint = {**_plugins_lint, str(ctx.templates_dir): (key, issues)}
+    return list(issues)
 
 
 def _check_lock(path, data, ctx):

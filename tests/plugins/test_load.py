@@ -14,6 +14,7 @@ import kraft
 from kraft import harness, update
 from kraft.config import read_yaml, write_yaml
 from kraft.plugins import fetch, load
+from kraft.plugins.config import PluginsConfig
 from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.library import TemplateLibrary
 
@@ -227,22 +228,133 @@ def test_offline_lint_says_which_chains_it_did_not_check(process, capsys):
     assert "not checked (plugin)" in out
 
 
-def test_a_limit_above_a_lowered_maximum_leaves_the_plugin_out(tmp_path):
-    """The operator lowered `maxima:` after the plugin was installed: the
-    plugin drops out, named, and is not run past the new ceiling."""
+SHIPPED_POLICY = Path(kraft.__file__).resolve().parents[2] / "config" / "policy.yaml"
+
+
+@pytest.fixture
+def capped(tmp_path):
+    """`release@acme` with a task that sets budget_usd 8, under a maximum of 9."""
     config = home(tmp_path)
     plugins = tmp_path / "run" / "plugins"
-    capped = {**AGENT, "policy": {"budget_usd": 8}}
-    release = {"library": {"tasks": {"base": capped}}, "chains": {"ship": chain("base")}}
-    install(config, plugins, make_collection(tmp_path, {"release": release}), "release")
-    shipped = read_yaml(Path(kraft.__file__).resolve().parents[2] / "config" / "policy.yaml")
-    write_yaml(config / "policy.yaml", {**shipped, "maxima": {"tasks": {"budget_usd": 9}}})
+    release = {
+        "library": {"tasks": {"base": {**AGENT, "policy": {"budget_usd": 8}}}},
+        "chains": {"ship": chain("base")},
+    }
+    store = install(config, plugins, make_collection(tmp_path, {"release": release}), "release")
+    _maximum(config, 9)
+    return config, plugins, store
+
+
+def _maximum(config, usd):
+    maxima = {"tasks": {"budget_usd": usd}}
+    write_yaml(config / "policy.yaml", {**read_yaml(SHIPPED_POLICY), "maxima": maxima})
+
+
+def test_a_limit_above_a_lowered_maximum_leaves_the_plugin_out(capped):
+    """The operator lowered `maxima:` after the plugin was installed: the
+    plugin drops out, named, and is not run past the new ceiling."""
+    config, plugins, _ = capped
     assert _one(config, plugins).left_out is None
 
-    write_yaml(config / "policy.yaml", {**shipped, "maxima": {"tasks": {"budget_usd": 5}}})
+    _maximum(config, 5)
 
     found = _one(config, plugins)
     assert "sets budget_usd 8 > the administrator maximum 5" in found.left_out and not found.quiet
+
+
+# ── the answer is kept until an input changes ──
+
+
+def _counting(monkeypatch):
+    calls = []
+    real = load._installed
+
+    def counted(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(load, "_installed", counted)
+    return calls
+
+
+def _disable(config, plugins, store):
+    _edit(config, "plugins.yaml", lambda d: d["plugins"].update({"release@acme": False}))
+
+
+def _bump_lock(config, plugins, store):
+    _edit(config, "plugins.lock", lambda d: d["plugins"]["release@acme"].update(version="9.9.9"))
+
+
+def _edit_harnesses(config, plugins, store):
+    _edit(config, "harnesses.yaml", lambda d: d["harnesses"].clear())
+
+
+def _edit_repos(config, plugins, store):
+    write_yaml(config / "repos.yaml", {"repos": [{"id": "release", "path": "/work/release"}]})
+
+
+def _edit_policy(config, plugins, store):
+    _maximum(config, 5)
+
+
+def _drop_the_store(config, plugins, store):
+    drop_store(store)
+
+
+def _mark_unrestored(config, plugins, store):
+    load._unrestored[store.name] = "x"
+
+
+@pytest.mark.parametrize(
+    ("before", "change"),
+    [
+        (None, _disable),
+        (None, _bump_lock),
+        (None, _edit_harnesses),
+        (None, _edit_repos),
+        (None, _edit_policy),
+        (None, _drop_the_store),
+        (_drop_the_store, _mark_unrestored),
+    ],
+    ids=[
+        "plugins-yaml",
+        "plugins-lock",
+        "harnesses-yaml",
+        "repos-yaml",
+        "policy-yaml",
+        "dropped-store",
+        "unrestored-reason",
+    ],
+)
+def test_installed_is_answered_from_a_cache_until_an_input_changes(
+    capped, monkeypatch, before, change
+):
+    config, plugins, store = capped
+    monkeypatch.setattr(load, "_unrestored", {})
+    if before:
+        before(config, plugins, store)
+    calls = _counting(monkeypatch)
+    first = load.installed(config, plugins)
+    n = len(calls)
+    assert n >= 1
+    assert load.installed(config, plugins) == first
+    assert len(calls) == n  # nothing recomputed
+
+    change(config, plugins, store)
+
+    after = load.installed(config, plugins)
+    assert len(calls) > n  # recomputed
+    assert after != first  # and the answer reflects it
+
+
+def test_verify_and_an_unsaved_config_never_hit_the_cache(instance, monkeypatch):
+    config, plugins, _ = instance
+    calls = _counting(monkeypatch)
+    load.installed(config, plugins)
+    n = len(calls)
+    load.installed(config, plugins, verify=True)
+    load.installed(config, plugins, config=PluginsConfig.load(config / "plugins.yaml"))
+    assert len(calls) == n + 2  # each of the two calls recomputed
 
 
 # ── restoring a store that is gone ──

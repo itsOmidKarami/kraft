@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from kraft.api import config_check, deps
+from kraft.plugins import update as plugin_update
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -281,6 +282,31 @@ def test_a_plugins_yaml_edit_is_checked(with_release, chain_text, edit, says):
     issues = config_check.check("plugins.yaml", _plugins_yaml(st, **edit), config_check.context(st))
 
     assert [says in i.message for i in issues] == ([True] if says else [])
+
+
+def test_a_pending_plugins_yaml_edit_is_linted_once(with_release, monkeypatch):
+    """`apply.notify` asks again every few seconds: nothing the lint reads has
+    changed, so it is not run again; a changed input runs it again."""
+    st = with_release
+    (st.templates_dir / "chains" / "mine.yaml").write_text(USES_RELEASE)
+    deps._reload_templates(st)
+    text = _plugins_yaml(st, **{"release@acme": False})
+    real, calls = plugin_update.state_of, []
+    monkeypatch.setattr(
+        plugin_update, "state_of", lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    )
+    ctx = config_check.context(st)
+
+    first = config_check.check("plugins.yaml", text, ctx)
+    assert first, "the edit must break something, or the test pins nothing"
+    assert config_check.check("plugins.yaml", text, ctx) == first
+    assert config_check.check("plugins.yaml", text, ctx) == first
+    assert len(calls) == 2  # before and after, once
+
+    library = st.templates_dir / "library.yaml"
+    library.write_text(library.read_text() + "\n# touched\n")
+    config_check.check("plugins.yaml", text, ctx)
+    assert len(calls) == 4  # a changed input lints again
 
 
 def test_a_lock_that_does_not_parse_is_an_issue(with_release):

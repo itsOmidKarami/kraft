@@ -335,3 +335,15 @@ origin: src/kraft/templates/catalogue.py §read_only_message
 WHEN a plugin component or chain is copied into a local draft, the system SHALL carry its plugin-internal references qualified, so the copy resolves.
 enforced-by: tests/api/test_plugin_content.py::test_copy_from_a_plugin[chain], tests/api/test_plugin_content.py::test_copy_from_a_plugin[component]
 origin: src/kraft/drafts/ops.py §copy_component
+
+## REQ installed-plugins-are-recomputed-only-when-an-input-changes
+
+WHEN `installed()` is called again and none of the files it reads has changed, the system SHALL return the earlier answer without re-running the load-time checks.
+enforced-by: tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[plugins-yaml], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[plugins-lock], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[harnesses-yaml], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[repos-yaml], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[policy-yaml], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[dropped-store], tests/plugins/test_load.py::test_installed_is_answered_from_a_cache_until_an_input_changes[unrestored-reason], tests/plugins/test_load.py::test_verify_and_an_unsaved_config_never_hit_the_cache
+origin: src/kraft/plugins/load.py §installed
+
+## REQ a-pending-plugins-yaml-edit-is-linted-once
+
+WHILE a `plugins.yaml` edit is pending and nothing it reads changes, the system SHALL lint it once, not on each pending check.
+enforced-by: tests/api/test_config_check.py::test_a_pending_plugins_yaml_edit_is_linted_once
+origin: src/kraft/api/config_check.py §_check_plugins
