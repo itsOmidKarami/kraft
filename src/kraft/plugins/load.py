@@ -448,11 +448,13 @@ def _restore(plugin: InstalledPlugin, config_dir: Path, root: Path) -> Path:
         )
     except ConfigError as exc:
         raise RestoreError(f"{what}: {exc}") from exc
-    if collection is None or plugin.source is None:
+    if collection is None:
         raise RestoreError(
             f"{what}: collection {collection_name} is no longer in plugins.yaml; add it again"
         )
     again = f"run `kraft admin plugin install {plugin.id} --re-install`"
+    if plugin.source is None:
+        raise RestoreError(f"{what}: its pin does not record where its files came from; {again}")
     try:
         if collection.git is not None and plugin.commit is not None:
             try:

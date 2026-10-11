@@ -169,8 +169,15 @@ def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:
             )
             found = manifest.plugin(raw, str(plugin_file))
             manifest.check_plugin(found, entry, extracted.files)
-            others = {p.namespace for p in load.installed(*home)} if home else set()
-            plugin_update.check(found, extracted.files, other_namespaces=others - {found.name})
+            held = load.installed(*home) if home else ()
+            plugin_update.check(
+                found,
+                extracted.files,
+                other_namespaces={p.namespace for p in held} - {found.name},
+                named_by=plugin_update.referrers(
+                    found.name, [p for p in held if p.name != found.name]
+                ),
+            )
         except plugin_update.Refused as exc:
             for why in exc.problems:
                 problem(root, why)
@@ -413,6 +420,7 @@ def _cmd_collection_list(ns: argparse.Namespace) -> None:
 
 
 def _cmd_collection_update(ns: argparse.Namespace) -> None:
+    _not_a_worker()  # it writes the mirrors the daemon later reads
     config_dir, plugins_dir = _home()
     try:
         config = PluginsConfig.load(config_dir / PluginsConfig.FILE)

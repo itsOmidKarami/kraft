@@ -406,6 +406,12 @@ def _remote_gone(repo, config, plugins):
     shutil.rmtree(plugins / "mirrors")
 
 
+def _source_not_recorded(repo, config, plugins):
+    """An older pin: it names a commit, and not the directory in it."""
+    (found,) = load.installed(config, plugins)
+    return replace(found, source=None)
+
+
 def _collection_removed(repo, config, plugins):
     written = read_yaml(config / "plugins.yaml")
     written["collections"]["other"] = written["collections"].pop("acme")
@@ -418,18 +424,22 @@ def _collection_removed(repo, config, plugins):
     [
         (_remote_gone, "could not be fetched"),
         (_collection_removed, "collection acme is no longer in plugins.yaml"),
+        (_source_not_recorded, "its pin does not record where its files came from"),
     ],
-    ids=["commit-not-on-the-remote", "collection-removed"],
+    ids=["commit-not-on-the-remote", "collection-removed", "source-not-recorded"],
 )
 def test_a_store_that_cannot_be_restored_says_why(tmp_path, happens, why):
     repo, config, plugins, found, _publish = _locked(tmp_path)
     drop_store(found.root)
-    happens(repo, config, plugins)
+    pin = happens(repo, config, plugins) or found
 
-    failed = load.restore_missing((found,), config, plugins)
+    failed = load.restore_missing((pin,), config, plugins)
 
     assert why in failed["release@acme"] and "release@acme 1.0.0" in failed["release@acme"]
     assert not found.root.exists()
+    # The collection still being listed, a person can put it back: say how. A
+    # removed collection is said to be added again, which --re-install cannot do.
+    assert ("--re-install" in failed["release@acme"]) is (happens is not _collection_removed)
     if happens is _remote_gone:
         assert "kraft admin plugin install release@acme --re-install" in failed["release@acme"]
         assert "could not be restored: release@acme 1.0.0" in _one(config, plugins).left_out

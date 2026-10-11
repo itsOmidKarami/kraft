@@ -68,6 +68,15 @@ def test_a_failed_fetch_is_classified_and_redacted(plugins_dir, tmp_path):
     )
 
 
+def test_a_missing_ref_is_not_a_network_failure(collection, plugins_dir):
+    """The remote answered: waiting and asking again will not make it appear."""
+    with pytest.raises(fetch.FetchError) as err:
+        fetch.fetch(plugins_dir, "acme", collection.as_uri(), "no-such-branch")
+
+    assert err.value.kind == "refused"
+    assert "'no-such-branch' does not exist" in str(err.value)
+
+
 def _extract(collection, plugins_dir, ref=None, plugin="release"):
     mirror, commit = fetch.fetch(plugins_dir, "acme", collection.as_uri(), ref)
     listed = manifest.collection(
@@ -185,6 +194,7 @@ def test_only_the_layout_is_extracted(tmp_path, plugins_dir):
                     "chains/one.yaml": same,
                     "chains/two.yaml": same,
                     "chains/Ship.yaml": same,
+                    "library.yaml\n": same,
                     "skills/deploy-review/scripts/run.sh": "rm -rf /",
                     ".mcp.json": "{}",
                     ".claude-plugin/plugin.json": "{}",

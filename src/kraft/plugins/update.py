@@ -190,14 +190,48 @@ def problems(
     return out
 
 
+def referrers(namespace: str, plugins: Sequence[load.InstalledPlugin]) -> list[str]:
+    """Why `namespace` may not be taken: each skill of `plugins`, the other
+    installed plugins, that already names `<namespace>:`. It resolved to no
+    plugin when it was installed; a plugin installed now would answer it, and
+    there are no plugin dependencies. A store that does not read says nothing:
+    loading says why it is left out."""
+    out: list[str] = []
+    for plugin in plugins:
+        try:
+            files = fetch.extract_dir(plugin.root).files
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            continue
+        for rel in sorted(files):
+            if not (rel in ("library.yaml", "profiles.yaml") or rel.startswith("chains/")):
+                continue
+            try:
+                data = bounded_yaml(files[rel][1].decode(), [20_000])
+            except (ValueError, yaml.YAMLError):
+                continue
+            for at, component in _components(rel, data):
+                skill = component.get("skill")
+                if _qualifier(skill) == namespace:
+                    out.append(
+                        f"{plugin.id}: {rel}: {at or 'file'}: skill {skill!r} names this "
+                        f"plugin's namespace {namespace!r}; there are no plugin dependencies"
+                    )
+    return out
+
+
 def check(
     found: PluginManifest,
     files: Mapping[str, tuple[str, bytes]],
     *,
     other_namespaces: Collection[str] = (),
+    named_by: Sequence[str] = (),
 ) -> None:
-    """Raise `Refused` when this plugin's content may not be installed."""
-    if found_problems := problems(found, files, other_namespaces=other_namespaces):
+    """Raise `Refused` when this plugin's content may not be installed.
+    `named_by` is what `referrers()` says of its namespace."""
+    if found_problems := [
+        *problems(found, files, other_namespaces=other_namespaces),
+        *named_by,
+    ]:
         raise Refused(found_problems)
 
 
@@ -367,10 +401,7 @@ def _catalogue(
         source = fetch.redact(collection.git)
     else:
         mirror, commit, source = None, None, str(collection.path)
-        try:
-            data = (Path(source) / where).read_bytes()
-        except OSError as exc:
-            raise fetch.FetchError("refused", f"{source}: {exc}") from exc
+        data = fetch.read_regular(Path(source) / where, fetch.MAX_JSON)
     try:
         text = data.decode()
     except UnicodeDecodeError as exc:
@@ -507,7 +538,12 @@ def update(
                 others = set(holders) | {
                     config.namespace(o) for o in config.plugins if o != plugin_id
                 }
-                check(found, extracted.files, other_namespaces=others)
+                check(
+                    found,
+                    extracted.files,
+                    other_namespaces=others,
+                    named_by=referrers(namespace, [p for p in loaded if p.id != plugin_id]),
+                )
             except fetch.FetchError as exc:
                 results[plugin_id] = Result(
                     plugin_id, "failed", problems=(str(exc),), kind=exc.kind

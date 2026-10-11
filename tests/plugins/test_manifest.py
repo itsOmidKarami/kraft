@@ -182,6 +182,8 @@ def test_components_are_read_from_the_fixed_layout():
         "chains/Ship.yaml": False,
         "chains/sub/a.yaml": False,
         "library.yml": False,
+        "library.yaml\n": False,
+        "chains/ship.yaml\n": False,
         "skills/x/scripts/run.sh": False,
         "scripts/x.sh": False,
         ".mcp.json": False,
@@ -191,6 +193,7 @@ def test_components_are_read_from_the_fixed_layout():
     assert not manifest.near_layout("scripts/x.sh")
     assert manifest.shadows_layout("skills") and manifest.shadows_layout("skills/x")
     assert not manifest.shadows_layout("skills/x/scripts")
+    assert not manifest.shadows_layout("skills\n")
 
 
 #: Manifests both the published schema and the loader can judge. What only

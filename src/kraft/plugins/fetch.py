@@ -42,6 +42,9 @@ _AUTH = re.compile(
     r"Authentication failed|Permission denied|could not read Username|terminal prompts disabled",
     re.IGNORECASE,
 )
+#: What git says when the remote answered and has no such ref: not a failure of
+#: the network, and no retry will find it.
+_MISSING_REF = re.compile(r"couldn't find remote ref|invalid refspec", re.IGNORECASE)
 
 
 class FetchError(Exception):
@@ -130,6 +133,10 @@ def fetch(plugins_dir: Path, name: str, url: str, ref: str | None) -> tuple[Path
             timeout=FETCH_TIMEOUT_S,
         )  # fmt: skip
     except FetchError as exc:
+        if _MISSING_REF.search(str(exc)):
+            raise FetchError(
+                "refused", f"{redact(url)}: ref {ref or 'HEAD'!r} does not exist: {exc}"
+            ) from exc
         kind = "auth" if _AUTH.search(str(exc)) else "network"
         raise FetchError(kind, f"{redact(url)}: {exc}") from exc
     commit = _git(
@@ -250,6 +257,23 @@ def read_file(mirror: Path, commit: str, path: str, cap: int) -> bytes:
     if size > cap:
         raise PluginRefused(f"{commit[:12]}:{path}: {size} bytes; at most {cap}")
     return _blobs(mirror, [oid])[oid]
+
+
+def read_regular(path: Path, cap: int) -> bytes:
+    """`path`'s bytes, if it is a regular file (not a symlink, a FIFO or a
+    device) of at most `cap` bytes; else `FetchError("refused")`. Opened
+    `O_NOFOLLOW | O_NONBLOCK`, so a FIFO cannot block the read."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise FetchError("refused", f"{path}: {exc}") from exc
+    with os.fdopen(fd, "rb") as fh:
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            raise FetchError("refused", f"{path}: not a regular file")
+        data = fh.read(cap + 1)
+    if len(data) > cap:
+        raise FetchError("refused", f"{path}: over {cap} bytes")
+    return data
 
 
 def extract_git(mirror: Path, commit: str, source: str) -> Extracted:

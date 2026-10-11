@@ -37,16 +37,19 @@ PLUGIN_JSON = ".kraft/plugin.json"
 
 _NAME = r"[a-z][a-z0-9_-]*"
 #: The only files of a plugin directory Kraft extracts, hashes and reviews.
+#: `\Z`, not `$`: `$` also matches before a trailing newline, so a file named
+#: `library.yaml\n` would be taken for `library.yaml`.
 _LAYOUT = re.compile(
     rf"^(library\.yaml|profiles\.yaml|\.kraft/plugin\.json"
-    rf"|chains/{_NAME}\.yaml|skills/{_NAME}/SKILL\.md)$"
+    rf"|chains/{_NAME}\.yaml|skills/{_NAME}/SKILL\.md)\Z"
 )
 #: A path that could stand in for part of the layout if it were followed: a
 #: symlink or a submodule here is refused, not skipped.
-_SHADOWS = re.compile(r"^(chains|skills|\.kraft|skills/[^/]+)$")
+_SHADOWS = re.compile(r"^(chains|skills|\.kraft|skills/[^/]+)\Z")
 #: A file an author most likely meant as part of the layout.
 _NEAR = re.compile(
-    r"^(library|profiles)\.ya?ml$|^chains/[^/]+\.ya?ml$|^skills/[^/]+/skill\.md$", re.IGNORECASE
+    r"^(library|profiles)\.ya?ml\Z|^chains/[^/]+\.ya?ml\Z|^skills/[^/]+/skill\.md\Z",
+    re.IGNORECASE,
 )
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\Z")
 _HTTPS = re.compile(r"^https://[^\s/]+\S*\Z")

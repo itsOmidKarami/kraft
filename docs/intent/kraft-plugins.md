@@ -371,3 +371,9 @@ origin: src/kraft/templates/library.py §_pins
 WHEN an item's launch needs a pinned store that is gone, the system SHALL restore it before reading the harness profile table, at dispatch, gate review, escalation and review reply.
 enforced-by: tests/executor/test_dispatch_pins.py::test_the_fallback_table_is_read_after_the_pins_are_restored, tests/executor/test_gates_autoreview.py::test_the_profile_fallback_check_reads_restored_pins, tests/test_escalate.py::test_an_escalation_restores_the_pinned_store, tests/test_review_reply.py::test_a_review_reply_restores_the_pinned_store
 origin: src/kraft/executor/dispatch.py §restore_pins
+
+## REQ a-directory-collection-catalogue-is-read-bounded
+
+IF a directory collection's `collection.json` is a symlink, a FIFO or over the JSON cap, THEN the system SHALL refuse the collection.
+enforced-by: tests/plugins/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[fifo], tests/plugins/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[symlink], tests/plugins/test_update_hardening.py::test_a_directory_collections_catalogue_is_read_safely[oversized]
+origin: src/kraft/plugins/update.py §_catalogue
