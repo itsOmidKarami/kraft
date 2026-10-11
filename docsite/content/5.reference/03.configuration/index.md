@@ -24,11 +24,12 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
 | `addons.yaml` | The [collections](/concepts/vocabulary#collection) this instance knows and the [Kraft add-ons](/concepts/vocabulary#add-on) installed from them. | `kraft admin addon`, or you | [Add-ons and collections](/reference/configuration/addons#addonsyaml) |
 | `addons.lock` | The commit, digest and version each installed add-on is pinned to. Not edited by hand. | `kraft admin addon` | [Add-ons and collections](/reference/configuration/addons#addonslock) |
+| `repo-libraries.lock` | The commit and digest each connected repository's [repo library](/concepts/vocabulary#repo-library) was accepted at. Not edited by hand. | `kraft repo library` | [Repo libraries](/reference/configuration/repo-libraries#repo-librarieslock) |
 
 ## How Kraft treats the directory
 
 - **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. [Upgrade your configuration](/guides/run/upgrade-your-configuration) takes what a new release ships in `library.yaml` and `chains/`. The files marked "You", "`kraft admin addon`" or "The first save in Settings" are never seeded.
-- **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the two add-on files, which no screen edits. Editing any file by hand is equally supported.
+- **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the add-on files and locks, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
 - **An old directory.** Before 2.0, the directory was `templates/`; see [Upgrade from 1.4](/guides/run/upgrade-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating a home from 0.x](/guides/run/upgrade-from-0-x-or-a-release-candidate#migrating-a-home-from-0x).
@@ -52,3 +53,4 @@ Three commands check and reload the files:
 - [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's resource limits, callbacks, network, credentials, Kits, `sandbox.yaml` and git.
 - [Environment variables](/reference/configuration/environment-variables): the variables that move this directory, every other variable Kraft reads, and the variables a worker gets.
 - [Add-ons and collections](/reference/configuration/addons): `collection.json`, `addon.json`, `addons.yaml` and `addons.lock`, the naming rules, and when an add-on loads, updates and is restored.
+- [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.

@@ -7,7 +7,16 @@ import shutil
 
 import pytest
 import yaml
-from support.addons import AGENT, chain, drop_store, instance, make_collection, publish
+from support.addons import (
+    AGENT,
+    accept_repo_library,
+    chain,
+    drop_store,
+    instance,
+    make_collection,
+    publish,
+    repo_with_library,
+)
 
 from kraft.adapters import agent
 from kraft.addons import load, update
@@ -113,6 +122,37 @@ def test_a_resolved_chain_pins_the_addons_it_reads(home, chain_id):
     assert locked.commit and locked.tree
     snapshot = MaterializedChain.from_json(_stored(resolved))
     assert snapshot.chain.addons == resolved.addons
+
+
+def test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored(home, tmp_path):
+    """A repo library is pinned as an add-on is: its id, the commit and tree
+    it was accepted at, and `./.kraft`; a missing store is read back from the
+    connected checkout."""
+    _repo, config_dir, addons_dir = home
+    app = repo_with_library(tmp_path)
+    accept_repo_library(config_dir, addons_dir, app, "app")
+    library = next(p for p in load.installed(config_dir, addons_dir) if p.repo_id)
+
+    resolved = _resolved(config_dir, addons_dir, "app:ship")
+
+    assert resolved.addons == {
+        "app": {
+            "id": "library@repo:app",
+            "commit": library.commit,
+            "tree": library.tree,
+            "source": "./.kraft",
+            "digest": f"sha256:{library.root.name}",
+            "version": library.version,
+        }
+    }
+    assert library.commit and library.tree
+    drop_store(library.root)
+    (pinned,) = [p for p in load.for_item(resolved.addons, config_dir, addons_dir) if p.repo_id]
+    assert pinned.left_out is not None
+
+    load.restore(pinned, config_dir, addons_dir)
+
+    assert library.root.is_dir()
 
 
 @pytest.mark.parametrize("rebuild", ["retry-override", "chain-revision"])

@@ -54,7 +54,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 | `managed` | boolean | `true` | Keeps a repo you connected out of Settings › Repos' "Detected · not connected" section. Auto-connected submodules are written with `managed: false`. |
 | `forge` | string | `null` | `github` or `gitlab`: which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |
 | `project` | string | `null` | The GitLab project path, when `forge: gitlab`. |
-| `default_chain` | string | `null` | The chain a [work item](/concepts/vocabulary#work-item) on this repo runs when none is named. Unset, it is `default`. See [`default_chain`](#default_chain). |
+| `default_chain` | string | `null` | The chain a [work item](/concepts/vocabulary#work-item) on this repo runs when none is named. Unset, it is the repo library's `default` chain when one is loaded, else `default`. See [`default_chain`](#default_chain). |
 | `models` | mapping of [harness profile](/concepts/vocabulary#harness-profile) id to string | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`). See [`models`](#models). |
 
 ### Test and setup
@@ -103,6 +103,8 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 ### `default_chain`
 
 An item that names no chain gets it however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake.
+
+Unset or `default`, it gives way to the chain `<id>:default` of the repo's [repo library](/reference/configuration/repo-libraries#the-default-chain), when the library is accepted and has one. Name another chain here to keep the instance's own. Accepting a repo library writes an `id` on the entry when it has none.
 
 Before 2.0, this key was `default_chain_template`. It is still read, and saved under the new name.
 

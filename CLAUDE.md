@@ -89,6 +89,7 @@ kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in
 kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [-y] [--verify [--timeout MIN] [--on-host]]
 kraft repo disconnect [PATH]
+kraft repo library [PATH] [-y | --check]     # review the repo's .kraft/ library and take it; --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
 kraft admin stop                             # SIGTERM to run/kraft.pid

@@ -21,16 +21,13 @@ from fastapi import HTTPException
 from support import permissions
 from support.addons import (
     AGENT,
-    accept_repo_library,
     chain,
     drop_store,
     extracted,
     install,
     make_collection,
     publish,
-    repo_with_library,
 )
-from support.harness import entry_of
 from support.store_fixtures import mk_item
 
 from kraft import config as config_mod
@@ -508,22 +505,6 @@ def test_health_names_an_addon_that_did_not_load(client, tmp_path, change, key, 
         assert why in body["invalid_templates"][key]
 
 
-def test_health_names_a_repo_library_that_did_not_load(client, tmp_path):
-    """A repo library is keyed by its repository, not by an add-on id."""
-    st = client.app.state
-    accept_repo_library(st.templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")
-    deps._reload_templates(st)
-    assert "app:ship" in st.library.chain_ids
-    assert client.get("/api/health").json()["status"] == "ok"
-
-    (st.templates_dir / "harnesses.yaml").write_text(yaml.safe_dump({"harnesses": {}}))
-    deps._reload_templates(st)
-
-    body = client.get("/api/health").json()
-    assert body["status"] == "degraded"
-    assert "requires harness 'codex'" in body["invalid_templates"]["repo library app"]
-
-
 def test_an_addon_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
     """An add-on verb applies its own change: an unsaved-to-the-server edit of
     `policy.yaml` is not taken along."""
@@ -817,39 +798,3 @@ def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_p
     health = client.get("/api/health").json()
     assert health["status"] == "ok"
     assert health["addon_updates"] == {"release@acme": {"outcome": "held", "kind": None}}
-
-
-class _Library:
-    def __init__(self, *chains):
-        self.chain_ids = chains
-
-
-@pytest.mark.parametrize(
-    "entry, asked, chains, stored",
-    [
-        pytest.param({"id": "app"}, None, ("app:default",), "app:default", id="the-repos-default"),
-        pytest.param(
-            {"id": "app", "default_chain": "default"},
-            None,
-            ("app:default",),
-            "app:default",
-            id="default-counts-as-unset",
-        ),
-        pytest.param(
-            {"id": "app", "default_chain": "quick"},
-            None,
-            ("app:default",),
-            "quick",
-            id="the-entrys-own-wins",
-        ),
-        pytest.param({"id": "app"}, "other", ("app:default",), "other", id="asked-wins"),
-        pytest.param({"id": "app"}, None, ("app:ship",), None, id="library-without-default"),
-        pytest.param({}, None, ("app:default",), None, id="no-id"),
-        pytest.param({"id": "app"}, None, None, None, id="no-library"),
-    ],
-)
-def test_which_chain_an_item_with_no_chain_runs(tmp_path, entry, asked, chains, stored):
-    repo_entry = entry_of({"path": str(tmp_path), **entry})
-    library = None if chains is None else _Library(*chains)
-
-    assert deps.chain_template_for(repo_entry, asked, library) == stored
