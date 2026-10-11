@@ -12,6 +12,7 @@ import json
 import pytest
 from support.harness import entry_of, v1_chain, v1_resolved, write_harness_profiles
 from support.never_signal import NEVER_SIGNAL, NEVER_SIGNAL_TEXT
+from support.plugins import drop_store, install_release, pinned_chain
 
 from kraft import escalate, events, executor, store
 from kraft.db import Database
@@ -19,16 +20,12 @@ from kraft.paths import RunDirs
 
 #: The chain every item here is on: an escalation turn runs under the policy of
 #: the node its item stopped at, read from the item's snapshot (Kraft-l8ype).
-_CHAIN = v1_chain(
-    [
-        {
-            "id": "implementation",
-            "kind": "exec",
-            "tasks": [{"id": "work", "kind": "subprocess", "command": "true"}],
-        }
-    ],
-    repo="/r",
-)
+_NODE = {
+    "id": "implementation",
+    "kind": "exec",
+    "tasks": [{"id": "work", "kind": "subprocess", "command": "true"}],
+}
+_CHAIN = v1_chain([_NODE], repo="/r")
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +81,34 @@ async def _seed_paused(database, rd, wid: str) -> None:
     )
     await database.write(lambda c: store.enter_node(c, wid, "implementation"))
     await database.write(lambda c: store.pause_work_item(c, wid, []))
+
+
+async def test_an_escalation_restores_the_pinned_store(monkeypatch, database, run_dirs, tmp_path):
+    """The store the item pinned is gone and the lock has moved on: the
+    escalation's launch puts the item's own version back."""
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(json.dumps({"type": "system", "session_id": "cli-abc"}) + "\n")
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+    pins, store_dir = install_release(tmp_path, "1.0.0", provider="claude")
+    install_release(tmp_path, "1.1.0", provider="claude")
+    drop_store(store_dir)
+    nodes = [_NODE]
+    await _seed_needs_human(database, run_dirs, "w1", chain=pinned_chain(nodes, pins, repo="/r"))
+
+    await escalate.dispatch(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        message="any update?",
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
+    )
+
+    assert store_dir.is_dir()
 
 
 async def test_dispatch_on_a_paused_item_does_not_claim_needs_human_or_offer_retry(

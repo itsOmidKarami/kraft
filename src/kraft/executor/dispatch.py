@@ -1291,6 +1291,9 @@ async def _dispatch_task(
     # known to be rate-limited is skipped and a rate-limited launch moves on,
     # every skip or switch logged. Overrides and escalation are the task's own
     # launch's; a fallback entry runs as written.
+    # Before the table is read: a pinned plugin's profile, and the `fallback:`
+    # list it carries, are only there once its store is.
+    await restore_pins(work_item_row)
     try:
         # A profile's own list is live configuration, like the profile body;
         # a file that does not load has none, and the launch below says why.
@@ -1307,7 +1310,6 @@ async def _dispatch_task(
         db, work_item_row["id"], node.id, task.path, overridden=bool(merged_override)
     )
     status = None
-    await restore_pins(work_item_row)
     for i, cand in enumerate(cands):
         primary = i == 0
         try:

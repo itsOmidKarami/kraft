@@ -171,6 +171,10 @@ async def review(
             (work_item_id,),
         ).fetchone()
     )
+    if item is not None:
+        # Before the profile table is read below: a pinned plugin's profile,
+        # and its `fallback:`, are only there once its store is.
+        await executor.restore_pins(item)
     pins = executor.frozen_steering(item)["plugins"] if item is not None else None
     if (refusal := _profile_fallback_refusal(auto_review.task, gate, pins)) is not None:
         # Same posture as the kind-check above: an unpaired skip, no
@@ -271,7 +275,6 @@ async def review(
             f"{auto_review.path}: {refusal}\n",
         )
         return "undecided", refusal
-    await executor.restore_pins(row)
     try:
         inv = _agent.resolve_agent_task(
             auto_review.task,

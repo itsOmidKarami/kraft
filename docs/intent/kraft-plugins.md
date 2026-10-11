@@ -353,3 +353,21 @@ origin: src/kraft/api/config_check.py §_check_plugins
 WHEN the server shuts down, the system SHALL cancel every plugin background task and stop its worker thread before the next plugin write.
 enforced-by: tests/api/test_deps_plugin_tasks.py::test_shutdown_cancels_every_plugin_task_and_stops_the_thread, tests/api/test_deps_plugin_tasks.py::test_shutdown_names_a_thread_that_outlives_the_grace, tests/plugins/test_load.py::test_restore_missing_stops_between_plugins_once_cancelled, tests/plugins/test_update_hardening.py::test_auto_update_stops_between_collections_once_cancelled
 origin: src/kraft/api/startup.py §lifespan
+
+## REQ a-launch-stops-only-for-a-plugin-it-reads
+
+IF a pinned plugin's store cannot be read, THEN the system SHALL stop only a launch whose task selects that plugin's skill or profile.
+enforced-by: tests/plugins/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[skill-from-it-stops], tests/plugins/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[profile-from-it-stops], tests/plugins/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[fallback-to-it-stops], tests/plugins/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[unrelated-task-launches]
+origin: src/kraft/adapters/agent.py §resolve_agent_task
+
+## REQ a-profile-fallback-pins-the-plugin-it-names
+
+WHEN a chain selects a local agent profile whose `fallback` names a plugin profile, the system SHALL pin that plugin.
+enforced-by: tests/plugins/test_pins.py::test_a_local_profiles_fallback_pins_the_plugin_it_names
+origin: src/kraft/templates/library.py §_pins
+
+## REQ a-launch-restores-its-pins-before-reading-profiles
+
+WHEN an item's launch needs a pinned store that is gone, the system SHALL restore it before reading the harness profile table, at dispatch, gate review, escalation and review reply.
+enforced-by: tests/executor/test_dispatch_pins.py::test_the_fallback_table_is_read_after_the_pins_are_restored, tests/executor/test_gates_autoreview.py::test_the_profile_fallback_check_reads_restored_pins, tests/test_escalate.py::test_an_escalation_restores_the_pinned_store, tests/test_review_reply.py::test_a_review_reply_restores_the_pinned_store
+origin: src/kraft/executor/dispatch.py §restore_pins

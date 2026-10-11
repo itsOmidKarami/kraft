@@ -234,3 +234,47 @@ def load_release(client, tmp_path: Path, **spec) -> Path:
     store = install(st.templates_dir, st.run_dirs.plugins, collection, "release")
     deps._reload_templates(st)
     return store
+
+
+def install_release(
+    tmp_path: Path, version: str = "1.0.0", *, fallback: bool = True, provider: str = "fake"
+) -> tuple[dict, Path]:
+    """`release@acme` at `version` installed into this process's own Kraft
+    home (`paths.config_dir()`, `load.plugins_dir()`): a skill `notes` that
+    says `the <version> method`, and agent profiles `deep` (with a `fallback:`
+    to `cheap` unless `fallback` is False) and `cheap` on `provider`. A second
+    call publishes the next version to the same collection and moves the lock
+    onto it. Returns what a work item's snapshot pins for it (`ResolvedChain.
+    plugins`) and the version's store."""
+    from kraft import paths
+    from kraft.plugins import load
+
+    deep = {
+        "model": {provider: "opus"},
+        **({"fallback": [{"profile": "release:cheap"}]} if fallback else {}),
+    }
+    spec = {
+        "version": version,
+        "skills": {"notes": f"the {version} method"},
+        "profiles": {"deep": deep, "cheap": {"model": {provider: "haiku"}}},
+    }
+    collection = tmp_path / "acme-kraft"
+    if collection.exists():
+        publish(collection, "release", **spec)
+    else:
+        make_collection(tmp_path, {"release": spec})
+    config_dir, plugins_dir = paths.config_dir(), load.plugins_dir()
+    store = install(config_dir, plugins_dir, collection, "release")
+    (found,) = [p for p in load.installed(config_dir, plugins_dir) if p.id == "release@acme"]
+    return {"release": found.pin}, store
+
+
+def pinned_chain(nodes, pins: dict, *, repo):
+    """`nodes` (authored V1 node mappings) materialized as a snapshot that
+    pins `pins`, the way an item filed while those plugin versions were the
+    lock's records it."""
+    from dataclasses import replace
+
+    from support.harness import v1_chain, v1_resolved
+
+    return v1_chain(replace(v1_resolved(nodes), plugins=pins), repo=repo)

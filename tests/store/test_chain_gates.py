@@ -395,24 +395,35 @@ async def test_set_attachments_refuses_an_item_that_started_after_the_caller_rea
     assert "attachments_changed" not in types
 
 
+OLD = {"id": "release@acme", "version": "1.4.0"}
+NEW = {"id": "release@acme", "version": "1.5.0"}
+
+
 @pytest.mark.parametrize(
-    "snapshot, payload",
+    "snapshot, run, payload",
     [
-        ({"plugins": {"release": {"id": "release@acme", "version": "1.4.0"}}}, None),
-        ({}, {}),
-        (None, {}),
+        ({"plugins": {"release": OLD}}, None, None),
+        (
+            {"plugins": {"release": OLD}},
+            {"plugins": {"release": NEW}},
+            {"plugins": {"release": NEW}},
+        ),
+        ({}, None, {}),
+        (None, None, {}),
     ],
-    ids=["pinned-plugins", "no-plugins", "no-snapshot"],
+    ids=["pinned-plugins", "run-chain-wins", "no-plugins", "no-snapshot"],
 )
 async def test_chain_loaded_records_the_plugin_versions_the_item_runs_on(
-    database, snapshot, payload
+    database, snapshot, run, payload
 ):
-    """The item's history shows which plugin versions it ran."""
+    """The item's history shows which plugin versions it ran: a retried item's
+    `run_chain` is the one it runs on."""
     await mk_item(database)
     stored = None if snapshot is None else json.dumps(snapshot)
     await database.write(
         lambda c: c.execute(
-            "UPDATE work_items SET materialized_chain = ? WHERE id = 'w1'", (stored,)
+            "UPDATE work_items SET materialized_chain = ?, run_chain = ? WHERE id = 'w1'",
+            (stored, None if run is None else json.dumps(run)),
         )
     )
 

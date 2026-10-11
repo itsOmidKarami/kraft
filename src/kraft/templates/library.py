@@ -273,10 +273,14 @@ class TemplateLibrary:
         steering: dict[str, SteeringProfile],
         skills_dir: Path | None = None,
         plugins: Sequence[InstalledPlugin] = (),
+        library_path: Path | None = None,
     ) -> None:
         self._components = components
         self._chains = dict(chains)
         self.steering = steering
+        #: The `library.yaml` this was read from, whose directory also holds
+        #: `harnesses.yaml`. `None` for a library built with no file behind it.
+        self.library_path = library_path
         #: Where an operator may overlay a method file (`kraft.skill`); `None`
         #: means the bundled methods only.
         self.skills_dir = skills_dir
@@ -365,7 +369,7 @@ class TemplateLibrary:
             for name, body in _section(library_path, library, Namespace.STEERING).items()
         }
 
-        built = cls(components, {}, steering, skills_dir, plugins)
+        built = cls(components, {}, steering, skills_dir, plugins, library_path)
         for plugin in plugins:
             if plugin.left_out is None:
                 built._add_plugin(plugin)
@@ -435,6 +439,7 @@ class TemplateLibrary:
             {name: profile for name, profile in self.steering.items() if ":" not in name},
             self.skills_dir,
             plugins,
+            self.library_path,
         )
         for plugin in plugins:
             if plugin.left_out is None:
@@ -448,7 +453,12 @@ class TemplateLibrary:
         the same id is shadowed, which is how a saved chain's edit is checked
         before it is saved. `self` is not changed."""
         candidate = TemplateLibrary(
-            self._components, self._chains, self.steering, self.skills_dir, self.plugins
+            self._components,
+            self._chains,
+            self.steering,
+            self.skills_dir,
+            self.plugins,
+            self.library_path,
         )
         candidate._chains.pop(_chain_id(chain_path, body), None)
         return candidate, candidate._add_chain(chain_path, body)
@@ -673,15 +683,43 @@ class TemplateLibrary:
             plugins=self._pins(id, resolved),
         )
 
+    def _fallback_profiles(self, chain: object) -> list[str]:
+        """The agent profiles named only by the `fallback:` list of a local
+        profile `chain` selects, and of those in turn. A `profile:` is read
+        live from `harnesses.yaml` at launch, so a plugin profile reached only
+        through such a list is read from the plugin and must be pinned too. An
+        unreadable or missing file adds nothing: the launch reports it."""
+        if self.library_path is None:
+            return []
+        try:
+            profiles = _read(self.library_path.parent / "harnesses.yaml").get("profiles")
+        except TemplateLibraryError:
+            return []
+        if not isinstance(profiles, Mapping):
+            return []
+        pending = list(seen := _profile_names(chain))
+        reached: list[str] = []
+        while pending:
+            body = profiles.get(pending.pop())
+            for entry in (body.get("fallback") if isinstance(body, Mapping) else None) or ():
+                name = entry.get("profile") if isinstance(entry, Mapping) else None
+                if isinstance(name, str) and name not in seen:
+                    seen.add(name)
+                    reached.append(name)
+                    pending.append(name)
+        return reached
+
     def _pins(self, id: str, resolved: ResolvedChain) -> dict[str, dict[str, str | None]]:
         """The loaded plugins chain `id` reads anything from: the chain itself,
         a component it extends or selects, or a skill or agent profile one of
         its tasks names."""
+        data = resolved.chain.model_dump(mode="json")
         named = " ".join(
             [
                 f"{id} ",
                 *(name for names in self.references(id).values() for name in names),
-                json.dumps(resolved.chain.model_dump(mode="json")),
+                json.dumps(data),
+                *self._fallback_profiles(data),
             ]
         )
         return {
@@ -690,6 +728,17 @@ class TemplateLibrary:
             if plugin.left_out is None
             and re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", named)
         }
+
+
+def _profile_names(data: object) -> set[str]:
+    """Every value of a `profile:` key in `data`, a chain dumped to JSON: a
+    task's own agent profile and the profile of a `fallback:` entry."""
+    if isinstance(data, dict):
+        found = {v for k, v in data.items() if k == "profile" and isinstance(v, str)}
+        return found.union(*(_profile_names(v) for v in data.values()))
+    if isinstance(data, list):
+        return set().union(*(_profile_names(v) for v in data))
+    return set()
 
 
 @dataclass(frozen=True)

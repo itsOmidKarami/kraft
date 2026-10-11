@@ -6,6 +6,7 @@ import json
 import shutil
 
 import pytest
+import yaml
 from support.plugins import AGENT, chain, drop_store, instance, make_collection, publish
 
 from kraft.adapters import agent
@@ -133,6 +134,24 @@ def test_a_rebuilt_snapshot_keeps_the_items_pins(home, rebuild):
     assert rebuilt.chain.plugins == resolved.plugins
 
 
+def test_a_local_profiles_fallback_pins_the_plugin_it_names(home):
+    """`profile:` is read live: the plugin profile a local one falls back to
+    is read from the plugin at launch, so the item has to pin it."""
+    repo, config_dir, plugins_dir = home
+    fast = {"model": {"codex": "gpt-5"}, "fallback": [{"profile": "release:deep"}]}
+    (config_dir / "harnesses.yaml").write_text(
+        yaml.safe_dump({"harnesses": {"codex": {"provider": "codex"}}, "profiles": {"fast": fast}})
+    )
+    task = {**AGENT, "profile": "fast"}
+    (config_dir / "chains" / "quick.yaml").write_text(
+        json.dumps({"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **task}]}]})
+    )
+
+    resolved = _resolved(config_dir, plugins_dir, "quick")
+
+    assert list(resolved.plugins) == ["release"]
+
+
 def test_a_chain_that_reads_no_plugin_stores_no_pins(home):
     repo, config_dir, plugins_dir = home
     (config_dir / "chains" / "plain.yaml").write_text(json.dumps(chain("base")))
@@ -142,9 +161,9 @@ def test_a_chain_that_reads_no_plugin_stores_no_pins(home):
     assert "plugins" not in json.loads(stored)
 
 
-def _launch(pins):
+def _launch(pins, **fields):
     task = AgentTask.model_validate(
-        {"id": "t", **AGENT, "skill": "release:notes", "profile": "release:deep"}
+        {"id": "t", **AGENT, **(fields or {"skill": "release:notes", "profile": "release:deep"})}
     )
     return agent.resolve_agent_task(task, None, steering={}, plugins=pins)
 
@@ -176,6 +195,36 @@ def test_a_pinned_version_that_is_gone_is_refused_not_delegated(home):
         "plugin release@acme 1.0.0 could not be read: the version this work item started "
         "with is no longer in the store"
     )
+
+
+@pytest.mark.parametrize(
+    ("fields", "stops"),
+    [
+        ({"skill": "release:notes"}, True),
+        ({"profile": "release:deep"}, True),
+        ({"fallback": [{"profile": "release:deep"}]}, True),
+        ({"prompt": "unrelated"}, False),
+    ],
+    ids=[
+        "skill-from-it-stops",
+        "profile-from-it-stops",
+        "fallback-to-it-stops",
+        "unrelated-task-launches",
+    ],
+)
+def test_a_missing_pin_the_task_does_not_read_does_not_stop_it(home, fields, stops):
+    """An escalation or a review of an item that pinned `release` reads nothing
+    from it: its store being gone is no reason to refuse them."""
+    repo, config_dir, plugins_dir = home
+    pins = _resolved(config_dir, plugins_dir, "mine").plugins
+    drop_store(load.installed(config_dir, plugins_dir)[0].root)
+    gone = {"release": {**pins["release"], "digest": "sha256:" + "0" * 64}}
+
+    if stops:
+        with pytest.raises(agent.HarnessUnavailable, match="could not be read"):
+            _launch(gone, **fields)
+    else:
+        assert _launch(gone, **fields).harness
 
 
 def test_every_launch_is_handed_the_items_pins(home):

@@ -28,6 +28,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
 from kraft.config import RepoEntry, git_read
 from kraft.plugins import load as plugins_load
 from kraft.policy import InstancePolicy
+from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.models import AgentTask
 from kraft.vocab import ADVANCING
 from kraft.worker import backends as _backends
@@ -362,7 +363,11 @@ def resolve_agent_task(
     table, path = harness_table(harnesses, plugins)
     known = plugins_load.for_item(plugins, path.parent)
     for plugin in known:
-        if plugin.namespace in (plugins or {}) and plugin.left_out is not None:
+        if (
+            plugin.namespace in (plugins or {})
+            and plugin.left_out is not None
+            and _reads_namespace(task, table, plugin.namespace)
+        ):
             raise HarnessUnavailable(
                 f"plugin {plugin.id} {plugin.version} could not be read: {plugin.left_out}"
             )
@@ -396,6 +401,16 @@ def resolve_agent_task(
     if policy is None:
         return inv
     return inv._replace(allowed_tools=policy.allowed_tools, grants=tuple(policy.grants))
+
+
+def _reads_namespace(task: AgentTask, table: HarnessProfileTable, namespace: str) -> bool:
+    """Whether this launch reads from plugin `namespace`: only through its
+    skill or its agent profile (extends and steering were frozen at
+    materialization), or a `fallback:` entry of the task or of that profile."""
+    profile = table.agent_profiles.get(task.profile) if task.profile else None
+    names = [task.skill, task.profile]
+    names += [e.profile for e in (*(profile.fallback if profile else ()), *(task.fallback or ()))]
+    return any(n is not None and n.startswith(f"{namespace}:") for n in names)
 
 
 def _envelope_is_error(

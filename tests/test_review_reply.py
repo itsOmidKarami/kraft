@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
-from support.harness import entry_of, git, make_repo, seed_v1_library
+from support.harness import entry_of, git, make_repo, seed_v1_library, write_harness_profiles
+from support.plugins import drop_store, install_release, pinned_chain
 
 from kraft import executor, review_reply, store
 
@@ -39,7 +41,7 @@ def _seed(tmp_path, monkeypatch):
     return prompts, argv
 
 
-async def _item(item_on, run_dirs):
+async def _item(item_on, run_dirs, chain=NODES):
     """An item at a pending gate, with a real git repo standing in for its
     worktree (`review_reply.run` reads it through `read_only`).
 
@@ -47,7 +49,7 @@ async def _item(item_on, run_dirs):
     otherwise every launch's own session-summary write -- required of every
     agent, `read_only` or not -- would read as a worktree change on its own.
     """
-    it = await item_on(NODES, GATE, status="needs_human")
+    it = await item_on(chain, GATE, status="needs_human")
     worktree = make_repo(run_dirs.worktrees, name=it.id)
     (worktree / ".gitignore").write_text(".engineering/\n")
     git(worktree, "add", ".gitignore")
@@ -102,6 +104,35 @@ async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
     prompt = prompts.read_text()
     assert tid in prompt
     assert "why is this a list, not a set?" in prompt
+
+
+async def test_a_review_reply_restores_the_pinned_store(
+    item_on, run_dirs, repo, tmp_path, monkeypatch
+):
+    """The store the item pinned is gone and the lock has moved on: the reply
+    agent's launch puts the item's own version back."""
+    _seed(tmp_path, monkeypatch)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "config", {"fake": {"provider": "fake"}}
+    )
+    pins, store_dir = install_release(tmp_path, "1.0.0")
+    install_release(tmp_path, "1.1.0")
+    drop_store(store_dir)
+    it = await _item(item_on, run_dirs, pinned_chain(NODES, pins, repo=repo))
+    await _published_unanswered_thread(it)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "replied"
+    assert store_dir.is_dir()
 
 
 async def test_a_sandbox_without_network_gets_no_reply_agent(

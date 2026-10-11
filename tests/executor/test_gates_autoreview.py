@@ -27,6 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from support.harness import entry_of, fake_harness_home, write_agent_profiles
+from support.plugins import drop_store, install_release, pinned_chain
 
 from kraft import events, executor, gate_review
 from kraft.adapters import agent as agent_mod
@@ -268,31 +269,27 @@ def _profile_reviewer(profile: str) -> dict:
     }
 
 
-async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_path, monkeypatch):
-    reviewer = _profile_reviewer("deep")
-    it = await item_on(
-        [
-            {
-                "id": "spec",
-                "kind": "exec",
-                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
-            },
-            {
-                "id": "spec_approval",
-                "kind": "gate",
-                "artifact": "spec",
-                "reject_to": "spec",
-                "auto_review": reviewer,
-            },
-            _run("implementation"),
-        ],
-        auto_gate=True,
-    )
-    fake_harness_home(tmp_path, ["true"])
-    write_agent_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "config",
-        {"deep": {"model": {"fake": "opus"}, "fallback": [{"model": "haiku"}]}},
-    )
+def _spec_gate_chain(reviewer: dict) -> list[dict]:
+    return [
+        {
+            "id": "spec",
+            "kind": "exec",
+            "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+        },
+        {
+            "id": "spec_approval",
+            "kind": "gate",
+            "artifact": "spec",
+            "reject_to": "spec",
+            "auto_review": reviewer,
+        },
+        _run("implementation"),
+    ]
+
+
+async def _review_spec_gate(it, monkeypatch):
+    """`gate_review.review` of `spec_approval` with the reviewer's launch
+    captured: `(verdict, note, launches)`."""
     launched = []
 
     async def _capture(_db, _rd, **kw):
@@ -308,7 +305,6 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
             c, it.id, "gate_requested", {"gate": "spec_approval", "node_id": "spec_approval"}
         )
     )
-
     verdict, note = await gate_review.review(
         it.database,
         it.run_dirs,
@@ -317,6 +313,18 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
         node=it.chain.chain.nodes[1],
         launch=LaunchContext(repo_entry=entry_of({"setup_command": ""})),
     )
+    return verdict, note, launched
+
+
+async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_path, monkeypatch):
+    it = await item_on(_spec_gate_chain(_profile_reviewer("deep")), auto_gate=True)
+    fake_harness_home(tmp_path, ["true"])
+    write_agent_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "config",
+        {"deep": {"model": {"fake": "opus"}, "fallback": [{"model": "haiku"}]}},
+    )
+
+    verdict, note, launched = await _review_spec_gate(it, monkeypatch)
 
     assert launched == [], (
         "the reviewer launched despite its profile's fallback list -- "
@@ -325,6 +333,49 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
     )
     assert verdict == "undecided"
     assert "deep" in note
+
+
+async def test_the_profile_fallback_check_reads_restored_pins(item_on, repo, tmp_path, monkeypatch):
+    """The item pinned a plugin whose profile carries the list, and its store
+    is gone: the check restores it first, or it reads a table without it and
+    lets a reviewer launch that has no loop to walk the list."""
+    fake_harness_home(tmp_path, ["true"])
+    pins, store = install_release(tmp_path)
+    drop_store(store)
+    chain = pinned_chain(_spec_gate_chain(_profile_reviewer("release:deep")), pins, repo=repo)
+    it = await item_on(chain, auto_gate=True)
+
+    verdict, note, launched = await _review_spec_gate(it, monkeypatch)
+
+    assert (verdict, launched) == ("undecided", [])
+    assert "release:deep" in note
+    assert [e["payload"]["reason"] for e in it.events("gate_auto_review_skipped")] == [
+        "profile_fallback"
+    ]
+    assert store.is_dir()  # restored before the table was read
+
+
+async def test_a_retried_items_run_chain_pins_decide_the_profile_fallback_refusal(
+    item_on, repo, tmp_path, monkeypatch
+):
+    """A retry runs on `run_chain`: its pins are the version the reviewer
+    launches on, so a list the older `materialized_chain` pin lacks still refuses."""
+    fake_harness_home(tmp_path, ["true"])
+    old, _ = install_release(tmp_path, "1.0.0", fallback=False)
+    new, _ = install_release(tmp_path, "1.1.0", fallback=True)
+    nodes = _spec_gate_chain(_profile_reviewer("release:deep"))
+    it = await item_on(pinned_chain(nodes, old, repo=repo), auto_gate=True)
+    retried = pinned_chain(nodes, new, repo=repo).to_json()
+    await it.database.write(
+        lambda c: c.execute("UPDATE work_items SET run_chain = ? WHERE id = ?", (retried, it.id))
+    )
+
+    verdict, note, launched = await _review_spec_gate(it, monkeypatch)
+
+    assert (verdict, launched) == ("undecided", [])
+    assert [e["payload"]["reason"] for e in it.events("gate_auto_review_skipped")] == [
+        "profile_fallback"
+    ]
 
 
 # -- Review flow: must-fix outranks an agent's approve --------------------
