@@ -316,6 +316,10 @@ class RepoEntry(BaseModel):
     #: waiting on checks that never come (Kraft-9efnk.12). Opt-in: an absent
     #: key waits, as before.
     ci_checks: bool = True
+    #: Take changes to this repository's accepted repo library without a
+    #: person, when nothing but text changed (`addons.repo_library.check_all`).
+    #: Never a first load.
+    library_auto_update: bool = False
     #: An absent key is enabled (Ruling 212): every existing entry that
     #: predates this field connected a repo a human meant to run against.
     enabled: bool = True

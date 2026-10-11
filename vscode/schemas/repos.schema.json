@@ -199,6 +199,11 @@
           "default": null,
           "title": "Intent Dir"
         },
+        "library_auto_update": {
+          "default": false,
+          "title": "Library Auto Update",
+          "type": "boolean"
+        },
         "local_files": {
           "default": [],
           "items": {

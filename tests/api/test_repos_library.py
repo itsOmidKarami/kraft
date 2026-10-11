@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 from support.addons import repo_with_library
-from support.harness import make_repo
+from support.harness import git, make_repo
 
 from kraft.addons.config import RepoLibrariesLock
 
@@ -103,3 +103,28 @@ def test_its_own_default_chain_does_not_hold_a_repo(tmp_path, client):
     client.patch("/api/repos", params={"path": str(repo)}, json={"default_chain": "app:ship"})
 
     assert client.delete("/api/repos", params={"path": str(repo)}).status_code == 204
+
+
+def test_the_library_view_says_first_branch_and_auto_update(tmp_path, client):
+    repo = _with_library(tmp_path, client)
+    params = {"path": str(repo)}
+    branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+
+    seen = client.get("/api/repos/library", params=params).json()
+    assert (seen["first"], seen["branch"], seen["auto_update"]) == (True, branch, False)
+
+    client.post("/api/repos/library", params=params, json={"digest": seen["digest"]})
+    assert (
+        client.patch("/api/repos", params=params, json={"library_auto_update": True}).status_code
+        == 200
+    )
+
+    again = client.get("/api/repos/library", params=params).json()
+    assert (again["first"], again["auto_update"]) == (False, True)
+
+
+def test_a_repo_with_no_library_has_no_branch_to_name(tmp_path, client):
+    repo = make_repo(tmp_path, "plain")
+    client.post("/api/repos", json={"path": str(repo)})
+
+    assert client.get("/api/repos/library", params={"path": str(repo)}).json()["branch"] is None

@@ -273,6 +273,9 @@ def _library_view(entry: dict, found: repo_library.Check) -> dict:
         },
         "problems": list(found.problems),
         "kind": found.kind,
+        "first": found.locked is None,
+        "branch": found.remote.branch if found.remote else None,
+        "auto_update": bool(entry.get("library_auto_update")),
     }
 
 
@@ -565,6 +568,7 @@ class RepoPatch(BaseModel):
     steering: list[str] | None = None
     local_files: list[str] | None = None
     intent_dir: str | None = None
+    library_auto_update: bool | None = None
 
 
 def _has_tests(entry: dict) -> bool:

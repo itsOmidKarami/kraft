@@ -627,12 +627,14 @@ def test_repos_yaml_defaults_an_absent_test_field_to_none(tmp_path, field):
         "    test_scopes:\n      - command: just test\n",
         "    test_scopes:\n      - paths: ['**']\n        command: ''\n",
         "    test_scopes: nope\n",
+        "    library_auto_update: yes please\n",
     ],
     ids=[
         "non-string-test-command",
         "scope-missing-paths",
         "scope-empty-command",
         "non-list-scopes",
+        "non-boolean-library-auto-update",
     ],
 )
 def test_repos_yaml_rejects_a_malformed_test_field(tmp_path, tail):
@@ -642,6 +644,22 @@ def test_repos_yaml_rejects_a_malformed_test_field(tmp_path, tail):
     p.write_text("repos:\n  - path: /r\n" + tail)
     with pytest.raises(config.ConfigError):
         config.load_repos(p)
+
+
+@pytest.mark.parametrize(
+    "tail, value",
+    [
+        pytest.param("    library_auto_update: true\n", True, id="on"),
+        pytest.param("", False, id="absent-is-off"),
+    ],
+)
+def test_repos_yaml_reads_library_auto_update(tmp_path, tail, value):
+    from kraft import config
+
+    p = tmp_path / "repos.yaml"
+    p.write_text("repos:\n  - path: /r\n" + tail)
+
+    assert config.load_repos(p)[0].library_auto_update is value
 
 
 # ── test_scopes (Kraft-9wzy) ─────────────────────────────────────────────────
