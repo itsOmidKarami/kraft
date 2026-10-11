@@ -796,5 +796,5 @@ def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_p
     (st.run_dirs.plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held}))
 
     health = client.get("/api/health").json()
-
-    assert (health["status"], health["plugin_updates"]) == ("ok", {"release@acme": held})
+    assert health["status"] == "ok"
+    assert health["plugin_updates"] == {"release@acme": {"outcome": "held", "kind": None}}

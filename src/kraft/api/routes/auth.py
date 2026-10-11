@@ -126,9 +126,15 @@ async def health(request: Request):
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
-        # Each auto-updating plugin's last outcome. A held or failed one is
-        # not degraded: the locked version still serves.
-        "plugin_updates": plugin_update.read_status(st.run_dirs.plugins),
+        # public: each auto-updating plugin's last outcome and kind, not its
+        # message (refusal and git error text). `doctor` reads the message from
+        # status.json. A held or failed one is not degraded: the locked
+        # version still serves.
+        "plugin_updates": {
+            pid: {k: entry.get(k) for k in ("outcome", "kind")}
+            for pid, entry in plugin_update.read_status(st.run_dirs.plugins).items()
+            if isinstance(entry, dict)
+        },
         # public: totals only. None without `storage.worktrees.limit`. `held`
         # degrades: starts that need a new worktree are waiting on disk space.
         "storage": storage_health,
