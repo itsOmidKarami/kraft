@@ -9,6 +9,7 @@ describe("configFile", () => {
     [`${T}/notify.yaml`, "notify.yaml"],
     [`${T}/detectors.yaml`, "detectors.yaml"],
     [`${T}/sandbox.yaml`, "sandbox.yaml"],
+    [`${T}/addons.yaml`, "addons.yaml"],
     [`${T}/chains/default.yaml`, "chains/default.yaml"],
     [`${T}/chains/Bad Name.yaml`, undefined],
     [`${T}/chains/nested/x.yaml`, undefined],
@@ -27,6 +28,7 @@ describe("configFile", () => {
 it("names the schema for each file", () => {
   expect(schemaFor("chains/default.yaml")).toBe("chain.schema.json");
   expect(schemaFor("harnesses.yaml")).toBe("harnesses.schema.json");
+  expect(schemaFor("addons.yaml")).toBe("addons.schema.json");
 });
 
 it("knows which files the library lint covers", () => {

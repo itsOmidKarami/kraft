@@ -180,7 +180,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `harness` | string | required | The [harness profile](/concepts/vocabulary#harness-profile) to run on, an ID from `harnesses.yaml`. A missing or disabled harness profile stops the task and waits for you unless the task declares `fallback`. |
 | `prompt` | string | required | What the task is asked to do. Kraft's output contract comes before the skill and steering. |
-| `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, or a plugin's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that cannot load stops the task and waits for you. |
+| `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, an [add-on](/reference/configuration/addons#names)'s `release:release-notes`, or another tool's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that cannot load stops the task and waits for you. |
 | `produces` | string | none | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`). |
 | `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
 | `model`, `effort` | string | none | This task's runtime options, checked against what the [provider](/concepts/vocabulary#provider) of the task's harness profile accepts. Not allowed with `profile`. |

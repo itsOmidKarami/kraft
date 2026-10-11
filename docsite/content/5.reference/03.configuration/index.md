@@ -22,7 +22,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
 | `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
-| `addons.yaml` | The [collections](/concepts/vocabulary#collection) this instance knows and the [Kraft add-ons](/concepts/vocabulary#kraft-add-on) installed from them. | `kraft admin addon`, or you | [Add-ons and collections](/reference/configuration/addons#addonsyaml) |
+| `addons.yaml` | The [collections](/concepts/vocabulary#collection) this instance knows and the [Kraft add-ons](/concepts/vocabulary#add-on) installed from them. | `kraft admin addon`, or you | [Add-ons and collections](/reference/configuration/addons#addonsyaml) |
 | `addons.lock` | The commit, digest and version each installed add-on is pinned to. Not edited by hand. | `kraft admin addon` | [Add-ons and collections](/reference/configuration/addons#addonslock) |
 
 ## How Kraft treats the directory

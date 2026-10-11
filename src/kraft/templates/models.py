@@ -494,7 +494,7 @@ class AgentTask(TaskBase):
     harness: Identifier
     prompt: StrictStr = Field(min_length=1)
     #: One skill, never a list (`agent-task-may-select-one-skill`). Not an
-    #: `Identifier`: a skill name is a plugin-qualified `plugin:skill`.
+    #: `Identifier`: a skill name is namespace-qualified, `namespace:skill`.
     skill: StrictStr | None = None
     #: The Kraft-owned output contract, supplied before skill and steering
     #: (`agent-task-contract-precedes-skill-and-steering`).

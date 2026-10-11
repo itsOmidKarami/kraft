@@ -1343,9 +1343,10 @@ async def _dispatch_task(
         except (_skill.SkillError, _steering.SteeringError) as exc:
             # A selected skill the environment cannot load stops for a human and
             # never substitutes a method (`selected-skill-must-be-available`). A
-            # plugin-qualified reference is not checked here -- Kraft cannot read
-            # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
-            # to stop with `needs_context` instead. A steering selection the
+            # reference to another tool's plugin is not checked here -- Kraft
+            # cannot read that tool's plugin cache, so `skill.UNAVAILABLE` tells
+            # the agent to stop with `needs_context` instead (an add-on's skill is
+            # read from its store, so it is checked). A steering selection the
             # snapshot cannot supply stops the same way rather than run unsteered.
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
         here = _fallback.describe(cand, inv)

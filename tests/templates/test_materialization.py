@@ -13,6 +13,7 @@ nothing about what an operator actually gets.
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 from pathlib import Path
 
@@ -477,6 +478,50 @@ def test_serialization_is_deterministic():
     )
 
     assert MaterializedChain.from_json(stored).to_json() == stored
+
+
+_PINS = {
+    "release": {
+        "id": "release@acme",
+        "commit": "f4a11422cc8377a6ae61353897431dafa72b8ef5",
+        "tree": "de1b745c4020ff2d468c14451da2f28a5fb56207",
+        "source": "./addons/release",
+        "digest": "0" * 64,
+        "version": "1.0.0",
+    }
+}
+
+
+def _pre_rename_snapshot() -> dict:
+    """A pre-rename row: the build before the add-on rename kept the pins under `plugins`."""
+    from support.harness import v1_chain, v1_resolved
+
+    nodes = [
+        {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "x"}]}
+    ]
+    stored = json.loads(
+        v1_chain(dataclasses.replace(v1_resolved(nodes), addons=_PINS), repo="r").to_json()
+    )
+    stored["plugins"] = stored.pop("addons")  # pre-rename snapshot key
+    return stored
+
+
+def test_a_pre_rename_snapshot_loads_its_pins_under_addons():
+    """D3: the stored key is read as `addons`, so a work item filed before the
+    rename still finds its pins instead of failing as "not a materialized chain"."""
+    snapshot = MaterializedChain.from_json(json.dumps(_pre_rename_snapshot()))
+
+    assert snapshot.chain.addons == _PINS
+    assert "addons" in json.loads(snapshot.to_json())
+    assert "plugins" not in json.loads(snapshot.to_json())  # pre-rename key is not written back
+
+
+def test_a_snapshot_with_both_pin_keys_is_refused_not_merged():
+    stored = _pre_rename_snapshot()
+    stored["addons"] = _PINS
+
+    with pytest.raises(TemplateLibraryError, match="not a materialized chain"):
+        MaterializedChain.from_json(json.dumps(stored))
 
 
 def test_the_stored_form_keeps_durations_in_their_authored_units():
