@@ -7,6 +7,7 @@ import asyncio
 import subprocess
 
 import pytest
+from support.addons import a_terminal, library_outcome, repo_with_library
 from support.harness import commit_all
 
 from kraft import cli, client
@@ -231,3 +232,52 @@ def test_connect_says_the_commands_it_was_given_not_the_probes_advice(app, capsy
     assert "pass --setup-command" not in again
     assert "no test command proposed: the root" not in again
     assert asyncio.run(client.repos())[0]["setup_command"] == "make deps"
+
+
+@pytest.mark.parametrize(
+    "flags, terminal, outcome, says",
+    [
+        pytest.param([], True, "current", "repo library app taken", id="a-terminal-is-asked"),
+        pytest.param(
+            ["-y"], True, "waiting", "run `kraft repo library` to review it", id="yes-never-accepts"
+        ),
+        pytest.param(
+            [],
+            False,
+            "waiting",
+            "run `kraft repo library` to review it",
+            id="no-terminal-never-accepts",
+        ),
+        pytest.param(["--json"], True, "waiting", None, id="json-never-accepts"),
+    ],
+)
+def test_connect_offers_the_repo_library(
+    app, tmp_path, capsys, monkeypatch, flags, terminal, outcome, says
+):
+    repo = repo_with_library(tmp_path)
+    if terminal:
+        a_terminal(monkeypatch, "y")
+
+    cli.main(["repo", "connect", str(repo), "--no-tests", *flags])
+
+    out = capsys.readouterr().out
+    assert library_outcome(repo) == outcome
+    if says:
+        assert says in out
+
+
+def test_a_library_that_cannot_be_checked_does_not_fail_the_connect(
+    app, tmp_path, capsys, monkeypatch
+):
+    repo = repo_with_library(tmp_path)
+
+    async def down(_path=None):
+        raise ValueError("kraft 502: origin did not answer")
+
+    monkeypatch.setattr(client, "repo_library", down)
+
+    cli.main(["repo", "connect", str(repo), "--no-tests"])
+
+    out = capsys.readouterr().out
+    assert "connected:" in out
+    assert "repo library not checked: kraft 502: origin did not answer" in out

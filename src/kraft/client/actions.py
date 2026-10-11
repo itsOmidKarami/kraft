@@ -204,6 +204,40 @@ async def update_repo(path: str, fields: dict) -> dict:
     return body
 
 
+async def _connected_path(path: str | None) -> str:
+    """`path` (the cwd when None) as the connected entry it names: itself
+    when it is one, else the checkout the probe finds for it."""
+    path = context.absolute_path(path or os.getcwd())
+    if path not in {entry["path"] for entry in await reads.repos()}:
+        status, probed = await transport._post("/repos/probe", {"path": path, "detect": False})
+        if status < 400:
+            path = probed["path"]
+    return path
+
+
+async def repo_library(path: str | None = None) -> dict:
+    """A connected repo's library against what was accepted (`GET /repos/library`)."""
+    response = await transport._send(
+        "GET", "/repos/library", params={"path": await _connected_path(path)}, timeout=120
+    )
+    if response.status_code >= 400:
+        raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
+    return response.json()
+
+
+async def accept_repo_library(path: str | None, digest: str) -> dict:
+    """Take the repo library a person reviewed (`POST /repos/library`)."""
+    status, body = await transport._post(
+        "/repos/library",
+        {"digest": digest},
+        params={"path": await _connected_path(path)},
+        timeout=120,
+    )
+    if status >= 400:
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
+    return body
+
+
 async def disconnect_repo(path: str | None = None) -> dict:
     """Forget a repo. No repo file is touched and no work item is dropped.
 
@@ -221,11 +255,7 @@ async def disconnect_repo(path: str | None = None) -> dict:
     Server-side `_connected` still matches a path against its `resolve()`, so a
     path differing only by `/var` -> `/private/var` behaves as before.
     """
-    path = context.absolute_path(path or os.getcwd())
-    if path not in {entry["path"] for entry in await reads.repos()}:
-        status, probed = await transport._post("/repos/probe", {"path": path, "detect": False})
-        if status < 400:
-            path = probed["path"]
+    path = await _connected_path(path)
     await transport._delete("/repos", path=path)
     return {"path": path}
 

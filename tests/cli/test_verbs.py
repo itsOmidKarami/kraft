@@ -650,7 +650,7 @@ GROUPS = {
         "artifact",
         "storage",
     ],
-    "repo": ["list", "connect", "disconnect", "path", "cd", "open"],
+    "repo": ["list", "connect", "disconnect", "library", "path", "cd", "open"],
     "admin": ["start", "stop", "health", "doctor", "reindex", "init", "mcp", "update"],
 }
 

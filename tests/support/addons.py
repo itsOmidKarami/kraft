@@ -3,6 +3,7 @@ add-on's store directory, as the library and the profile table read them."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft import client
 from kraft.addons import fetch, manifest, repo_library
 from kraft.addons.load import InstalledAddon
 from kraft.config import read_yaml, write_yaml
@@ -339,3 +341,16 @@ def accept_repo_library(config_dir: Path, addons_dir: Path, repo: Path, repo_id:
     }
     write_yaml(config_dir / "repo-libraries.lock", lock)
     return store
+
+
+def library_outcome(repo: Path) -> str:
+    """What the running server says of `repo`'s repo library: `waiting`,
+    `current`, `none`, ..."""
+    return asyncio.run(client.repo_library(str(repo)))["outcome"]
+
+
+def a_terminal(monkeypatch, typed: str) -> None:
+    """stdin and stdout are a terminal, and every prompt is answered `typed`."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": typed)

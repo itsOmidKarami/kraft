@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 
 from kraft import client, detect, render
@@ -412,6 +413,75 @@ _FIELDS = {
 }
 
 
+#: `--check`'s exit codes, as `kraft admin addon update --check` numbers them.
+_LIBRARY_EXIT = {"none": 0, "current": 0, "waiting": 1, "refused": 2, "failed": 3}
+
+
+def _say_library(found: dict) -> None:
+    """One repo library check, as a person reads it."""
+    where = found["path"]
+    if found["outcome"] == "none":
+        _print(f"{where}: no repo library on origin's default branch")
+    elif found["outcome"] == "current":
+        _print(f"{where}: repo library {found['id']} is up to date")
+    elif found["outcome"] == "waiting":
+        _print(found["review"]["text"])
+    else:
+        _print(f"{where}: repo library {found['outcome']}: {'; '.join(found['problems'])}")
+
+
+def _take_library(path: str | None, *, ask: bool, yes: bool) -> dict:
+    """Check `path`'s repo library, show it, and take it on a yes."""
+    found = asyncio.run(client.repo_library(path))
+    _say_library(found)
+    if found["outcome"] != "waiting":
+        return found
+    if not yes:
+        if not ask:
+            return found
+        answer = input("  take this repo library? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            _print("  nothing taken")
+            return found
+    took = asyncio.run(client.accept_repo_library(path, found["digest"]))
+    _print(f"repo library {took['id']} taken")
+    return took
+
+
+def _offer_library(path: str, *, ask: bool) -> None:
+    """After a connect: show the repo's library and ask, in a terminal. A
+    connect that cannot ask never takes one, and never fails over it."""
+    try:
+        found = asyncio.run(client.repo_library(path))
+    except ValueError as exc:
+        _print(f"  repo library not checked: {exc}")
+        return
+    if found["outcome"] == "waiting" and ask:
+        _take_library(path, ask=True, yes=False)
+    elif found["outcome"] == "waiting":
+        _print("  this repo has a repo library; run `kraft repo library` to review it")
+    elif found["outcome"] in ("refused", "failed"):
+        _say_library(found)
+
+
+def _cmd_library(ns: argparse.Namespace) -> None:
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise SystemExit("error: a worker does not change the instance's repo libraries")
+    if ns.check or ns.json:
+        found = asyncio.run(client.repo_library(ns.path))
+        if ns.yes and not ns.check and found["outcome"] == "waiting":
+            found = asyncio.run(client.accept_repo_library(ns.path, found["digest"]))
+        if ns.json:
+            common.emit(found, str, True)
+        else:
+            _say_library(found)
+        if ns.check:
+            raise SystemExit(_LIBRARY_EXIT.get(found["outcome"], 3))
+        return
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    _take_library(ns.path, ask=interactive, yes=ns.yes)
+
+
 def _cmd_connect(ns: argparse.Namespace) -> None:
     test_command = "" if ns.no_tests else ns.test_command
     setup_command = ns.setup_command
@@ -427,6 +497,8 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         )
     elif not ns.json:
         _say_connected(result)
+    if not ns.json and not os.environ.get("KRAFT_WORK_ITEM_ID"):
+        _offer_library(result["path"], ask=interactive)
     passed = True
     if ns.verify:
         # Imported here, not at the top: it reaches `kraft.builtins`, and every
@@ -530,6 +602,23 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     )
     disconnect.add_argument("path", nargs="?", help="default: the current directory")
     disconnect.set_defaults(func=_cmd_disconnect)
+
+    library = subs.add_parser(
+        "library",
+        parents=[common],
+        help="review a repo's .kraft/ library on its default branch, and take it",
+    )
+    library.add_argument("path", nargs="?", help="default: the current directory")
+    take = library.add_mutually_exclusive_group()
+    take.add_argument(
+        "-y", "--yes", action="store_true", help="take a waiting library without asking"
+    )
+    take.add_argument(
+        "--check",
+        action="store_true",
+        help="exit 0 current or none, 1 waiting, 2 refused, 3 could not check; takes nothing",
+    )
+    library.set_defaults(func=_cmd_library)
 
     # No `--json` (no parent parser): one bare line is the contract that makes
     # `cd "$(kraft repo path ID)"` work; `view show --json` has the payload.
