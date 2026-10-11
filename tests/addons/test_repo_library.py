@@ -5,10 +5,20 @@ import subprocess
 
 import pytest
 import yaml
-from support.addons import AGENT, repo_library_files, with_origin
+from support.addons import (
+    AGENT,
+    chain,
+    install,
+    instance,
+    make_collection,
+    repo_library_files,
+    with_origin,
+)
 from support.harness import commit_all, git, make_repo, write
 
-from kraft.addons import fetch, manifest, repo_library
+from kraft.addons import fetch, load, manifest, repo_library, update
+from kraft.addons.config import RepoLibrariesLock
+from kraft.config import write_yaml
 
 _library = repo_library_files
 
@@ -121,3 +131,156 @@ def test_missing_blobs_are_refused_with_the_commit_named(app, monkeypatch):
 
     with pytest.raises(fetch.AddonRefused, match=head[:12]):
         repo_library.extract(app, head)
+
+
+@pytest.fixture
+def home(tmp_path, app):
+    """An instance with `app` connected under the id `app`, nothing accepted."""
+    found = instance(tmp_path)
+    write_yaml(found[0] / "repos.yaml", {"repos": [{"path": str(app), "id": "app"}]})
+    return found
+
+
+def test_a_first_load_waits_with_everything_shown_as_new(app, home):
+    head = _library(app, skills={"notes": "# notes\n"})
+
+    found = repo_library.check(app, "app", *home)
+
+    assert found.outcome == "waiting"
+    assert found.review.old_version is None
+    assert any("skill notes" in line for line in found.review.content)
+    assert any(head[:12] in line for line in found.review.content)
+    assert load.installed(*home) == ()
+
+
+def test_accept_writes_the_store_and_the_lock(app, home):
+    head = _library(app)
+    found = repo_library.check(app, "app", *home)
+
+    repo_library.accept(found, *home)
+
+    locked = RepoLibrariesLock.load(home[0] / "repo-libraries.lock").repos["app"]
+    assert (locked.commit, locked.digest) == (head, found.digest)
+    (library,) = load.installed(*home, verify=True)
+    assert (library.namespace, library.left_out) == ("app", None)
+    assert repo_library.check(app, "app", *home).outcome == "current"
+
+
+def test_a_change_is_reviewed_against_the_accepted_version(app, home):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _library(app, library={"tasks": {"base": {**AGENT, "prompt": "new words"}}})
+
+    found = repo_library.check(app, "app", *home)
+
+    assert found.outcome == "waiting"
+    assert found.review.old_version is not None
+    assert found.review.old_version != found.review.new_version
+    assert any("base" in line for line in (*found.review.reach, *found.review.content))
+
+
+def test_a_remote_with_no_library_is_none_not_a_fault(app, home):
+    assert repo_library.check(app, "app", *home).outcome == "none"
+
+
+@pytest.mark.parametrize(
+    "library, chains, why",
+    [
+        pytest.param(
+            {"tasks": {"base": {"kind": "subprocess", "command": "true"}}},
+            None,
+            "subprocess",
+            id="subprocess",
+        ),
+        pytest.param(
+            {"tasks": {"base": {**AGENT, "policy": {"grants": ["git-push"]}}}},
+            None,
+            "policy.grants is not a limit",
+            id="permission",
+        ),
+        pytest.param(
+            {"tasks": {"base": {**AGENT, "harness": "nope"}}},
+            None,
+            "requires harness 'nope'",
+            id="harness-the-instance-lacks",
+        ),
+        pytest.param(
+            {"tasks": {"base": {**AGENT, "extends": "app:other"}}},
+            None,
+            "reaches outside",
+            id="its-own-repo-id-as-a-qualifier",
+        ),
+        pytest.param(None, {"ship": chain("missing")}, "does not resolve", id="broken-chain"),
+    ],
+)
+def test_a_repo_library_is_refused_for_what_an_addon_is(app, home, library, chains, why):
+    _library(app, library=library, chains=chains)
+
+    found = repo_library.check(app, "app", *home)
+
+    assert found.outcome == "refused"
+    assert any(why in problem for problem in found.problems), found.problems
+
+
+@pytest.mark.parametrize(
+    "repo_id, why",
+    [
+        pytest.param("kraft", "Kraft's own namespace", id="reserved"),
+        pytest.param("release", "add-on release@acme", id="an-addons-namespace"),
+        pytest.param("a" * 65, "longer than 64", id="too-long"),
+    ],
+)
+def test_an_id_that_cannot_be_a_namespace_is_refused(tmp_path, app, home, repo_id, why):
+    collection = make_collection(tmp_path, {"release": {"library": {"tasks": {"base": AGENT}}}})
+    install(*home, collection, "release")
+    _library(app)
+    repos = {"repos": [{"path": str(app), "id": repo_id}]}
+
+    found = repo_library.check(app, repo_id, *home, repos=repos)
+
+    assert found.outcome == "refused"
+    assert why in found.problems[0]
+    assert "set another `id`" in found.problems[0]
+
+
+def test_a_local_chain_through_the_library_is_in_the_review(app, home):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    write(home[0], "chains/mine.yaml", yaml.safe_dump(chain("app:base")))
+    _library(app, library={"tasks": {"base": {**AGENT, "policy": {"budget_usd": 5}}}})
+
+    found = repo_library.check(app, "app", *home)
+
+    assert any(line.startswith("mine.") for line in found.review.reach), found.review.reach
+
+
+def test_an_accept_after_the_lock_moved_writes_nothing(app, home):
+    _library(app)
+    stale = repo_library.check(app, "app", *home)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    before = (home[0] / "repo-libraries.lock").read_bytes()
+
+    with pytest.raises(update.Busy, match="changed while you reviewed"):
+        repo_library.accept(stale, *home)
+
+    assert (home[0] / "repo-libraries.lock").read_bytes() == before
+
+
+def test_a_remote_that_does_not_answer_is_failed_and_keeps_the_lock(app, home):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    git(app, "remote", "set-url", "origin", (app.parent / "gone.git").as_uri())
+
+    found = repo_library.check(app, "app", *home)
+
+    assert (found.outcome, found.kind) == ("failed", "network")
+    assert load.installed(*home)[0].left_out is None
+
+
+def test_drop_forgets_the_accepted_version(app, home):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+
+    assert repo_library.drop("app", *home) is True
+    assert repo_library.drop("app", *home) is False
+    assert load.installed(*home) == ()

@@ -16,15 +16,22 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
-from kraft.addons import fetch, manifest, update
-from kraft.config import GIT_READ_ENV, bounded_yaml
+from kraft.addons import fetch, load, manifest, update
+from kraft.addons.config import RESERVED_NAMESPACE, RepoLibrariesLock, RepoLockEntry
+from kraft.config import GIT_READ_ENV, bounded_yaml, write_text
 from kraft.worker.sandbox import harden_host_git_env
+
+if TYPE_CHECKING:
+    from kraft.addons.review import Review
 
 #: The name every repo library's derived manifest carries. Inside the files it
 #: is the library's own qualifier (`library:base`), as an add-on's name is.
@@ -45,6 +52,10 @@ class Remote:
     url: str
     branch: str
     commit: str
+
+
+class NoOrigin(fetch.AddonRefused):
+    """The checkout has no `origin`, so it has no repo library."""
 
 
 def _git(checkout: Path, *args: str, timeout: int | None = None) -> str:
@@ -76,7 +87,7 @@ def remote(checkout: Path) -> Remote:
     try:
         url = _git(checkout, "remote", "get-url", "origin").strip()
     except fetch.FetchError as exc:
-        raise fetch.AddonRefused(
+        raise NoOrigin(
             f"{checkout} has no remote named origin; a repo library is read from origin"
         ) from exc
     answer = _git(checkout, "ls-remote", "--symref", "origin", "HEAD", timeout=REMOTE_TIMEOUT_S)
@@ -155,3 +166,193 @@ def extract(checkout: Path, commit: str) -> fetch.Extracted | None:
     derived = json.dumps(derive_manifest(files), indent=2, sort_keys=True) + "\n"
     files[manifest.ADDON_JSON] = ("100644", derived.encode())
     return replace(extracted, files=files)
+
+
+_LOCK_HEADER = "# Written by `kraft repo library`. Do not edit.\n"
+
+
+@dataclass(frozen=True)
+class Check:
+    """What one repository's repo library is, against what was accepted."""
+
+    repo_id: str
+    #: `none` (the remote has no repo library), `current`, `waiting` (a first
+    #: load or a change: `review` is set), `refused` or `failed`.
+    outcome: str
+    review: Review | None = None
+    problems: tuple[str, ...] = ()
+    #: For `failed`: `network` or `auth`.
+    kind: str | None = None
+    remote: Remote | None = None
+    #: The candidate's digest, and the lock's when this was checked.
+    digest: str | None = None
+    locked: str | None = None
+    extracted: fetch.Extracted | None = None
+
+
+def _short(digest: str) -> str:
+    return digest.removeprefix("sha256:")[:12]
+
+
+def _id_problem(repo_id: str, addons: list[load.InstalledAddon]) -> str | None:
+    """Why `repo_id` cannot be a repo library's namespace, with the fix."""
+    fix = "set another `id` on the repository's entry in repos.yaml"
+    if repo_id == RESERVED_NAMESPACE:
+        return f"repository id {repo_id!r} is Kraft's own namespace; {fix}"
+    if len(repo_id) > 64:
+        return f"repository id {repo_id[:20]!r}... is longer than 64 characters; {fix}"
+    for addon in addons:
+        if addon.repo_id is None and addon.namespace == repo_id:
+            return f"repository id {repo_id!r} is the namespace of add-on {addon.id}; {fix}"
+    return None
+
+
+def check(
+    checkout: Path,
+    repo_id: str,
+    config_dir: Path,
+    addons_root: Path,
+    *,
+    repos: dict | None = None,
+) -> Check:
+    """Ask the remote, and judge what it has as an add-on update is judged.
+    Writes nothing. `repos` is a `repos.yaml` to judge in place of the file:
+    the entry's id may be minted and not saved yet."""
+    from kraft.addons import review as review_mod
+
+    addon_id = load.repo_library_id(repo_id)
+    locked = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE).repos.get(repo_id)
+    was = locked.digest if locked else None
+    try:
+        found = remote(checkout)
+        extracted = extract(checkout, found.commit)
+    except fetch.FetchError as exc:
+        outcome = "refused" if exc.kind == "refused" else "failed"
+        return Check(repo_id, outcome, problems=(str(exc),), kind=exc.kind, locked=was)
+    except NoOrigin as exc:
+        return Check(repo_id, "none", problems=(str(exc),), locked=was)
+    except fetch.AddonRefused as exc:
+        return Check(repo_id, "refused", problems=(str(exc),), locked=was)
+    if extracted is None:
+        return Check(repo_id, "none", remote=found, locked=was)
+    digest = fetch.digest(extracted.files)
+    base = Check(repo_id, "current", remote=found, digest=digest, locked=was, extracted=extracted)
+    if digest == was:
+        return base
+
+    def refused(*problems: str) -> Check:
+        return replace(base, outcome="refused", problems=problems)
+
+    loaded = list(load.installed(config_dir, addons_root))
+    if why := _id_problem(repo_id, loaded):
+        return refused(why)
+    try:
+        declared = manifest.addon(
+            json.loads(extracted.files[manifest.ADDON_JSON][1]), manifest.ADDON_JSON
+        )
+        manifest.check_addon(declared, None, extracted.files)
+    except manifest.ManifestError as exc:
+        return refused(str(exc))
+    others = {p.namespace for p in loaded if p.id != addon_id} | {repo_id}
+    problems = update.problems(declared, extracted.files, other_namespaces=others)
+    if why := load.instance_problem(
+        repo_id, declared.requires, config_dir, repos=repos, repo_library=True
+    ):
+        problems.append(why)
+    if problems:
+        return refused(*problems)
+
+    old = None
+    store = addons_root / "store" / was.removeprefix("sha256:") if was else None
+    if store is not None and store.is_dir():
+        try:
+            old = fetch.extract_dir(store)
+        except Exception:  # noqa: BLE001 -- an edited store can break in any way
+            old = None
+    reviewed = review_mod.review(addon_id, old, extracted)
+    reach = list(reviewed.reach)
+    if was and old is None:
+        reach.insert(0, "the accepted version's files could not be read to compare with")
+    content = [
+        f"read from {found.url} at {found.commit[:12]} ({found.branch})",
+        *reviewed.content,
+    ]
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch) / digest.removeprefix("sha256:")
+        for rel, (_mode, data) in extracted.files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_bytes(data)
+        candidate = load.InstalledAddon(addon_id, NAME, repo_id, _short(digest), root)
+        state = update.state_of(config_dir, loaded)
+        after = update.state_of(config_dir, [*(p for p in loaded if p.id != addon_id), candidate])
+        if broken := update.breaks(state, after, config_dir, repo_id):
+            return replace(
+                refused(*(why.replace(str(root), addon_id) for why in broken)),
+                review=reviewed,
+            )
+        if was is None:
+            reach += [
+                f"{where}: {key} {value!r} is now read from this repo library"
+                for where, key, _kind, value in update.references(config_dir)
+                if update._qualifier(value) == repo_id
+            ]
+        if after.library is not None:
+            more_reach, more_content = review_mod.local_changes(
+                state.library, after.library, repo_id
+            )
+            reach += more_reach
+            content += more_content
+    return replace(
+        base,
+        outcome="waiting",
+        review=replace(
+            reviewed,
+            old_version=_short(was) if was else None,
+            new_version=_short(digest),
+            reach=tuple(reach),
+            content=tuple(content),
+        ),
+    )
+
+
+def _write(config_dir: Path, lock: RepoLibrariesLock) -> None:
+    write_text(
+        config_dir / RepoLibrariesLock.FILE,
+        _LOCK_HEADER + yaml.safe_dump(lock.model_dump(mode="json"), sort_keys=False),
+    )
+
+
+def accept(found: Check, config_dir: Path, addons_root: Path) -> None:
+    """Take a `waiting` check: write its store and its lock entry. Raises
+    `update.Busy` when the lock is not the one the check read, or another
+    add-on change is running."""
+    assert found.outcome == "waiting" and found.extracted and found.remote and found.digest
+    with update.write_lock(addons_root):
+        lock = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE)
+        now = lock.repos.get(found.repo_id)
+        if (now.digest if now else None) != found.locked:
+            raise update.Busy("the repo library changed while you reviewed; check again")
+        fetch.write_store(addons_root, found.extracted)
+        entry = RepoLockEntry(
+            git=found.remote.url,
+            branch=found.remote.branch,
+            commit=found.remote.commit,
+            tree=found.extracted.tree,
+            digest=found.digest,
+            updated_at=datetime.now(UTC),
+        )
+        _write(config_dir, RepoLibrariesLock(repos={**lock.repos, found.repo_id: entry}))
+    update.clear_status(addons_root, {load.repo_library_id(found.repo_id)})
+
+
+def drop(repo_id: str, config_dir: Path, addons_root: Path) -> bool:
+    """Forget `repo_id`'s accepted repo library; whether there was one. The
+    store is left to the garbage collector."""
+    with update.write_lock(addons_root):
+        lock = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE)
+        if repo_id not in lock.repos:
+            return False
+        remaining = {k: v for k, v in lock.repos.items() if k != repo_id}
+        _write(config_dir, RepoLibrariesLock(repos=remaining))
+    update.clear_status(addons_root, {load.repo_library_id(repo_id)})
+    return True
