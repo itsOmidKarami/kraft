@@ -301,3 +301,50 @@ def test_a_first_load_says_when_it_becomes_the_repos_default(app, home, default_
 
     line = "becomes the chain new items in this repo run: app:default"
     assert (line in found.review.reach) is said
+
+
+def _later(app):
+    _library(app, library={"tasks": {"base": {**AGENT, "prompt": "later"}}})
+
+
+def _unreachable(app):
+    git(app, "remote", "set-url", "origin", (app.parent / "gone.git").as_uri())
+
+
+@pytest.mark.parametrize(
+    "then, outcome",
+    [
+        pytest.param(lambda app: None, "up to date", id="unchanged"),
+        pytest.param(_later, "waiting", id="a-change"),
+        pytest.param(_unreachable, "failed", id="remote-does-not-answer"),
+    ],
+)
+def test_the_daily_check_reports_and_applies_nothing(app, home, then, outcome):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    locked = (home[0] / "repo-libraries.lock").read_bytes()
+    then(app)
+
+    said = repo_library.check_all(*home)
+
+    assert said["library@repo:app"]["outcome"] == outcome
+    assert update.read_status(home[1])["library@repo:app"]["outcome"] == outcome
+    assert (home[0] / "repo-libraries.lock").read_bytes() == locked
+
+
+def test_the_daily_check_asks_about_no_library_nobody_accepted(app, home, monkeypatch):
+    _library(app)
+    monkeypatch.setattr(repo_library, "remote", lambda _c: pytest.fail("asked the remote"))
+
+    assert repo_library.check_all(*home) == {}
+
+
+def test_taking_a_waiting_change_clears_its_notice(app, home):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    _later(app)
+    repo_library.check_all(*home)
+
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+
+    assert "library@repo:app" not in update.read_status(home[1])

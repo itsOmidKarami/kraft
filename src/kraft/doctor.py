@@ -528,11 +528,13 @@ def _addon_checks(templates: Path) -> list[dict]:
         return [
             _check("add-ons", False, why),
             _check("add-on updates", True, "skipped: the add-on files do not read", skipped=True),
+            _check("repo libraries", True, "skipped: the add-on files do not read", skipped=True),
         ]
     root = addons_load.addons_dir()
     listed = AddonsConfig.load(templates / AddonsConfig.FILE)
     lock = AddonsLock.load(templates / AddonsLock.FILE)
-    found = [p for p in addons_load.installed(templates, root, verify=True) if p.repo_id is None]
+    everything = addons_load.installed(templates, root, verify=True)
+    found = [p for p in everything if p.repo_id is None]
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
     notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
     auto = []
@@ -602,7 +604,31 @@ def _addon_checks(templates: Path) -> list[dict]:
         updates = _check("add-on updates", True, "; ".join(waiting), warn=True)
     else:
         updates = _check("add-on updates", True, f"{len(auto)} add-on(s) auto-update")
-    return [addons, updates]
+    return [addons, updates, _repo_libraries_check([p for p in everything if p.repo_id], status)]
+
+
+def _repo_libraries_check(libraries: list, status: dict) -> dict:
+    """Each accepted repo library: what does not load, and what the last check
+    of its remote found waiting or could not read."""
+    faults = [f"{p.repo_id}: {p.left_out}" for p in libraries if p.left_out and not p.quiet]
+    said = []
+    for p in libraries:
+        entry = status.get(p.id) or {}
+        if entry.get("outcome") == "waiting":
+            said.append(
+                f"{p.repo_id}: a change is waiting ({entry.get('message')}); "
+                "run `kraft repo library`"
+            )
+        elif entry.get("outcome") == "failed":
+            said.append(
+                f"{p.repo_id}: could not be checked ({entry.get('kind')}: {entry.get('message')})"
+            )
+    if faults:
+        return _check("repo libraries", False, "; ".join(faults + said))
+    if said:
+        return _check("repo libraries", True, "; ".join(said), warn=True)
+    loaded = sum(1 for p in libraries if p.left_out is None)
+    return _check("repo libraries", True, f"{loaded} loaded")
 
 
 def _capabilities_check() -> dict:

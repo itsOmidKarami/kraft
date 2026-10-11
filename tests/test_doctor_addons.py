@@ -3,7 +3,16 @@
 import json
 
 import pytest
-from support.addons import AGENT, chain, drop_store, edit_addons_yaml, instance, make_collection
+from support.addons import (
+    AGENT,
+    accept_repo_library,
+    chain,
+    drop_store,
+    edit_addons_yaml,
+    instance,
+    make_collection,
+    repo_with_library,
+)
 
 from kraft import doctor
 from kraft.addons import update
@@ -129,3 +138,46 @@ def test_a_bounded_instance_with_a_current_addon_has_nothing_to_say(installed):
     row = _rows(config_dir)["add-on updates"]
 
     assert (row["warn"], row["detail"]) == (False, "1 add-on(s) auto-update")
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        pytest.param(None, "1 loaded", id="loaded"),
+        pytest.param(
+            {"outcome": "waiting", "message": "component tasks.base changed"},
+            "app: a change is waiting (component tasks.base changed); run `kraft repo library`",
+            id="waiting",
+        ),
+        pytest.param(
+            {"outcome": "failed", "kind": "auth", "message": "Permission denied"},
+            "app: could not be checked (auth: Permission denied)",
+            id="failed",
+        ),
+    ],
+)
+def test_the_repo_libraries_row(tmp_path, monkeypatch, status, expected):
+    repo = repo_with_library(tmp_path)
+    config_dir, addons_dir = instance(tmp_path)
+    accept_repo_library(config_dir, addons_dir, repo, "app")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    if status:
+        (addons_dir / "status.json").write_text(json.dumps({"library@repo:app": status}))
+
+    row = _rows(config_dir)["repo libraries"]
+
+    assert row["ok"] is True
+    assert expected in row["detail"]
+
+
+def test_a_repo_library_that_does_not_load_fails_its_row(tmp_path, monkeypatch):
+    repo = repo_with_library(tmp_path)
+    config_dir, addons_dir = instance(tmp_path)
+    accept_repo_library(config_dir, addons_dir, repo, "app")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    write_yaml(config_dir / "harnesses.yaml", {"harnesses": {}})
+
+    row = _rows(config_dir)["repo libraries"]
+
+    assert row["ok"] is False
+    assert "app: requires harness 'codex'" in row["detail"]

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from support.addons import drop_store, load_release
 
 from kraft.addons import load as addons_load
+from kraft.addons import repo_library
 from kraft.api import deps
 
 
@@ -170,3 +171,19 @@ def test_collect_addon_stores_reads_the_db_on_the_loop(client, monkeypatch):
     client.portal.call(deps.collect_addon_stores, client.app.state)
 
     assert where["db"] == loop_thread and where["gc"] != loop_thread
+
+
+def test_the_start_task_checks_the_accepted_repo_libraries(client, monkeypatch):
+    st = client.app.state
+    asked = []
+    monkeypatch.setattr(repo_library, "check_all", lambda *args, **kw: asked.append(args) or {})
+
+    async def startup_done():  # the server's own start already ran this task
+        await asyncio.gather(*st.addon_tasks)
+
+    client.portal.call(startup_done)
+    asked.clear()
+
+    client.portal.call(deps.auto_update_addons, client.app)
+
+    assert asked == [(st.templates_dir, st.run_dirs.addons)]

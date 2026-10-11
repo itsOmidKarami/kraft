@@ -502,6 +502,7 @@ async def auto_update_addons(app) -> None:
     a start never waits on the network: restore what is missing, then take
     the updates that add-ons set to auto-update may take on their own."""
     from kraft import apply
+    from kraft.addons import repo_library
     from kraft.addons import update as addon_update
 
     st = app.state
@@ -517,6 +518,14 @@ async def auto_update_addons(app) -> None:
         await reload_templates(st)
         apply.notify(app)
         await collect_addon_stores(st)
+    # Reports what waits and applies nothing: a person takes it with `kraft repo library`.
+    await _in_thread(
+        st,
+        repo_library.check_all,
+        st.templates_dir,
+        st.run_dirs.addons,
+        cancel=st.addon_cancel,
+    )
 
 
 def in_background(app, work) -> asyncio.Task:

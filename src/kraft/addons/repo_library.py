@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -27,7 +28,7 @@ import yaml
 
 from kraft.addons import fetch, load, manifest, update
 from kraft.addons.config import RESERVED_NAMESPACE, RepoLibrariesLock, RepoLockEntry
-from kraft.config import GIT_READ_ENV, bounded_yaml, write_text
+from kraft.config import GIT_READ_ENV, ConfigError, bounded_yaml, load_repos, write_text
 from kraft.worker.sandbox import harden_host_git_env
 
 if TYPE_CHECKING:
@@ -366,3 +367,48 @@ def drop(repo_id: str, config_dir: Path, addons_root: Path) -> bool:
         _write(config_dir, RepoLibrariesLock(repos=remaining))
     update.clear_status(addons_root, {load.repo_library_id(repo_id)})
     return True
+
+
+def check_all(
+    config_dir: Path, addons_root: Path, cancel: threading.Event | None = None
+) -> dict[str, dict]:
+    """Ask the remote about every accepted repo library whose repository is
+    still connected, and record what it said in `status.json`: `up to date`,
+    `waiting` or `failed`. Applies nothing: a person takes a waiting change
+    with `kraft repo library`. A repository nobody accepted a library for is
+    not asked about. `cancel` (set at shutdown) stops between repositories."""
+    try:
+        lock = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE)
+        paths = {r.id: Path(r.path) for r in load_repos(config_dir / "repos.yaml") if r.id}
+    except ConfigError:
+        return {}  # the load says why
+    outcomes: dict[str, dict] = {}
+    for repo_id in lock.repos:
+        if repo_id not in paths or (cancel is not None and cancel.is_set()):
+            continue
+        found = check(paths[repo_id], repo_id, config_dir, addons_root)
+        if found.outcome == "current":
+            outcome: dict = {"outcome": "up to date"}
+        elif found.outcome == "waiting":
+            # `content[0]` is "read from <url> at <commit>": not what changed.
+            lines = [*found.review.reach, *found.review.content[1:]][:3]
+            said = "; ".join(line.splitlines()[0] for line in lines if line)
+            outcome = {"outcome": "waiting", "message": said or "its files changed"}
+        elif found.outcome == "none":
+            outcome = {"outcome": "waiting", "message": "origin no longer has a repo library"}
+        else:
+            outcome = {
+                "outcome": "failed",
+                "kind": found.kind or "refused",
+                "message": "; ".join(found.problems),
+            }
+        outcomes[load.repo_library_id(repo_id)] = outcome
+    if outcomes:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        status = update.read_status(addons_root) | {
+            key: {"at": now, "kind": None, "message": None, **outcome}
+            for key, outcome in outcomes.items()
+        }
+        addons_root.mkdir(parents=True, exist_ok=True)
+        write_text(addons_root / update.STATUS_FILE, json.dumps(status, indent=2) + "\n")
+    return outcomes
