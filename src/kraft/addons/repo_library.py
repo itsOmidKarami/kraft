@@ -277,6 +277,12 @@ def check(
     reach = list(reviewed.reach)
     if was and old is None:
         reach.insert(0, "the accepted version's files could not be read to compare with")
+    if locked is not None:
+        # Compared as stored: both sides are `fetch.redact`ed.
+        if found.url != locked.git:
+            reach.append(f"origin's URL changed: {locked.git} -> {found.url}")
+        if found.branch != locked.branch:
+            reach.append(f"the default branch changed: {locked.branch} -> {found.branch}")
     content = [
         f"read from {found.url} at {found.commit[:12]} ({found.branch})",
         *reviewed.content,
@@ -300,13 +306,14 @@ def check(
                 for where, key, _kind, value in update.references(config_dir)
                 if update._qualifier(value) == repo_id
             ]
-            own = f"{repo_id}:default"
-            if (
-                default_chain in (None, "default")
-                and after.library is not None
-                and own in after.library.chain_ids
-            ):
+        own = f"{repo_id}:default"
+        if default_chain in (None, "default") and after.library is not None:
+            had = state.library is not None and own in state.library.chain_ids
+            has = own in after.library.chain_ids
+            if has and not had:
                 reach.append(f"becomes the chain new items in this repo run: {own}")
+            elif had and not has:
+                reach.append("new items in this repo go back to the instance's default chain")
         if after.library is not None:
             more_reach, more_content = review_mod.local_changes(
                 state.library, after.library, repo_id
@@ -379,14 +386,17 @@ def check_all(
     not asked about. `cancel` (set at shutdown) stops between repositories."""
     try:
         lock = RepoLibrariesLock.load(config_dir / RepoLibrariesLock.FILE)
-        paths = {r.id: Path(r.path) for r in load_repos(config_dir / "repos.yaml") if r.id}
+        entries = {r.id: r for r in load_repos(config_dir / "repos.yaml") if r.id}
     except ConfigError:
         return {}  # the load says why
     outcomes: dict[str, dict] = {}
     for repo_id in lock.repos:
-        if repo_id not in paths or (cancel is not None and cancel.is_set()):
+        if repo_id not in entries or (cancel is not None and cancel.is_set()):
             continue
-        found = check(paths[repo_id], repo_id, config_dir, addons_root)
+        entry = entries[repo_id]
+        found = check(
+            Path(entry.path), repo_id, config_dir, addons_root, default_chain=entry.default_chain
+        )
         if found.outcome == "current":
             outcome: dict = {"outcome": "up to date"}
         elif found.outcome == "waiting":

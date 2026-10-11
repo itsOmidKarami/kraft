@@ -303,6 +303,81 @@ def test_a_first_load_says_when_it_becomes_the_repos_default(app, home, default_
     assert (line in found.review.reach) is said
 
 
+def _moved_remote(app):
+    elsewhere = app.parent / "elsewhere.git"
+    origin = git(app, "remote", "get-url", "origin")
+    git(app.parent, "clone", "-q", "--bare", origin, str(elsewhere))
+    git(app, "remote", "set-url", "origin", elsewhere.as_uri())
+    _library(app, library={"tasks": {"base": {**AGENT, "prompt": "moved"}}})
+    return "origin's URL changed: "
+
+
+def _renamed_branch(app):
+    git(app, "checkout", "-q", "-b", "trunk")
+    _library(app, library={"tasks": {"base": {**AGENT, "prompt": "trunk"}}})
+    git(app.parent / f"{app.name}-origin.git", "symbolic-ref", "HEAD", "refs/heads/trunk")
+    return "the default branch changed: "
+
+
+@pytest.mark.parametrize(
+    "then",
+    [
+        pytest.param(_moved_remote, id="another-url"),
+        pytest.param(_renamed_branch, id="another-default-branch"),
+    ],
+)
+def test_a_change_from_somewhere_else_is_said_as_reach(app, home, then):
+    _library(app)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+
+    line = then(app)
+
+    found = repo_library.check(app, "app", *home)
+    assert found.outcome == "waiting"
+    assert any(entry.startswith(line) for entry in found.review.reach), found.review.reach
+
+
+@pytest.mark.parametrize(
+    "first, then, default_chain, line",
+    [
+        pytest.param(
+            {"ship": chain("base")},
+            {"ship": chain("base"), "default": chain("base")},
+            None,
+            "becomes the chain new items in this repo run: app:default",
+            id="gains-default",
+        ),
+        pytest.param(
+            {"ship": chain("base"), "default": chain("base")},
+            {"ship": chain("base")},
+            "default",
+            "new items in this repo go back to the instance's default chain",
+            id="loses-default",
+        ),
+        pytest.param(
+            {"ship": chain("base")},
+            {"ship": chain("base"), "default": chain("base")},
+            "quick",
+            None,
+            id="the-entry-names-another",
+        ),
+    ],
+)
+def test_a_change_that_moves_the_repos_default_chain_is_reach(
+    app, home, first, then, default_chain, line
+):
+    _library(app, chains=first)
+    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    if "default" not in then:
+        git(app, "rm", "-q", ".kraft/chains/default.yaml")
+    _library(app, chains=then, library={"tasks": {"base": {**AGENT, "prompt": "v2"}}})
+
+    found = repo_library.check(app, "app", *home, default_chain=default_chain)
+
+    about_default = [e for e in found.review.reach if "default chain" in e or "app:default" in e]
+    assert about_default == ([line] if line else [])
+
+
 def _later(app):
     _library(app, library={"tasks": {"base": {**AGENT, "prompt": "later"}}})
 
