@@ -1009,7 +1009,7 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
         )
     base = (
         ResolvedChain.from_chain(
-            untrimmed, steering=previous.chain.steering, plugins=previous.chain.plugins
+            untrimmed, steering=previous.chain.steering, addons=previous.chain.addons
         )
         if untrimmed is not None
         else previous.chain

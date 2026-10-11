@@ -26,6 +26,7 @@ from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.addons import load as _addons_load
 from kraft.automated_review import AutomatedReview
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
@@ -48,7 +49,6 @@ from kraft.executor.context import (
     LaunchContext,
     Steer,
 )
-from kraft.plugins import load as _plugins_load
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import (
@@ -442,15 +442,15 @@ def _item_policy(row, launch: LaunchContext | None) -> _policy.SandboxPolicy | N
 
 def frozen_steering(row) -> dict:
     """What `resolve_agent_task` takes from this item's snapshot, frozen at
-    intake: the task steering, the repository steering, and the plugin
+    intake: the task steering, the repository steering, and the add-on
     versions its chain was resolved through."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
-        return {"steering": None, "repository_steering": None, "plugins": None}
+        return {"steering": None, "repository_steering": None, "addons": None}
     return {
         "steering": snapshot.chain.steering,
         "repository_steering": snapshot.repository_steering,
-        "plugins": snapshot.chain.plugins,
+        "addons": snapshot.chain.addons,
     }
 
 
@@ -460,17 +460,17 @@ _restoring = asyncio.Lock()
 
 
 async def restore_pins(row) -> None:
-    """Put back any plugin store this item pinned that is gone, before a
+    """Put back any add-on store this item pinned that is gone, before a
     launch reads it. Off the event loop: it may fetch. A store that cannot be
     restored is left missing, and the launch that needs it stops and says why
     (`resolve_agent_task`)."""
-    pins = frozen_steering(row)["plugins"]
+    pins = frozen_steering(row)["addons"]
     if not pins:
         return
-    pinned = tuple(p for p in _plugins_load.for_item(pins) if p.namespace in pins)
+    pinned = tuple(p for p in _addons_load.for_item(pins) if p.namespace in pins)
     if any(not p.root.is_dir() for p in pinned):
         async with _restoring:
-            await asyncio.to_thread(_plugins_load.restore_missing, pinned)
+            await asyncio.to_thread(_addons_load.restore_missing, pinned)
 
 
 def _item_root(row, worktree, repository: str | None) -> Path:
@@ -1291,14 +1291,14 @@ async def _dispatch_task(
     # known to be rate-limited is skipped and a rate-limited launch moves on,
     # every skip or switch logged. Overrides and escalation are the task's own
     # launch's; a fallback entry runs as written.
-    # Before the table is read: a pinned plugin's profile, and the `fallback:`
+    # Before the table is read: a pinned add-on's profile, and the `fallback:`
     # list it carries, are only there once its store is.
     await restore_pins(work_item_row)
     try:
         # A profile's own list is live configuration, like the profile body;
         # a file that does not load has none, and the launch below says why.
         table = (
-            _agent.harness_table(harnesses, frozen_steering(work_item_row)["plugins"])[0]
+            _agent.harness_table(harnesses, frozen_steering(work_item_row)["addons"])[0]
             if t.fallback is None and t.profile
             else None
         )

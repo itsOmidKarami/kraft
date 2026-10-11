@@ -33,7 +33,7 @@ def _lint_dir_report(path: str) -> dict:
     will not show up here even though the server route would catch it."""
     from kraft.api.config_check import lint_report  # the daemon's modules, only for --dir
 
-    return lint_report(path, plugins=None)  # offline: no instance, so no plugins
+    return lint_report(path, addons=None)  # offline: no instance, so no add-ons
 
 
 def _cmd_lint(ns: argparse.Namespace) -> None:
@@ -54,15 +54,15 @@ def _cmd_show(ns: argparse.Namespace) -> None:
 
 
 def _render_chain_text(payload: dict) -> str:
-    """A chain file as written; a plugin's is headed by where it comes from."""
-    header = f"# {_named(payload)}\n" if payload.get("plugin") else ""
+    """A chain file as written; an add-on's is headed by where it comes from."""
+    header = f"# {_named(payload)}\n" if payload.get("addon") else ""
     return header + payload["text"].rstrip("\n")
 
 
 def _named(entry: dict) -> str:
-    """An id, followed by the plugin it comes from: `release:ship (release@acme 1.4.0)`."""
-    plugin = entry.get("plugin")
-    return entry["id"] + (f" ({plugin['id']} {plugin['version']})" if plugin else "")
+    """An id, followed by the add-on it comes from: `release:ship (release@acme 1.4.0)`."""
+    addon = entry.get("addon")
+    return entry["id"] + (f" ({addon['id']} {addon['version']})" if addon else "")
 
 
 def _render_components(payload: dict) -> str:

@@ -8,8 +8,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from kraft import harness as _harness
+from kraft.addons import load as addons_load
 from kraft.paths import config_dir
-from kraft.plugins import load as plugins_load
 from kraft.templates.environment import (
     HarnessProfile,
     HarnessProfileTable,
@@ -39,12 +39,12 @@ def harness_table(
     """The live `harnesses.yaml` and its path, or `HarnessUnavailable`. Read
     from the app's templates directory (`KRAFT_CONFIG_DIR`, else
     `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch.
-    A plugin's agent profiles are the exception: `pins` are the versions a
-    work item started with (`ResolvedChain.plugins`), and theirs are read."""
+    An add-on's agent profiles are the exception: `pins` are the versions a
+    work item started with (`ResolvedChain.addons`), and theirs are read."""
     path = config_dir() / "harnesses.yaml"
     try:
         table = HarnessProfileTable.from_yaml(
-            path, harnesses=harnesses.valid, plugins=plugins_load.for_item(pins, path.parent)
+            path, harnesses=harnesses.valid, addons=addons_load.for_item(pins, path.parent)
         )
         return table, path
     except TemplateEnvironmentError as exc:

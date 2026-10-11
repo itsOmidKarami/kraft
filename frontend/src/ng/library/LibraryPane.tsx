@@ -23,7 +23,7 @@ import { LibraryOverview } from "./overview";
 import { Instructions } from "./steering";
 import { UsedBy } from "./UsedBy";
 import type { Use } from "./types";
-import { ReadOnly } from "../templates/plugin";
+import { ReadOnly } from "../templates/addon";
 import { yamlOf } from "../phone/areas/yaml";
 
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }];
@@ -160,7 +160,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     showToast(`Duplicated as ${name}`);
     onDuplicated(to);
   };
-  // A plugin's component is changed by copying it: the copy is the library's own, under a name of its own.
+  // An add-on's component is changed by copying it: the copy is the library's own, under a name of its own.
   const copy = async (name: string) => {
     const a = await draft.ops([{ op: "copy_component", ref: path, name }], { quiet: true });
     if (a.status !== 200) return setRefused(detailOf(a.body));

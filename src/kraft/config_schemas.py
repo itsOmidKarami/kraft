@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from kraft import config as config_mod
 from kraft import detect as detect_mod
 from kraft import policy as policy_mod
-from kraft.plugins.config import PluginsConfig
+from kraft.addons.config import AddonsConfig
 from kraft.templates import models as models_mod
 from kraft.templates.environment import AgentProfileInput, HarnessProfileInput
 
@@ -153,7 +153,7 @@ SCHEMAS: dict[str, Callable[[], dict]] = {
     "notify.schema.json": lambda: _model(config_mod.Notify, "Kraft notifications"),
     "detectors.schema.json": lambda: _model(detect_mod.DetectorFile, "Kraft repo detectors"),
     # The shape and the typos; what compares entries only the loader checks.
-    "plugins.schema.json": lambda: _model(PluginsConfig, "Kraft plugins"),
+    "addons.schema.json": lambda: _model(AddonsConfig, "Kraft add-ons"),
 }
 
 

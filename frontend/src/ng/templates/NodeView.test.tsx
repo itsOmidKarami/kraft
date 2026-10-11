@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
   vi.spyOn(api, "getLibrary").mockResolvedValue({ file: "", text: "", components: [
     { id: "tasks.implementer", kind: "tasks", name: "implementer", definition: { kind: "agent", prompt: "Implement the approved plan." }, used_by: [], issues: [] },
-    { id: "tasks.release:base", kind: "tasks", name: "release:base", definition: { kind: "agent", prompt: "Ship it." }, used_by: [], issues: [], plugin: { id: "release@acme", version: "1.0.0" } },
+    { id: "tasks.release:base", kind: "tasks", name: "release:base", definition: { kind: "agent", prompt: "Ship it." }, used_by: [], issues: [], addon: { id: "release@acme", version: "1.0.0" } },
     { id: "tasks.verify_changed_scopes", kind: "tasks", name: "verify_changed_scopes", definition: { kind: "subprocess", command: "true" }, used_by: [], issues: [] },
     { id: "nodes.verification", kind: "nodes", name: "verification", definition: { kind: "exec", steps: [{ id: "tests", tasks: [] }, { id: "review", tasks: [] }] }, used_by: [], issues: [] },
   ] });
@@ -99,7 +99,7 @@ describe("Chains page: the node view", () => {
     expect(screen.getByRole("textbox", { name: "prompt" })).toHaveFocus();
   });
 
-  // A plugin's task is `release:base`; the id it gets is one an id may be.
+  // An add-on's task is `release:base`; the id it gets is one an id may be.
   it.each([["impl", "implementer", "implementer"], ["release", "base", "release:base"]])("adds a library task beside a step's tasks from its parallel seam (%s)", async (typed, id, name) => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...DEFAULT_VIEW, ops: [] }));
     mount("/templates/chains/default/nodes/verification");

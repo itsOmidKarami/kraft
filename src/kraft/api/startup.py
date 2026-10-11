@@ -32,12 +32,12 @@ from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters.forge import git as forge_git
+from kraft.addons import load as addons_load
 from kraft.api import deps
 from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
-from kraft.plugins import load as plugins_load
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker.egress import EgressProxy
@@ -115,9 +115,9 @@ async def lifespan(app: FastAPI):
     library, invalid_library = deps.load_library(
         templates_dir,
         app.state.skills_dir,
-        plugins_load.installed(templates_dir, run_dirs.plugins, verify=True),
+        addons_load.installed(templates_dir, run_dirs.addons, verify=True),
     )
-    app.state.plugins_problem = plugins_load.config_problem(templates_dir)
+    app.state.addons_problem = addons_load.config_problem(templates_dir)
     # Now, not with the rest of app.state below: reattach's launch factory
     # reads it, for an item filed before repository steering was frozen.
     app.state.library = library
@@ -337,14 +337,14 @@ async def lifespan(app: FastAPI):
     # restart (Kraft-ygnw6). A tick with no triggers files nothing.
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
-    # Every background plugin task (`deps.in_background`), so shutdown reaches all.
-    app.state.plugin_tasks = set()
-    # Set at shutdown: the worker threads of those tasks stop between plugins.
-    app.state.plugin_cancel = threading.Event()
-    app.state.plugin_threads = set()
+    # Every background add-on task (`deps.in_background`), so shutdown reaches all.
+    app.state.addon_tasks = set()
+    # Set at shutdown: the worker threads of those tasks stop between add-ons.
+    app.state.addon_cancel = threading.Event()
+    app.state.addon_threads = set()
     # After the library is loaded from the lock: a start never waits on the network.
-    deps.in_background(app, deps.auto_update_plugins)
-    app.state.plugin_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
+    deps.in_background(app, deps.auto_update_addons)
+    app.state.addon_update_task = asyncio.ensure_future(deps.auto_update_daily(app))
     try:
         yield
     finally:
@@ -385,11 +385,11 @@ async def lifespan(app: FastAPI):
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
-        # The daily task first: it is what starts the next plugin task.
-        app.state.plugin_update_task.cancel()
-        await asyncio.gather(app.state.plugin_update_task, return_exceptions=True)
+        # The daily task first: it is what starts the next add-on task.
+        app.state.addon_update_task.cancel()
+        await asyncio.gather(app.state.addon_update_task, return_exceptions=True)
         await asyncio.gather(app.state.apply_task, return_exceptions=True)
-        await deps.stop_plugin_work(app.state)
+        await deps.stop_addon_work(app.state)
         # Before the walks are cancelled: a setup command runs in a thread
         # no cancel reaches, and would outlive this server.
         _builtins.end_running_setups()

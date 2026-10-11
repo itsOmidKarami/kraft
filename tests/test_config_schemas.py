@@ -80,15 +80,15 @@ def test_a_misspelled_library_section_is_refused():
     assert list(validator("library.schema.json").iter_errors({"taks": {}}))
 
 
-def test_the_plugins_schema_catches_shape_and_typos():
-    """What an editor can catch in `plugins.yaml`; the rules that compare
+def test_the_addons_schema_catches_shape_and_typos():
+    """What an editor can catch in `addons.yaml`; the rules that compare
     entries are the loader's."""
-    schema = validator("plugins.schema.json")
-    source = {"collections": {"acme": {"git": "https://github.com/acme/kraft-plugins.git"}}}
-    assert schema.is_valid({**source, "plugins": {"release@acme": True, "x@acme": {"as": "y"}}})
-    assert not schema.is_valid({**source, "plugins": {"release@acme": {"enabeld": False}}})
-    assert not schema.is_valid({"collections": {"acme": {"git": "acme/kraft-plugins"}}})
-    assert not schema.is_valid({**source, "plugns": {}})
+    schema = validator("addons.schema.json")
+    source = {"collections": {"acme": {"git": "https://github.com/acme/kraft-addons.git"}}}
+    assert schema.is_valid({**source, "addons": {"release@acme": True, "x@acme": {"as": "y"}}})
+    assert not schema.is_valid({**source, "addons": {"release@acme": {"enabeld": False}}})
+    assert not schema.is_valid({"collections": {"acme": {"git": "acme/kraft-addons"}}})
+    assert not schema.is_valid({**source, "addns": {}})
 
 
 def test_every_extendable_model_is_in_the_chain_defs():

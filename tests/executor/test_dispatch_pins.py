@@ -1,12 +1,12 @@
-"""A launch restores the plugin versions its item pinned before it reads the
-agent profile table: a profile's `fallback:` list comes from the plugin, and
-the plugin is not there until its store is (`dispatch.restore_pins`)."""
+"""A launch restores the add-on versions its item pinned before it reads the
+agent profile table: a profile's `fallback:` list comes from the add-on, and
+the add-on is not there until its store is (`dispatch.restore_pins`)."""
 
 import json
 import time
 
+from support.addons import drop_store, install_release, pinned_chain
 from support.harness import v1_walk
-from support.plugins import drop_store, install_release, pinned_chain
 
 
 async def test_the_fallback_table_is_read_after_the_pins_are_restored(

@@ -1,6 +1,6 @@
 /** W9's config-draft answers, field for field (docs: /reference/http-api/drafts). */
 
-import type { Plugin } from "../../../types";
+import type { Addon } from "../../../types";
 import type { Choice } from "../../ui/Combobox";
 
 export type Area = "chains" | "library" | "repos" | "policy" | "intake" | "harnesses";
@@ -93,10 +93,10 @@ export interface DraftView {
   published?: Record<string, string | null>;
   updated_at: string | null;
   result: Result;
-  /** A chains view of a plugin's chain: every write to it answers 409. */
-  plugin?: Plugin | null;
-  /** The library view: the loaded plugins' components in `library.yaml`'s shape, by qualified name. Not in `files` or the model. */
-  plugin_library?: Record<string, Record<string, Authored>> | null;
+  /** A chains view of an add-on's chain: every write to it answers 409. */
+  addon?: Addon | null;
+  /** The library view: the loaded add-ons' components in `library.yaml`'s shape, by qualified name. Not in `files` or the model. */
+  addon_library?: Record<string, Record<string, Authored>> | null;
 }
 
 export interface DraftSummary {

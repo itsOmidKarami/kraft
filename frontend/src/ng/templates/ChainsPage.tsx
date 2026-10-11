@@ -21,7 +21,7 @@ import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
-import { PluginBadge, ReadOnly } from "./plugin";
+import { AddonBadge, ReadOnly } from "./addon";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
@@ -68,9 +68,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const view = draft.view!;
   const scope = draft.scope;
   const r = view.result;
-  // A plugin's chain is read here and copied, never edited: every write answers 409.
-  const plugin = view.plugin ?? null;
-  const readOnly = !!plugin;
+  // An add-on's chain is read here and copied, never edited: every write answers 409.
+  const addon = view.addon ?? null;
+  const readOnly = !!addon;
   const [frame, canvasW, areaH] = useBox();
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
@@ -293,7 +293,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
         <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} />
-        {plugin && <PluginBadge plugin={plugin} />}
+        {addon && <AddonBadge addon={addon} />}
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>

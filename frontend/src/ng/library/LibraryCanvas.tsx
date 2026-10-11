@@ -11,7 +11,7 @@ import type { Row } from "./rows";
 import { SteeringCanvas } from "./steering";
 import type { Use } from "./types";
 import { libSel } from "./sel";
-import { ReadOnly } from "../templates/plugin";
+import { ReadOnly } from "../templates/addon";
 
 /** The Library's canvas (Decisions §10): a node as its steps and tasks, with its failure handlers in the bottom
  *  pane; a step as one step; a task as its one glyph. Drawn from the draft as written (R18). The page keys it by

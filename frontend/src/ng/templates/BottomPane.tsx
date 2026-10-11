@@ -11,7 +11,7 @@ import type { Scope } from "./draft/types";
 import { authoredAt, changeAt, normalise, problemsAt, valueAt, type NodeA, type Step, type Task } from "./draft/view";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
-import { ReadOnly } from "./plugin";
+import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
 import { autoEscalates } from "./escalateWords";
 import { tip } from "../ui/Tooltip";

@@ -8,8 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from support.addons import drop_store, install_release, pinned_chain
 from support.harness import entry_of, git, make_repo, seed_v1_library, write_harness_profiles
-from support.plugins import drop_store, install_release, pinned_chain
 
 from kraft import executor, review_reply, store
 

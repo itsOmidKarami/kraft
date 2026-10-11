@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from kraft import auth as auth_mod
 from kraft import storage
 from kraft import update as update_mod
+from kraft.addons import update as addon_update
 from kraft.api import api_router, deps
-from kraft.plugins import update as plugin_update
 from kraft.worker import reattach as reattach_mod
 
 #: Failed logins one address may make within `LOGIN_WINDOW_S` before it is
@@ -126,13 +126,13 @@ async def health(request: Request):
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
-        # public: each auto-updating plugin's last outcome and kind, not its
+        # public: each auto-updating add-on's last outcome and kind, not its
         # message (refusal and git error text). `doctor` reads the message from
         # status.json. A held or failed one is not degraded: the locked
         # version still serves.
-        "plugin_updates": {
+        "addon_updates": {
             pid: {k: entry.get(k) for k in ("outcome", "kind")}
-            for pid, entry in plugin_update.read_status(st.run_dirs.plugins).items()
+            for pid, entry in addon_update.read_status(st.run_dirs.addons).items()
             if isinstance(entry, dict)
         },
         # public: totals only. None without `storage.worktrees.limit`. `held`

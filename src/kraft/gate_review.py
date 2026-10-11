@@ -96,7 +96,7 @@ def _profile_fallback_refusal(task: AgentTask, gate: str, pins=None) -> str | No
     if task.profile is None:
         return None
     try:
-        # The item's pinned plugin versions: the profile the launch will use.
+        # The item's pinned add-on versions: the profile the launch will use.
         table, _path = harness_table(_harness.load(None), pins)
     except HarnessUnavailable:
         # The launch a moment later hits the identical problem and reports
@@ -172,10 +172,10 @@ async def review(
         ).fetchone()
     )
     if item is not None:
-        # Before the profile table is read below: a pinned plugin's profile,
+        # Before the profile table is read below: a pinned add-on's profile,
         # and its `fallback:`, are only there once its store is.
         await executor.restore_pins(item)
-    pins = executor.frozen_steering(item)["plugins"] if item is not None else None
+    pins = executor.frozen_steering(item)["addons"] if item is not None else None
     if (refusal := _profile_fallback_refusal(auto_review.task, gate, pins)) is not None:
         # Same posture as the kind-check above: an unpaired skip, no
         # `_started`, so `_gate_review_attempts` still counts it as one

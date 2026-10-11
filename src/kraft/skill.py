@@ -108,26 +108,26 @@ def path_for(skills_dir: Path | None, name: str, *, where: str) -> Path:
     return _local_path(skills_dir, _own_name(name), where)
 
 
-def _plugin_path(
-    plugin_dirs: Mapping[str, Path | None] | None, value: str, where: str
+def _addon_path(
+    addon_dirs: Mapping[str, Path | None] | None, value: str, where: str
 ) -> Path | None:
     """The file `<namespace>:<name>` names when the namespace is a loaded Kraft
-    plugin's, read from that plugin's store; None when it is not, which leaves
+    add-on's, read from that add-on's store; None when it is not, which leaves
     the reference another tool's."""
     qualifier, _, name = value.partition(":")
-    if qualifier not in (plugin_dirs or {}):
+    if qualifier not in (addon_dirs or {}):
         return None
-    root = (plugin_dirs or {})[qualifier]
+    root = (addon_dirs or {})[qualifier]
     if root is None:
         raise SkillError(
-            f"{where}: plugin {qualifier!r} is installed but not loaded, so its skill "
+            f"{where}: add-on {qualifier!r} is installed but not loaded, so its skill "
             f"{name!r} cannot be read; `kraft admin health` says why"
         )
     _bare(name, where)
     path = Path(root) / "skills" / name / "SKILL.md"
     if not _is_file(path):
         raise SkillError(
-            f"{where}: plugin {qualifier!r} has no skill {name!r} at {path}; a method Kraft "
+            f"{where}: add-on {qualifier!r} has no skill {name!r} at {path}; a method Kraft "
             f"ships is written kraft:{name}"
         )
     return path
@@ -138,29 +138,29 @@ def validate(
     value,
     *,
     where: str,
-    plugin_dirs: Mapping[str, Path | None] | None = None,
+    addon_dirs: Mapping[str, Path | None] | None = None,
 ) -> None:
     """The value is a usable skill reference, or raise.
 
     Another tool's plugin reference is accepted without a lookup: whether the
     agent's installation has it is not knowable here, and the injected text
     tells the agent to stop with `needs_context` if it cannot load it. A
-    loaded Kraft plugin's is looked up in its store (`plugin_dirs`, namespace
+    loaded Kraft add-on's is looked up in its store (`addon_dirs`, namespace
     to directory).
     """
     if not isinstance(value, str) or not value:
         raise SkillError(f"{where}: 'skill' must be a non-empty string")
     if is_plugin_ref(value):
-        _plugin_path(plugin_dirs, value, where)
+        _addon_path(addon_dirs, value, where)
         return
     _local_path(skills_dir, _own_name(value), where)
 
 
 def read(
-    skills_dir: Path | None, value: str, plugin_dirs: Mapping[str, Path | None] | None = None
+    skills_dir: Path | None, value: str, addon_dirs: Mapping[str, Path | None] | None = None
 ) -> str:
     """The method text to inject. Called at dispatch, after `validate`."""
-    path = _plugin_path(plugin_dirs, value, "skill") if is_plugin_ref(value) else None
+    path = _addon_path(addon_dirs, value, "skill") if is_plugin_ref(value) else None
     if path is None and is_plugin_ref(value):
         return PLUGIN_PROMPT.format(ref=value)
     path = path or _local_path(skills_dir, _own_name(value), "skill")

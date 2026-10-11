@@ -1156,11 +1156,11 @@ class ResolvedChain:
     #: resolved": a chain built without a library, or a snapshot stored before
     #: steering was frozen -- a task selecting steering then stops for a human.
     steering: dict[str, str] | None = None
-    #: Each Kraft plugin the chain resolved anything through, namespace to
-    #: `InstalledPlugin.pin`, frozen with the chain: a launch reads these
+    #: Each Kraft add-on the chain resolved anything through, namespace to
+    #: `InstalledAddon.pin`, frozen with the chain: a launch reads these
     #: versions' skills and agent profiles, whatever was installed since.
     #: `None` is "never resolved", as for `steering`: the launch reads the lock.
-    plugins: dict[str, dict[str, str | None]] | None = None
+    addons: dict[str, dict[str, str | None]] | None = None
 
     @property
     def id(self) -> str | None:
@@ -1175,7 +1175,7 @@ class ResolvedChain:
         cls,
         chain: Chain,
         steering: dict[str, str] | None = None,
-        plugins: dict[str, dict[str, str | None]] | None = None,
+        addons: dict[str, dict[str, str | None]] | None = None,
     ) -> ResolvedChain:
         nodes = []
         for node in chain.nodes:
@@ -1236,7 +1236,7 @@ class ResolvedChain:
                     scopes=node_scopes,
                 )
             )
-        return cls(chain=chain, nodes=tuple(nodes), steering=steering, plugins=plugins)
+        return cls(chain=chain, nodes=tuple(nodes), steering=steering, addons=addons)
 
     def materialize(
         self,
@@ -1572,7 +1572,7 @@ class ResolvedChain:
         return ResolvedChain.from_chain(
             self.chain.model_copy(update={"nodes": kept}),
             steering=self.steering,
-            plugins=self.plugins,
+            addons=self.addons,
         )
 
 
@@ -1617,6 +1617,15 @@ class _StoredMaterialization(BaseModel):
             }
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def _pre_rename_addons(cls, data: object) -> object:
+        """A snapshot stored before the rename kept its add-on pins under `plugins`;
+        read that key as `addons`."""
+        if isinstance(data, dict) and "plugins" in data and "addons" not in data:
+            return {("addons" if k == "plugins" else k): v for k, v in data.items()}
+        return data
+
     #: `ResolvedChain.steering`. Absent from a snapshot stored before steering
     #: was frozen, which reads back as `None`.
     steering: dict[str, str] | None = None
@@ -1627,9 +1636,9 @@ class _StoredMaterialization(BaseModel):
     #: `MaterializedChain.repository_steering`. Absent from a snapshot stored
     #: before repository steering was frozen, which reads back as `None`.
     repository_steering: dict[str, dict[str, str]] | None = None
-    #: `ResolvedChain.plugins`. Absent when the chain uses no plugin, and from
-    #: a snapshot stored before plugins were pinned.
-    plugins: dict[str, dict[str, str | None]] | None = None
+    #: `ResolvedChain.addons`. Absent when the chain uses no add-on, and from
+    #: a snapshot stored before add-ons were pinned.
+    addons: dict[str, dict[str, str | None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -1826,7 +1835,7 @@ class MaterializedChain:
             target=self.target,
             policy=self.policy,
             steering=self.chain.steering,
-            plugins=self.chain.plugins or None,
+            addons=self.chain.addons or None,
             repository_policies=dict(self.repository_policies),
             untrimmed=self.untrimmed,
             repository_steering=(
@@ -1839,7 +1848,7 @@ class MaterializedChain:
             exclude=({"repository_policies"} if not self.repository_policies else set())
             | ({"untrimmed"} if self.untrimmed is None else set())
             | ({"repository_steering"} if self.repository_steering is None else set())
-            | ({"plugins"} if not self.chain.plugins else set())
+            | ({"addons"} if not self.chain.addons else set())
         )
 
     @classmethod
@@ -1854,7 +1863,7 @@ class MaterializedChain:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(
             chain=ResolvedChain.from_chain(
-                stored.chain, steering=stored.steering, plugins=stored.plugins
+                stored.chain, steering=stored.steering, addons=stored.addons
             ),
             target=stored.target,
             policy=stored.policy,

@@ -15,7 +15,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - **An item stopped on a cap.** Read [Raise a cap on a stopped item](/guides/day-to-day/raise-a-cap).
 - **You want the board on your phone.** Read [Kraft on a phone](/guides/day-to-day/kraft-on-a-phone), then [Remote access](/guides/run/remote-access).
 - **You are upgrading Kraft, backing it up, or going back a version.** Read [Upgrade Kraft](/guides/run/upgrade-kraft), [Back up and restore the database](/guides/run/back-up-and-restore) or [Roll back to 1.4](/guides/run/roll-back).
-- **You want your team to run the same chains, or to install a chain someone else published as a [Kraft plugin](/concepts/vocabulary#kraft-plugin).** Read [Share chains with plugins](/guides/customize/share-chains-with-plugins).
+- **You want your team to run the same chains, or to install a chain someone else published as a [Kraft add-on](/concepts/vocabulary#kraft-add-on).** Read [Share chains with add-ons](/guides/customize/share-chains-with-addons).
 - **You want to change the chain, a [harness](/concepts/vocabulary#harness) or the server.** Pick from the groups below.
 
 ## In this section
@@ -36,7 +36,7 @@ Guides each take one task from start to finish. Pick one by what you want to do.
 - [Write your own chain](/guides/customize/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
 - [Add a security review or a gate reviewer](/guides/customize/add-review-agents): put the shipped `security-review` and `gate-review` skills into a chain of your own.
 - [Schedule or webhook work](/guides/customize/schedule-and-webhook-work): file paused work items from a cron schedule or an HTTP call.
-- [Share chains with plugins](/guides/customize/share-chains-with-plugins): publish chains, components, skills and agent profiles as a Kraft plugin, and install, use and update one.
+- [Share chains with add-ons](/guides/customize/share-chains-with-addons): publish chains, components, skills and agent profiles as a Kraft add-on, and install, use and update one.
 
 ### Agents and harnesses
 

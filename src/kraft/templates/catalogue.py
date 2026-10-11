@@ -56,25 +56,25 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
                     "used_by": sorted(used_by.get(id, ())),
                     "used_by_paths": paths.get(id, []),
                     "issues": [i for i in issues if named.search(i.message)],
-                    "plugin": plugin_view(library, name),
+                    "addon": addon_view(library, name),
                 }
             )
     return listed
 
 
-def plugin_view(library: TemplateLibrary, name: str) -> dict | None:
-    """`{id, version}` of the plugin a chain or component comes from; None for
+def addon_view(library: TemplateLibrary, name: str) -> dict | None:
+    """`{id, version}` of the add-on a chain or component comes from; None for
     the instance's own. What a screen badges and refuses to edit."""
-    plugin = library.plugin_of(name)
-    return None if plugin is None else {"id": plugin.id, "version": plugin.version}
+    addon = library.addon_of(name)
+    return None if addon is None else {"id": addon.id, "version": addon.version}
 
 
 def read_only_message(library: TemplateLibrary, name: str) -> str | None:
-    """Why `name` cannot be saved, when it is a plugin's; None for a local name."""
-    plugin = library.plugin_of(name)
-    if plugin is None:
+    """Why `name` cannot be saved, when it is an add-on's; None for a local name."""
+    addon = library.addon_of(name)
+    if addon is None:
         return None
-    return f"{name} comes from plugin {plugin.id}; extend it or copy it to your library"
+    return f"{name} comes from add-on {addon.id}; extend it or copy it to your library"
 
 
 class AmbiguousName(LookupError):

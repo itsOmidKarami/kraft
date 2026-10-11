@@ -7,12 +7,12 @@ import type { Scope } from "../draft/types";
 import { problemsAt } from "../draft/view";
 import { problemText } from "../problems";
 import { jumpTo } from "../YamlView";
-import { ReadOnly } from "../plugin";
+import { ReadOnly } from "../addon";
 
 /** One component's own YAML (Decisions §9 Item YAML): the server writes it
  *  (W13-A's fragment route, R46), edits send `set_fragment` on a pause; an id
  *  change or a syntax error is refused and the last valid version kept. */
-export function ItemYaml({ draft, scope, path, extendsName, fixed }: { draft: ConfigDraft; scope: Scope; path: string; extendsName?: string; /** The text itself, for a part the fragment route does not serve (a plugin's library component). */ fixed?: string }) {
+export function ItemYaml({ draft, scope, path, extendsName, fixed }: { draft: ConfigDraft; scope: Scope; path: string; extendsName?: string; /** The text itself, for a part the fragment route does not serve (an add-on's library component). */ fixed?: string }) {
   const view = draft.view!;
   const readOnly = useContext(ReadOnly);
   const [text, setText] = useState<string | null>(fixed ?? null);
@@ -58,7 +58,7 @@ export function ItemYaml({ draft, scope, path, extendsName, fixed }: { draft: Co
   if (text === null) return <p className="pane-note">Loading…</p>;
   return (
     <div className="iy">
-      <p className="pane-note">{readOnly ? "Read-only: it comes from a plugin." : extendsName ? `Only what this chain sets. Everything else comes from ${extendsName}.` : "Edits apply to the draft as you type."}</p>
+      <p className="pane-note">{readOnly ? "Read-only: it comes from an add-on." : extendsName ? `Only what this chain sets. Everything else comes from ${extendsName}.` : "Edits apply to the draft as you type."}</p>
       <div className="iy-box" ref={box}>
         <div className="iy-gutter" aria-hidden="true">{lines.map((_, i) => <div key={i} className={refusal?.line === i + 1 ? "is-bad" : undefined}>{i + 1}</div>)}</div>
         <textarea

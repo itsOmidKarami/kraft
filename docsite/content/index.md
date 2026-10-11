@@ -146,7 +146,7 @@ variant: ghost
 ---
 to: /troubleshooting
 title: Troubleshooting
-description: Why an item stopped, why the server will not start, and what a refused plugin means.
+description: Why an item stopped, why the server will not start, and what a refused add-on means.
 variant: ghost
 ---
 ::::
@@ -164,7 +164,7 @@ variant: ghost
 ---
 to: /guides
 title: Guides
-description: Use Kraft from your agent, reach the board from a phone, write your own chain, share chains as Kraft plugins, add a harness, run Kraft Lite.
+description: Use Kraft from your agent, reach the board from a phone, write your own chain, share chains as Kraft add-ons, add a harness, run Kraft Lite.
 variant: ghost
 ---
 ::::

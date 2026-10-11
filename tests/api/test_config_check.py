@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kraft.addons import update as addon_update
 from kraft.api import config_check, deps
-from kraft.plugins import update as plugin_update
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -200,37 +200,37 @@ def test_lint_reports_an_unknown_icon_in_a_chain_and_in_the_library(tmp_path):
     }
 
 
-def test_lint_report_with_and_without_the_instance_plugins(tmp_path):
-    """The route lints against the installed plugins; `--dir` has none and
+def test_lint_report_with_and_without_the_instance_addons(tmp_path):
+    """The route lints against the installed add-ons; `--dir` has none and
     reports what it could not judge instead of calling it broken."""
-    from support.plugins import AGENT, chain, home, install, make_collection
+    from support.addons import AGENT, chain, home, install, make_collection
 
-    from kraft.plugins import load
+    from kraft.addons import load
 
     config = home(tmp_path, chains={"local": chain("release:base")})
-    plugins = tmp_path / "run" / "plugins"
+    addons = tmp_path / "run" / "addons"
     release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
-    install(config, plugins, make_collection(tmp_path, {"release": release}), "release")
+    install(config, addons, make_collection(tmp_path, {"release": release}), "release")
 
-    online = config_check.lint_report(config, plugins=load.installed(config, plugins))
+    online = config_check.lint_report(config, addons=load.installed(config, addons))
     assert (online["valid"], online["chains"], online["unchecked"]) == (
         True,
         ["release:ship", "local"],
         [],
     )
-    offline = config_check.lint_report(config, plugins=None)
+    offline = config_check.lint_report(config, addons=None)
     assert (offline["valid"], offline["chains"]) == (True, [])
-    assert [u["message"].endswith("not checked (plugin)") for u in offline["unchecked"]] == [True]
+    assert [u["message"].endswith("not checked (add-on)") for u in offline["unchecked"]] == [True]
 
 
-# ── plugins.yaml, and the files whose edit can drop a plugin ──
+# ── addons.yaml, and the files whose edit can drop an add-on ──
 
 
 @pytest.fixture
 def with_release(client, tmp_path):
     """The running server with `release@acme` installed and loaded: a task
     capped at 8 dollars, and a `requires` on the agent profile `extra`."""
-    from support.plugins import AGENT, chain, install, make_collection
+    from support.addons import AGENT, chain, install, make_collection
 
     st = client.app.state
     harnesses = yaml.safe_load((st.templates_dir / "harnesses.yaml").read_text())
@@ -242,15 +242,15 @@ def with_release(client, tmp_path):
         "manifest": {"requires": {"kraft": "2", "harnesses": ["codex"], "profiles": ["extra"]}},
     }
     collection = make_collection(tmp_path, {"release": release})
-    install(st.templates_dir, st.run_dirs.plugins, collection, "release")
+    install(st.templates_dir, st.run_dirs.addons, collection, "release")
     deps._reload_templates(st)
     assert "release:ship" in st.library.chain_ids and not deps.invalid_templates(st)
     return st
 
 
-def _plugins_yaml(st, **plugins):
-    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
-    return yaml.safe_dump({**written, "plugins": {**written["plugins"], **plugins}})
+def _addons_yaml(st, **addons):
+    written = yaml.safe_load((st.templates_dir / "addons.yaml").read_text())
+    return yaml.safe_dump({**written, "addons": {**written["addons"], **addons}})
 
 
 USES_RELEASE = (
@@ -272,49 +272,49 @@ USES_ANOTHER_TOOLS_SKILL = (
     ],
     ids=["breaks-a-chain", "captures-a-reference", "an-edit-that-unloads-nothing", "typo"],
 )
-def test_a_plugins_yaml_edit_is_checked(with_release, chain_text, edit, says):
+def test_an_addons_yaml_edit_is_checked(with_release, chain_text, edit, says):
     """A hand edit is refused for what it would stop resolving, with the reason."""
     st = with_release
     (st.templates_dir / "chains" / "mine.yaml").write_text(chain_text)
     deps._reload_templates(st)
     assert "mine" not in st.invalid_chains
 
-    issues = config_check.check("plugins.yaml", _plugins_yaml(st, **edit), config_check.context(st))
+    issues = config_check.check("addons.yaml", _addons_yaml(st, **edit), config_check.context(st))
 
     assert [says in i.message for i in issues] == ([True] if says else [])
 
 
-def test_a_pending_plugins_yaml_edit_is_linted_once(with_release, monkeypatch):
+def test_a_pending_addons_yaml_edit_is_linted_once(with_release, monkeypatch):
     """`apply.notify` asks again every few seconds: nothing the lint reads has
     changed, so it is not run again; a changed input runs it again."""
     st = with_release
     (st.templates_dir / "chains" / "mine.yaml").write_text(USES_RELEASE)
     deps._reload_templates(st)
-    text = _plugins_yaml(st, **{"release@acme": False})
-    real, calls = plugin_update.state_of, []
+    text = _addons_yaml(st, **{"release@acme": False})
+    real, calls = addon_update.state_of, []
     monkeypatch.setattr(
-        plugin_update, "state_of", lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+        addon_update, "state_of", lambda *a, **k: (calls.append(1), real(*a, **k))[1]
     )
     ctx = config_check.context(st)
 
-    first = config_check.check("plugins.yaml", text, ctx)
+    first = config_check.check("addons.yaml", text, ctx)
     assert first, "the edit must break something, or the test pins nothing"
-    assert config_check.check("plugins.yaml", text, ctx) == first
-    assert config_check.check("plugins.yaml", text, ctx) == first
+    assert config_check.check("addons.yaml", text, ctx) == first
+    assert config_check.check("addons.yaml", text, ctx) == first
     assert len(calls) == 2  # before and after, once
 
     library = st.templates_dir / "library.yaml"
     library.write_text(library.read_text() + "\n# touched\n")
-    config_check.check("plugins.yaml", text, ctx)
+    config_check.check("addons.yaml", text, ctx)
     assert len(calls) == 4  # a changed input lints again
 
 
 def test_a_lock_that_does_not_parse_is_an_issue(with_release):
     ctx = config_check.context(with_release)
-    lock = (with_release.templates_dir / "plugins.lock").read_text()
-    assert config_check.check("plugins.lock", lock, ctx) == []
+    lock = (with_release.templates_dir / "addons.lock").read_text()
+    assert config_check.check("addons.lock", lock, ctx) == []
     (issue,) = config_check.check(
-        "plugins.lock", lock.replace("lock_version: 1", "lock_version: 2"), ctx
+        "addons.lock", lock.replace("lock_version: 1", "lock_version: 2"), ctx
     )
     assert "lock_version" in issue.message
 
@@ -325,22 +325,22 @@ def test_a_lock_that_does_not_parse_is_an_issue(with_release):
         (
             "policy.yaml",
             lambda d: d.update(maxima={"tasks": {"budget_usd": 5}}),
-            "would leave plugin release@acme out: ",
+            "would leave add-on release@acme out: ",
         ),
         (
             "harnesses.yaml",
             lambda d: d["profiles"].pop("extra"),
-            "would leave plugin release@acme out: requires agent profile 'extra'",
+            "would leave add-on release@acme out: requires agent profile 'extra'",
         ),
         (
             "repos.yaml",
             lambda d: d.setdefault("repos", []).append({"path": "/r", "id": "release"}),
-            "would leave plugin release@acme out: its namespace 'release' is now a repository id",
+            "would leave add-on release@acme out: its namespace 'release' is now a repository id",
         ),
     ],
     ids=["maxima-lowered", "required-profile-removed", "namespace-becomes-a-repo-id"],
 )
-def test_an_edit_that_drops_a_plugin_is_reported(with_release, file, edit, says):
+def test_an_edit_that_drops_an_addon_is_reported(with_release, file, edit, says):
     """Reported on the pending reload, before it is applied."""
     st = with_release
     written = st.templates_dir / file

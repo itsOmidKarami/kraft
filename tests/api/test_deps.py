@@ -19,7 +19,7 @@ import pytest
 import yaml
 from fastapi import HTTPException
 from support import permissions
-from support.plugins import (
+from support.addons import (
     AGENT,
     chain,
     drop_store,
@@ -32,9 +32,9 @@ from support.store_fixtures import mk_item
 
 from kraft import config as config_mod
 from kraft import store
+from kraft.addons import fetch
+from kraft.addons import update as addon_update
 from kraft.api import deps
-from kraft.plugins import fetch
-from kraft.plugins import update as plugin_update
 
 
 def _app():
@@ -435,23 +435,23 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
     assert client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
 
 
-# ── installed plugins in the running library ──
+# ── installed add-ons in the running library ──
 
 
 def _install_release(client, tmp_path, **spec):
     st = client.app.state
-    plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}, **spec}
+    addon = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}, **spec}
     store = install(
         st.templates_dir,
-        st.run_dirs.plugins,
-        make_collection(tmp_path, {"release": plugin}),
+        st.run_dirs.addons,
+        make_collection(tmp_path, {"release": addon}),
         "release",
     )
     deps._reload_templates(st)
     return store
 
 
-def test_the_running_library_holds_the_installed_plugins(client, tmp_path):
+def test_the_running_library_holds_the_installed_addons(client, tmp_path):
     _install_release(client, tmp_path)
     assert "release:ship" in client.app.state.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
@@ -469,30 +469,30 @@ def _delete_the_store(st, store):
 
 
 def _disable(st, store):
-    (st.templates_dir / "plugins.yaml").write_text(
-        (st.templates_dir / "plugins.yaml")
+    (st.templates_dir / "addons.yaml").write_text(
+        (st.templates_dir / "addons.yaml")
         .read_text()
         .replace("release@acme: true", "release@acme: false")
     )
 
 
-def _break_plugins_yaml(st, store):
-    (st.templates_dir / "plugins.yaml").write_text("plugins: [not, a, mapping]\n")
+def _break_addons_yaml(st, store):
+    (st.templates_dir / "addons.yaml").write_text("addons: [not, a, mapping]\n")
 
 
 @pytest.mark.parametrize(
     ("change", "key", "why", "kept"),
     [
-        (_edit_a_stored_file, "plugin release@acme", "do not match the locked digest", False),
-        (_delete_the_store, "plugin release@acme", "store is missing", False),
+        (_edit_a_stored_file, "add-on release@acme", "do not match the locked digest", False),
+        (_delete_the_store, "add-on release@acme", "store is missing", False),
         (_disable, None, None, False),
         # A file that does not read is refused: what is running stays.
-        (_break_plugins_yaml, "plugins.yaml", "plugins.yaml", True),
+        (_break_addons_yaml, "addons.yaml", "addons.yaml", True),
     ],
-    ids=["store-edited", "store-deleted", "disabled-is-no-fault", "plugins-yaml-unreadable"],
+    ids=["store-edited", "store-deleted", "disabled-is-no-fault", "addons-yaml-unreadable"],
 )
-def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, why, kept):
-    """A plugin left out at load degrades health like a chain that does not
+def test_health_names_an_addon_that_did_not_load(client, tmp_path, change, key, why, kept):
+    """An add-on left out at load degrades health like a chain that does not
     resolve: the instance is not running what its lock says."""
     store = _install_release(client, tmp_path)
     st = client.app.state
@@ -505,14 +505,14 @@ def test_health_names_a_plugin_that_did_not_load(client, tmp_path, change, key, 
         assert why in body["invalid_templates"][key]
 
 
-def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
-    """A plugin verb applies its own change: an unsaved-to-the-server edit of
+def test_an_addon_reload_leaves_the_operators_pending_edits_pending(client, tmp_path):
+    """An add-on verb applies its own change: an unsaved-to-the-server edit of
     `policy.yaml` is not taken along."""
     st = client.app.state
     release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
     install(
         st.templates_dir,
-        st.run_dirs.plugins,
+        st.run_dirs.addons,
         make_collection(tmp_path, {"release": release}),
         "release",
     )
@@ -521,11 +521,11 @@ def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_
     # A lock a teammate's pull brought in is a pending reload like any hand edit.
     assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [
         "policy.yaml",
-        "plugins.yaml",
-        "plugins.lock",
+        "addons.yaml",
+        "addons.lock",
     ]
 
-    r = client.post("/api/templates/reload", json={"only": ["plugins.yaml", "plugins.lock"]})
+    r = client.post("/api/templates/reload", json={"only": ["addons.yaml", "addons.lock"]})
 
     assert r.status_code == 200 and "release:ship" in r.json()["valid"]
     assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == ["policy.yaml"]
@@ -534,15 +534,15 @@ def test_a_plugin_reload_leaves_the_operators_pending_edits_pending(client, tmp_
     assert client.get("/api/apply").json()["reload"] == []
 
 
-@pytest.mark.parametrize("file", ["plugins.yaml", "plugins.lock"])
-def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, file):
-    """The running instance keeps its plugins, and the file stays pending with
+@pytest.mark.parametrize("file", ["addons.yaml", "addons.lock"])
+def test_a_reload_refuses_an_addon_file_that_does_not_read(client, tmp_path, file):
+    """The running instance keeps its add-ons, and the file stays pending with
     the reason, until it reads again."""
     st = client.app.state
     release = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
     install(
         st.templates_dir,
-        st.run_dirs.plugins,
+        st.run_dirs.addons,
         make_collection(tmp_path, {"release": release}),
         "release",
     )
@@ -555,7 +555,7 @@ def test_a_reload_refuses_a_plugin_file_that_does_not_read(client, tmp_path, fil
     body = client.post("/api/templates/reload").json()
 
     assert "release:ship" in body["valid"]
-    assert "plugins.yaml" in body["invalid_templates"]
+    assert "addons.yaml" in body["invalid_templates"]
     assert [i["file"] for i in client.get("/api/apply").json()["reload"]] == [file]
     path.write_text(good)
     client.post("/api/templates/reload")
@@ -567,27 +567,27 @@ def test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks(client,
     store = _install_release(client, tmp_path)
     drop_store(store)
     deps._reload_templates(client.app.state)
-    assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
+    assert "add-on release@acme" in client.get("/api/health").json()["invalid_templates"]
 
     client.post("/api/templates/reload")
-    _plugin_task_done(client)
+    _addon_task_done(client)
 
     assert store.is_dir() and "release:ship" in client.app.state.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
 
 
 def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path, monkeypatch):
-    """The server started without it (offline, say) and left the plugin out;
+    """The server started without it (offline, say) and left the add-on out;
     a work item pinned to it then restored the store by itself."""
     st = client.app.state
     store = _install_release(client, tmp_path)
     store.chmod(0o755)  # a store is read-only, and a directory moves only if writable
     away = store.rename(tmp_path / "away")
     deps._reload_templates(st)
-    assert "plugin release@acme" in client.get("/api/health").json()["invalid_templates"]
+    assert "add-on release@acme" in client.get("/api/health").json()["invalid_templates"]
     away.rename(store)
 
-    client.portal.call(deps.restore_plugins, client.app)
+    client.portal.call(deps.restore_addons, client.app)
 
     assert "release:ship" in st.library.chain_ids
     assert client.get("/api/health").json()["status"] == "ok"
@@ -595,22 +595,22 @@ def test_a_store_a_launch_put_back_is_loaded_by_the_next_check(client, tmp_path,
     async def no_reload(st):
         pytest.fail("reloaded")
 
-    plugins_yaml = st.templates_dir / "plugins.yaml"  # disabled, then enabled by hand
-    listed = yaml.safe_load(plugins_yaml.read_text())
-    listed["plugins"]["release@acme"] = {"enabled": False}
-    plugins_yaml.write_text(yaml.safe_dump(listed))
+    addons_yaml = st.templates_dir / "addons.yaml"  # disabled, then enabled by hand
+    listed = yaml.safe_load(addons_yaml.read_text())
+    listed["addons"]["release@acme"] = {"enabled": False}
+    addons_yaml.write_text(yaml.safe_dump(listed))
     deps._reload_templates(st)
-    plugins_yaml.write_text(yaml.safe_dump(listed).replace("false", "true"))
+    addons_yaml.write_text(yaml.safe_dump(listed).replace("false", "true"))
     with monkeypatch.context() as held:
         held.setattr(deps, "reload_templates", no_reload)
-        client.portal.call(deps.restore_plugins, client.app)
+        client.portal.call(deps.restore_addons, client.app)
     _edit_a_stored_file(st, store)  # left out for another reason, its store present
     deps._reload_templates(st)
     monkeypatch.setattr(deps, "reload_templates", no_reload)
-    client.portal.call(deps.restore_plugins, client.app)
+    client.portal.call(deps.restore_addons, client.app)
 
 
-def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
+def test_intake_on_an_addon_whose_store_is_away_says_retry_not_unknown(client, tmp_path):
     st = client.app.state
     store = _install_release(client, tmp_path)
     with pytest.raises(HTTPException) as no_such_chain:
@@ -624,28 +624,28 @@ def test_intake_on_a_plugin_whose_store_is_away_says_retry_not_unknown(client, t
     with pytest.raises(HTTPException) as unknown:
         deps.resolve_chain_or_422(st, "nope")
     with pytest.raises(HTTPException) as longer_name:
-        # `release:` is the end of this name, not the plugin's namespace.
+        # `release:` is the end of this name, not the add-on's namespace.
         deps.resolve_chain_or_422(st, "pre-release:ship")
 
     assert (away.value.status_code, away.value.detail) == (
         503,
-        "plugin release@acme is being restored; retry",
+        "add-on release@acme is being restored; retry",
     )
     assert unknown.value.status_code == longer_name.value.status_code == 422
 
 
-def _plugin_task_done(client):
-    """Wait for the server's background plugin task: a reload starts one."""
+def _addon_task_done(client):
+    """Wait for the server's background add-on task: a reload starts one."""
 
     async def done():
-        await asyncio.gather(*client.app.state.plugin_tasks)
+        await asyncio.gather(*client.app.state.addon_tasks)
 
     client.portal.call(done)
 
 
 def _other_version(st, tmp_path):
-    """A second extracted plugin in the store that the lock does not name."""
-    return fetch.write_store(st.run_dirs.plugins, extracted(skills={"old": "an older method"}))
+    """A second extracted add-on in the store that the lock does not name."""
+    return fetch.write_store(st.run_dirs.addons, extracted(skills={"old": "an older method"}))
 
 
 @pytest.mark.parametrize(
@@ -672,8 +672,8 @@ def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     st = client.app.state
     locked = _install_release(client, tmp_path)
     old = _other_version(st, tmp_path)
-    (st.run_dirs.plugins / "staging" / "half-written").mkdir(parents=True)
-    snapshot = {"plugins": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
+    (st.run_dirs.addons / "staging" / "half-written").mkdir(parents=True)
+    snapshot = {"addons": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
     stored = json.dumps(snapshot if pinned else {})
     column = "run_chain" if pinned == "run_chain" else "materialized_chain"
 
@@ -688,36 +688,36 @@ def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
 
     client.portal.call(an_item)
 
-    removed = client.portal.call(deps.collect_plugin_stores, st)
+    removed = client.portal.call(deps.collect_addon_stores, st)
 
     assert (old.is_dir(), removed) == (kept, [] if kept else [old.name])
-    assert locked.is_dir() and not (st.run_dirs.plugins / "staging").exists()
+    assert locked.is_dir() and not (st.run_dirs.addons / "staging").exists()
 
 
 def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, tmp_path):
     st = client.app.state
     locked = _install_release(client, tmp_path)
     old = _other_version(st, tmp_path)
-    lock = st.templates_dir / "plugins.lock"
+    lock = st.templates_dir / "addons.lock"
     good = lock.read_text()
-    lock.write_text("plugins: [\n")
+    lock.write_text("addons: [\n")
     client.post("/api/templates/reload")
-    _plugin_task_done(client)
+    _addon_task_done(client)
     assert old.is_dir()
 
     lock.write_text(good)
     client.post("/api/templates/reload")
-    _plugin_task_done(client)
+    _addon_task_done(client)
 
     assert not old.exists()
     # No library is loaded to say what it reads: the lock alone keeps its stores.
     (st.templates_dir / "library.yaml").write_text("tasks: [\n")
     client.post("/api/templates/reload")
-    _plugin_task_done(client)
+    _addon_task_done(client)
     assert st.library is None and locked.is_dir()
 
 
-def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
+def test_gc_does_not_wait_for_an_addon_change_that_is_running(client, tmp_path):
     """A lock someone holds is skipped, not waited for, and the next
     collection takes what this one left."""
     st = client.app.state
@@ -725,14 +725,14 @@ def test_gc_does_not_wait_for_a_plugin_change_that_is_running(client, tmp_path):
     old = _other_version(st, tmp_path)
 
     started = time.monotonic()
-    with plugin_update.write_lock(st.run_dirs.plugins):
-        assert client.portal.call(deps.collect_plugin_stores, st) == []
-    assert old.is_dir() and time.monotonic() - started < plugin_update.LOCK_WAIT_S / 2
+    with addon_update.write_lock(st.run_dirs.addons):
+        assert client.portal.call(deps.collect_addon_stores, st) == []
+    assert old.is_dir() and time.monotonic() - started < addon_update.LOCK_WAIT_S / 2
 
-    assert client.portal.call(deps.collect_plugin_stores, st) == [old.name]
+    assert client.portal.call(deps.collect_addon_stores, st) == [old.name]
 
 
-def test_a_plugin_background_task_that_fails_says_so(client, caplog):
+def test_an_addon_background_task_that_fails_says_so(client, caplog):
     """Nobody awaits it: what it raises is logged, not dropped."""
 
     async def breaks(app):
@@ -743,7 +743,7 @@ def test_a_plugin_background_task_that_fails_says_so(client, caplog):
 
     client.portal.call(run)
 
-    assert "plugin background task failed" in caplog.text and "disk full" in caplog.text
+    assert "add-on background task failed" in caplog.text and "disk full" in caplog.text
 
 
 def test_a_running_server_checks_for_auto_updates_again(client, monkeypatch):
@@ -759,9 +759,9 @@ def test_a_running_server_checks_for_auto_updates_again(client, monkeypatch):
             await asyncio.sleep(0.01)
         task.cancel()
 
-    assert not client.app.state.plugin_update_task.done()
+    assert not client.app.state.addon_update_task.done()
     monkeypatch.setattr(deps, "AUTO_UPDATE_EVERY_S", 0.01)
-    monkeypatch.setattr(deps, "auto_update_plugins", check)
+    monkeypatch.setattr(deps, "auto_update_addons", check)
 
     client.portal.call(asyncio.wait_for, two_checks(), 5)
 
@@ -773,28 +773,28 @@ def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
     old store goes, and health reports the outcome without being degraded."""
     st = client.app.state
     old = _install_release(client, tmp_path)
-    written = yaml.safe_load((st.templates_dir / "plugins.yaml").read_text())
-    written["plugins"]["release@acme"] = {"auto_update": True}
-    (st.templates_dir / "plugins.yaml").write_text(yaml.safe_dump(written))
+    written = yaml.safe_load((st.templates_dir / "addons.yaml").read_text())
+    written["addons"]["release@acme"] = {"auto_update": True}
+    (st.templates_dir / "addons.yaml").write_text(yaml.safe_dump(written))
     repo = Path(written["collections"]["acme"]["git"].removeprefix("file://"))
     publish(repo, "release", version="1.1.0", skills={"notes": "new in 1.1.0"})
 
-    client.portal.call(deps.auto_update_plugins, client.app)
+    client.portal.call(deps.auto_update_addons, client.app)
 
-    assert [p.version for p in st.library.plugins] == ["1.1.0"] and not old.exists()
+    assert [p.version for p in st.library.addons] == ["1.1.0"] and not old.exists()
     health = client.get("/api/health").json()
-    assert (health["status"], health["plugin_updates"]["release@acme"]["outcome"]) == (
+    assert (health["status"], health["addon_updates"]["release@acme"]["outcome"]) == (
         "ok",
         "applied",
     )
 
 
 def test_a_held_or_failed_auto_update_is_reported_and_not_degraded(client, tmp_path):
-    plugins = client.app.state.run_dirs.plugins
+    addons = client.app.state.run_dirs.addons
     _install_release(client, tmp_path)
     held = {"at": "2026-10-10T12:00:00+00:00", "outcome": "held", "kind": None, "message": "gate"}
-    (plugins / plugin_update.STATUS_FILE).write_text(json.dumps({"release@acme": held, "x": 1}))
+    (addons / addon_update.STATUS_FILE).write_text(json.dumps({"release@acme": held, "x": 1}))
 
     health = client.get("/api/health").json()
     assert health["status"] == "ok"
-    assert health["plugin_updates"] == {"release@acme": {"outcome": "held", "kind": None}}
+    assert health["addon_updates"] == {"release@acme": {"outcome": "held", "kind": None}}

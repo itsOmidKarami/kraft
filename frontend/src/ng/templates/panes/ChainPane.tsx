@@ -23,7 +23,7 @@ import { movable } from "../../library/moveToLibrary";
 import { detailOf } from "../../http";
 import "./panes.css";
 import { mod } from "../../keys";
-import { ReadOnly } from "../plugin";
+import { ReadOnly } from "../addon";
 
 const FIXED_ICON: Partial<Record<PaneKind, string>> = { chain: "workflow", fixloop: "refresh-cw", judge: "scale" };
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];

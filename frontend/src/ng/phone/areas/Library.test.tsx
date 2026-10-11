@@ -78,9 +78,9 @@ describe("Library component (L.2)", () => {
     expect(within(used).getByRole("link", { name: /docs_only/ })).toHaveTextContent("via nodes.implementation");
   });
 
-  it("a plugin's task is listed with its plugin and read with nothing to tap, beside a local one that edits", async () => {
-    const shipped = { plugin_library: { tasks: { "release:base": { kind: "agent", profile: "strong", auto: true } } } };
-    const answers = { ...lib(shipped), "GET /templates/library": [200, { ...PUBLISHED, components: [...PUBLISHED.components, { id: "tasks.release:base", kind: "tasks", name: "release:base", used_by: [], used_by_paths: [], plugin: { id: "release@acme", version: "1.0.0" } }] }] as [number, unknown] };
+  it("an add-on's task is listed with its add-on and read with nothing to tap, beside a local one that edits", async () => {
+    const shipped = { addon_library: { tasks: { "release:base": { kind: "agent", profile: "strong", auto: true } } } };
+    const answers = { ...lib(shipped), "GET /templates/library": [200, { ...PUBLISHED, components: [...PUBLISHED.components, { id: "tasks.release:base", kind: "tasks", name: "release:base", used_by: [], used_by_paths: [], addon: { id: "release@acme", version: "1.0.0" } }] }] as [number, unknown] };
     mountAt(<LibraryList />, "/templates/library?kind=tasks", "/templates/library", answers);
     await waitFor(() => expect(screen.getByRole("link", { name: /^release:base/ })).toHaveTextContent("release@acme 1.0.0"));
     expect(screen.getByRole("link", { name: /^release:base/ })).toHaveAttribute("href", "/templates/library/tasks.release%3Abase");

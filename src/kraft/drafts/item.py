@@ -102,7 +102,7 @@ def _override(chain: MaterializedChain, op: OverrideOp) -> MaterializedChain:
         whole = replace(
             chain,
             chain=ResolvedChain.from_chain(
-                chain.untrimmed, steering=chain.chain.steering, plugins=chain.chain.plugins
+                chain.untrimmed, steering=chain.chain.steering, addons=chain.chain.addons
             ),
             untrimmed=None,
         )

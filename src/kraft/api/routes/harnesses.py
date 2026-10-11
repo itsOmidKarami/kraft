@@ -71,8 +71,8 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
     return [
         {
             "id": p.id,
-            # The plugin a qualified profile comes from; None for the instance's own.
-            "plugin": catalogue.plugin_view(library, p.id) if library is not None else None,
+            # The add-on a qualified profile comes from; None for the instance's own.
+            "addon": catalogue.addon_view(library, p.id) if library is not None else None,
             "effort": p.effort,
             "model": p.model,
             "providers": {
@@ -115,7 +115,7 @@ def _view(st) -> dict:
     library = getattr(st, "library", None)
     try:
         table = HarnessProfileTable.from_yaml(
-            path, harnesses=providers, plugins=getattr(library, "plugins", ())
+            path, harnesses=providers, addons=getattr(library, "addons", ())
         )
         profiles, error = table.profiles, None
     except TemplateEnvironmentError as exc:

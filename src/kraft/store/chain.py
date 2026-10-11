@@ -34,14 +34,14 @@ def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
         "UPDATE work_items SET current_node_id = ?, updated_at = ? WHERE id = ?",
         (first_node_id, _now(), work_item_id),
     )
-    # The plugin versions the item runs on, so its history shows them: a
+    # The add-on versions the item runs on, so its history shows them: a
     # retried item's `run_chain` first, as `materialized_chain_of` reads it.
     row = conn.execute(
         "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()
     stored = (row[1] or row[0]) if row else None
-    pins = json.loads(stored).get("plugins") if stored else None
-    events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {"plugins": pins} if pins else {})
+    pins = json.loads(stored).get("addons") if stored else None
+    events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {"addons": pins} if pins else {})
 
 
 def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:

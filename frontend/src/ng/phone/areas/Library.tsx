@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { SECTION_LABEL, SECTIONS, parseRef, pluginLabel, refUrl, type PublishedLibrary, type Section } from "../../library/types";
+import { SECTION_LABEL, SECTIONS, parseRef, addonLabel, refUrl, type PublishedLibrary, type Section } from "../../library/types";
 import { listRows } from "../../library/rows";
 import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
@@ -51,7 +51,7 @@ export function LibraryList() {
     for (const [k, v] of Object.entries(patch)) (v ? next.set(k, v) : next.delete(k));
     setParams(next, { replace: true });
   };
-  const rows = useMemo(() => (draft.view ? listRows(draft.view.result, published?.components ?? null, draft.view.plugin_library) : []).filter((r) => r.section === kind && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))), [draft.view, published, kind, q]);
+  const rows = useMemo(() => (draft.view ? listRows(draft.view.result, published?.components ?? null, draft.view.addon_library) : []).filter((r) => r.section === kind && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))), [draft.view, published, kind, q]);
   return (
     <AreaScreen title="Library" sub="Nodes, steps, tasks and steering that chains and repos reuse." draft={draft}>
       <label className="ph-search-field ph-area-search">
@@ -61,7 +61,7 @@ export function LibraryList() {
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
       {draft.view && rows.length === 0 && <p className="ph-empty">{q ? "Nothing matches." : `No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>}
       <Group
-        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.plugin ? [{ label: pluginLabel(r.plugin) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
+        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
       />
     </AreaScreen>
   );
@@ -75,8 +75,8 @@ export function LibraryComponentView() {
   const published = usePublished();
   const { edit, node: sheet } = useEditor();
   const path = ref ?? "";
-  // A plugin's component is not in the draft: it is read from the plugins' library, and nothing here edits it.
-  const shipped = (parsed && draft.view?.plugin_library?.[parsed.section]?.[parsed.name]) || null;
+  // An add-on's component is not in the draft: it is read from the add-ons' library, and nothing here edits it.
+  const shipped = (parsed && draft.view?.addon_library?.[parsed.section]?.[parsed.name]) || null;
   const own = shipped ?? (draft.view && parsed ? authoredAt(draft.view.result, draft.scope, path) : null);
   const send = async (op: Record<string, unknown>) => {
     const a = await draft.ops([op as never], { quiet: true });
@@ -102,7 +102,7 @@ export function LibraryComponentView() {
   const problems = (draft.view?.result.problems ?? []).filter((p) => p.path === path || p.path.startsWith(`${path}.`) || p.component === path);
 
   return (
-    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.plugin ? ` · ${pluginLabel(pub.plugin)}` : ""}` : undefined} draft={draft}>
+    <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.addon ? ` · ${addonLabel(pub.addon)}` : ""}` : undefined} draft={draft}>
       {draft.view && !own && <p className="ph-empty">There is no component {path}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problems.map((p, i): RowSpec => ({ key: `p${i}`, label: p.message.replace(/^Value error, /, ""), sub: [p.chain && `breaks ${p.chain}`, p.repo && `repo ${p.repo}`].filter(Boolean).join(" · ") || undefined }))} />}
       {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...settings]} />}

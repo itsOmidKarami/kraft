@@ -12,7 +12,7 @@ import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 import { useProviders, type ProviderStatus } from "../../harnesses/useProviders";
 import { harnessChoices, steeringChoices } from "../choices";
 import { useLibrary } from "../useLibrary";
-import { ReadOnly } from "../plugin";
+import { ReadOnly } from "../addon";
 import type { Harnesses } from "../../../types";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
@@ -40,8 +40,8 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const readOnly = useContext(ReadOnly);
   if (kind === "chain") return <ChainConfig ctx={ctx} />;
   const rows: Row[] = sourceRows(r, path);
-  // A plugin's chain answers no `sources`: what each part sets is in its YAML.
-  if (!rows.length && readOnly) return <Note>A plugin's settings are in the YAML tab.</Note>;
+  // An add-on's chain answers no `sources`: what each part sets is in its YAML.
+  if (!rows.length && readOnly) return <Note>An add-on's settings are in the YAML tab.</Note>;
   if (!rows.length) return <Note>{r.resolved ? "Nothing to configure here." : "The resolved config shows once the draft resolves."}</Note>;
   // A node with a fix loop cannot be read only (the prototype's lock).
   const node = kind === "node" ? resolvedAt(r, path) : null;

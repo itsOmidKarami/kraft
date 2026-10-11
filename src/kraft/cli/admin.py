@@ -24,7 +24,7 @@ import uvicorn
 import yaml
 
 from kraft import client, config, permission_hooks, pidfile, render
-from kraft.cli import common, plugin, templates
+from kraft.cli import addon, common, templates
 from kraft.paths import (
     BUNDLED,
     LEGACY_CONFIG_DIR_VAR,
@@ -551,7 +551,7 @@ def _holds_config(directory: Path) -> bool:
 
 #: Config files a templates directory can hold that are neither bundled nor
 #: carried across a major update: read when present, never seeded.
-CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml", "plugins.yaml", "plugins.lock"})
+CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml", "addons.yaml", "addons.lock"})
 
 
 def _operators_alone(root: Path) -> None:
@@ -1467,16 +1467,16 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
         )
 
 
-def _confirm_dropped_plugins(version: str, assume_yes: bool) -> None:
-    """Name the installed plugins `version` would stop loading and ask before
+def _confirm_dropped_addons(version: str, assume_yes: bool) -> None:
+    """Name the installed add-ons `version` would stop loading and ask before
     installing it; exit 1 having installed nothing on a no."""
-    from kraft.plugins import load as plugins_load
+    from kraft.addons import load as addons_load
 
-    dropped = plugins_load.left_out_by(version)
+    dropped = addons_load.left_out_by(version)
     if not dropped:
         return
     print(
-        f"kraft {version} would stop loading these plugins until each publishes a version "
+        f"kraft {version} would stop loading these add-ons until each publishes a version "
         "for it:\n  " + "\n  ".join(dropped),
         file=sys.stderr,
     )
@@ -1526,7 +1526,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         # Before installing, so answering no leaves nothing half done.
         _confirm_running_agents(ns, "restarting", ask=True, declined="nothing installed or stopped")
     print(f"kraft {here} -> {release.tag}")
-    _confirm_dropped_plugins(release.tag.removeprefix("v"), ns.yes)
+    _confirm_dropped_addons(release.tag.removeprefix("v"), ns.yes)
     code = update.perform(release)
     if code != 0:
         raise SystemExit(code)
@@ -1647,7 +1647,7 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reload_p.set_defaults(func=_cmd_reload)
 
     templates.add(subs, common)
-    plugin.add(subs, common)
+    addon.add(subs, common)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"

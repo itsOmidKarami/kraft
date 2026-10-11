@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.plugins import installed
+from support.addons import installed
 
 from kraft import harness
 from kraft.templates import environment as te
@@ -228,18 +228,18 @@ def test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library(tmp_path)
     ],
     ids=["qualified", "fallback-entry"],
 )
-def test_plugin_profiles(tmp_path, local):
-    """A plugin's agent profiles join the table under `<namespace>:<name>`, and
+def test_addon_profiles(tmp_path, local):
+    """An add-on's agent profiles join the table under `<namespace>:<name>`, and
     a local profile's fallback may name one."""
 
     from kraft import harness
 
-    plugin = installed(tmp_path, "release", profiles={"deep": {"model": {"codex": "p"}}})
+    addon = installed(tmp_path, "release", profiles={"deep": {"model": {"codex": "p"}}})
     table = te.HarnessProfileTable.from_mapping(
         {"profiles": local},
         tmp_path / "harnesses.yaml",
         harnesses=harness.load(None).valid,
-        plugins=[plugin],
+        addons=[addon],
     )
     assert table.agent_profiles["release:deep"].model == {"codex": "p"}
     for profile in local:

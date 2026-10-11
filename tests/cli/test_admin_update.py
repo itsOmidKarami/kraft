@@ -222,19 +222,19 @@ def test_a_1_5_candidate_install_updates_to_the_2_0_candidate(monkeypatch, tmp_p
     ],
     ids=["next-major-asks", "next-major-accepted", "same-major-says-nothing"],
 )
-def test_a_major_update_lists_the_plugins_it_would_drop(
+def test_a_major_update_lists_the_addons_it_would_drop(
     monkeypatch, tmp_path, capsys, release, argv, installs, says
 ):
-    """A plugin runs on one Kraft major: the operator hears which ones a new
+    """An add-on runs on one Kraft major: the operator hears which ones a new
     major leaves out before it is installed, and nothing is installed on a no."""
-    from support.plugins import AGENT, chain, home, install, make_collection
+    from support.addons import AGENT, chain, home, install, make_collection
 
     config_dir = home(tmp_path)
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    plugin = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
-    collection = make_collection(tmp_path, {"release": plugin})
-    install(config_dir, tmp_path / "run" / "plugins", collection, "release")
+    addon = {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}
+    collection = make_collection(tmp_path, {"release": addon})
+    install(config_dir, tmp_path / "run" / "addons", collection, "release")
     installed = []
     monkeypatch.setattr(update, "latest", lambda **_k: update.Release(release, "u"))
     monkeypatch.setattr(update, "installed", lambda: "2.4.0")

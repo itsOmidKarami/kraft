@@ -17,8 +17,8 @@ import { LibraryList } from "./LibraryList";
 import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
 import { ProblemWhere } from "./ProblemWhere";
-import { listRows, withPlugins } from "./rows";
-import { PluginBadge, ReadOnly } from "../templates/plugin";
+import { listRows, withAddons } from "./rows";
+import { AddonBadge, ReadOnly } from "../templates/addon";
 import { LIBRARY_FILE } from "../templates/draft/view";
 import { parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
@@ -57,15 +57,15 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [collapsed, setCollapsed] = useState(false);
   const [frame, mainW, mainH] = useBox();
   const size = useResizable("library", mainW);
-  const plugins = draft.view!.plugin_library;
-  const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null, plugins), [r, published, plugins]);
-  const merged = useMemo(() => withPlugins(r, plugins), [r, plugins]);
+  const addons = draft.view!.addon_library;
+  const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null, addons), [r, published, addons]);
+  const merged = useMemo(() => withAddons(r, addons), [r, addons]);
   const sel = parseRef(refId);
   const id = sel ? `${sel.section}.${sel.name}` : undefined;
   const row = rows.find((x) => x.id === id);
-  // A plugin's component is read through the same accessors, over the plugins' library beside the draft's: nothing
+  // An add-on's component is read through the same accessors, over the add-ons' library beside the draft's: nothing
   // in it is the draft's, so it has no change and no problem, and every write to it would answer 409.
-  const shownDraft = useMemo(() => (row?.plugin ? { ...draft, view: { ...draft.view!, result: { ...r, model: { ...r.model, [LIBRARY_FILE]: merged }, problems: [], changes: [] } } } : draft), [row?.plugin, draft, r, merged]);
+  const shownDraft = useMemo(() => (row?.addon ? { ...draft, view: { ...draft.view!, result: { ...r, model: { ...r.model, [LIBRARY_FILE]: merged }, problems: [], changes: [] } } } : draft), [row?.addon, draft, r, merged]);
   // What the pane shows now, for a rename that lands after another pick.
   const shown = useRef("");
   shown.current = sub ?? row?.id ?? "";
@@ -101,9 +101,9 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
   const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: merged[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, merged]);
 
-  // ⌘Z undoes the last request, outside a text field. Not over a plugin's component: nothing shown there would change.
+  // ⌘Z undoes the last request, outside a text field. Not over an add-on's component: nothing shown there would change.
   const undo = draft.undo;
-  const readOnly = !!row?.plugin;
+  const readOnly = !!row?.addon;
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (readOnly || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
@@ -145,7 +145,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             <span className="lib-ref">{sel.name}</span>
           </>
         )}
-        {row?.plugin && <PluginBadge plugin={row.plugin} />}
+        {row?.addon && <AddonBadge addon={row.addon} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
           : <span className="lib-published">published</span>}
@@ -174,7 +174,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           </div>
         )}
         {surface === "canvas" && row && (
-          <ReadOnly.Provider value={!!row.plugin}>
+          <ReadOnly.Provider value={!!row.addon}>
             <LibraryCanvas
               key={row.id}
               draft={shownDraft}

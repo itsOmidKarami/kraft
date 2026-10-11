@@ -37,7 +37,7 @@ def _area(area: str, key: str, st=None, *, read: bool = False) -> store.Area:
         raise HTTPException(404, f"no draft area {area!r}")
     library = getattr(st, "library", None)
     # Before the key-shape check, which would answer 400 for a qualified id:
-    # a plugin's chain has no draft.
+    # an add-on's chain has no draft.
     if area == "chains" and library is not None:
         if why := catalogue.read_only_message(library, key):
             if read:
@@ -54,8 +54,8 @@ def _state(st, area: str, key: str, draft: dict | None, history: list[dict]):
     names = {*store.AREAS[area].files(key), *(draft["files"] if draft else ())}
     published = resolve.published(st.templates_dir, sorted(names))
     library = getattr(st, "library", None)
-    if area == "chains" and library is not None and library.plugin_of(key):
-        # A plugin's chain is in its store, not under config/: shown as the
+    if area == "chains" and library is not None and library.addon_of(key):
+        # An add-on's chain is in its store, not under config/: shown as the
         # library holds it, its own references already qualified.
         if key in library.chain_ids:
             published[f"chains/{key}.yaml"] = authored.dump(ops.plain(library.chain_data(key)))
@@ -88,14 +88,14 @@ def _view(st, area: str, key: str, files: dict, published: dict, result: dict) -
         "published": published,
         "updated_at": draft["updated_at"] if draft else None,
         "result": result,
-        # The plugin a chain comes from: the screen shows it and offers no edit.
-        "plugin": catalogue.plugin_view(st.library, key)
+        # The add-on a chain comes from: the screen shows it and offers no edit.
+        "addon": catalogue.addon_view(st.library, key)
         if area == "chains" and getattr(st, "library", None) is not None
         else None,
-        # On the library: the loaded plugins' components, in `library.yaml`'s
+        # On the library: the loaded add-ons' components, in `library.yaml`'s
         # own shape (`{section: {"release:base": definition}}`), to show beside
         # the local ones. Never part of `files`: no op or publish touches them.
-        "plugin_library": ops.plugin_components(st) if area == "library" else None,
+        "addon_library": ops.addon_components(st) if area == "library" else None,
     }
 
 
@@ -184,7 +184,7 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
         written = working.finish()
     except ops.OpError as exc:
         return JSONResponse(
-            status_code=409 if isinstance(exc, ops.PluginReadOnly) else 422,
+            status_code=409 if isinstance(exc, ops.AddonReadOnly) else 422,
             content={"detail": str(exc), "op": exc.index, **exc.extra},
         )
     names = {*(old["files"] if old else ()), *working.dirty}
@@ -389,7 +389,7 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
     # A throwaway copy of the request's model: owning what the component
     # inherits (as `set_fragment` does) writes nothing.
     found = (
-        authored.at(mapping, path, file=kind, library=ops.with_plugins(st, library), write=True)
+        authored.at(mapping, path, file=kind, library=ops.with_addons(st, library), write=True)
         if isinstance(mapping, dict)
         else None
     )

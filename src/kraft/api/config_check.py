@@ -22,10 +22,10 @@ from kraft import config as config_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
+from kraft.addons import load as addons_load
+from kraft.addons import manifest as addon_manifest
+from kraft.addons.config import AddonsConfig, AddonsLock
 from kraft.executor import fallback
-from kraft.plugins import load as plugins_load
-from kraft.plugins import manifest as plugin_manifest
-from kraft.plugins.config import PluginsConfig, PluginsLock
 from kraft.templates import positions
 from kraft.templates.environment import (
     AgentProfileInput,
@@ -57,8 +57,8 @@ FILES = frozenset(
         "access.yaml",
         "theme.yaml",
         "notify.yaml",
-        "plugins.yaml",
-        "plugins.lock",
+        "addons.yaml",
+        "addons.lock",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -72,10 +72,10 @@ class CheckContext:
     skills_dir: Path | None
     instance_policy: policy_mod.InstancePolicy | None
     providers: Mapping[str, harness_mod.Harness]
-    #: The installed plugins the running library was built with.
-    plugins: tuple[plugins_load.InstalledPlugin, ...] = ()
-    #: `run/plugins`, where their stores are. None: this process's own.
-    plugins_dir: Path | None = None
+    #: The installed add-ons the running library was built with.
+    addons: tuple[addons_load.InstalledAddon, ...] = ()
+    #: `run/addons`, where their stores are. None: this process's own.
+    addons_dir: Path | None = None
 
 
 def context(st) -> CheckContext:
@@ -85,8 +85,8 @@ def context(st) -> CheckContext:
         skills_dir=getattr(st, "skills_dir", None),
         instance_policy=getattr(st, "instance_policy", None),
         providers=harness_mod.load(None).valid,
-        plugins=getattr(getattr(st, "library", None), "plugins", ()),
-        plugins_dir=st.run_dirs.plugins if getattr(st, "run_dirs", None) else None,
+        addons=getattr(getattr(st, "library", None), "addons", ()),
+        addons_dir=st.run_dirs.addons if getattr(st, "run_dirs", None) else None,
     )
 
 
@@ -239,7 +239,7 @@ def library_candidate(
             _chains_on_disk(path.parent),
             library_path=path,
             skills_dir=skills_dir,
-            plugins=plugins_load.installed(path.parent),
+            addons=addons_load.installed(path.parent),
         )
     else:
         candidate = library.with_library(data, path)
@@ -331,10 +331,10 @@ def _check_policy(path, data, ctx):
         return [TemplateIssue(path, None, str(exc), loc=_first_loc(policy_mod.PolicyInput, data))]
     instance = parsed.instance_policy()
     return [
-        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}", loc=("maxima",))
-        for plugin in ctx.plugins
-        if plugin.left_out is None
-        and (why := plugins_load.limits_problem(plugin, instance)) is not None
+        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}", loc=("maxima",))
+        for addon in ctx.addons
+        if addon.left_out is None
+        and (why := addons_load.limits_problem(addon, instance)) is not None
     ]
 
 
@@ -547,7 +547,7 @@ def lint_report(
     *,
     skills_dir: Path | None = None,
     instance_policy: policy_mod.InstancePolicy | None = None,
-    plugins: Sequence[plugins_load.InstalledPlugin] | None = (),
+    addons: Sequence[addons_load.InstalledAddon] | None = (),
 ) -> dict:
     """`kraft admin templates lint`'s answer, from the route and `--dir` alike:
     `TemplateLibrary.lint_dir`, plus each agent task of a resolving chain that
@@ -557,14 +557,14 @@ def lint_report(
     doctor's `harnesses.yaml` row already says why."""
     templates_dir = Path(templates_dir)
     report = TemplateLibrary.lint_dir(
-        templates_dir, skills_dir=skills_dir, instance_policy=instance_policy, plugins=plugins
+        templates_dir, skills_dir=skills_dir, instance_policy=instance_policy, addons=addons
     )
     issues = list(report.issues)
     path = templates_dir / "harnesses.yaml"
     providers = harness_mod.load(None).valid
     try:
         library = TemplateLibrary.from_yaml_dir(
-            templates_dir, skills_dir=skills_dir, plugins=plugins or ()
+            templates_dir, skills_dir=skills_dir, addons=addons or ()
         )
     except TemplateLibraryError:
         library = None
@@ -575,7 +575,7 @@ def lint_report(
             file = library.chain_file(chain)
             issues += chain_icon_issues(library, file, chain, dict(library.chain_data(chain)))
         try:
-            table = HarnessProfileTable.from_yaml(path, harnesses=providers, plugins=plugins or ())
+            table = HarnessProfileTable.from_yaml(path, harnesses=providers, addons=addons or ())
         except TemplateEnvironmentError:
             table = None
         problems = (
@@ -590,7 +590,7 @@ def lint_report(
         "valid": not issues,
         "chains": [id for id in report.chains if id not in failed],
         "issues": [positions.issue_view(i) for i in issues],
-        # Offline (`--dir`) only: chains that reference a plugin, left unjudged.
+        # Offline (`--dir`) only: chains that reference an add-on, left unjudged.
         "unchecked": [positions.issue_view(i) for i in report.unchecked],
     }
 
@@ -625,10 +625,10 @@ def harness_breakage(
     """Why `candidate` (the whole harnesses.yaml) must not be saved over
     `current`, or None. A task that could not launch before is not the
     edit's to fix."""
-    plugins = library.plugins if library is not None else ()
+    addons = library.addons if library is not None else ()
     try:
         before_table = (
-            HarnessProfileTable.from_mapping(current, path, harnesses=providers, plugins=plugins)
+            HarnessProfileTable.from_mapping(current, path, harnesses=providers, addons=addons)
             if current is not None
             else None
         )
@@ -636,7 +636,7 @@ def harness_breakage(
         before_table = None
     try:
         table = HarnessProfileTable.from_mapping(
-            candidate, path, harnesses=providers, plugins=plugins
+            candidate, path, harnesses=providers, addons=addons
         )
     except TemplateEnvironmentError as exc:
         return str(exc)
@@ -662,42 +662,42 @@ def _check_harnesses(path, data, ctx):
                 loc = loc or _first_loc(model, body, (section, name))
         return [TemplateIssue(path, None, why, loc=loc)]
     return [
-        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
-        for plugin in ctx.plugins
-        if plugin.left_out is None
-        and (why := _unmet_requires(plugin, ctx, harnesses=data)) is not None
+        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}")
+        for addon in ctx.addons
+        if addon.left_out is None
+        and (why := _unmet_requires(addon, ctx, harnesses=data)) is not None
     ]
 
 
 def _unmet_requires(
-    plugin, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
+    addon, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
 ) -> str | None:
-    """Why `plugin` would not load once `harnesses` is saved as harnesses.yaml,
+    """Why `addon` would not load once `harnesses` is saved as harnesses.yaml,
     or `repos` as repos.yaml."""
     try:
-        declared = plugin_manifest.plugin(
-            plugin_manifest.parse(
-                (plugin.root / plugin_manifest.PLUGIN_JSON).read_text(), plugin_manifest.PLUGIN_JSON
+        declared = addon_manifest.addon(
+            addon_manifest.parse(
+                (addon.root / addon_manifest.ADDON_JSON).read_text(), addon_manifest.ADDON_JSON
             ),
-            plugin_manifest.PLUGIN_JSON,
+            addon_manifest.ADDON_JSON,
         )
-    except (OSError, ValueError, plugin_manifest.ManifestError):
+    except (OSError, ValueError, addon_manifest.ManifestError):
         return None  # already not loading; the load says why
-    return plugins_load.instance_problem(
-        plugin.namespace, declared.requires, ctx.templates_dir, harnesses, repos
+    return addons_load.instance_problem(
+        addon.namespace, declared.requires, ctx.templates_dir, harnesses, repos
     )
 
 
-# ── plugins ──
+# ── add-ons ──
 
 
-#: Per templates dir: the key the last lint of a pending `plugins.yaml` edit
+#: Per templates dir: the key the last lint of a pending `addons.yaml` edit
 #: was made under, and its issues. Replaced whole; one entry per directory.
-_plugins_lint: dict[str, tuple[str, list[TemplateIssue]]] = {}
+_addons_lint: dict[str, tuple[str, list[TemplateIssue]]] = {}
 
 
 def _lint_inputs(templates_dir: Path) -> list:
-    """Stamps of the files, besides the plugin state `plugins_load.signature`
+    """Stamps of the files, besides the add-on state `addons_load.signature`
     covers, that a lint of the instance reads: its library, chains, policy,
     harnesses, repos and intake files, and the local skills."""
     from kraft.paths import default_skills_dir
@@ -708,62 +708,62 @@ def _lint_inputs(templates_dir: Path) -> list:
         for name in ("library.yaml", "policy.yaml", "harnesses.yaml", "repos.yaml", "intake.yaml")
     ]
     files += sorted(templates_dir.glob(f"{CHAINS_DIR}/*.yaml")) + sorted(skills.glob("*/SKILL.md"))
-    return [(str(p), plugins_load.stamp(p)) for p in files]
+    return [(str(p), addons_load.stamp(p)) for p in files]
 
 
-def _check_plugins(path, data, ctx):
-    """A hand edit of `plugins.yaml`: the file itself, then what it would stop
-    resolving. Disabling or dropping an entry unloads its plugin, and a new
+def _check_addons(path, data, ctx):
+    """A hand edit of `addons.yaml`: the file itself, then what it would stop
+    resolving. Disabling or dropping an entry unloads its add-on, and a new
     entry reserves its namespace before anything is installed under it.
 
     The two full lints this costs are kept per edit: `apply.notify` asks again
     every few seconds while the edit is pending, and nothing it reads has
     changed between the asks."""
-    global _plugins_lint
-    from kraft.plugins import update as plugin_update
+    global _addons_lint
+    from kraft.addons import update as addon_update
 
     try:
-        config = PluginsConfig.model_validate(data)
+        config = AddonsConfig.model_validate(data)
     except ValidationError as exc:
         return [_pydantic_issue(path, exc)]
-    root = ctx.plugins_dir or plugins_load.plugins_dir()
-    now = plugins_load.installed(ctx.templates_dir, root)
+    root = ctx.addons_dir or addons_load.addons_dir()
+    now = addons_load.installed(ctx.templates_dir, root)
     key = json.dumps(
         [
             data,
-            plugins_load.signature(ctx.templates_dir, now),
+            addons_load.signature(ctx.templates_dir, now),
             str(root),
             _lint_inputs(ctx.templates_dir),
         ],
         sort_keys=True,
         default=str,
     )
-    cached = _plugins_lint.get(str(ctx.templates_dir))
+    cached = _addons_lint.get(str(ctx.templates_dir))
     if cached is not None and cached[0] == key:
         return list(cached[1])
-    then = plugins_load.installed(ctx.templates_dir, root, config=config)
+    then = addons_load.installed(ctx.templates_dir, root, config=config)
 
-    def loads(plugins):
-        return {(p.id, p.namespace, p.left_out is None) for p in plugins}
+    def loads(addons):
+        return {(p.id, p.namespace, p.left_out is None) for p in addons}
 
     issues: list[TemplateIssue] = []
     if loads(now) != loads(then):
         try:
-            broken = plugin_update.breaks(
-                plugin_update.state_of(ctx.templates_dir, now),
-                plugin_update.state_of(ctx.templates_dir, then),
+            broken = addon_update.breaks(
+                addon_update.state_of(ctx.templates_dir, now),
+                addon_update.state_of(ctx.templates_dir, then),
                 ctx.templates_dir,
             )
         except policy_mod.PolicyError:
             return []  # policy.yaml's own check says why; not kept
-        issues = [TemplateIssue(path, None, why, loc=("plugins",)) for why in broken]
-    _plugins_lint = {**_plugins_lint, str(ctx.templates_dir): (key, issues)}
+        issues = [TemplateIssue(path, None, why, loc=("addons",)) for why in broken]
+    _addons_lint = {**_addons_lint, str(ctx.templates_dir): (key, issues)}
     return list(issues)
 
 
 def _check_lock(path, data, ctx):
     try:
-        PluginsLock.model_validate(data)
+        AddonsLock.model_validate(data)
     except ValidationError as exc:
         return [_pydantic_issue(path, exc)]
     return []
@@ -787,9 +787,9 @@ def _check_repos(path, data, ctx):
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
     return [
-        TemplateIssue(path, None, f"would leave plugin {plugin.id} out: {why}")
-        for plugin in ctx.plugins
-        if plugin.left_out is None and (why := _unmet_requires(plugin, ctx, repos=data)) is not None
+        TemplateIssue(path, None, f"would leave add-on {addon.id} out: {why}")
+        for addon in ctx.addons
+        if addon.left_out is None and (why := _unmet_requires(addon, ctx, repos=data)) is not None
     ]
 
 
@@ -802,6 +802,6 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "access.yaml": _check_access,
     "theme.yaml": _check_theme,
     "notify.yaml": _check_notify,
-    "plugins.yaml": _check_plugins,
-    "plugins.lock": _check_lock,
+    "addons.yaml": _check_addons,
+    "addons.lock": _check_lock,
 }

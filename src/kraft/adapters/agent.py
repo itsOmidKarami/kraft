@@ -25,8 +25,8 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
     resolve_profile,
     select_profile,
 )
+from kraft.addons import load as addons_load
 from kraft.config import RepoEntry, git_read
-from kraft.plugins import load as plugins_load
 from kraft.policy import InstancePolicy
 from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.models import AgentTask
@@ -201,9 +201,9 @@ def resolve_invocation(
     #: The launch's steering texts, the repository's then the task's, already
     #: resolved from the item's snapshot (`resolve_agent_task`).
     steering_texts: tuple[str, ...] = (),
-    #: Each Kraft plugin namespace this launch knows, to its store; None for
+    #: Each Kraft add-on namespace this launch knows, to its store; None for
     #: one that is not loaded. A skill named in one is read there, or refused.
-    plugin_dirs: Mapping[str, Path | None] | None = None,
+    addon_dirs: Mapping[str, Path | None] | None = None,
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
     launch.
@@ -223,7 +223,7 @@ def resolve_invocation(
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
     method_text = (
-        _skill.read(skills_dir, binding["skill"], plugin_dirs) if binding.get("skill") else None
+        _skill.read(skills_dir, binding["skill"], addon_dirs) if binding.get("skill") else None
     )
     # The item's own override wins over the binding's, for both the plain and
     # the escalate model -- but the two never compete with each other: while
@@ -294,13 +294,13 @@ def resolve_agent_task(
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
     item_repo: str | None = None,
     policy: InstancePolicy | None = None,
-    plugins: Mapping[str, Mapping[str, str | None]] | None = None,
+    addons: Mapping[str, Mapping[str, str | None]] | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
 
-    `plugins` are the item's snapshot's plugin pins (`ResolvedChain.plugins`):
-    a plugin skill and a plugin agent profile are read from the version the
-    item started with, and from the lock for a plugin it did not pin.
+    `addons` are the item's snapshot's add-on pins (`ResolvedChain.addons`):
+    an add-on skill and an add-on agent profile are read from the version the
+    item started with, and from the lock for an add-on it did not pin.
 
     The typed entry point to `resolve_invocation`'s precedence rules, so the
     executor hands over a model and never a hook dictionary. The dict is built
@@ -360,16 +360,16 @@ def resolve_agent_task(
             f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
     harnesses = harnesses if harnesses is not None else _harness.load(None)
-    table, path = harness_table(harnesses, plugins)
-    known = plugins_load.for_item(plugins, path.parent)
-    for plugin in known:
+    table, path = harness_table(harnesses, addons)
+    known = addons_load.for_item(addons, path.parent)
+    for addon in known:
         if (
-            plugin.namespace in (plugins or {})
-            and plugin.left_out is not None
-            and _reads_namespace(task, table, plugin.namespace)
+            addon.namespace in (addons or {})
+            and addon.left_out is not None
+            and _reads_namespace(task, table, addon.namespace)
         ):
             raise HarnessUnavailable(
-                f"plugin {plugin.id} {plugin.version} could not be read: {plugin.left_out}"
+                f"add-on {addon.id} {addon.version} could not be read: {addon.left_out}"
             )
     profile = select_profile(table.profiles, task.harness, path)
     # The task's own rung: its agent profile, read live, or its own fields.
@@ -388,7 +388,7 @@ def resolve_agent_task(
         },
         repo_entry,
         skills_dir=skills_dir,
-        plugin_dirs={p.namespace: p.root if p.left_out is None else None for p in known},
+        addon_dirs={p.namespace: p.root if p.left_out is None else None for p in known},
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,
@@ -404,7 +404,7 @@ def resolve_agent_task(
 
 
 def _reads_namespace(task: AgentTask, table: HarnessProfileTable, namespace: str) -> bool:
-    """Whether this launch reads from plugin `namespace`: only through its
+    """Whether this launch reads from add-on `namespace`: only through its
     skill or its agent profile (extends and steering were frozen at
     materialization), or a `fallback:` entry of the task or of that profile."""
     profile = table.agent_profiles.get(task.profile) if task.profile else None

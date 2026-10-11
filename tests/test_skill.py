@@ -26,46 +26,46 @@ def test_an_unknown_skill_raises(tmp_path):
         skill.validate(tmp_path, "nope", where="registry.yaml")
 
 
-@pytest.mark.parametrize("loaded", [False, True], ids=["no-plugins", "another-namespace-loaded"])
+@pytest.mark.parametrize("loaded", [False, True], ids=["no-addons", "another-namespace-loaded"])
 def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded):
     # No file anywhere named `superpowers:brainstorming`; validation must not
     # look for one, and read must return the instruction, not a body. A loaded
-    # Kraft plugin under another namespace changes nothing.
+    # Kraft add-on under another namespace changes nothing.
     dirs = {"release": tmp_path} if loaded else None
-    skill.validate(tmp_path, "superpowers:brainstorming", where="registry.yaml", plugin_dirs=dirs)
+    skill.validate(tmp_path, "superpowers:brainstorming", where="registry.yaml", addon_dirs=dirs)
     assert "superpowers:brainstorming" in skill.read(
-        tmp_path, "superpowers:brainstorming", plugin_dirs=dirs
+        tmp_path, "superpowers:brainstorming", addon_dirs=dirs
     )
 
 
 @pytest.mark.parametrize(
     ("ref", "text", "error"),
     [
-        ("release:deploy-review", "plugin method", None),
+        ("release:deploy-review", "add-on method", None),
         ("release:nope", None, "kraft:nope"),
         ("release:../deploy-review", None, "bare directory name"),
         ("legacy:deploy-review", None, "installed but not loaded"),
     ],
     ids=[
-        "loaded-plugin-is-read",
-        "missing-in-loaded-plugin",
+        "loaded-addon-is-read",
+        "missing-in-loaded-addon",
         "escaping-name",
-        "unloaded-plugin-is-an-error",
+        "unloaded-addon-is-an-error",
     ],
 )
-def test_plugin_skill_references(tmp_path, ref, text, error):
-    """A `<namespace>:<name>` whose namespace is a loaded Kraft plugin is that
-    plugin's `skills/<name>/SKILL.md`, read from its store, never handed to the
+def test_addon_skill_references(tmp_path, ref, text, error):
+    """A `<namespace>:<name>` whose namespace is a loaded Kraft add-on is that
+    add-on's `skills/<name>/SKILL.md`, read from its store, never handed to the
     agent as another tool's skill."""
     store = tmp_path / "store"
-    write(store, "skills/deploy-review/SKILL.md", "plugin method")
+    write(store, "skills/deploy-review/SKILL.md", "add-on method")
     dirs = {"release": store, "legacy": None}
     if error is not None:
         with pytest.raises(skill.SkillError, match=error):
-            skill.validate(tmp_path, ref, where="library.yaml", plugin_dirs=dirs)
+            skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
         return
-    skill.validate(tmp_path, ref, where="library.yaml", plugin_dirs=dirs)
-    assert skill.read(tmp_path, ref, plugin_dirs=dirs) == text
+    skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
+    assert skill.read(tmp_path, ref, addon_dirs=dirs) == text
 
 
 @pytest.mark.parametrize("name", ["../etc/passwd", "a/b", "a\\b", ".", "", ".hidden"])

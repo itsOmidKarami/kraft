@@ -177,10 +177,10 @@ class RunDirs:
         return self.base / "results"
 
     @property
-    def plugins(self) -> Path:
-        """Kraft plugins: `mirrors/` (one bare mirror per git collection),
-        `store/<digest>/` (one extracted plugin each) and `staging/`."""
-        return self.base / "plugins"
+    def addons(self) -> Path:
+        """Kraft add-ons: `mirrors/` (one bare mirror per git collection),
+        `store/<digest>/` (one extracted add-on each) and `staging/`."""
+        return self.base / "addons"
 
     @property
     def pid(self) -> Path:

@@ -338,8 +338,8 @@ def test_harness_status_lists_every_provider_with_whether_its_executable_is_foun
     assert "version" not in rows["codex"]
 
 
-def test_the_profiles_view_lists_an_installed_plugins_profiles(client, tmp_path):
-    from support.plugins import AGENT, install, make_collection
+def test_the_profiles_view_lists_an_installed_addons_profiles(client, tmp_path):
+    from support.addons import AGENT, install, make_collection
 
     from kraft.api import deps
 
@@ -350,7 +350,7 @@ def test_the_profiles_view_lists_an_installed_plugins_profiles(client, tmp_path)
     }
     install(
         st.templates_dir,
-        st.run_dirs.plugins,
+        st.run_dirs.addons,
         make_collection(tmp_path, {"release": release}),
         "release",
     )

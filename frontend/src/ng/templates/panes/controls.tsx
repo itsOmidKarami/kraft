@@ -1,6 +1,6 @@
 import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
-import { ReadOnly } from "../plugin";
+import { ReadOnly } from "../addon";
 
 /** A text field that sends on a pause (Decided 3): the page's `field(…, pause)`
  *  debounces, blur flushes. It follows the server's value while not focused.

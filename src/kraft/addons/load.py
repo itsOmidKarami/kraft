@@ -1,0 +1,564 @@
+"""An installed Kraft add-on as the template library and the agent-profile
+table read it.
+
+A leaf module on purpose: it imports nothing from `kraft.templates` or
+`kraft.config`. `kraft.config` imports `kraft.templates.environment`, which
+reads add-ons, so an import the other way would be a cycle.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import threading
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class InstalledAddon:
+    """One add-on the instance loads: where its extracted files are and the
+    namespace everything it declares is addressed under."""
+
+    #: `<addon>@<collection>`.
+    id: str
+    #: The name its `addon.json` declares.
+    name: str
+    #: `name`, or the alias it was installed under.
+    namespace: str
+    version: str
+    #: Its extracted files, in the fixed layout: `library.yaml`, `chains/`,
+    #: `skills/`, `profiles.yaml`.
+    root: Path
+    #: Who sees it. Repo collections will add a second value.
+    scope: Literal["instance"] = "instance"
+    #: Why this add-on is known to the instance but not loaded; None when it loads.
+    left_out: str | None = None
+    #: An add-on left out on purpose (disabled, not yet installed, orphaned in
+    #: the lock) is no fault: health does not report it.
+    quiet: bool = False
+    #: Where the lock says its files came from: the collection's commit, the
+    #: add-on's directory in it and that directory's tree. None for a
+    #: directory collection, and for an add-on that is not locked.
+    commit: str | None = None
+    tree: str | None = None
+    source: str | None = None
+
+    @property
+    def pin(self) -> dict[str, str | None]:
+        """What a work item records of this add-on: enough to find its store,
+        and to restore it from its commit when the store is gone."""
+        return {
+            "id": self.id,
+            "commit": self.commit,
+            "tree": self.tree,
+            "source": self.source,
+            "digest": f"sha256:{self.root.name}",
+            "version": self.version,
+        }
+
+
+def _reference(value: str, addon: InstalledAddon, *, bare_is_own: bool) -> str:
+    qualifier, colon, name = value.partition(":")
+    if not colon:
+        return f"{addon.namespace}:{value}" if bare_is_own else value
+    return f"{addon.namespace}:{name}" if qualifier == addon.name else value
+
+
+def qualify(data: object, addon: InstalledAddon) -> object:
+    """`data`, an add-on's parsed YAML, with its references made absolute.
+
+    A bare `extends:`, `steering:` or `skill:` names the add-on's own
+    declaration, and so does one qualified by the add-on's own name; both
+    become `<namespace>:<name>`, so an aliased add-on works unchanged. A bare
+    `profile:` is the instance's agent profile and stays bare; only the
+    add-on's own name in it is rewritten. Any other qualifier (`kraft:`,
+    another tool's plugin) and every `harness:` is left as written.
+    """
+    if isinstance(data, list):
+        return [qualify(item, addon) for item in data]
+    if not isinstance(data, Mapping):
+        return data
+    out: dict[object, object] = {}
+    for key, value in data.items():
+        if key in ("extends", "skill") and isinstance(value, str):
+            out[key] = _reference(value, addon, bare_is_own=True)
+        elif key == "steering" and isinstance(value, list):
+            out[key] = [
+                _reference(v, addon, bare_is_own=True) if isinstance(v, str) else v for v in value
+            ]
+        elif key == "profile" and isinstance(value, str):
+            out[key] = _reference(value, addon, bare_is_own=False)
+        else:
+            out[key] = qualify(value, addon)
+    return out
+
+
+def addons_dir() -> Path:
+    """This process's `run/addons`: `KRAFT_RUN_DIR`, else the default run directory."""
+    from kraft.paths import RunDirs, default_run_dir
+
+    return RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).addons
+
+
+def config_problem(config_dir: Path) -> str | None:
+    """Why `addons.yaml` or `addons.lock` in `config_dir` cannot be read, or
+    None. While one cannot, no add-on loads."""
+    from kraft.addons.config import AddonsConfig, AddonsLock
+    from kraft.config import ConfigError
+
+    try:
+        AddonsConfig.load(Path(config_dir) / AddonsConfig.FILE)
+        AddonsLock.load(Path(config_dir) / AddonsLock.FILE)
+    except ConfigError as exc:
+        return str(exc)
+    return None
+
+
+#: `installed()`'s last answer per (config dir, store root) and what it was
+#: computed from. Replaced whole, never mutated: a thread and the loop cannot
+#: corrupt it; the worst race is one redundant recompute.
+_memo: dict[tuple[str, str], tuple[tuple, tuple[InstalledAddon, ...]]] = {}
+
+
+def stamp(path: Path) -> tuple | None:
+    """`path`'s (mtime_ns, size, inode), or None when it cannot be statted."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+def signature(config_dir: Path, found: tuple[InstalledAddon, ...] = ()) -> tuple:
+    """Everything `installed()` reads, as stat triples (None: absent), so an
+    unchanged answer can be told without re-parsing: the five config files,
+    the harness overlay directory, `found`'s stores (existence, manifest,
+    digest file), the restore failures `_why_left_out` quotes, and this
+    Kraft's version, which decides `requires.kraft`."""
+    from kraft import paths, update
+    from kraft.addons import fetch, manifest
+
+    config_dir = Path(config_dir)
+    names = ("addons.yaml", "addons.lock", "harnesses.yaml", "repos.yaml", "policy.yaml")
+    store_files = (manifest.ADDON_JSON, fetch.DIGEST_FILE)
+    try:
+        overlaid = sorted(paths.default_harnesses_dir().glob("*.yaml"))
+    except OSError:
+        overlaid = []
+    return (
+        tuple(stamp(config_dir / n) for n in names),
+        tuple((p.name, stamp(p)) for p in overlaid),
+        tuple((p.root.is_dir(), *(stamp(p.root / f) for f in store_files)) for p in found),
+        tuple(sorted(_unrestored.items())),
+        update.installed(),
+    )
+
+
+def installed(
+    config_dir: Path | None = None,
+    addons_root: Path | None = None,
+    *,
+    verify: bool = False,
+    config=None,
+) -> tuple[InstalledAddon, ...]:
+    """Every add-on `addons.yaml` or `addons.lock` names, each either
+    loadable (`left_out` None) or carrying why it is not.
+
+    An add-on loads when it has an enabled `addons.yaml` entry and a lock
+    entry, from the store the lock names and under the namespace the lock
+    recorded: an alias changed by hand waits for an update. Nothing is fetched
+    here, ever. `verify` re-hashes every stored file, not only the manifest.
+    `config` is an `AddonsConfig` to read in place of the file: an edit of
+    `addons.yaml` not saved yet.
+
+    The answer is kept until a file it was computed from changes (see
+    `signature`); a `verify` or `config` call is never answered from it.
+    """
+    global _memo
+    from kraft import paths
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    root = Path(addons_root) if addons_root is not None else addons_dir()
+    if verify or config is not None:
+        return _installed(config_dir, root / "store", verify, config)
+    key = (str(config_dir), str(root))
+    hit = _memo.get(key)
+    if hit is not None and hit[0] == signature(config_dir, hit[1]):
+        return hit[1]
+    before = signature(config_dir)
+    found = _installed(config_dir, root / "store", verify, config)
+    after = signature(config_dir, found)
+    # An input that changed during the compute is not what `found` was made
+    # from (the stores, index 2, are derived from `found` and so not compared).
+    if (before[:2], before[3:]) == (after[:2], after[3:]):
+        _memo = {**_memo, key: (after, found)}
+    return found
+
+
+def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[InstalledAddon, ...]:
+    from kraft.addons.config import AddonsConfig, AddonsLock
+    from kraft.config import ConfigError
+
+    try:
+        config = config or AddonsConfig.load(config_dir / AddonsConfig.FILE)
+        lock = AddonsLock.load(config_dir / AddonsLock.FILE)
+    except ConfigError:
+        return ()  # `config_problem` says why
+    found: list[InstalledAddon] = []
+    for addon_id in config.addons:
+        name = addon_id.split("@", 1)[0]
+        locked = lock.addons.get(addon_id)
+        if locked is None:
+            found.append(
+                InstalledAddon(
+                    addon_id,
+                    name,
+                    config.namespace(addon_id),
+                    "",
+                    store / "not-installed",
+                    left_out="is not installed; run `kraft admin addon install`",
+                    quiet=True,
+                )
+            )
+            continue
+        addon = InstalledAddon(
+            addon_id,
+            name,
+            locked.namespace,
+            locked.version,
+            store / locked.digest.removeprefix("sha256:"),
+            commit=locked.commit,
+            tree=locked.tree,
+            source=locked.source,
+        )
+        if not config.entry(addon_id).enabled:
+            found.append(replace(addon, left_out="is disabled", quiet=True))
+        else:
+            found.append(replace(addon, left_out=_why_left_out(addon, config_dir, verify)))
+    for addon_id, locked in lock.addons.items():
+        if addon_id not in config.addons:
+            found.append(
+                InstalledAddon(
+                    addon_id,
+                    addon_id.split("@", 1)[0],
+                    locked.namespace,
+                    locked.version,
+                    store / locked.digest.removeprefix("sha256:"),
+                    left_out="is locked but not listed in addons.yaml",
+                    quiet=True,
+                )
+            )
+    return tuple(found)
+
+
+def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str | None:
+    """The first load-time check `addon` fails, as a reason; None when it loads."""
+    from kraft import harness, update
+    from kraft.addons import fetch, manifest
+    from kraft.config import ConfigError, read_yaml
+    from kraft.policy import PolicyError, PolicyInput
+    from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
+    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
+    root = addon.root
+    if not root.is_dir():
+        if why := _unrestored.get(root.name):
+            return f"its store could not be restored: {why}"
+        return "its store is missing and has not been restored"
+    mismatch = "its files do not match the locked digest"
+    try:
+        recorded = (root / fetch.DIGEST_FILE).read_bytes()
+        if hashlib.sha256(recorded).hexdigest() != root.name:
+            return mismatch
+        if verify and fetch.digest_manifest(fetch.extract_dir(root).files) != recorded:
+            return mismatch
+        declared = manifest.addon(
+            manifest.parse((root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
+            manifest.ADDON_JSON,
+        )
+    except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
+        return f"its store cannot be read: {exc}"
+    running = update.installed()
+    if not manifest.is_source_build(running):
+        if why := manifest.kraft_compatible(declared.requires.kraft, running):
+            return why
+    if why := instance_problem(addon.namespace, declared.requires, config_dir):
+        return why
+    try:
+        harnesses = read_yaml(config_dir / "harnesses.yaml")
+    except ConfigError:
+        return None  # that file's own check says why
+    # Its own files, read alone: an add-on that does not load must not take the
+    # library or the profile table down with it.
+    try:
+        TemplateLibrary.from_mappings(
+            {}, (), library_path=config_dir / "library.yaml", addons=[addon]
+        )
+        HarnessProfileTable.from_mapping(
+            harnesses,
+            config_dir / "harnesses.yaml",
+            harnesses=harness.load(None).valid,
+            addons=[addon],
+        )
+    except (TemplateLibraryError, TemplateEnvironmentError) as exc:
+        if str(root) in str(exc) or f"profiles.{addon.namespace}:" in str(exc):
+            return str(exc)
+        return None
+    try:
+        policy = PolicyInput.from_yaml(config_dir / "policy.yaml").instance_policy()
+    except PolicyError:
+        return None  # no policy.yaml, or one whose own check says why
+    return limits_problem(addon, policy)
+
+
+def limits_problem(addon: InstalledAddon, instance_policy) -> str | None:
+    """Why one of `addon`'s limits no longer fits under `instance_policy`'s
+    `maxima:`, lowered since the add-on was installed; None when all fit."""
+    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
+    try:
+        library = TemplateLibrary.from_mappings(
+            {}, (), library_path=addon.root / "local-library.yaml", addons=[addon]
+        )
+    except TemplateLibraryError:
+        return None
+    unbounded = {issue.message for issue in library.lint()}
+    over = sorted({issue.message for issue in library.lint(instance_policy)} - unbounded)
+    return over[0] if over else None
+
+
+def instance_problem(
+    namespace: str,
+    requires,
+    config_dir: Path,
+    harnesses: Mapping | None = None,
+    repos: Mapping | None = None,
+) -> str | None:
+    """Why this instance cannot hold an add-on under `namespace` that declares
+    `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
+    does not define, or a repository whose id is the namespace. None when it
+    can. Asked at load and of every install or update candidate. `harnesses`
+    is a `harnesses.yaml` to judge in place of the file, `repos` likewise a
+    `repos.yaml`: an edit not saved yet."""
+    from kraft.config import ConfigError, read_yaml
+
+    try:
+        if harnesses is None:
+            harnesses = read_yaml(config_dir / "harnesses.yaml")
+        if repos is None:
+            repos = read_yaml(config_dir / "repos.yaml")
+    except ConfigError:
+        return None  # that file's own check says why
+    for section, what, wanted in (
+        ("harnesses", "harness", requires.harnesses),
+        ("profiles", "agent profile", requires.profiles),
+    ):
+        defined = harnesses.get(section)
+        for name in wanted:
+            if not isinstance(defined, dict) or name not in defined:
+                return f"requires {what} {name!r}, which harnesses.yaml does not define"
+    entries = repos.get("repos")
+    for entry in entries if isinstance(entries, list) else ():
+        if isinstance(entry, dict) and entry.get("id") == namespace:
+            return f"its namespace {namespace!r} is now a repository id"
+    return None
+
+
+def for_item(
+    pins: Mapping[str, Mapping[str, str | None]] | None,
+    config_dir: Path | None = None,
+    addons_root: Path | None = None,
+) -> tuple[InstalledAddon, ...]:
+    """The add-ons one work item reads: the versions its chain was
+    materialized with (`pins`, namespace to `InstalledAddon.pin`), and the
+    lock's for every namespace it did not pin. A pinned version whose store
+    is gone is known and not loaded: its skills are refused, never handed to
+    the agent as another tool's."""
+    store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
+    pinned = []
+    for namespace, pin in (pins or {}).items():
+        addon_id, digest = str(pin["id"]), str(pin["digest"])
+        root = store / digest.removeprefix("sha256:")
+        pinned.append(
+            InstalledAddon(
+                addon_id,
+                addon_id.split("@", 1)[0],
+                namespace,
+                str(pin["version"]),
+                root,
+                left_out=None
+                if root.is_dir()
+                else _unrestored.get(root.name)
+                or "the version this work item started with is no longer in the store",
+                commit=pin.get("commit"),
+                tree=pin.get("tree"),
+                source=pin.get("source"),
+            )
+        )
+    live = [p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})]
+    return (*live, *pinned)
+
+
+#: Why the last restore of a store failed, by its digest: what a launch that
+#: needed it says when it stops. Cleared when a restore of it succeeds.
+_unrestored: dict[str, str] = {}
+
+
+class RestoreError(Exception):
+    """A store that is gone and cannot be put back. The message says why and,
+    where there is one, what to run."""
+
+
+def restore(
+    addon: InstalledAddon, config_dir: Path | None = None, addons_root: Path | None = None
+) -> Path:
+    """Put `addon`'s missing store back, from where the lock (or a work
+    item's pin) says its files came from, and return it. Not a review: this
+    commit was accepted when it was locked, and it is taken only if its tree
+    and digest are still the ones recorded. A directory collection is copied
+    again only while the folder still matches the digest. Raises `RestoreError`."""
+    from kraft import paths
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    root = Path(addons_root) if addons_root is not None else addons_dir()
+    if addon.root.is_dir():
+        return addon.root
+    try:
+        store = _restore(addon, config_dir, root)
+    except RestoreError as exc:
+        _unrestored[addon.root.name] = str(exc)
+        raise
+    _unrestored.pop(addon.root.name, None)
+    return store
+
+
+def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
+    from kraft.addons import fetch, update
+    from kraft.addons.config import AddonsConfig
+    from kraft.config import ConfigError
+
+    what = f"{addon.id} {addon.version}"
+    collection_name = addon.id.split("@", 1)[1]
+    try:
+        collection = AddonsConfig.load(config_dir / AddonsConfig.FILE).collections.get(
+            collection_name
+        )
+    except ConfigError as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if collection is None:
+        raise RestoreError(
+            f"{what}: collection {collection_name} is no longer in addons.yaml; add it again"
+        )
+    again = f"run `kraft admin addon install {addon.id} --re-install`"
+    if addon.source is None:
+        raise RestoreError(f"{what}: its pin does not record where its files came from; {again}")
+    try:
+        if collection.git is not None and addon.commit is not None:
+            try:
+                mirror = fetch.fetch_commit(root, collection_name, collection.git, addon.commit)
+            except fetch.FetchError as exc:
+                raise RestoreError(
+                    f"{what}: locked commit {addon.commit[:12]} could not be fetched "
+                    f"({exc.kind}: {exc}); if it is no longer on the remote, {again}"
+                ) from exc
+            fetch.pin(mirror, addon.commit)
+            # A commit names its tree: only the digest, which also covers how
+            # this Kraft extracts, is left to check.
+            extracted = fetch.extract_git(mirror, addon.commit, addon.source)
+        elif collection.path is not None and addon.commit is None:
+            extracted = fetch.extract_dir(Path(collection.path) / addon.source.removeprefix("./"))
+        else:
+            raise RestoreError(
+                f"{what}: collection {collection_name} is no longer the kind it was locked "
+                f"from; {again}"
+            )
+    except (OSError, fetch.FetchError, fetch.AddonRefused) as exc:
+        raise RestoreError(f"{what}: {exc}") from exc
+    if fetch.digest(extracted.files) != f"sha256:{addon.root.name}":
+        raise RestoreError(
+            f"{what}: its files no longer match the locked digest; "
+            + (again if addon.commit else "run `kraft admin addon update` to review the change")
+        )
+    try:
+        with update.write_lock(root):
+            return fetch.write_store(root, extracted)
+    except (update.Busy, OSError) as exc:  # a full disk or a read-only run directory
+        raise RestoreError(f"{what}: {exc}") from exc
+
+
+def restore_missing(
+    addons: tuple[InstalledAddon, ...],
+    config_dir: Path | None = None,
+    addons_root: Path | None = None,
+    cancel: threading.Event | None = None,
+) -> dict[str, str]:
+    """Restore every store of `addons` that is gone; add-on id to why, for
+    each that could not be. An add-on left out on purpose is not restored.
+    `cancel` (set at shutdown) is checked before each: the rest are reported
+    `cancelled`, and a restore already running finishes, its write atomic."""
+    failed: dict[str, str] = {}
+    for addon in addons:
+        if addon.quiet:
+            continue
+        if cancel is not None and cancel.is_set():
+            failed[addon.id] = "cancelled"
+            continue
+        try:
+            restore(addon, config_dir, addons_root)
+        except RestoreError as exc:
+            failed[addon.id] = str(exc)
+    return failed
+
+
+def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> list[str]:
+    """Delete every extracted add-on whose digest is not in `keep()` (hex, as
+    a store directory is named), and whatever an interrupted write left in
+    `staging/`. `keep` is asked under the update lock, so a store an install
+    finished a moment ago is already in its answer; a lock someone else holds
+    is not waited for (raises `update.Busy`): the next collection takes what
+    this one left. Returns the digests deleted. Only the daemon calls this:
+    it alone knows what its loaded library and its unfinished work items read."""
+    import shutil
+
+    from kraft.addons import update
+
+    root = Path(addons_root) if addons_root is not None else addons_dir()
+    removed: list[str] = []
+    with update.write_lock(root, wait=0):
+        kept = keep()
+        shutil.rmtree(root / "staging", ignore_errors=True)
+        stores = sorted((root / "store").iterdir()) if (root / "store").is_dir() else []
+        for store in stores:
+            if store.name in kept:
+                continue
+            for path in [store, *store.rglob("*")]:
+                if path.is_dir():
+                    path.chmod(0o755)  # a store is read-only
+            shutil.rmtree(store)
+            removed.append(store.name)
+    return removed
+
+
+def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
+    """Each loaded add-on a Kraft `version` would leave out, with why: its
+    `requires.kraft` names another major. What `kraft admin update` lists
+    before it installs a release."""
+    from kraft.addons import manifest
+
+    out = []
+    for addon in installed(config_dir):
+        if addon.left_out is not None:
+            continue
+        try:
+            declared = manifest.addon(
+                manifest.parse((addon.root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
+                manifest.ADDON_JSON,
+            )
+        except (OSError, ValueError, manifest.ManifestError):
+            continue
+        if why := manifest.kraft_compatible(declared.requires.kraft, version):
+            out.append(f"{addon.id} {addon.version} {why}")
+    return out

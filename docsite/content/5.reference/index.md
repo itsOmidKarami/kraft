@@ -19,7 +19,7 @@ Look up a command, field, endpoint, tool, status or event.
 
 - [Configuration](/reference/configuration): when you edit a YAML file and want its fields, defaults and limits.
 - [Environment variables](/reference/configuration/environment-variables): when you want a `KRAFT_*` variable, or a variable Kraft passes to workers. It sits inside Configuration in the sidebar.
-- [Plugins and collections](/reference/configuration/plugins): when you publish or install a Kraft plugin and want the manifest fields, `plugins.yaml`, the lock, and the rules for what loads. It sits last inside Configuration in the sidebar.
+- [Add-ons and collections](/reference/configuration/addons): when you publish or install a Kraft add-on and want the manifest fields, `addons.yaml`, the lock, and the rules for what loads. It sits last inside Configuration in the sidebar.
 - [Chain file keys](/reference/chain-nodes): when you write a chain and want the node kinds, the subprocess task and fix loop contracts, and the result file.
 - [Agent harnesses](/reference/harnesses): when you want the agent CLIs Kraft runs and what each supports.
 - [Permission gate](/reference/permissions): when you want to know how Kraft answers a worker's asks, and the grants.

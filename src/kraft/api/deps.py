@@ -26,8 +26,8 @@ from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters.forge import git as forge_git
+from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
-from kraft.plugins import load as plugins_load
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -316,16 +316,16 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
 
 
 def _begin_reload(st) -> bool:
-    """On the loop, before the read: say why plugins.yaml and plugins.lock do
+    """On the loop, before the read: say why addons.yaml and addons.lock do
     not read, and record what is about to be loaded (recorded first, so a file
-    edited during the read stays pending). Returns whether the plugin files
-    were refused: the plugins already running stay, and the two files stay
+    edited during the read stays pending). Returns whether the add-on files
+    were refused: the add-ons already running stay, and the two files stay
     pending with the reason."""
     from kraft import apply
 
-    st.plugins_problem = plugins_load.config_problem(st.templates_dir)
-    refused = st.plugins_problem is not None and st.library is not None
-    apply.record_library(st, plugin_files=not refused)
+    st.addons_problem = addons_load.config_problem(st.templates_dir)
+    refused = st.addons_problem is not None and st.library is not None
+    apply.record_library(st, addon_files=not refused)
     st.reload_generation = getattr(st, "reload_generation", 0) + 1
     return refused
 
@@ -333,8 +333,8 @@ def _begin_reload(st) -> bool:
 def _read_library(st, refused: bool) -> tuple[TemplateLibrary | None, list[str]]:
     """The heavy half: re-hash every stored file and parse the library. Writes
     nothing on `st`, so it may run in a worker thread."""
-    plugins = st.library.plugins if refused else installed_plugins(st, verify=True)
-    return load_library(st.templates_dir, st.skills_dir, plugins)
+    addons = st.library.addons if refused else installed_addons(st, verify=True)
+    return load_library(st.templates_dir, st.skills_dir, addons)
 
 
 def _publish_library(st, library: TemplateLibrary | None, invalid: list[str]) -> None:
@@ -405,59 +405,59 @@ def invalid_templates(st) -> dict[str, str]:
     for id, message in (getattr(st, "invalid_chains", None) or {}).items():
         invalid[f"chain {id}"] = message
     # The instance is not running what its lock says: degraded, like a chain
-    # that does not resolve. A plugin left out on purpose is no fault.
-    for plugin in st.library.plugins if st.library else ():
-        if plugin.left_out is not None and not plugin.quiet:
-            invalid[f"plugin {plugin.id}"] = plugin.left_out
-    if why := getattr(st, "plugins_problem", None):
-        invalid["plugins.yaml"] = why
+    # that does not resolve. An add-on left out on purpose is no fault.
+    for addon in st.library.addons if st.library else ():
+        if addon.left_out is not None and not addon.quiet:
+            invalid[f"add-on {addon.id}"] = addon.left_out
+    if why := getattr(st, "addons_problem", None):
+        invalid["addons.yaml"] = why
     return invalid
 
 
-def installed_plugins(st, *, verify: bool = False) -> tuple[plugins_load.InstalledPlugin, ...]:
-    """The plugins this instance has installed, loadable or not."""
-    return plugins_load.installed(st.templates_dir, st.run_dirs.plugins, verify=verify)
+def installed_addons(st, *, verify: bool = False) -> tuple[addons_load.InstalledAddon, ...]:
+    """The add-ons this instance has installed, loadable or not."""
+    return addons_load.installed(st.templates_dir, st.run_dirs.addons, verify=verify)
 
 
-#: One `FETCH_TIMEOUT_S` (60 s, `plugins/fetch.py`) plus margin: how long
-#: shutdown waits for a plugin worker thread that is mid-fetch.
-PLUGIN_SHUTDOWN_GRACE_S = 70
+#: One `FETCH_TIMEOUT_S` (60 s, `addons/fetch.py`) plus margin: how long
+#: shutdown waits for an add-on worker thread that is mid-fetch.
+ADDON_SHUTDOWN_GRACE_S = 70
 
 
 async def _in_thread(st, fn, *args, **kwargs):
-    """`fn(*args, **kwargs)` in a worker thread, recorded in `st.plugin_threads`
+    """`fn(*args, **kwargs)` in a worker thread, recorded in `st.addon_threads`
     and shielded: cancelling the awaiting task leaves the future in the set,
     so shutdown can wait for the thread it cannot interrupt. A fn that takes
-    `cancel=` is handed `st.plugin_cancel` by its caller."""
+    `cancel=` is handed `st.addon_cancel` by its caller."""
     future = asyncio.get_running_loop().run_in_executor(
         None, functools.partial(fn, *args, **kwargs)
     )
     future.kraft_label = getattr(fn, "__name__", repr(fn))
-    st.plugin_threads.add(future)
-    future.add_done_callback(st.plugin_threads.discard)
+    st.addon_threads.add(future)
+    future.add_done_callback(st.addon_threads.discard)
     return await asyncio.shield(future)
 
 
-async def stop_plugin_work(st) -> None:
-    """Shutdown: stop every plugin background task, then wait for its thread.
-    A thread cannot be interrupted: `plugin_cancel` makes it stop between
-    plugins, and one still mid-fetch after the grace is logged and left (the
+async def stop_addon_work(st) -> None:
+    """Shutdown: stop every add-on background task, then wait for its thread.
+    A thread cannot be interrupted: `addon_cancel` makes it stop between
+    add-ons, and one still mid-fetch after the grace is logged and left (the
     process is going; each of its writes is atomic)."""
-    st.plugin_cancel.set()
-    tasks = list(st.plugin_tasks)
+    st.addon_cancel.set()
+    tasks = list(st.addon_tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
-    if st.plugin_threads:
-        _, alive = await asyncio.wait(set(st.plugin_threads), timeout=PLUGIN_SHUTDOWN_GRACE_S)
+    if st.addon_threads:
+        _, alive = await asyncio.wait(set(st.addon_threads), timeout=ADDON_SHUTDOWN_GRACE_S)
         for future in alive:
             logger.warning(
-                "plugin worker thread still running at shutdown, left to end: %s",
+                "add-on worker thread still running at shutdown, left to end: %s",
                 getattr(future, "kraft_label", "?"),
             )
 
 
-async def restore_plugins(app) -> None:
+async def restore_addons(app) -> None:
     """Put back every locked store that is gone (a config directory copied to
     a new machine, a cleared run directory, a teammate's newer lock), then
     load what came back and collect what nothing reads. Off the event loop:
@@ -468,71 +468,71 @@ async def restore_plugins(app) -> None:
     st = app.state
     # `verify`, as the library load reads: a store edited in place stays left
     # out here too, so it never counts as "loads now".
-    fresh = await _in_thread(st, installed_plugins, st, verify=True)
+    fresh = await _in_thread(st, installed_addons, st, verify=True)
     missing = tuple(p for p in fresh if not p.quiet and not p.root.is_dir())
     loads = {p.id for p in fresh if p.left_out is None}
     if missing:
         failed = await _in_thread(
             st,
-            plugins_load.restore_missing,
+            addons_load.restore_missing,
             missing,
             st.templates_dir,
-            st.run_dirs.plugins,
-            cancel=st.plugin_cancel,
+            st.run_dirs.addons,
+            cancel=st.addon_cancel,
         )
         await reload_templates(st)
         apply.notify(app)
         if failed:
-            logger.warning("plugin stores not restored: %s", "; ".join(failed.values()))
+            logger.warning("add-on stores not restored: %s", "; ".join(failed.values()))
     elif any(
-        # Left out by the running library, loading now. Not a plugin enabled
+        # Left out by the running library, loading now. Not an add-on enabled
         # by hand (quiet while disabled): that edit waits for its own reload.
         p.left_out is not None and not p.quiet and p.id in loads
-        for p in (st.library.plugins if st.library is not None else ())
+        for p in (st.library.addons if st.library is not None else ())
     ):
         # A launch put the store back (`dispatch.restore_pins`). Load it.
         await reload_templates(st)
         apply.notify(app)
-    await collect_plugin_stores(st)
+    await collect_addon_stores(st)
 
 
-async def auto_update_plugins(app) -> None:
-    """What the server does about plugins once it is up, in the background so
+async def auto_update_addons(app) -> None:
+    """What the server does about add-ons once it is up, in the background so
     a start never waits on the network: restore what is missing, then take
-    the updates that plugins set to auto-update may take on their own."""
+    the updates that add-ons set to auto-update may take on their own."""
     from kraft import apply
-    from kraft.plugins import update as plugin_update
+    from kraft.addons import update as addon_update
 
     st = app.state
-    await restore_plugins(app)
+    await restore_addons(app)
     outcomes = await _in_thread(
         st,
-        plugin_update.auto_update,
+        addon_update.auto_update,
         st.templates_dir,
-        st.run_dirs.plugins,
-        cancel=st.plugin_cancel,
+        st.run_dirs.addons,
+        cancel=st.addon_cancel,
     )
     if any(o["outcome"] == "applied" for o in outcomes.values()):
         await reload_templates(st)
         apply.notify(app)
-        await collect_plugin_stores(st)
+        await collect_addon_stores(st)
 
 
 def in_background(app, work) -> asyncio.Task:
-    """Run `work(app)` (one of the two above) as the server's plugin task.
+    """Run `work(app)` (one of the two above) as the server's add-on task.
     Nobody awaits it, so what it raises is logged here, never dropped."""
 
     async def logged() -> None:
         try:
             await work(app)
         except Exception:  # noqa: BLE001 -- a background task must say why it died
-            logger.exception("plugin background task failed")
+            logger.exception("add-on background task failed")
 
     task = asyncio.ensure_future(logged())
     # A set, not a handle: a reload starts a second task while the first runs,
     # and shutdown must reach both.
-    app.state.plugin_tasks.add(task)
-    task.add_done_callback(app.state.plugin_tasks.discard)
+    app.state.addon_tasks.add(task)
+    task.add_done_callback(app.state.addon_tasks.discard)
     return task
 
 
@@ -545,21 +545,21 @@ async def auto_update_daily(app) -> None:
     weeks, and the check at start would be its only one."""
     while True:
         await asyncio.sleep(AUTO_UPDATE_EVERY_S)
-        await in_background(app, auto_update_plugins)
+        await in_background(app, auto_update_addons)
 
 
-async def collect_plugin_stores(st) -> list[str]:
-    """Delete each plugin store that none of these names: the lock, the
+async def collect_addon_stores(st) -> list[str]:
+    """Delete each add-on store that none of these names: the lock, the
     library this server has loaded, or the snapshot of a work item that has
     not ended (a paused or stopped one can still be retried onto it). A
     directory collection's store is the lock's, so it stays while installed.
-    Nothing is deleted while the lock cannot be read, while another plugin
+    Nothing is deleted while the lock cannot be read, while another add-on
     change is running, or when the store cannot be written.
 
     The database and the loaded library are read here, on the loop (`db.read`
     is not for another thread); the file work runs in a worker thread."""
-    from kraft.plugins import update as plugin_update
-    from kraft.plugins.config import PluginsLock
+    from kraft.addons import update as addon_update
+    from kraft.addons.config import AddonsLock
 
     ended = sorted(ENDED)
     rows = st.db.read(
@@ -570,26 +570,26 @@ async def collect_plugin_stores(st) -> list[str]:
             ended,
         ).fetchall()
     )
-    kept = {p.root.name for p in (st.library.plugins if st.library is not None else ())}
+    kept = {p.root.name for p in (st.library.addons if st.library is not None else ())}
     for stored in (snapshot for row in rows for snapshot in row if snapshot):
-        for pin in (json.loads(stored).get("plugins") or {}).values():
+        for pin in (json.loads(stored).get("addons") or {}).values():
             kept.add(str(pin["digest"]).removeprefix("sha256:"))
 
     def keep() -> set[str]:
         # Asked under the update lock: an install that just finished is in the lock.
-        locked = PluginsLock.load(st.templates_dir / PluginsLock.FILE).plugins.values()
+        locked = AddonsLock.load(st.templates_dir / AddonsLock.FILE).addons.values()
         return {entry.digest.removeprefix("sha256:") for entry in locked} | kept
 
     try:
-        return await _in_thread(st, plugins_load.gc, keep, st.run_dirs.plugins)
-    except (config_mod.ConfigError, plugin_update.Busy, OSError):
+        return await _in_thread(st, addons_load.gc, keep, st.run_dirs.addons)
+    except (config_mod.ConfigError, addon_update.Busy, OSError):
         return []
 
 
 def load_library(
     templates_dir: Path,
     skills_dir: Path | None = None,
-    plugins: tuple[plugins_load.InstalledPlugin, ...] = (),
+    addons: tuple[addons_load.InstalledAddon, ...] = (),
 ) -> tuple[TemplateLibrary | None, list[str]]:
     """The V1 template library for `templates_dir`, and why it is missing.
 
@@ -599,9 +599,7 @@ def load_library(
     for `None`; nothing falls back to the legacy loader.
     """
     try:
-        library = TemplateLibrary.from_yaml_dir(
-            templates_dir, skills_dir=skills_dir, plugins=plugins
-        )
+        library = TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir, addons=addons)
         return library, []
     except TemplateLibraryError as exc:
         logger.warning("template library unreadable: %s", exc)
@@ -678,12 +676,12 @@ def resolve_chain_or_422(st, chain_template: str | None):
     except TemplateLibraryError as exc:
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
-        for plugin in library.plugins:
-            # Not "unknown chain": its plugin is installed and its store is on the way back.
-            away = not plugin.quiet and not plugin.root.is_dir()
-            named = re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", f"{name} {exc}")
+        for addon in library.addons:
+            # Not "unknown chain": its add-on is installed and its store is on the way back.
+            away = not addon.quiet and not addon.root.is_dir()
+            named = re.search(rf"(?<![a-z0-9_-]){re.escape(addon.namespace)}:", f"{name} {exc}")
             if away and named:
-                raise HTTPException(503, f"plugin {plugin.id} is being restored; retry") from exc
+                raise HTTPException(503, f"add-on {addon.id} is being restored; retry") from exc
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 

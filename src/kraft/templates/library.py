@@ -28,8 +28,8 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
+from kraft.addons.load import InstalledAddon, qualify
 from kraft.config import bounded_yaml
-from kraft.plugins.load import InstalledPlugin, qualify
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import positions
 from kraft.templates.models import (
@@ -52,9 +52,9 @@ CHAINS_DIR = "chains"
 #: Every pre-V1 home was seeded with one, and V1 has no reader for it.
 LEGACY_REGISTRY = "registry.yaml"
 
-#: How many YAML nodes one plugin file may expand to (`config.bounded_yaml`):
+#: How many YAML nodes one add-on file may expand to (`config.bounded_yaml`):
 #: the same budget a repository's own config gets.
-PLUGIN_YAML_NODES = 20_000
+ADDON_YAML_NODES = 20_000
 
 
 def is_pre_v1(path: str | Path) -> bool:
@@ -87,14 +87,14 @@ class TemplateLibraryError(Exception):
         loc: tuple[object, ...] | None = None,
         related: tuple[Path, tuple[object, ...]] | None = None,
         errors: tuple[tuple[tuple[object, ...], str], ...] = (),
-        plugin_ref: bool = False,
+        addon_ref: bool = False,
     ) -> None:
         super().__init__(message)
         self.loc = loc
         self.related = related
         self.errors = errors
-        #: The failure is a reference into a plugin namespace that is not loaded.
-        self.plugin_ref = plugin_ref
+        #: The failure is a reference into an add-on namespace that is not loaded.
+        self.addon_ref = addon_ref
 
 
 @dataclass(frozen=True)
@@ -114,8 +114,8 @@ class TemplateIssue:
     mark: Position | None = None
     #: `TemplateLibraryError.errors`: every schema failure, when there were several.
     errors: tuple[tuple[tuple[object, ...], str], ...] = ()
-    #: `TemplateLibraryError.plugin_ref`.
-    plugin_ref: bool = False
+    #: `TemplateLibraryError.addon_ref`.
+    addon_ref: bool = False
 
     def __str__(self) -> str:
         return f"{self.chain or self.file}: {self.message}"
@@ -130,7 +130,7 @@ class TemplateIssue:
             related=getattr(exc, "related", None),
             mark=positions.yaml_mark(exc),
             errors=getattr(exc, "errors", ()),
-            plugin_ref=getattr(exc, "plugin_ref", False),
+            addon_ref=getattr(exc, "addon_ref", False),
         )
 
 
@@ -141,7 +141,7 @@ class LintReport:
 
     chains: tuple[str, ...]
     issues: tuple[TemplateIssue, ...]
-    #: Offline only: chains left unjudged because they reference a plugin.
+    #: Offline only: chains left unjudged because they reference an add-on.
     unchecked: tuple[TemplateIssue, ...] = ()
 
     @property
@@ -208,11 +208,11 @@ def _merge(parent: object, child: object) -> object:
 
 
 def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
-    """One YAML file as a mapping. `bounded` for a file a plugin's author
+    """One YAML file as a mapping. `bounded` for a file an add-on's author
     wrote: alias expansion is budgeted, where the operator's own file is not."""
     try:
         text = path.read_text()
-        data = bounded_yaml(text, [PLUGIN_YAML_NODES]) if bounded else yaml.safe_load(text)
+        data = bounded_yaml(text, [ADDON_YAML_NODES]) if bounded else yaml.safe_load(text)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
     if data is None:
@@ -223,12 +223,12 @@ def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
 
 
 def _refuse_qualified(path: Path, what: str, name: object) -> None:
-    """A declaration is bare, in local files and in a plugin's own: `:` only
-    ever appears in a reference to a plugin's declaration."""
+    """A declaration is bare, in local files and in an add-on's own: `:` only
+    ever appears in a reference to an add-on's declaration."""
     if ":" in str(name):
         raise TemplateLibraryError(
-            f"{path}: {what} {name!r}: a name is declared bare; '<plugin>:<name>' is how a "
-            "plugin's declaration is referenced"
+            f"{path}: {what} {name!r}: a name is declared bare; '<addon>:<name>' is how a "
+            "add-on's declaration is referenced"
         )
 
 
@@ -272,7 +272,7 @@ class TemplateLibrary:
         chains: Mapping[str, RawComponent],
         steering: dict[str, SteeringProfile],
         skills_dir: Path | None = None,
-        plugins: Sequence[InstalledPlugin] = (),
+        addons: Sequence[InstalledAddon] = (),
         library_path: Path | None = None,
     ) -> None:
         self._components = components
@@ -284,18 +284,18 @@ class TemplateLibrary:
         #: Where an operator may overlay a method file (`kraft.skill`); `None`
         #: means the bundled methods only.
         self.skills_dir = skills_dir
-        #: The installed plugins whose declarations sit in the maps above under
+        #: The installed add-ons whose declarations sit in the maps above under
         #: `<namespace>:<name>`.
-        self.plugins = tuple(plugins)
+        self.addons = tuple(addons)
         #: Namespace to store directory, for `skill.validate`.
-        #: None for a plugin that is known but not loaded: a reference into it
+        #: None for an add-on that is known but not loaded: a reference into it
         #: is refused, never handed to the agent as another tool's skill.
-        self.plugin_dirs: dict[str, Path | None] = {}
-        for plugin in self.plugins:
-            if plugin.left_out is None:
-                self.plugin_dirs[plugin.namespace] = plugin.root
+        self.addon_dirs: dict[str, Path | None] = {}
+        for addon in self.addons:
+            if addon.left_out is None:
+                self.addon_dirs[addon.namespace] = addon.root
             else:
-                self.plugin_dirs.setdefault(plugin.namespace, None)
+                self.addon_dirs.setdefault(addon.namespace, None)
 
     @classmethod
     def from_yaml_dir(
@@ -304,7 +304,7 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         issues: list[TemplateIssue] | None = None,
-        plugins: Sequence[InstalledPlugin] = (),
+        addons: Sequence[InstalledAddon] = (),
     ) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
@@ -331,7 +331,7 @@ class TemplateLibrary:
             (),
             library_path=library_path,
             skills_dir=skills_dir,
-            plugins=plugins,
+            addons=addons,
         )
         for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
             try:
@@ -350,7 +350,7 @@ class TemplateLibrary:
         *,
         library_path: Path,
         skills_dir: Path | None = None,
-        plugins: Sequence[InstalledPlugin] = (),
+        addons: Sequence[InstalledAddon] = (),
     ) -> TemplateLibrary:
         """A library from already-parsed mappings: `library` is `library.yaml`'s
         content and each chain is paired with the file it is named after --
@@ -369,37 +369,37 @@ class TemplateLibrary:
             for name, body in _section(library_path, library, Namespace.STEERING).items()
         }
 
-        built = cls(components, {}, steering, skills_dir, plugins, library_path)
-        for plugin in plugins:
-            if plugin.left_out is None:
-                built._add_plugin(plugin)
+        built = cls(components, {}, steering, skills_dir, addons, library_path)
+        for addon in addons:
+            if addon.left_out is None:
+                built._add_addon(addon)
         for chain_path, body in chains:
             built._add_chain(chain_path, body)
         return built
 
-    def _add_plugin(self, plugin: InstalledPlugin) -> None:
-        """One plugin's `library.yaml` and `chains/`, under its namespace. Its
-        own references are qualified first (`plugins.load.qualify`), so the
+    def _add_addon(self, addon: InstalledAddon) -> None:
+        """One add-on's `library.yaml` and `chains/`, under its namespace. Its
+        own references are qualified first (`addons.load.qualify`), so the
         resolver only ever sees qualified names. Every `ComponentSource` is the
-        file in the plugin's store: that is the file an error names."""
-        library_path = plugin.root / LIBRARY_FILE
+        file in the add-on's store: that is the file an error names."""
+        library_path = addon.root / LIBRARY_FILE
         library = (
-            qualify(_read(library_path, bounded=True), plugin) if library_path.is_file() else {}
+            qualify(_read(library_path, bounded=True), addon) if library_path.is_file() else {}
         )
         assert isinstance(library, Mapping)
         for namespace in _EXTENDABLE:
             for name, body in _section(library_path, library, namespace).items():
-                self._components[namespace][f"{plugin.namespace}:{name}"] = RawComponent(
+                self._components[namespace][f"{addon.namespace}:{name}"] = RawComponent(
                     body, ComponentSource(library_path, namespace, name)
                 )
         for name, body in _section(library_path, library, Namespace.STEERING).items():
-            self.steering[f"{plugin.namespace}:{name}"] = _steering_profile(
+            self.steering[f"{addon.namespace}:{name}"] = _steering_profile(
                 body, ComponentSource(library_path, Namespace.STEERING, name)
             )
-        for chain_path in sorted((plugin.root / CHAINS_DIR).glob("*.yaml")):
-            body = qualify(_read(chain_path, bounded=True), plugin)
+        for chain_path in sorted((addon.root / CHAINS_DIR).glob("*.yaml")):
+            body = qualify(_read(chain_path, bounded=True), addon)
             assert isinstance(body, Mapping)
-            self._add_chain(chain_path, body, plugin=plugin)
+            self._add_chain(chain_path, body, addon=addon)
 
     def with_library(self, library: Mapping[str, object], library_path: Path) -> TemplateLibrary:
         """This library's chains against a replacement `library.yaml` content:
@@ -407,28 +407,28 @@ class TemplateLibrary:
         changed."""
         return TemplateLibrary.from_mappings(
             library,
-            # A plugin's chains come back with its layer, not as local chains.
+            # An add-on's chains come back with its layer, not as local chains.
             [(raw.source.file, raw.data) for id, raw in self._chains.items() if ":" not in id],
             library_path=library_path,
             skills_dir=self.skills_dir,
-            plugins=self.plugins,
+            addons=self.addons,
         )
 
-    def plugin_of(self, name: str) -> InstalledPlugin | None:
-        """The loaded plugin a qualified chain or component name comes from
+    def addon_of(self, name: str) -> InstalledAddon | None:
+        """The loaded add-on a qualified chain or component name comes from
         (`release:ship`, or the `release:base` of `tasks.release:base`); None
-        for a local name. A plugin's declarations are read-only."""
+        for a local name. An add-on's declarations are read-only."""
         qualifier, colon, _ = name.rpartition(".")[2].partition(":")
         if not colon:
             return None
         return next(
-            (p for p in self.plugins if p.left_out is None and p.namespace == qualifier), None
+            (p for p in self.addons if p.left_out is None and p.namespace == qualifier), None
         )
 
-    def with_plugins(self, plugins: Sequence[InstalledPlugin]) -> TemplateLibrary:
-        """This library's own components and chains with `plugins` in place of
-        the plugins it was built with: what a work item that pinned other
-        versions resolves against (`plugins.load.for_item`). `self` is not
+    def with_addons(self, addons: Sequence[InstalledAddon]) -> TemplateLibrary:
+        """This library's own components and chains with `addons` in place of
+        the add-ons it was built with: what a work item that pinned other
+        versions resolves against (`addons.load.for_item`). `self` is not
         changed."""
         built = TemplateLibrary(
             {
@@ -438,12 +438,12 @@ class TemplateLibrary:
             {id: raw for id, raw in self._chains.items() if ":" not in id},
             {name: profile for name, profile in self.steering.items() if ":" not in name},
             self.skills_dir,
-            plugins,
+            addons,
             self.library_path,
         )
-        for plugin in plugins:
-            if plugin.left_out is None:
-                built._add_plugin(plugin)
+        for addon in addons:
+            if addon.left_out is None:
+                built._add_addon(addon)
         return built
 
     def with_chain(
@@ -457,7 +457,7 @@ class TemplateLibrary:
             self._chains,
             self.steering,
             self.skills_dir,
-            self.plugins,
+            self.addons,
             self.library_path,
         )
         candidate._chains.pop(_chain_id(chain_path, body), None)
@@ -468,12 +468,12 @@ class TemplateLibrary:
         chain_path: Path,
         body: Mapping[str, object],
         *,
-        plugin: InstalledPlugin | None = None,
+        addon: InstalledAddon | None = None,
     ) -> str:
         id = _chain_id(chain_path, body)
         _refuse_qualified(chain_path, "chain id", id)
-        if plugin is not None:
-            id = f"{plugin.namespace}:{id}"
+        if addon is not None:
+            id = f"{addon.namespace}:{id}"
         if id in self._chains:
             # One selectable chain per file: two files claiming one id would
             # otherwise make the loser's chain vanish from `chain_ids`.
@@ -538,35 +538,35 @@ class TemplateLibrary:
         *,
         skills_dir: Path | None = None,
         instance_policy: InstancePolicy | None = None,
-        plugins: Sequence[InstalledPlugin] | None = (),
+        addons: Sequence[InstalledAddon] | None = (),
     ) -> LintReport:
         """Everything wrong with the template directory at `path` -- every
         chain file that does not parse and every chain that does not resolve,
         or the one `library.yaml` failure that leaves nothing to resolve
         against (`template-lint-reports-library-validity`). Reads; never writes.
-        `plugins=None` is the offline lint: chains that reference a plugin
+        `addons=None` is the offline lint: chains that reference an add-on
         namespace are returned as `unchecked`."""
         root = Path(path)
         issues: list[TemplateIssue] = []
         try:
             library = cls.from_yaml_dir(
-                root, skills_dir=skills_dir, issues=issues, plugins=plugins or ()
+                root, skills_dir=skills_dir, issues=issues, addons=addons or ()
             )
         except TemplateLibraryError as exc:
             return LintReport(
                 chains=(), issues=(TemplateIssue.from_error(root / LIBRARY_FILE, None, exc),)
             )
         issues += library.lint(instance_policy)
-        # `None` is the offline lint (`--dir`): no plugins are known, so a
-        # reference into a plugin namespace is unjudged, not wrong.
-        unchecked = [i for i in issues if i.plugin_ref] if plugins is None else []
+        # `None` is the offline lint (`--dir`): no add-ons are known, so a
+        # reference into an add-on namespace is unjudged, not wrong.
+        unchecked = [i for i in issues if i.addon_ref] if addons is None else []
         issues = [i for i in issues if i not in unchecked]
         failed = {issue.chain for issue in (*issues, *unchecked)}
         return LintReport(
             chains=tuple(id for id in library.chain_ids if id not in failed),
             issues=tuple(issues),
             unchecked=tuple(
-                replace(i, message=f"{i.message}: not checked (plugin)") for i in unchecked
+                replace(i, message=f"{i.message}: not checked (add-on)") for i in unchecked
             ),
         )
 
@@ -648,11 +648,11 @@ class TemplateLibrary:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}",
                             **resolution.path_location(task.path),
-                            plugin_ref=":" in name,
+                            addon_ref=":" in name,
                         )
                 # A skill that names no method is refused here, where lint and
                 # intake see it, never discovered by an agent at launch
-                # (Kraft-vhcop). A loaded Kraft plugin's skill is looked up in
+                # (Kraft-vhcop). A loaded Kraft add-on's skill is looked up in
                 # its store; another tool's cannot be, and `skill.UNAVAILABLE`
                 # has the agent stop on it.
                 selected = getattr(task.task, "skill", None)
@@ -662,7 +662,7 @@ class TemplateLibrary:
                             self.skills_dir,
                             selected,
                             where=task.path,
-                            plugin_dirs=self.plugin_dirs,
+                            addon_dirs=self.addon_dirs,
                         )
                     except _skill.SkillError as exc:
                         raise TemplateLibraryError(
@@ -680,14 +680,14 @@ class TemplateLibrary:
                 for task in node.tasks()
                 for name in task.task.steering
             },
-            plugins=self._pins(id, resolved),
+            addons=self._pins(id, resolved),
         )
 
     def _fallback_profiles(self, chain: object) -> list[str]:
         """The agent profiles named only by the `fallback:` list of a local
         profile `chain` selects, and of those in turn. A `profile:` is read
-        live from `harnesses.yaml` at launch, so a plugin profile reached only
-        through such a list is read from the plugin and must be pinned too. An
+        live from `harnesses.yaml` at launch, so an add-on profile reached only
+        through such a list is read from the add-on and must be pinned too. An
         unreadable or missing file adds nothing: the launch reports it."""
         if self.library_path is None:
             return []
@@ -710,7 +710,7 @@ class TemplateLibrary:
         return reached
 
     def _pins(self, id: str, resolved: ResolvedChain) -> dict[str, dict[str, str | None]]:
-        """The loaded plugins chain `id` reads anything from: the chain itself,
+        """The loaded add-ons chain `id` reads anything from: the chain itself,
         a component it extends or selects, or a skill or agent profile one of
         its tasks names."""
         data = resolved.chain.model_dump(mode="json")
@@ -723,10 +723,10 @@ class TemplateLibrary:
             ]
         )
         return {
-            plugin.namespace: plugin.pin
-            for plugin in self.plugins
-            if plugin.left_out is None
-            and re.search(rf"(?<![a-z0-9_-]){re.escape(plugin.namespace)}:", named)
+            addon.namespace: addon.pin
+            for addon in self.addons
+            if addon.left_out is None
+            and re.search(rf"(?<![a-z0-9_-]){re.escape(addon.namespace)}:", named)
         }
 
 
@@ -1038,7 +1038,7 @@ class _Resolution:
         raise TemplateLibraryError(
             f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
             loc=(*loc, "extends"),
-            plugin_ref=":" in name,
+            addon_ref=":" in name,
         )
 
     def _reject_kind_change(

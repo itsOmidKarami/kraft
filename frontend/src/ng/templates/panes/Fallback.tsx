@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { useContext } from "react";
-import { ReadOnly } from "../plugin";
+import { ReadOnly } from "../addon";
 import { Kv, type Option } from "./controls";
 
 /** One `fallback:` entry (`FallbackEntry`): an optional harness plus one route,

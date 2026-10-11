@@ -26,8 +26,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+from support.addons import drop_store, install_release, pinned_chain
 from support.harness import entry_of, fake_harness_home, write_agent_profiles
-from support.plugins import drop_store, install_release, pinned_chain
 
 from kraft import events, executor, gate_review
 from kraft.adapters import agent as agent_mod
@@ -336,7 +336,7 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
 
 
 async def test_the_profile_fallback_check_reads_restored_pins(item_on, repo, tmp_path, monkeypatch):
-    """The item pinned a plugin whose profile carries the list, and its store
+    """The item pinned an add-on whose profile carries the list, and its store
     is gone: the check restores it first, or it reads a table without it and
     lets a reviewer launch that has no loop to walk the list."""
     fake_harness_home(tmp_path, ["true"])

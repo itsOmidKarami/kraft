@@ -33,7 +33,7 @@ from pydantic import (
 from kraft.harness import Harness
 
 if TYPE_CHECKING:
-    from kraft.plugins.load import InstalledPlugin
+    from kraft.addons.load import InstalledAddon
 
 #: One identifier rule for both sides of every reference: the harness-profile
 #: id an `AgentTask.harness` names, the repository id a workspace member
@@ -45,7 +45,7 @@ _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
 
-#: A reference that may name a plugin's declaration: `ship` or `release:ship`.
+#: A reference that may name an add-on's declaration: `ship` or `release:ship`.
 #: What a file declares stays `Identifier`; only references take this.
 _QUALIFIED = re.compile(r"^([a-z][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$")
 
@@ -471,7 +471,7 @@ class AgentProfile:
         harnesses: Mapping[str, Harness],
         qualified: bool = False,
     ) -> AgentProfile:
-        # A local profile id is bare; only a plugin's arrives qualified.
+        # A local profile id is bare; only an add-on's arrives qualified.
         rule = _QUALIFIED if qualified else _IDENTIFIER
         if not rule.match(id):
             raise TemplateEnvironmentError(
@@ -553,7 +553,7 @@ def _agent_profiles(
     namespace: str | None = None,
 ) -> dict[str, AgentProfile]:
     """One file's `profiles:` section as agent profiles; under `namespace:` for
-    a plugin's."""
+    an add-on's."""
     found: dict[str, AgentProfile] = {}
     for name, body in section.items():
         id = f"{namespace}:{name}" if namespace else name
@@ -569,24 +569,24 @@ def _agent_profiles(
     return found
 
 
-def _plugin_profiles(
-    plugin: InstalledPlugin, harnesses: Mapping[str, Harness]
+def _addon_profiles(
+    addon: InstalledAddon, harnesses: Mapping[str, Harness]
 ) -> dict[str, AgentProfile]:
-    """A plugin's `profiles.yaml`, under its namespace. Only its `profiles:`
-    section is read: a plugin never chooses an executable, so a `harnesses:`
+    """An add-on's `profiles.yaml`, under its namespace. Only its `profiles:`
+    section is read: an add-on never chooses an executable, so a `harnesses:`
     section in it has no reader here."""
     # Imported here: `kraft.config` imports this module.
+    from kraft.addons.load import qualify
     from kraft.config import bounded_yaml
-    from kraft.plugins.load import qualify
 
-    path = plugin.root / "profiles.yaml"
+    path = addon.root / "profiles.yaml"
     if not path.is_file():
         return {}
     try:
-        data = qualify(bounded_yaml(path.read_text(), [20_000]), plugin)
+        data = qualify(bounded_yaml(path.read_text(), [20_000]), addon)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
-    return _agent_profiles(_section(data, "profiles", path), path, harnesses, plugin.namespace)
+    return _agent_profiles(_section(data, "profiles", path), path, harnesses, addon.namespace)
 
 
 @dataclass(frozen=True)
@@ -605,7 +605,7 @@ class HarnessProfileTable:
         path: str | Path,
         *,
         harnesses: Mapping[str, Harness],
-        plugins: Sequence[InstalledPlugin] = (),
+        addons: Sequence[InstalledAddon] = (),
     ) -> HarnessProfileTable:
         """Read `harnesses:` from `path` and validate each profile against the
         provider it names.
@@ -621,7 +621,7 @@ class HarnessProfileTable:
             data = yaml.safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError) as exc:
             raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
-        return cls.from_mapping(data, path, harnesses=harnesses, plugins=plugins)
+        return cls.from_mapping(data, path, harnesses=harnesses, addons=addons)
 
     @classmethod
     def from_mapping(
@@ -630,7 +630,7 @@ class HarnessProfileTable:
         path: str | Path,
         *,
         harnesses: Mapping[str, Harness],
-        plugins: Sequence[InstalledPlugin] = (),
+        addons: Sequence[InstalledAddon] = (),
     ) -> HarnessProfileTable:
         """`from_yaml` for a file's already-parsed content -- a candidate the
         Harnesses screen would save as `path` -- so a save is checked by the
@@ -655,9 +655,9 @@ class HarnessProfileTable:
             except TemplateEnvironmentError as exc:
                 raise TemplateEnvironmentError(f"{path}: {exc}") from exc
         agent_profiles = _agent_profiles(_section(data, "profiles", path), path, harnesses)
-        for plugin in plugins:
-            if plugin.left_out is None:
-                agent_profiles |= _plugin_profiles(plugin, harnesses)
+        for addon in addons:
+            if addon.left_out is None:
+                agent_profiles |= _addon_profiles(addon, harnesses)
         for p in agent_profiles.values():
             for n, entry in enumerate(p.fallback):
                 if entry.profile is not None and entry.profile not in agent_profiles:

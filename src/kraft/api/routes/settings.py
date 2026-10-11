@@ -53,7 +53,7 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     listed = {
         "id": id,
         "description": description if isinstance(description, str) else None,
-        "plugin": catalogue.plugin_view(library, id),
+        "addon": catalogue.addon_view(library, id),
     }
     try:
         nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
@@ -187,7 +187,7 @@ async def lint_templates(request: Request):
         st.templates_dir,
         skills_dir=st.skills_dir,
         instance_policy=getattr(st, "instance_policy", None),
-        plugins=deps.installed_plugins(st),
+        addons=deps.installed_addons(st),
     )
 
 
@@ -314,7 +314,7 @@ async def resolve_templates(body: ResolveBody, request: Request):
                 [(_unsaved_chain_path(c, i), c) for i, c in enumerate(body.chains)],
                 library_path=_UNSAVED / LIBRARY_FILE,
                 skills_dir=st.skills_dir,
-                plugins=getattr(st.library, "plugins", ()),
+                addons=getattr(st.library, "addons", ()),
             )
             ids = list(library.chain_ids)
     except TemplateLibraryError as exc:
@@ -367,7 +367,7 @@ async def get_template(tid: str, request: Request):
         "file": str(path),
         "text": text,
         "chain": yaml.safe_load(text) or {},
-        "plugin": catalogue.plugin_view(library, tid),
+        "addon": catalogue.addon_view(library, tid),
     }
 
 
@@ -426,8 +426,8 @@ async def parse_template_yaml(body: ParseBody):
 
 
 class ReloadBody(BaseModel):
-    #: The plugin files alone (`apply.PLUGIN_FILES`): what a plugin verb asks for.
-    only: list[Literal["plugins.yaml", "plugins.lock"]] | None = None
+    #: The add-on files alone (`apply.ADDON_FILES`): what an add-on verb asks for.
+    only: list[Literal["addons.yaml", "addons.lock"]] | None = None
 
 
 # Refusing a policy that does not validate: Kraft-m86uq.

@@ -280,11 +280,11 @@ def revise(
         skipped.add(skip.node)
     after: dict[str, list] = {}
     steering = chain.chain.steering
-    plugins = chain.chain.plugins
+    addons = chain.chain.addons
     if changes.add:
-        added, added_steering, added_plugins = _added_nodes(changes.add, _pinned(library, chain))
-        # A plugin the item had not touched yet is pinned now, at the lock's version.
-        plugins = {**(added_plugins or {}), **(plugins or {})} or None
+        added, added_steering, added_addons = _added_nodes(changes.add, _pinned(library, chain))
+        # An add-on the item had not touched yet is pinned now, at the lock's version.
+        addons = {**(added_addons or {}), **(addons or {})} or None
         for add, node in zip(changes.add, added, strict=True):
             # Right after the revision's own gate is the earliest a node can run.
             if add.after not in ids:
@@ -317,7 +317,7 @@ def revise(
         raise RevisionError(f"the revised chain does not validate: {first_error(exc)}") from exc
     revised = replace(
         chain,
-        chain=ResolvedChain.from_chain(authored, steering=steering, plugins=plugins),
+        chain=ResolvedChain.from_chain(authored, steering=steering, addons=addons),
     )
     for path, override in changes.overrides.items():
         open_node(revised.chain.nodes, path.split(PATH_SEPARATOR)[0], f"override {path}")
@@ -341,7 +341,7 @@ def revise(
         whole = replace(
             chain,
             chain=ResolvedChain.from_chain(
-                chain.untrimmed, steering=chain.chain.steering, plugins=chain.chain.plugins
+                chain.untrimmed, steering=chain.chain.steering, addons=chain.chain.addons
             ),
             untrimmed=None,
         )
@@ -374,14 +374,14 @@ def _lands(node: ResolvedNode) -> bool:
 
 
 def _pinned(library: TemplateLibrary | None, chain: MaterializedChain) -> TemplateLibrary | None:
-    """`library` as this item reads it: the plugin versions its snapshot
+    """`library` as this item reads it: the add-on versions its snapshot
     pinned in place of the lock's, so an added node resolves against what the
-    item runs on. A plugin it has not touched yet is taken from the lock."""
-    if library is None or not chain.chain.plugins:
+    item runs on. An add-on it has not touched yet is taken from the lock."""
+    if library is None or not chain.chain.addons:
         return library
-    from kraft.plugins import load
+    from kraft.addons import load
 
-    return library.with_plugins(load.for_item(chain.chain.plugins))
+    return library.with_addons(load.for_item(chain.chain.addons))
 
 
 def _added_nodes(
@@ -400,7 +400,7 @@ def _added_nodes(
         resolved = candidate.resolve_chain(id)
     except TemplateLibraryError as exc:
         raise RevisionError(f"add: {exc}") from exc
-    return [n.node for n in resolved.nodes], resolved.steering, resolved.plugins
+    return [n.node for n in resolved.nodes], resolved.steering, resolved.addons
 
 
 def _fields(node: ResolvedNode) -> dict[str, dict]:

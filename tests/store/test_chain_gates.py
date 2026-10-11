@@ -402,21 +402,21 @@ NEW = {"id": "release@acme", "version": "1.5.0"}
 @pytest.mark.parametrize(
     "snapshot, run, payload",
     [
-        ({"plugins": {"release": OLD}}, None, None),
+        ({"addons": {"release": OLD}}, None, None),
         (
-            {"plugins": {"release": OLD}},
-            {"plugins": {"release": NEW}},
-            {"plugins": {"release": NEW}},
+            {"addons": {"release": OLD}},
+            {"addons": {"release": NEW}},
+            {"addons": {"release": NEW}},
         ),
         ({}, None, {}),
         (None, None, {}),
     ],
-    ids=["pinned-plugins", "run-chain-wins", "no-plugins", "no-snapshot"],
+    ids=["pinned-addons", "run-chain-wins", "no-addons", "no-snapshot"],
 )
-async def test_chain_loaded_records_the_plugin_versions_the_item_runs_on(
+async def test_chain_loaded_records_the_addon_versions_the_item_runs_on(
     database, snapshot, run, payload
 ):
-    """The item's history shows which plugin versions it ran: a retried item's
+    """The item's history shows which add-on versions it ran: a retried item's
     `run_chain` is the one it runs on."""
     await mk_item(database)
     stored = None if snapshot is None else json.dumps(snapshot)

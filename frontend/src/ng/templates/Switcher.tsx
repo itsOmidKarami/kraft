@@ -7,16 +7,16 @@ import { listDrafts } from "./draft/draftApi";
 import { focusSoon } from "./menus/focus";
 import { IdRow } from "./menus/IdRow";
 import { isOpen } from "../board/counts";
-import type { Plugin } from "../../types";
-import { PluginBadge } from "./plugin";
+import type { Addon } from "../../types";
+import { AddonBadge } from "./addon";
 
-type Row = { id: string; nodes: number; open: number; draft: boolean; plugin?: Plugin | null };
+type Row = { id: string; nodes: number; open: number; draft: boolean; addon?: Addon | null };
 export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: string } | { kind: "dup"; id: string };
 
 /** The chain crumb, and the switcher it opens (Decisions §9 Chain switcher):
  *  search, every chain with its size and open items, ✓ on the current one,
  *  an amber dot on one with a draft; then New chain and Duplicate, which turn
- *  the menu into the id step. No Delete here. A plugin's chain (`copy`) is
+ *  the menu into the id step. No Delete here. An add-on's chain (`copy`) is
  *  duplicated as "Copy to my library", from the page's own button. */
 export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: string; renamedTo?: string; onGo: (to: SwitchTo) => void; startDup?: number; copy?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -46,7 +46,7 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: st
         nodes: chains.find((c) => c.id === id)?.nodes.length ?? 0,
         open: all.filter((w) => w.chain_template === id && isOpen(w)).length,
         draft: drafted.has(id),
-        plugin: chains.find((c) => c.id === id)?.plugin,
+        addon: chains.find((c) => c.id === id)?.addon,
       })));
     }).catch(() => setRows([]));
     if (stage === "list") focusSoon(search.current);
@@ -87,7 +87,7 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: st
                 <button key={r.id} ref={(el) => void (refs.current[k] = el)} type="button" role="option" aria-selected={r.id === chain} className="menu-item sw-row" onKeyDown={(e) => move(e, k)} onClick={() => go({ kind: "switch", id: r.id })}>
                   <span className="sw-check" aria-hidden="true">{r.id === chain && <Check size={12} />}</span>
                   <span className="sw-main"><span className="picklist-name">{r.id}</span><span className="picklist-sub">{r.nodes} nodes · {r.open} open</span></span>
-                  {r.plugin && <PluginBadge plugin={r.plugin} />}
+                  {r.addon && <AddonBadge addon={r.addon} />}
                   {r.draft && <span className="sw-dot" aria-label="unpublished draft" />}
                 </button>
               ))}
@@ -102,7 +102,7 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: st
             <p className="menu-title">{stage === "dup" ? dupTitle : "New chain id"}</p>
             <IdRow
               label={stage === "dup" ? "Duplicate id" : "New chain id"}
-              // A plugin's chain id is `<namespace>:<name>`; the copy is the operator's own, so it starts from the bare name.
+              // An add-on's chain id is `<namespace>:<name>`; the copy is the operator's own, so it starts from the bare name.
               initial={stage === "dup" ? (copy ? chain.split(":").pop()! : `${chain}_copy`) : ""}
               taken={(rows ?? []).map((r) => r.id)}
               go={stage === "dup" ? (copy ? "Copy →" : "Duplicate →") : "Create →"}

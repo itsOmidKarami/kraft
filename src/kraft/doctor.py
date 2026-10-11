@@ -22,6 +22,7 @@ import yaml
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
 from kraft import policy as policy_mod
 from kraft.adapters import forge
+from kraft.addons import load as addons_load
 from kraft.api import config_check
 from kraft.executor import fallback
 from kraft.paths import (
@@ -34,7 +35,6 @@ from kraft.paths import (
     linked_advice,
     linked_pre_2_config_dir,
 )
-from kraft.plugins import load as plugins_load
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
@@ -256,8 +256,8 @@ def _config_checks() -> list[dict]:
             _check("capabilities", True, "skipped: no config dir", skipped=True),
             _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _check("notify.yaml", True, "skipped: no config dir", skipped=True),
-            _check("plugins", True, "skipped: no config dir", skipped=True),
-            _check("plugin updates", True, "skipped: no config dir", skipped=True),
+            _check("add-ons", True, "skipped: no config dir", skipped=True),
+            _check("add-on updates", True, "skipped: no config dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -296,7 +296,7 @@ def _config_checks() -> list[dict]:
     checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
-    checks += _plugin_checks(templates)
+    checks += _addon_checks(templates)
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
@@ -509,55 +509,53 @@ def _chains_check(templates: Path) -> dict:
     not resolve otherwise only shows up as the next intake on it failing."""
     skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
     report = TemplateLibrary.lint_dir(
-        templates, skills_dir=skills, plugins=plugins_load.installed(templates)
+        templates, skills_dir=skills, addons=addons_load.installed(templates)
     )
     if report.valid:
         return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
     return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
 
 
-def _plugin_checks(templates: Path) -> list[dict]:
-    """The installed plugins as the files say, with no server running: what
+def _addon_checks(templates: Path) -> list[dict]:
+    """The installed add-ons as the files say, with no server running: what
     does not load and why, what waits for a person, and each auto-updating
-    plugin's last outcome."""
-    from kraft.plugins import fetch
-    from kraft.plugins import update as plugin_update
-    from kraft.plugins.config import PluginsConfig, PluginsLock
+    add-on's last outcome."""
+    from kraft.addons import fetch
+    from kraft.addons import update as addon_update
+    from kraft.addons.config import AddonsConfig, AddonsLock
 
-    if why := plugins_load.config_problem(templates):
+    if why := addons_load.config_problem(templates):
         return [
-            _check("plugins", False, why),
-            _check("plugin updates", True, "skipped: the plugin files do not read", skipped=True),
+            _check("add-ons", False, why),
+            _check("add-on updates", True, "skipped: the add-on files do not read", skipped=True),
         ]
-    root = plugins_load.plugins_dir()
-    listed = PluginsConfig.load(templates / PluginsConfig.FILE)
-    lock = PluginsLock.load(templates / PluginsLock.FILE)
-    found = plugins_load.installed(templates, root, verify=True)
+    root = addons_load.addons_dir()
+    listed = AddonsConfig.load(templates / AddonsConfig.FILE)
+    lock = AddonsLock.load(templates / AddonsLock.FILE)
+    found = addons_load.installed(templates, root, verify=True)
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
     notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
     auto = []
-    for plugin_id, locked in lock.plugins.items():
-        if plugin_id not in listed.plugins:
+    for addon_id, locked in lock.addons.items():
+        if addon_id not in listed.addons:
             continue
-        name = plugin_id.split("@", 1)[1]
+        name = addon_id.split("@", 1)[1]
         collection = listed.collections[name]
-        if listed.namespace(plugin_id) != locked.namespace:
-            notes.append(f"{plugin_id}: alias change pending; run kraft admin plugin update")
+        if listed.namespace(addon_id) != locked.namespace:
+            notes.append(f"{addon_id}: alias change pending; run kraft admin addon update")
         if collection.ref != locked.ref:
-            notes.append(f"{plugin_id}: ref change pending; run kraft admin plugin update")
-        if plugin_update._moved(collection, locked):
-            notes.append(
-                f"{plugin_id}: collection URL change pending; run kraft admin plugin update"
-            )
-        if collection.auto_update or listed.entry(plugin_id).auto_update:
-            auto.append(plugin_id)
+            notes.append(f"{addon_id}: ref change pending; run kraft admin addon update")
+        if addon_update._moved(collection, locked):
+            notes.append(f"{addon_id}: collection URL change pending; run kraft admin addon update")
+        if collection.auto_update or listed.entry(addon_id).auto_update:
+            auto.append(addon_id)
         if collection.git is not None and locked.commit is not None:
             mirror = fetch.mirror_path(root, name, collection.git)
             try:
                 fetch._git("cat-file", "-e", f"{locked.commit}^{{commit}}", git_dir=mirror)
             except (fetch.FetchError, OSError):
                 notes.append(
-                    f"{plugin_id}: locked commit {locked.commit[:12]} is not in the local "
+                    f"{addon_id}: locked commit {locked.commit[:12]} is not in the local "
                     "mirror; a restore would have to fetch it"
                 )
     notes += [
@@ -567,16 +565,16 @@ def _plugin_checks(templates: Path) -> list[dict]:
         if collection.path is not None
     ]
     if broken:
-        plugins = _check("plugins", False, "; ".join(broken + notes))
+        addons = _check("add-ons", False, "; ".join(broken + notes))
     elif notes:
-        plugins = _check("plugins", True, "; ".join(notes), warn=True)
+        addons = _check("add-ons", True, "; ".join(notes), warn=True)
     else:
         loaded = sum(1 for p in found if p.left_out is None)
-        plugins = _check("plugins", True, f"{loaded} plugin(s) load")
+        addons = _check("add-ons", True, f"{loaded} add-on(s) load")
 
-    status = plugin_update.read_status(root)
+    status = addon_update.read_status(root)
     waiting = [
-        f"{plugin_id}: {entry.get('outcome')}"
+        f"{addon_id}: {entry.get('outcome')}"
         + (f" ({entry['kind']})" if entry.get("kind") else "")
         + (f": {entry['message']}" if entry.get("message") else "")
         + (
@@ -585,8 +583,8 @@ def _plugin_checks(templates: Path) -> list[dict]:
             if entry.get("kind") == "auth"
             else ""
         )
-        for plugin_id, entry in status.items()
-        if plugin_id in auto and entry.get("outcome") in ("held", "failed")
+        for addon_id, entry in status.items()
+        if addon_id in auto and entry.get("outcome") in ("held", "failed")
     ]
     try:
         policy = config.read_yaml(templates / "policy.yaml")
@@ -601,10 +599,10 @@ def _plugin_checks(templates: Path) -> list[dict]:
             "or maxima: in policy.yaml: an update can change what a run does unattended"
         )
     if waiting:
-        updates = _check("plugin updates", True, "; ".join(waiting), warn=True)
+        updates = _check("add-on updates", True, "; ".join(waiting), warn=True)
     else:
-        updates = _check("plugin updates", True, f"{len(auto)} plugin(s) auto-update")
-    return [plugins, updates]
+        updates = _check("add-on updates", True, f"{len(auto)} add-on(s) auto-update")
+    return [addons, updates]
 
 
 def _capabilities_check() -> dict:
@@ -673,7 +671,7 @@ def _agent_checks() -> list[dict]:
         table = HarnessProfileTable.from_yaml(
             live / "harnesses.yaml",
             harnesses=harnesses.valid,
-            plugins=plugins_load.installed(live),
+            addons=addons_load.installed(live),
         )
     except TemplateEnvironmentError as exc:
         detail = (
@@ -812,7 +810,7 @@ def _resolved_chains(live: Path) -> list:
     """Every chain of the live library that resolves; `[]` when the library
     itself does not load."""
     try:
-        library = TemplateLibrary.from_yaml_dir(live, plugins=plugins_load.installed(live))
+        library = TemplateLibrary.from_yaml_dir(live, addons=addons_load.installed(live))
     except TemplateLibraryError:
         return []
     chains = []
@@ -960,7 +958,7 @@ def _launches_direct_asker(entries: list[config.RepoEntry]) -> bool:
         table = HarnessProfileTable.from_yaml(
             live / "harnesses.yaml",
             harnesses=harnesses.valid,
-            plugins=plugins_load.installed(live),
+            addons=addons_load.installed(live),
         )
     except TemplateEnvironmentError:
         return True
@@ -1448,7 +1446,7 @@ def _library_steering(live: Path) -> dict[str, str] | None:
     `_chains_check` already reports that failure, and a second copy of it per
     repo helps nobody."""
     try:
-        library = TemplateLibrary.from_yaml_dir(live, plugins=plugins_load.installed(live))
+        library = TemplateLibrary.from_yaml_dir(live, addons=addons_load.installed(live))
     except TemplateLibraryError:
         return None
     return {name: profile.instructions for name, profile in library.steering.items()}

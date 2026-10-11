@@ -5,7 +5,7 @@ import { gutter } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Scope } from "./draft/types";
 import { scopeFile } from "./draft/view";
-import { ReadOnly } from "./plugin";
+import { ReadOnly } from "./addon";
 import { problemText } from "./problems";
 import { tip } from "../ui/Tooltip";
 
@@ -76,7 +76,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
         <span className="yv-file">{file}</span>
         <span className={`yv-status${err || r.problems.length ? " is-bad" : ""}`} role="status">{status}</span>
         <span className="bp-gap" />
-        {readOnly ? <span className="yv-legend">read-only · it comes from a plugin</span> : <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>}
+        {readOnly ? <span className="yv-legend">read-only · it comes from an add-on</span> : <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>}
       </div>
       {err && (
         <div className="yv-err" role="alert">

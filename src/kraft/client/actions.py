@@ -693,7 +693,7 @@ async def reload_templates() -> dict:
     return await transport._act("/templates/reload")
 
 
-async def reload_plugins() -> dict:
-    """Rebuild the running server's library from `plugins.lock`, leaving any
+async def reload_addons() -> dict:
+    """Rebuild the running server's library from `addons.lock`, leaving any
     pending edit of the other config files pending."""
-    return await transport._act("/templates/reload", {"only": ["plugins.yaml", "plugins.lock"]})
+    return await transport._act("/templates/reload", {"only": ["addons.yaml", "addons.lock"]})

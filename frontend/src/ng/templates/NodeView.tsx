@@ -13,7 +13,7 @@ import { authoredAt, authoredNodes, changeAt, kindOf, nodeGlyph, normalise, prob
 import { ExtendMenu } from "./menus/ExtendMenu";
 import { IdCard } from "./menus/IdCard";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
-import { ReadOnly } from "./plugin";
+import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
 import type { TSel } from "./sel";
 

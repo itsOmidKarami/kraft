@@ -3,7 +3,7 @@ export const SECTIONS = ["nodes", "steps", "tasks", "steering"] as const;
 export type Section = (typeof SECTIONS)[number];
 export const SECTION_LABEL: Record<Section, string> = { nodes: "Nodes", steps: "Steps", tasks: "Tasks", steering: "Steering" };
 
-import type { Plugin } from "../../types";
+import type { Addon } from "../../types";
 
 /** One place a chain uses a component (`GET /templates/library`'s `used_by_paths`). */
 export interface Use {
@@ -20,7 +20,7 @@ export interface PublishedComponent {
   name: string;
   used_by: string[];
   used_by_paths: Use[];
-  plugin?: Plugin | null;
+  addon?: Addon | null;
 }
 
 export interface PublishedLibrary {
@@ -35,7 +35,7 @@ export function parseRef(ref: string | undefined): { section: Section; name: str
   return name && !rest.length && (SECTIONS as readonly string[]).includes(section) ? { section: section as Section, name } : null;
 }
 
-/** `release@acme 1.4.0`: what a plugin's chain or component is badged with, on both layouts. */
-export const pluginLabel = (p: Plugin) => `${p.id} ${p.version}`.trim();
+/** `release@acme 1.4.0`: what an add-on's chain or component is badged with, on both layouts. */
+export const addonLabel = (p: Addon) => `${p.id} ${p.version}`.trim();
 
 export const refUrl = (id: string) => `/templates/library/${encodeURIComponent(id)}`;

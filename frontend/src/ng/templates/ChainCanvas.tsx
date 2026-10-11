@@ -5,7 +5,7 @@ import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
 import { authoredNodes, changeAt, kindOf, nodeGlyph, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
-import { ReadOnly } from "./plugin";
+import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
 
 type Props = {

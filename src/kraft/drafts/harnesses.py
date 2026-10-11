@@ -346,7 +346,7 @@ def _table_issues(path, text, ctx) -> list[TemplateIssue]:
     if not isinstance(data, dict):
         return [TemplateIssue(path, None, config_check.NOT_A_MAPPING)]
     try:
-        HarnessProfileTable.from_mapping(data, path, harnesses=ctx.providers, plugins=ctx.plugins)
+        HarnessProfileTable.from_mapping(data, path, harnesses=ctx.providers, addons=ctx.addons)
     except TemplateEnvironmentError as exc:
         return [TemplateIssue(path, None, str(exc))]
     return []
@@ -534,7 +534,7 @@ def resolve(st, key, raw, files, published) -> dict:
             harnesses_yaml,
             path,
             harnesses=providers,
-            plugins=getattr(getattr(st, "library", None), "plugins", ()),
+            addons=getattr(getattr(st, "library", None), "addons", ()),
         )
     except TemplateEnvironmentError:
         table = None
