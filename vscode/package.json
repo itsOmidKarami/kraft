@@ -227,6 +227,12 @@
         "icon": "$(filter)"
       },
       {
+        "command": "kraft.showThisRepo",
+        "title": "Show This Repo",
+        "category": "Kraft",
+        "icon": "$(filter-filled)"
+      },
+      {
         "command": "kraft.startDaemon",
         "title": "Start Kraft",
         "category": "Kraft"
@@ -383,7 +389,12 @@
         },
         {
           "command": "kraft.toggleAllRepos",
-          "when": "view == kraft.board",
+          "when": "view == kraft.board && !kraft.allRepos",
+          "group": "navigation"
+        },
+        {
+          "command": "kraft.showThisRepo",
+          "when": "view == kraft.board && kraft.allRepos",
           "group": "navigation"
         }
       ],
@@ -554,6 +565,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "kraft.toggleAllRepos",
+          "when": "!kraft.allRepos"
+        },
+        {
+          "command": "kraft.showThisRepo",
+          "when": "kraft.allRepos"
+        },
         {
           "command": "kraft.statusMenu",
           "when": "false"

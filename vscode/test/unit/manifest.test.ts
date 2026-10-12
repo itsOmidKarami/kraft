@@ -23,6 +23,10 @@ it.each([
   ["explorer/context", "kraft.fileAsPlan", "resourceExtname == .md && !explorerResourceIsFolder && !kraft.readOnly"],
   ["editor/context", "kraft.fileSelection", "editorHasSelection && !kraft.readOnly"],
   ["view/title", "kraft.fileWork", "view == kraft.board && !kraft.readOnly"],
+  ["view/title", "kraft.toggleAllRepos", "view == kraft.board && !kraft.allRepos"],
+  ["view/title", "kraft.showThisRepo", "view == kraft.board && kraft.allRepos"],
+  ["commandPalette", "kraft.toggleAllRepos", "!kraft.allRepos"],
+  ["commandPalette", "kraft.showThisRepo", "kraft.allRepos"],
   ["commandPalette", "kraft.fileWork", "!kraft.readOnly"],
   ["commandPalette", "kraft.search", "kraft.connected"],
   ["commandPalette", "kraft.approveNextGate", "kraft.connected"],
@@ -35,6 +39,12 @@ it.each([
   ["commandPalette", "kraft.openArtifactSource", "kraft.artifactPreview"],
 ])("%s offers %s when %s", (menu, command, when) =>
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
+
+it.each([
+  ["kraft.toggleAllRepos", "Show All Repos", "$(filter)"],
+  ["kraft.showThisRepo", "Show This Repo", "$(filter-filled)"],
+])("%s is %s with icon %s", (command, title, icon) =>
+  expect(pkg.contributes.commands).toContainEqual({ command, title, category: "Kraft", icon }));
 
 it("offers Show Log in the palette and keeps the status menu out of it", () => {
   const commands = pkg.contributes.commands.map((c: { command: string }) => c.command);

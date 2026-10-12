@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import type { Api, Repo } from "./core/api";
 import { connectOutcome } from "./core/fileWork";
 import { mutating } from "./core/guard";
-import { refetchRepos, REFETCH_MS, WorkspaceScope, type ConnectedRepo, type Git, type ScopeDeps } from "./core/repoScope";
+import { ALL_REPOS_KEY, refetchRepos, REFETCH_MS, rememberedScope, type ConnectedRepo, type Git, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
 
 const git: Git = (args, cwd) =>
@@ -21,7 +21,8 @@ const sameList = (a: ConnectedRepo[], b: ConnectedRepo[]) =>
 /** The window's scope, recomputed when its folders change and when the daemon
  *  it talks to has another `run_dir` or another set of connected repos. */
 export function registerRepoScope(context: vscode.ExtensionContext, initialRunDir: string, api: Api, store: Store) {
-  const scope = new WorkspaceScope(process.platform);
+  // Read before the board registers, so its first render already has the remembered choice.
+  const scope = rememberedScope(process.platform, context.workspaceState);
   let runDir = initialRunDir;
   let connected: ConnectedRepo[] = []; // the last list read
   let known: ConnectedRepo[] | undefined; // undefined while the last read failed
@@ -30,7 +31,11 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
   let retry: ReturnType<typeof setTimeout> | undefined;
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
   const recompute = () => scope.update(folders(), runDir, scopeDeps, connected);
-  const setAllRepos = () => void vscode.commands.executeCommand("setContext", "kraft.allRepos", scope.showAll);
+  const setAllRepos = () => void vscode.commands.executeCommand("setContext", ALL_REPOS_KEY, scope.showAll);
+  const showAll = (v: boolean) => () => {
+    scope.setShowAll(v);
+    setAllRepos();
+  };
 
   const read = async () => {
     lastRead = Date.now();
@@ -58,10 +63,8 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => void recompute()),
-    vscode.commands.registerCommand("kraft.toggleAllRepos", () => {
-      scope.toggleAll();
-      setAllRepos();
-    }),
+    vscode.commands.registerCommand("kraft.toggleAllRepos", showAll(true)),
+    vscode.commands.registerCommand("kraft.showThisRepo", showAll(false)),
     { dispose: store.onChange(maybeRead) },
     { dispose: () => retry && clearTimeout(retry) },
   );
