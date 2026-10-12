@@ -1,8 +1,11 @@
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action } from "./core/board";
 import { findingsOf } from "./core/findings";
+import { mutating } from "./core/guard";
+import { RESTRICTED } from "./core/readOnly";
 import type { Store } from "./core/store";
 
 type Node =
@@ -72,7 +75,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
   }
 }
 
-export function registerBoard(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string, readOnly: () => boolean) {
+export function registerBoard(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string, refusal: () => string | null) {
   const repos = () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
   const board = new Board(store, repos);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
@@ -83,11 +86,11 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
   const act = (action: Action) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
     if (!item) return;
-    if (readOnly()) return void vscode.window.showWarningMessage("Kraft is read-only: this server's version does not work with this extension. Hover Kraft in the status bar to see which one to update.");
     await runAction(api, store, item, action);
   };
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   for (const a of ["pause", "resume", "retry", "cancel", "skip", "escalate", "archive"] as Action[]) {
-    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, act(a)));
+    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, mutating(`kraft.${a}`, refusal, warn, act(a))));
   }
   context.subscriptions.push(
     view,
@@ -103,11 +106,13 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
       const item = itemOf(node);
       if (item) void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(item.id)}`));
     }),
-    vscode.commands.registerCommand("kraft.startDaemon", () => {
-      const t = vscode.window.createTerminal("Kraft");
+    // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
+    // From home, so the workspace's shell hooks, venv or shims cannot pick the `kraft` binary.
+    vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : null), warn, () => {
+      const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir() });
       t.sendText("kraft admin start");
       t.show();
-    }),
+    })),
   );
   return board;
 }

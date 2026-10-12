@@ -84,13 +84,16 @@ startup.
   Kraft 2.0 or a later 2.x. Against any other Kraft the extension turns
   read-only: the board still updates, every action is disabled, and the status
   bar's tooltip says whether to update Kraft or the extension.
+- A trusted workspace to act. In Restricted Mode the board, gate documents and
+  diffs are read-only, and config checks wait until you trust the workspace.
 - [Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
   for completion in config files. The extension offers it once if it is missing.
 
 ## Settings
 
 - `kraft.url`: where Kraft listens. Empty reads `KRAFT_HOST` and `KRAFT_PORT`,
-  then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`.
+  then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`. Set it in your
+  user or Remote settings only: a workspace's settings cannot change it.
 - `kraft.notifications`: `all`, `gates` or `off`, which states raise a
   notification. `gates` announces only gates; `all` also announces an item that
   stopped and needs you.
