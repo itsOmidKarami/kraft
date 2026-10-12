@@ -1,1 +1,1 @@
-["id", "title", "repo", "status", "current_node_id", "pending_gate", "archived_at", "progress", "updated_at", "display_status", "stop", "step", "mr_ref", "fallback", "chain_definition", "retry_at"]
+["id", "title", "repo", "status", "current_node_id", "pending_gate", "archived_at", "progress", "updated_at", "display_status", "stop", "step", "mr_ref", "fallback", "chain_definition", "retry_at", "actions"]

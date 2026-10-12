@@ -13,10 +13,13 @@ from kraft.vocab import (
     STOPPED,
     TRAITS,
     DisplayStatus,
+    DoorFacts,
+    ItemAction,
     StopKind,
     Verb,
     WorkItemStatus,
     admitting,
+    open_doors,
 )
 
 S = WorkItemStatus
@@ -132,3 +135,92 @@ def test_every_status_has_a_state_in_the_door_table():
 
 def test_every_verb_has_a_door():
     assert set(DOOR_VERB.values()) == set(Verb)
+
+
+def test_every_verb_is_an_item_action():
+    assert {str(v) for v in Verb} <= {str(a) for a in ItemAction}
+
+
+F = DoorFacts
+NH = S.NEEDS_HUMAN
+STOPPED_ON = {"started": True, "on_chain": True, "skippable": True}
+BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
+
+
+@pytest.mark.parametrize(
+    ("facts", "want"),
+    [
+        (F(NH, **BUDGET), "retry raise_budget skip complete cancel abandon"),
+        (F(NH, **{**BUDGET, "raisable": False}), "retry skip complete cancel abandon"),
+        (
+            F(NH, started=True, on_chain=True, pending_gate=True, walk_live=True),
+            "approve reject complete cancel abandon",
+        ),
+        (
+            F(NH, started=True, on_chain=True, pending_gate=True, escalation_live=True),
+            "approve reject retry complete cancel abandon",
+        ),
+        (
+            F(NH, **STOPPED_ON, pending_gate=True, must_fix_open=True),
+            "reject retry skip escalate complete cancel abandon",
+        ),
+        (
+            F(NH, **STOPPED_ON, question=True),
+            "resume steer retry skip escalate complete cancel abandon",
+        ),
+        (
+            F(S.PAUSED, **STOPPED_ON, unmet_dependency=True, dead_dependency=True),
+            "unblock skip escalate complete cancel abandon",
+        ),
+        (
+            F(S.PAUSED, **STOPPED_ON, agent_paused=True),
+            "resume steer skip escalate complete cancel abandon",
+        ),
+        (F(S.PAUSED), "resume steer complete cancel abandon"),
+        (
+            F(NH, **STOPPED_ON, mr_closed=True),
+            "retry reopen_mr skip escalate complete cancel abandon",
+        ),
+        (F(S.QUEUED, started=True, pending_gate=True), "pause complete cancel abandon"),
+        (F(S.COMPLETED, started=True, archived=True), "restore abandon"),
+        (F(S.COMPLETED, started=True), "archive abandon"),
+        (F(NH, **STOPPED_ON, dead_dependency=True), "skip escalate complete cancel abandon"),
+        (F(NH, **BUDGET, dead_dependency=True), "skip complete cancel abandon"),
+        (
+            F(NH, **STOPPED_ON, mr_closed=True, dead_dependency=True),
+            "skip escalate complete cancel abandon",
+        ),
+        (
+            F(NH, started=True, budget_stop=True, raisable=True, mr_closed=True),
+            "complete cancel abandon",
+        ),
+        (
+            F(NH, **BUDGET, walk_live=True, escalation_live=True),
+            "retry complete cancel abandon",
+        ),
+        (F(S.PAUSED, unmet_dependency=True), "resume steer unblock complete cancel abandon"),
+    ],
+    ids=[
+        "budget-closes-escalate",
+        "daily-cap-not-raisable",
+        "walk-closes-retry",
+        "escalation-reopens-retry",
+        "must-fix-closes-approve",
+        "question",
+        "dead-dependency",
+        "paused-agent-steer",
+        "not-started",
+        "mr-closed",
+        "queued-at-gate",
+        "archived",
+        "done",
+        "dead-dependency-closes-retry",
+        "dead-dependency-closes-raise-budget",
+        "dead-dependency-closes-reopen-mr",
+        "off-chain-closes-retry-and-its-composites",
+        "walk-closes-raise-budget-not-retry",
+        "unmet-dependency-opens-unblock",
+    ],
+)
+def test_open_doors_reads_the_second_facts(facts, want):
+    assert open_doors(facts) == tuple(ItemAction(a) for a in want.split())

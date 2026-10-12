@@ -44,6 +44,21 @@ describe("Api", () => {
     expect(f.mock.calls[0][0]).toBe("http://h:1/api/work-items/W-1/gates/review%20gate/reject");
   });
 
+  it.each([
+    ["raiseBudget", (a: Api) => a.raiseBudget("W-1", 12.5), "/budget/raise", { budget_usd: 12.5 }],
+    ["raiseBudget to no cap", (a: Api) => a.raiseBudget("W-1", null), "/budget/raise", { budget_usd: null }],
+    ["unblock", (a: Api) => a.unblock("W-1"), "/unblock", undefined],
+    ["complete", (a: Api) => a.complete("W-1", "landed by hand"), "/complete", { reason: "landed by hand" }],
+    ["restore", (a: Api) => a.restore("W-1"), "/restore", undefined],
+  ])("posts %s", async (_, call, path, body) => {
+    const f = fakeFetch(200, {});
+    await call(new Api("http://h:1", undefined, f as any));
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe(`http://h:1/api/work-items/W-1${path}`);
+    expect((init as RequestInit).method).toBe("POST");
+    expect((init as RequestInit).body === undefined ? undefined : JSON.parse((init as RequestInit).body as string)).toEqual(body);
+  });
+
   it("maps a missing artifact to null", async () => {
     expect(await new Api("http://h:1", undefined, fakeFetch(404, { detail: "none" }) as any).getArtifact("W-1")).toBeNull();
   });
