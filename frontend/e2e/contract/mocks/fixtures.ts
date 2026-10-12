@@ -1,7 +1,8 @@
 /**
  * Deterministic API fixtures for the UI contract. Shapes follow
- * frontend/src/types/*.ts. Every display_status and stop the UI renders is
- * reachable here in milliseconds — no orchestrator, no fake agent.
+ * frontend/src/types/*.ts. Every case in `STATES` is reachable here in
+ * milliseconds, each carrying the server's display_status and stop — no
+ * orchestrator, no fake agent.
  *
  * Variants:
  *   default — realistic data, one item per state, medium titles

@@ -108,10 +108,10 @@ either direction swaps the shape and keeps the URL.
 The two share data hooks, pure models and `ui/` primitives, never a pane. That
 is enforced by `ng/phone/contract.test.ts`: it reads every non-test file under
 `ng/phone/` and fails on a relative import that leaves `phone/` for anything
-not on its `ALLOWED` list. A
-module the phone genuinely should share gets a line in `ALLOWED` with the
-reason, in the same change that imports it. The same file pins that the restart call is made only from the phone's More and
-Access screens, each behind its own confirm.
+not on its `ALLOWED` list. A module the phone genuinely should share gets a
+line in `ALLOWED` with the reason, in the same change that imports it. The same
+file pins that the restart call is made only from the phone's More and Access
+screens, each behind its own confirm.
 
 Two more rules keep the phone's CSS apart (`ng/phone/css.test.ts`):
 
