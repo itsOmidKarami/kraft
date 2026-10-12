@@ -22,6 +22,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
   readonly onDidChangeTreeData = this.changed.event;
 
   private welcome: Welcome | undefined;
+  private draftsTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private store: Store,
@@ -29,7 +30,11 @@ export class Board implements vscode.TreeDataProvider<Node> {
     private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
     private drafts?: Drafts,
   ) {
-    drafts?.onChange(() => this.changed.fire());
+    // Coalesced: a reconnect preloads every gate item, one answer at a time.
+    drafts?.onChange(() => {
+      clearTimeout(this.draftsTimer);
+      this.draftsTimer = setTimeout(() => this.changed.fire(), 100);
+    });
     store.onChange(() => this.changed.fire());
     store.onConnection(() => this.changed.fire());
     store.onError(() => this.changed.fire());

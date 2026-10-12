@@ -30,12 +30,15 @@ export function registerMigration(context: vscode.ExtensionContext, api: Api, re
     existing: async (id) => (await api.listThreads(id)).map((t) => t.comments[0]?.body ?? ""),
     post: async (id, t) => void (await api.createThread(id, t)),
     save: async (id, d) => context.workspaceState.update(`kraft.draft.${id}`, d),
+    writable: () => refusal() === null,
   };
 
   let running = false;
-  const run = async () => {
-    if (running) return;
+  let again = false; // asked for during a run: one more after it
+  const run = async (): Promise<void> => {
+    if (running) return void (again = true);
     running = true;
+    again = false;
     try {
       const results = await migrateAll(context.workspaceState.keys(), (k) => context.workspaceState.get<LegacyDraft>(k), deps, refusal() !== null);
       for (const r of results) {
@@ -54,6 +57,7 @@ export function registerMigration(context: vscode.ExtensionContext, api: Api, re
     } finally {
       running = false;
     }
+    if (again) return run();
   };
   return { migrate: run };
 }

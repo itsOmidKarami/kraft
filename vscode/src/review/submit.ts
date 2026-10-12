@@ -11,7 +11,7 @@ import type { ShownRenders } from "../core/shown";
 import type { Store } from "../core/store";
 import { canSend, OUTCOME_LABEL, outcomeChoices, submitMessage, type Outcome } from "../core/submit";
 import type { ThreadCache } from "../core/threadCache";
-import { discardPlan } from "../core/threads";
+import { discardPlan, hasDrafts } from "../core/threads";
 import { showRefusal } from "./refusal";
 
 /** Why a Submit sent nothing: refused up front, a must-fix thread open, the document to read first, backed out, nothing to send, or an error. */
@@ -159,8 +159,12 @@ export function registerReviewSubmit(
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact", "kraft-threads"]);
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.review.submit", mutating("kraft.review.submit", refusal, warn, (arg?: unknown) => {
+      // The clicked tab's item first: the title-bar key is the active editor's, which may be another group's.
       const id = idOf(arg);
-      if (id) return submit(id);
+      if (!id) return;
+      const threads = cache.get(id);
+      if (arg instanceof vscode.Uri && threads && !hasDrafts(threads)) return info(`${id} has no draft comments to submit.`);
+      return submit(id);
     })),
     vscode.commands.registerCommand("kraft.review.discard", mutating("kraft.review.discard", refusal, warn, (arg?: unknown) => {
       const id = idOf(arg);

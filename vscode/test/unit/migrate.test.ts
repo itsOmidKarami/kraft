@@ -59,6 +59,15 @@ describe("migrateItem", () => {
     expect(stored.has("K-1") && stored.get("K-1")).toBeUndefined();
   });
 
+  it("stops posting once the window turns read-only, keeping the rest", async () => {
+    let n = 0;
+    const { d, posted, stored } = deps({ writable: () => n < 2, post: async (_id, t) => void (n++, posted.push(t.body)) });
+    const r = await migrateItem("K-1", five, d);
+    expect(posted).toHaveLength(2);
+    expect(r.kept?.comments.map((c) => c.body)).toEqual(["c3", "c4", "c5"]);
+    expect(stored.get("K-1")?.comments.map((c) => c.body)).toEqual(["c3", "c4", "c5"]);
+  });
+
   it("keeps everything when it cannot tell whether the item is reviewable", async () => {
     const { d, stored } = deps({ reviewable: async () => { throw new ApiError(0, "down"); } });
     expect(await migrateItem("K-1", draft, d)).toEqual({ posted: 0, dropped: null, kept: draft });

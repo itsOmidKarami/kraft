@@ -38,6 +38,8 @@ export interface MigrateDeps {
   post(id: string, t: ThreadIn): Promise<void>;
   /** `undefined` clears the item's key. */
   save(id: string, d: LegacyDraft | undefined): Promise<void>;
+  /** Asked before each post: a window that turned read-only mid-run posts nothing more. */
+  writable?(): boolean;
 }
 
 export interface Migrated { posted: number; dropped: LegacyDraft | null; kept: LegacyDraft | null; why?: DropReason }
@@ -79,6 +81,7 @@ export async function migrateItem(id: string, d: LegacyDraft, deps: MigrateDeps)
     const [t] = toThreadIns("comment" in u ? { comments: [u.comment] } : { comments: [], summary: u.summary });
     const done = () => ("comment" in u ? rest.comments.shift() : delete rest.summary);
     if (!existing.has(t.body)) {
+      if (deps.writable && !deps.writable()) return { posted, ...droppedOf(dropped), kept: rest };
       try {
         await deps.post(id, t);
         posted++;
