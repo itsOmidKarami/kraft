@@ -1,8 +1,14 @@
-import type { ChainNode, Finding, Repo, TemplateSummary, WorkItem as BoardItem } from "../../../frontend/src/types";
+import type {
+  ChainNode, CommentReview, Finding, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  WorkItem as BoardItem,
+} from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
-export type { Finding, ItemAction, Repo, TemplateSummary, WorkItemDiff };
+export type {
+  CommentReview, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  WorkItemDiff,
+};
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
 export type WorkItem = BoardItem & { actions?: ItemAction[] };
 
@@ -42,6 +48,11 @@ export const REQUEST_TIMEOUT = 10_000;
 /** For the calls that can legitimately take long: a big diff, a library lint, reload, apply. */
 export const SLOW_TIMEOUT = 60_000;
 export interface Timeouts { fast: number; slow: number }
+/** A new thread: no `start_side` or `anchor_sha` (the server fills those); `quote` is the lines as the editor shows them. */
+export interface ThreadIn { body: string; file_path?: string; side?: "old" | "new"; start_line?: number; end_line?: number; label?: ThreadLabel | null; quote?: string }
+export interface ReviewIn { outcome: ReviewOutcome; summary?: string; node?: string; digest?: string }
+/** A gate's approve or reject answers with the item. */
+export type ReviewResult = CommentReview | GatelessChanges | WorkItemDetail;
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -141,6 +152,21 @@ export class Api {
   complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
   restore = (id: string) => this.req("POST", this.item(id, "/restore"));
   abandon = (id: string) => this.req("POST", this.item(id, "/abandon"), {});
+
+  listThreads = (id: string) => this.req<ReviewThread[]>("GET", this.item(id, "/threads"));
+  createThread = (id: string, t: ThreadIn) => this.req<ReviewThread>("POST", this.item(id, "/threads"), t);
+  /** Only the keys present change: `{ label: null }` clears the label and keeps the body. */
+  patchThread = (tid: string, p: { body?: string; label?: ThreadLabel | null }) => this.req<ReviewThread>("PATCH", `/threads/${encodeURIComponent(tid)}`, p);
+  deleteThread = (tid: string) => this.req<void>("DELETE", `/threads/${encodeURIComponent(tid)}`);
+  addComment = (tid: string, body: string) => this.req<ReviewComment>("POST", `/threads/${encodeURIComponent(tid)}/comments`, { body });
+  /** The server replaces `suggestion` with what is sent, so an edit sends the existing one back. */
+  patchComment = (cid: string, p: { body: string; suggestion: Suggestion | null }) => this.req<ReviewComment>("PATCH", `/comments/${encodeURIComponent(cid)}`, p);
+  deleteComment = (cid: string) => this.req<void>("DELETE", `/comments/${encodeURIComponent(cid)}`);
+  resolveThread = (tid: string) => this.req<ReviewThread>("POST", `/threads/${encodeURIComponent(tid)}/resolve`);
+  reopenThread = (tid: string) => this.req<ReviewThread>("POST", `/threads/${encodeURIComponent(tid)}/reopen`);
+  /** At a gate, the gate's review route (409 when that gate moved on); with none, the item's. */
+  submitReview = (id: string, gate: string | null, r: ReviewIn) =>
+    this.req<ReviewResult>("POST", this.item(id, gate ? `/gates/${encodeURIComponent(gate)}/review` : "/review"), r);
 
   check = (file: string, text: string) => this.req<{ issues: ConfigIssue[] }>("POST", "/templates/check", { file, text });
   lint = () => this.req<LintReport>("GET", "/templates/lint", undefined, SLOW);

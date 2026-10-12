@@ -30,3 +30,16 @@ export function commandItemId(arg: unknown, active: UriLike | undefined, schemes
   const uri = typeof (arg as UriLike | undefined)?.scheme === "string" ? (arg as UriLike) : active;
   return uri && schemes.includes(uri.scheme) ? parseReviewUri(uri.path).id || undefined : undefined;
 }
+
+/** `git diff -M --name-status -z` output's renames, new path → old path. */
+export function parseRenames(out: string): Map<string, string> {
+  const tokens = out.split("\0");
+  const renames = new Map<string, string>();
+  for (let i = 0; i + 2 < tokens.length; ) {
+    if (tokens[i].startsWith("R") || tokens[i].startsWith("C")) {
+      if (tokens[i].startsWith("R")) renames.set(tokens[i + 2], tokens[i + 1]);
+      i += 3;
+    } else i += 2;
+  }
+  return renames;
+}

@@ -7,6 +7,8 @@ export const MUTATING: ReadonlySet<string> = new Set([
   "kraft.raiseBudget", "kraft.unblock", "kraft.complete", "kraft.restore",
   "kraft.approve", "kraft.reject",
   "kraft.review.submit", "kraft.review.discard",
+  "kraft.review.addComment", "kraft.review.editComment", "kraft.review.saveComment", "kraft.review.deleteComment",
+  "kraft.review.setLabel", "kraft.review.resolveThread", "kraft.review.reopenThread",
   "kraft.startDaemon",
   "kraft.fileWork", "kraft.fileAsSpec", "kraft.fileAsPlan", "kraft.fileSelection",
 ]);

@@ -11,12 +11,14 @@ import { registerFileWork } from "./fileWork";
 import { fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
+import { ThreadCache } from "./core/threadCache";
 import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
 import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
+import { registerReviewSubmit } from "./review/submit";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
@@ -29,7 +31,7 @@ export interface KraftApi {
   readOnly(): boolean;
   locations: Locations;
   gates: { announcer: Announcer };
-  review: ReturnType<typeof registerDiff> & ReturnType<typeof registerComments>;
+  review: ReturnType<typeof registerDiff> & ReturnType<typeof registerComments> & ReturnType<typeof registerReviewSubmit>;
   // Absent until the workspace is trusted.
   readonly config: ReturnType<typeof registerConfigChecks> | undefined;
 }
@@ -127,10 +129,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       }
     }),
   );
-  const comments = registerComments(context, store, api, () => refusal(state()));
-  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, comments.confirmApprove, comments.discardDrafts);
+  const cache = new ThreadCache(api);
   const diff = registerDiff(context, store, api, () => runDir);
-  const review = Object.assign(diff, comments);
+  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact);
+  const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.
   store.onChange((ids) => {

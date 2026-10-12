@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commandItemId, leftUri, parseReviewUri, reviewFiles, rightUri } from "../../src/core/review";
+import { commandItemId, leftUri, parseRenames, parseReviewUri, reviewFiles, rightUri } from "../../src/core/review";
 
 describe("reviewFiles", () => {
   it("unions landed, in-flight and untracked, sorted and unique", () => {
@@ -34,3 +34,9 @@ describe("commandItemId", () => {
     expect(commandItemId({ scheme: "file", path: "/Users/x/a.md" }, undefined, ["kraft-artifact"])).toBeUndefined();
   });
 });
+
+it("parseRenames reads git's -z name-status, new path to old, past copies and plain changes", () =>
+  expect([...parseRenames("M\0a.py\0R100\0old/n.py\0new/n.py\0C75\0x.py\0y.py\0R090\0p q\0r s\0")]).toEqual([
+    ["new/n.py", "old/n.py"],
+    ["r s", "p q"],
+  ]));

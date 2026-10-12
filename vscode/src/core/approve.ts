@@ -10,6 +10,8 @@ export async function approveGate(api: Api, id: string, gate: string, digest: st
  * and a digest to bind to, show the document instead and do not approve.
  * `confirm` only asks, and runs only once an approve is about to be sent;
  * `approved` runs after the server accepted it, so a failed approve loses nothing.
+ * `send` sends it with the digest (by default the gate's approve route); it
+ * may still decline, answering false, and then nothing is approved.
  */
 export async function approveOrRead(
   api: Api,
@@ -19,24 +21,22 @@ export async function approveOrRead(
   show: (a: Artifact) => Promise<void>,
   confirm: () => Promise<boolean> = async () => true,
   approved: () => PromiseLike<void> = async () => {},
+  send: (digest: string | undefined) => Promise<boolean> = (digest) => approveGate(api, id, gate, digest).then(() => true),
 ): Promise<"approved" | "read-first" | "cancelled"> {
-  const seen = shown.get(id, gate);
-  if (seen) {
-    if (!(await confirm())) return "cancelled";
-    await approveGate(api, id, gate, seen.digest);
+  const go = async (digest: string | undefined) => {
+    if (!(await confirm()) || !(await send(digest))) return "cancelled";
     await approved();
     return "approved";
-  }
+  };
+  const seen = shown.get(id, gate);
+  if (seen) return go(seen.digest);
   const a = await api.getArtifact(id);
   if (a?.digest) {
     await show(a);
     shown.record(id, gate, a.digest);
     return "read-first";
   }
-  if (!(await confirm())) return "cancelled";
-  await approveGate(api, id, gate, undefined);
-  await approved();
-  return "approved";
+  return go(undefined);
 }
 
 /** Whether `e` is the server saying the revision moved under the person's feet. */
