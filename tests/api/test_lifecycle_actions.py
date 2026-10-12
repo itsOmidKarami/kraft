@@ -142,13 +142,16 @@ def test_raisable_is_the_caps_budget_raise_takes(budget, want):
     assert board.raisable({"reason": "r", "budget": budget} if budget else None) is want
 
 
-@pytest.mark.parametrize("state", ["paused_agent", "failed"])
+@pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
 def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
-    """Not at a gate: there the detail's `fix_target` reads the chain and
-    raises for a legacy row, a refusal older than `actions`."""
+    """The detail renders with no restart target, even at a pending gate, and
+    `/fix-target` refuses with 409: there is no chain to restart from."""
     wid = _legacy(client, repo, state)
 
     detail = client.get(f"/api/work-items/{wid}")
+    target = client.get(f"/api/work-items/{wid}/fix-target")
 
     assert detail.status_code == 200, detail.text
     assert detail.json()["actions"] == _listed(client, wid, False)["actions"]
+    assert (detail.json()["fix_target"], detail.json()["reject_default"]) == (None, None)
+    assert target.status_code == 409, target.text

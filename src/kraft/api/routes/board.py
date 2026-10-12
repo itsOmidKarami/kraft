@@ -52,8 +52,12 @@ def _last_review_sha(st, wid: str) -> str | None:
     return rev["head_sha"] if rev else None
 
 
-def fix_target(st, row, gate: str, node: str | None = None) -> dict:
+def fix_target(st, row, gate: str, node: str | None = None) -> dict | None:
     """Where a rejection at `gate` restarts the chain, for the review page's sentence.
+
+    None for a legacy row with no materialized chain: nothing walks it, so
+    there is nowhere to restart (`executor.chain_of` would raise, and the
+    detail would 500).
 
     `node` is the index `executor.reject_target` picks, the function
     `apply_rejection` runs, so the sentence and the action cannot disagree.
@@ -62,6 +66,8 @@ def fix_target(st, row, gate: str, node: str | None = None) -> dict:
     no rejection has happened yet). Raises ValueError for a `node` not before
     the gate, as `reject_target` does.
     """
+    if store.materialized_chain_of(row) is None:
+        return None
     nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
     idx = executor.gate_node_index(nodes, gate)
     target = executor.reject_target(nodes, idx, node)
@@ -82,7 +88,8 @@ def fix_target(st, row, gate: str, node: str | None = None) -> dict:
 
 
 def _reject_default(st, row, gate: str | None) -> str | None:
-    return fix_target(st, row, gate)["node"] if gate else None
+    target = fix_target(st, row, gate) if gate else None
+    return target["node"] if target else None
 
 
 #: The event types that bound a `work_item_needs_human` stop, newest wins —
@@ -1103,6 +1110,8 @@ async def get_fix_target(
 
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
+    if store.materialized_chain_of(row) is None:
+        raise HTTPException(409, "this work item has no materialized chain to restart")
     pending = _pending_gate(st, wid)
     if gate is not None and gate != pending:
         raise HTTPException(409, f"gate {gate!r} is not pending")
