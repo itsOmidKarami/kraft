@@ -136,6 +136,7 @@ describe("Api", () => {
     { id: "delete thread", call: (a: Api) => a.deleteThread("t1"), method: "DELETE", url: "/threads/t1", body: undefined },
     { id: "delete reply", call: (a: Api) => a.deleteComment("c1"), method: "DELETE", url: "/comments/c1", body: undefined },
     { id: "resolve", call: (a: Api) => a.resolveThread("t1"), method: "POST", url: "/threads/t1/resolve", body: undefined },
+    { id: "fix target", call: (a: Api) => a.fixTarget("K-1"), method: "GET", url: "/work-items/K-1/fix-target", body: undefined },
     { id: "reopen", call: (a: Api) => a.reopenThread("t1"), method: "POST", url: "/threads/t1/reopen", body: undefined },
     {
       id: "at a gate", call: (a: Api) => a.submitReview("K-1", "spec/x", { outcome: "approve", digest: "d" }),

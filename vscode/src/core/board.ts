@@ -78,13 +78,15 @@ export function welcomeState(connected: boolean, ready: boolean, showAll: boolea
 
 /** The row's `contextValue`, which its menus match: `gate` while a gate is
  *  pending, then the server's `actions`, the doors it would admit now, then
- *  what it links to (`linkTokens`), then `worktree` while its worktree is on
- *  disk. A server that sends no `actions` gets no action entries, only the
+ *  `drafts` while it has draft review comments (so Submit and Discard apply),
+ *  then what it links to (`linkTokens`), then `worktree` while its worktree is
+ *  on disk. A server that sends no `actions` gets no action entries, only the
  *  ones every row has. */
-export const contextValueOf = (item: WorkItem): string =>
+export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: boolean } = {}): string =>
   `item:${[
     ...(item.pending_gate ? ["gate"] : []),
     ...(item.actions ?? []),
+    ...(drafts ? ["drafts"] : []),
     ...linkTokens(item),
     ...(item.worktree_exists ? ["worktree"] : []),
   ].join(",")}`;

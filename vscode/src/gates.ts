@@ -5,6 +5,8 @@ import type { Api, WorkItem } from "./core/api";
 import { Announcer, type Announcement } from "./core/announcer";
 import { announceable, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
+import { approveFlow } from "./core/mustFix";
+import { showRefusal } from "./review/refusal";
 import type { Artifact } from "./core/api";
 import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
@@ -22,6 +24,7 @@ export function registerGates(
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "showAll">,
   cache: ThreadCache,
+  reveal: (id: string, tid: string) => Promise<boolean | undefined>,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
@@ -88,7 +91,12 @@ export function registerGates(
       return true;
     };
     try {
-      const outcome = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send);
+      // Refused here, before the read-first fetch, while a must-fix thread is open.
+      const outcome = await approveFlow({
+        threads: () => cache.load(id),
+        refuse: (r) => showRefusal(id, r, reveal),
+        readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send),
+      });
       if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
       if (outcome === "approved") await store.refresh(id);
     } catch (e) {

@@ -69,9 +69,11 @@ must-fix thread blocks Approve.
 
 **Submit Review** asks for the outcome and an optional note. At a gate it offers
 Request changes, Comment or Approve; with no gate, Request changes only, which
-a paused item queues until you resume it. Approving with drafts asks to send
-them with the approval. **Discard Review Comments** deletes every draft on the
-item, the web UI's and the CLI's included.
+a paused item queues until you resume it. Request changes asks where the work
+restarts. Approve with a must-fix thread open lists the threads that block it.
+Approving with drafts asks to send them with the approval. **Discard Review
+Comments** deletes every draft on the item, the web UI's and the CLI's
+included. Both show on an item with draft comments.
 
 ## Config
 

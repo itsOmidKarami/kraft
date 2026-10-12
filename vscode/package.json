@@ -452,12 +452,12 @@
         },
         {
           "command": "kraft.review.submit",
-          "when": "view == kraft.board && viewItem =~ /^item:/ && !kraft.readOnly",
+          "when": "view == kraft.board && viewItem =~ /\\bdrafts\\b/ && !kraft.readOnly",
           "group": "4_review"
         },
         {
           "command": "kraft.review.discard",
-          "when": "view == kraft.board && viewItem =~ /^item:/ && !kraft.readOnly",
+          "when": "view == kraft.board && viewItem =~ /\\bdrafts\\b/ && !kraft.readOnly",
           "group": "4_review"
         }
       ],
@@ -660,7 +660,7 @@
         },
         {
           "command": "kraft.review.submit",
-          "when": "resourceScheme =~ /^kraft-(wt|git|artifact)$/ && !kraft.readOnly",
+          "when": "resourceScheme =~ /^kraft-(wt|git|artifact|threads)$/ && kraft.review.activeHasDrafts && !kraft.readOnly",
           "group": "navigation@4"
         },
         {
