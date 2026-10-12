@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
-import { ApiError } from "../../src/core/api";
+import { ApiError, type BulkResult } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
 import { announceable, archivedChildren, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
+import { log } from "../../src/log";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -350,9 +351,12 @@ describe("A multi-selection", () => {
   const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", display_status: "paused", actions: ["resume"] })];
   const q = stopped("question", { id: "Q-1", actions: ["resume", "retry"] });
   const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"] }), item({ id: "D-2", display_status: "done", actions: ["archive"] })];
+  const p3 = item({ id: "P-3", actions: ["pause"] });
+  /** The ids each bulk call sent, without the results array it fills. */
+  const sent = (bulk: { mock: { calls: unknown[][] } }) => bulk.mock.calls.map((c) => c.slice(0, 2));
 
   function setup(refusal: () => string | null = () => null, answer: string | null = "Archive") {
-    const all = [p1, p2, r1, r2, q, d1, d2];
+    const all = [p1, p2, p3, r1, r2, q, d1, d2];
     const refreshed: string[] = [];
     const store = { items: () => all, item: (id: string) => all.find((i) => i.id === id), detail: () => undefined,
       refresh: async (id: string) => { refreshed.push(id); if (id === "P-2") throw new Error("gone"); return true; },
@@ -360,7 +364,14 @@ describe("A multi-selection", () => {
     const api = {
       pause: vi.fn(async () => {}), archive: vi.fn(async () => {}), retry: vi.fn(async () => {}),
       resume: vi.fn(async (id: string) => { if (id === "R-2") throw new ApiError(409, "boom"); }),
-      bulk: vi.fn(async (_a: string, ids: string[]) => ids.map((id) => (id === "P-2" ? { id, ok: false, error: "being started" } : { id, ok: true }))),
+      // P-3's batch times out after P-1's went through.
+      bulk: vi.fn(async (_a: string, ids: string[], out: BulkResult[] = []) => {
+        for (const id of ids) {
+          if (id === "P-3") throw new ApiError(0, "Kraft did not answer within 60s");
+          out.push(id === "P-2" ? { id, ok: false, error: "being started" } : { id, ok: true });
+        }
+        return out;
+      }),
     };
     const handlers = new Map<string, (...a: unknown[]) => unknown>();
     const tree = vi.spyOn(vscode.window, "createTreeView");
@@ -368,8 +379,9 @@ describe("A multi-selection", () => {
     const info = vi.spyOn(vscode.window, "showInformationMessage").mockResolvedValue(undefined);
     const warn = vi.spyOn(vscode.window, "showWarningMessage").mockImplementation((async (_m: string, o?: unknown) => (o ? answer ?? undefined : undefined)) as never);
     const input = vi.spyOn(vscode.window, "showInputBox").mockResolvedValue("");
+    const logged = vi.spyOn(log, "info");
     registerBoard({ subscriptions: [] } as never, store, api as never, refusal, () => true, { onChange: () => () => {}, ready: true, showAll: false });
-    return { handlers, api, info, warn, input, refreshed, tree };
+    return { handlers, api, info, warn, input, refreshed, tree, logged };
   }
 
   afterEach(() => vi.restoreAllMocks());
@@ -379,10 +391,11 @@ describe("A multi-selection", () => {
     expect(tree.mock.calls[0][1]).toMatchObject({ canSelectMany: true });
   });
 
-  it("pauses in one bulk call, warns with the refusal, and refreshes each, a failed refresh ignored", async () => {
-    const { handlers, api, warn, info, refreshed } = setup();
+  it("pauses in one bulk call, warns with the refusal, logs it, and refreshes each, a failed refresh ignored", async () => {
+    const { handlers, api, warn, info, refreshed, logged } = setup();
     await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p2)]);
-    expect(api.bulk.mock.calls).toEqual([["pause", ["P-1", "P-2"]]]);
+    expect(sent(api.bulk)).toEqual([["pause", ["P-1", "P-2"]]]);
+    expect(logged).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
     expect(api.pause).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
     expect(info).not.toHaveBeenCalled();
@@ -397,14 +410,22 @@ describe("A multi-selection", () => {
     expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: R-2 (boom), Q-1 (needs an answer).");
   });
 
+  it("still refreshes each id when a batch fails, and says what went through", async () => {
+    const { handlers, warn, refreshed } = setup();
+    await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p3)]);
+    expect(refreshed).toEqual(["P-1", "P-3"]);
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-3 (Kraft did not answer within 60s).");
+  });
+
   it.each([
-    ["archives after asking once", "Archive", [["archive", ["D-1", "D-2"]]], "Archived 2."],
-    ["archives nothing when the question is dismissed", null, [], undefined],
-  ])("%s", async (_, answer, calls, said) => {
+    ["archives after asking once", "Archive", [d1, d2], [["archive", ["D-1", "D-2"]]], "Archive 2 items? Their worktrees are deleted.", "Archived 2."],
+    ["archives nothing when the question is dismissed", null, [d1, d2], [], "Archive 2 items? Their worktrees are deleted.", undefined],
+    ["asks nothing when only one of the selection can be archived", "Archive", [d1, p1], [["archive", ["D-1"]]], undefined, undefined],
+  ])("%s", async (_, answer, selection, calls, asked, said) => {
     const { handlers, api, warn, info } = setup(() => null, answer);
-    await handlers.get("kraft.archive")!(row(d1), [row(d1), row(d2)]);
-    expect(warn.mock.calls[0]).toEqual(["Archive 2 items? Their worktrees are deleted.", { modal: true }, "Archive"]);
-    expect(api.bulk.mock.calls).toEqual(calls);
+    await handlers.get("kraft.archive")!(row(selection[0]), selection.map(row));
+    expect(warn.mock.calls.filter((c) => c.length > 1).map((c) => c[0])).toEqual(asked ? [asked] : []);
+    expect(sent(api.bulk)).toEqual(calls);
     expect(info.mock.calls).toEqual(said ? [[said]] : []);
   });
 

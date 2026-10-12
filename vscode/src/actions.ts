@@ -89,7 +89,7 @@ export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: Wor
     const ok = await vscode.window.showWarningMessage(`Archive ${ids.length} items? Their worktrees are deleted.`, { modal: true }, "Archive");
     if (ok !== "Archive") return;
   }
-  let results: BulkResult[] = [];
+  const results: BulkResult[] = [];
   try {
     if (verb === "resume") {
       for (const id of ids) {
@@ -101,16 +101,20 @@ export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: Wor
         }
       }
     } else if (ids.length) {
-      results = await api.bulk(verb, ids);
+      await api.bulk(verb, ids, results);
     }
   } catch (e) {
+    // A batch failed: the ones before it went through, and the server may have
+    // acted on some of this one, so the refresh below still reads each id.
     const detail = e instanceof ApiError ? e.detail : String(e);
     log.error(`${verb} ${ids.join(", ")}: ${detail}`);
-    void vscode.window.showErrorMessage(detail);
-    return;
+    const answered = new Set(results.map((r) => r.id));
+    results.push(...ids.filter((id) => !answered.has(id)).map((id) => ({ id, ok: false, error: detail })));
+  } finally {
+    await Promise.all(ids.map((id) => store.refresh(id).catch(() => {})));
   }
   const line = bulkSummary(verb, results, skipped);
+  log.info(line);
   if (skipped.length || results.some((r) => !r.ok)) void vscode.window.showWarningMessage(line);
   else void vscode.window.showInformationMessage(line);
-  await Promise.all(ids.map((id) => store.refresh(id).catch(() => {})));
 }

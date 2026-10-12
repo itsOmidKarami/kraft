@@ -70,6 +70,9 @@ export interface ApiFailure { method: string; path: string; status: number; deta
 const SLOW = { slow: true };
 /** The most ids `POST /work-items/bulk` takes in one request. */
 export const BULK_LIMIT = 200;
+/** Archive's batch: the server removes each worktree and branch in turn, so a
+ *  batch of 200 could outlast the slow timeout. */
+export const ARCHIVE_BATCH = 25;
 
 export class Api {
   /** Every failed call, just before it throws: the extension logs them. */
@@ -224,12 +227,14 @@ export class Api {
   unblock = (id: string) => this.req("POST", this.item(id, "/unblock"));
   complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
   restore = (id: string) => this.req("POST", this.item(id, "/restore"));
-  /** One request per 200 ids, the server's cap, in order; their results joined.
-   *  Slow: the server runs each id's own route in turn. */
-  async bulk(action: "pause" | "archive" | "restore", ids: string[]): Promise<BulkResult[]> {
-    const results: BulkResult[] = [];
-    for (let k = 0; k < ids.length; k += BULK_LIMIT) {
-      const r = await this.req<{ results: BulkResult[] }>("POST", "/work-items/bulk", { action, ids: ids.slice(k, k + BULK_LIMIT) }, SLOW);
+  /** One request per 200 ids, the server's cap (25 for archive), in order;
+   *  their results joined into `results`, batch by batch, so a caller keeps
+   *  what went through when a later batch throws. Slow: the server runs each
+   *  id's own route in turn. */
+  async bulk(action: "pause" | "archive" | "restore", ids: string[], results: BulkResult[] = []): Promise<BulkResult[]> {
+    const size = action === "archive" ? ARCHIVE_BATCH : BULK_LIMIT;
+    for (let k = 0; k < ids.length; k += size) {
+      const r = await this.req<{ results: BulkResult[] }>("POST", "/work-items/bulk", { action, ids: ids.slice(k, k + size) }, SLOW);
       results.push(...r.results);
     }
     return results;

@@ -45,19 +45,31 @@ describe("Api", () => {
     expect([url, (init as RequestInit).method, JSON.parse((init as RequestInit).body as string)]).toEqual(["http://h:1/api/repos", "POST", { path: "/r" }]);
   });
 
+  const ids = (n: number, from = 0) => Array.from({ length: n }, (_, k) => `W-${from + k}`);
   it.each([
-    ["two ids in one request", ["a", "b"], [["a", "b"]]],
-    ["201 ids in two, the server's cap of 200 first", Array.from({ length: 201 }, (_, k) => `W-${k}`),
-      [Array.from({ length: 200 }, (_, k) => `W-${k}`), ["W-200"]]],
-  ])("posts a bulk archive of %s, and joins the results", async (_, ids, batches) => {
+    ["an archive of two ids in one request", "archive", ids(2), [ids(2)]],
+    ["a pause of 201 ids in two, the server's cap of 200 first", "pause", ids(201), [ids(200), ["W-200"]]],
+    ["an archive of 26 ids in batches of 25: each removes a worktree", "archive", ids(26), [ids(25), ["W-25"]]],
+  ] as const)("posts %s, and joins the results", async (_, action, all, batches) => {
     const f = vi.fn(async (_url: string, init?: RequestInit) => {
       const sent = JSON.parse(init!.body as string).ids as string[];
       return new Response(JSON.stringify({ results: sent.map((id) => ({ id, ok: true })) }), { status: 200 });
     });
-    const got = await new Api("http://h:1", undefined, f as any).bulk("archive", ids);
+    const got = await new Api("http://h:1", undefined, f as any).bulk(action, [...all]);
     expect(f.mock.calls.map(([url, init]) => [url, init!.method, JSON.parse(init!.body as string)]))
-      .toEqual(batches.map((b) => ["http://h:1/api/work-items/bulk", "POST", { action: "archive", ids: b }]));
-    expect(got.map((r) => r.id)).toEqual(ids);
+      .toEqual(batches.map((b) => ["http://h:1/api/work-items/bulk", "POST", { action, ids: b }]));
+    expect(got.map((r) => r.id)).toEqual(all);
+  });
+
+  it("keeps the batches that went through when a later one fails", async () => {
+    const f = vi.fn(async (_url: string, init?: RequestInit) => {
+      const sent = JSON.parse(init!.body as string).ids as string[];
+      if (sent.includes("W-25")) return new Response(JSON.stringify({ detail: "no" }), { status: 500 });
+      return new Response(JSON.stringify({ results: sent.map((id) => ({ id, ok: true })) }), { status: 200 });
+    });
+    const got: { id: string }[] = [];
+    await expect(new Api("http://h:1", undefined, f as any).bulk("archive", ids(26), got as never)).rejects.toMatchObject({ status: 500 });
+    expect(got.map((r) => r.id)).toEqual(ids(25));
   });
 
   it("encodes a gate path segment", async () => {

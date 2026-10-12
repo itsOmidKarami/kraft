@@ -36,10 +36,13 @@ export function bulkSummary(verb: BulkVerb, results: BulkResult[], skipped: Skip
   return [head, tail].filter(Boolean).join(" ");
 }
 
+/** A board row as a command receives it: `kind` is "item" for an item row. */
+export type SelectionRow = { kind?: string; item?: WorkItem };
+
 /** The items a pause, resume, archive or restore acts on: the selection when
  *  the clicked row is part of it, else the clicked row alone. VS Code passes
  *  the selection only when the click was inside it; only item rows count. */
-export function selectedItems(node: { kind?: string; item?: WorkItem } | undefined, nodes: readonly { kind?: string; item?: WorkItem }[] | undefined): WorkItem[] {
+export function selectedItems(node: SelectionRow | undefined, nodes: readonly SelectionRow[] | undefined): WorkItem[] {
   const clicked = node?.item;
   if (!clicked || (node.kind !== undefined && node.kind !== "item")) return [];
   const picked = (nodes ?? []).filter((n) => n.kind === "item" && n.item).map((n) => n.item!);

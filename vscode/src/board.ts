@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
 import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
-import { selectedItems, type BulkVerb } from "./core/bulk";
+import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -212,7 +212,6 @@ export function registerBoard(
   store.onChange(updateBadge);
   scope.onChange(updateBadge);
 
-  type Row = { kind?: string; item?: WorkItem };
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
   const act = (action: ItemAction) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
@@ -230,7 +229,7 @@ export function registerBoard(
   // Only these four read the selection VS Code passes second; every other
   // command acts on the clicked row alone. One selected row keeps its own path.
   const BULK: ReadonlySet<ItemAction> = new Set<BulkVerb>(["pause", "resume", "archive", "restore"]);
-  const actOnSelection = (a: BulkVerb) => async (node?: Row, nodes?: readonly Row[]) => {
+  const actOnSelection = (a: BulkVerb) => async (node?: SelectionRow, nodes?: readonly SelectionRow[]) => {
     const items = selectedItems(node, nodes);
     if (items.length < 2) return act(a)(node);
     await runBulk(api, store, a, items.map((i) => store.item(i.id) ?? i));
