@@ -254,12 +254,6 @@
         "icon": "$(go-to-file)"
       },
       {
-        "command": "kraft.openArtifactSource",
-        "title": "Open Gate Document Source",
-        "category": "Kraft",
-        "icon": "$(file-code)"
-      },
-      {
         "command": "kraft.approve",
         "title": "Approve",
         "category": "Kraft"
@@ -678,10 +672,6 @@
           "when": "resourceScheme == kraft-artifact || kraft.artifactPreview"
         },
         {
-          "command": "kraft.openArtifactSource",
-          "when": "kraft.artifactPreview"
-        },
-        {
           "command": "kraft.reviewChanges",
           "when": "false"
         },
@@ -799,11 +789,6 @@
           "command": "kraft.review.submit",
           "when": "kraft.artifactPreview && !kraft.readOnly",
           "group": "navigation@4"
-        },
-        {
-          "command": "kraft.openArtifactSource",
-          "when": "kraft.artifactPreview",
-          "group": "navigation@6"
         }
       ],
       "comments/commentThread/context": [

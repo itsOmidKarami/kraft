@@ -17,8 +17,9 @@ suite("gates", () => {
       return t?.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith("markdown.preview") ? t : undefined;
     });
     assert.ok(tab.label.endsWith(`(${item.id}).md`), tab.label);
-    // As the preview's title bar calls it: no id, so the item is the one the preview shows.
-    await vscode.commands.executeCommand("kraft.approve");
+    // As the preview's title bar calls it: the webview's own uri and the group, so the
+    // item is the one the active preview shows and the gate is the item's own.
+    await vscode.commands.executeCommand("kraft.approve", vscode.Uri.from({ scheme: "webview-panel", path: "webview-panel/webview-x" }), { groupId: 1 });
     await until("the gate to clear", () => k.store.item(item.id)?.pending_gate !== gate || undefined);
     assert.notEqual(k.store.item(item.id)?.pending_gate, gate);
   });

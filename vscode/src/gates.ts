@@ -11,7 +11,8 @@ import type { Artifact } from "./core/api";
 import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
 import type { WorkspaceScope } from "./core/repoScope";
-import { artifactBasename, docText } from "./core/docs";
+import { artifactBasename, artifactUri, docText } from "./core/docs";
+import { previewIsStale } from "./core/preview";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 import type { ThreadCache } from "./core/threadCache";
@@ -31,7 +32,7 @@ export function registerGates(
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
-  const sources = new Map<string, vscode.Uri>(); // item id → its gate document's last uri
+  const latest = new Map<string, string>(); // item id → the basename its latest render used
   const shown = new ShownRenders(); // what each item's tab last showed, so Approve binds to it
   const changed = new vscode.EventEmitter<vscode.Uri>();
 
@@ -43,21 +44,28 @@ export function registerGates(
     }),
   );
 
-  // A gate document's preview passes no kraft-artifact uri: its item is the one the active preview shows.
-  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]) ?? preview.id();
+  const direct = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
+  // A preview's title bar passes a webview-panel uri: its item is the one the active preview shows.
+  const idOf = (arg: unknown) => direct(arg) ?? preview.id();
+  // The title bar calls a command as (resource, { groupId }): only a string is a gate or a note.
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
   // Resolves once the preview is up; only then is the render remembered as read.
   const show = async (id: string, gate: string | undefined, a: Artifact) => {
-    const path = `/${id}/${artifactBasename(id, a.title)}`;
+    const { scheme, path } = artifactUri(id, a.title);
+    const basename = artifactBasename(id, a.title);
     artifacts.set(path, docText(a.content, a.truncated));
-    const uri = vscode.Uri.from({ scheme: "kraft-artifact", path });
-    sources.set(id, uri);
+    const uri = vscode.Uri.from({ scheme, path });
     changed.fire(uri); // a preview already open on this path re-renders
-    await vscode.workspace.openTextDocument(uri);
-    preview.opening(id); // before the tab appears, so its tab change finds the id
-    await vscode.commands.executeCommand("markdown.showPreview", uri);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    latest.set(id, basename);
+    preview.opening(id, basename); // before the tab appears, so its tab change finds it
+    // Locked, so it never follows the active editor onto someone else's file.
+    if ((await vscode.commands.getCommands(true)).includes("markdown.showPreview"))
+      await vscode.commands.executeCommand("markdown.showPreview", uri, undefined, { locked: true });
+    else await vscode.window.showTextDocument(doc, { preview: false }); // the Markdown extension is disabled
     if (gate) shown.record(id, gate, a.digest); // no gate to bind it to: shown, not remembered
   };
 
@@ -77,11 +85,16 @@ export function registerGates(
   };
 
   // Guarded here, not at registration: a gate notification's buttons call these directly.
-  const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string) => {
+  // `stale`: clicked on a preview of an older render than the latest; it reads first, as an unread gate does.
+  const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     const g = gate;
+    if (stale) {
+      if (await openArtifact(id, g)) void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
+      return;
+    }
     // Read once the approve is about to go: drafts written since the document opened go with it.
     const send = async (digest: string | undefined) => {
       const n = drafts(await cache.load(id)).length;
@@ -160,15 +173,12 @@ export function registerGates(
     // From the palette, away from a gate document: ask which gate.
     vscode.commands.registerCommand("kraft.openArtifact", async (arg?: unknown) =>
       openArtifact(idOf(arg) ?? (await pickItem("openArtifact", onBoard(store.items(), include)))?.id)),
-    vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: string) => approve(idOf(arg), gate)),
-    vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: string, note?: string) => reject(idOf(arg), gate, note)),
-    // The preview's markdown as text, for search, copy, or a line to quote.
-    vscode.commands.registerCommand("kraft.openArtifactSource", async (arg?: unknown) => {
-      const id = idOf(arg);
-      const uri = id ? sources.get(id) : undefined;
-      if (!uri) return void vscode.window.showInformationMessage("Open a gate document first: its source is the one it showed.");
-      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
+    vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: unknown) => {
+      const id = direct(arg);
+      const p = id ? undefined : preview.current();
+      return approve(id ?? p?.id, str(gate), p !== undefined && previewIsStale(p, latest));
     }),
+    vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: unknown, note?: unknown) => reject(idOf(arg), str(gate), str(note))),
   );
   return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }

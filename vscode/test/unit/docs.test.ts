@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artifactBasename, docPath, docText } from "../../src/core/docs";
+import { artifactBasename, artifactUri, docPath, docText } from "../../src/core/docs";
 
 describe("docText", () => {
   it.each([
@@ -27,5 +27,14 @@ describe("artifactBasename", () => {
     ["# and ? kept, the id last", "a#b?c", "a#b?c (K-1).md"],
   ])("%s", (_, title, want) => {
     expect(artifactBasename("K-1", title)).toBe(want);
+  });
+});
+
+describe("artifactUri", () => {
+  it.each([
+    ["a plain title", "Spec", "/K-1/Spec (K-1).md"],
+    ["# and ? kept in the path", "a#b?c", "/K-1/a#b?c (K-1).md"],
+  ])("%s", (_, title, path) => {
+    expect(artifactUri("K-1", title)).toEqual({ scheme: "kraft-artifact", path });
   });
 });

@@ -13,3 +13,8 @@ export const docPath = (key: string, title: string): string => `/${key}/${segmen
  *  dashes, then `(<id>).md`. The markdown preview's tab label ends with it,
  *  which is how previewItemId finds the item a preview shows. */
 export const artifactBasename = (id: string, title: string): string => `${segment(title).replace(/[()]/g, "-")} (${id}).md`;
+
+/** A gate document's virtual uri, as `Uri.from` takes it: the path is kept as
+ *  written, so a `#` or `?` in the title stays in the file name. */
+export const artifactUri = (id: string, title: string): { scheme: "kraft-artifact"; path: string } =>
+  ({ scheme: "kraft-artifact", path: `/${id}/${artifactBasename(id, title)}` });
