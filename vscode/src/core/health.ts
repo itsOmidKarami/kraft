@@ -25,6 +25,13 @@ export function statusMenu(connected: boolean): { label: string; choice: MenuCho
   ];
 }
 
+/** The status bar's text: connected, read-only, and how many items wait on you,
+ *  the count left out at 0. Down shows neither: the board it counts may be stale. */
+export function statusText(connected: boolean, readOnly: boolean, needs: number): string {
+  if (!connected) return "$(debug-disconnect) Kraft";
+  return `$(check) Kraft${readOnly ? " (read-only)" : ""}${needs > 0 ? ` ${needs}` : ""}`;
+}
+
 /** The status bar's hover. Connected: the read-only reasons (`readOnly.tooltip`) and
  *  today's spend, either alone. Down: the down row's reason, since that row shows only
  *  while the board is empty; with no error yet (a socket that dropped after it opened),

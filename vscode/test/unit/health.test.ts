@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptHealth, downRow, every, onceEach, statusMenu, statusTooltip } from "../../src/core/health";
+import { acceptHealth, downRow, every, onceEach, statusMenu, statusText, statusTooltip } from "../../src/core/health";
 
 describe("health", () => {
   it.each([
@@ -34,6 +34,13 @@ describe("health", () => {
     ["read-only with today's spend", true, "why", null, "why\n\nToday: $0.500 (no daily cap)", { spent_usd: 0.5, cap_usd: null }],
     ["down ignores today's spend", false, undefined, null, "Kraft: reconnecting…", { spent_usd: 1.2, cap_usd: 20 }],
   ])("statusTooltip: %s", (_, connected, readOnly, err, want, today?) => expect(statusTooltip(connected, readOnly, err, today)).toBe(want));
+
+  it.each([
+    [true, false, 2, "$(check) Kraft 2"],
+    [true, false, 0, "$(check) Kraft"],
+    [true, true, 1, "$(check) Kraft (read-only) 1"],
+    [false, false, 3, "$(debug-disconnect) Kraft"],
+  ])("statusText(%s, %s, %s)", (connected, readOnly, needs, want) => expect(statusText(connected, readOnly, needs)).toBe(want));
 
   it("every opens at most once per window, and always when forced", () => {
     let t = 0;

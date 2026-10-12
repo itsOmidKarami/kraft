@@ -6,7 +6,7 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
-import { needsYou } from "./core/board";
+import { needsYou, needsYouCount } from "./core/board";
 import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
@@ -29,7 +29,7 @@ import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { acceptHealth, every, onceEach, statusMenu, statusTooltip } from "./core/health";
+import { acceptHealth, every, onceEach, statusMenu, statusText, statusTooltip } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -83,10 +83,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  // The text alone: a board or scope change re-renders it without refetching spend.
+  const renderText = () => {
+    status.text = statusText(connected, refusal(state()) !== null, needsYouCount(store.items(), include));
+  };
   const setStatus = (now: boolean) => {
     connected = now;
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
-    status.text = connected ? `$(check) Kraft${refusal(state()) ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
+    renderText();
     status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError, today);
     status.command = "kraft.statusMenu";
     status.show();
@@ -142,6 +146,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     }
   });
   store.onError(() => setStatus(store.connected));
+  const offStore = store.onChange(renderText);
+  const offScope = scope.onChange(renderText);
+  context.subscriptions.push({ dispose: () => { offStore(); offScope(); } });
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
