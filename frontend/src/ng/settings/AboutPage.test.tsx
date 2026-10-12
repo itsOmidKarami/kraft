@@ -200,7 +200,7 @@ describe("ng AboutPage", () => {
     expect(within(version).getByText("kraft admin update")).toBeInTheDocument();
     const rows = (await screen.findByText("Health")).closest("dl") as HTMLElement;
     expect([...rows.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Health", "Address", "Run directory", "Process", "Search index"]);
-    expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", expect.stringContaining("github.io/kraft"));
+    expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", expect.stringContaining("kraft-sdlc.dev"));
     expect(screen.getByRole("link", { name: "Status and support" })).toHaveClass("set-linkrow");
   });
 

@@ -83,7 +83,7 @@ def spa_shell(request: Request, dist, headers: dict[str, str] | None = None):
 
 
 ROLLBACK_DOCS = (
-    "https://itsomidkarami.github.io/kraft/get-started/install#pin-or-roll-back-a-version"
+    "https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version"
 )
 
 

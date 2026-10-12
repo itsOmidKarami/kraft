@@ -274,14 +274,14 @@ def test_known_broken_excuses_a_dead_link_until_it_resolves(cr, content):
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        ("itsomidkarami.github.io/kraft/", "/"),
-        ("itsomidkarami.github.io/kraft/guides/vscode", "/guides/vscode"),
-        ("itsomidkarami.github.io/kraft/guides/vscode/#install", "/guides/vscode#install"),
-        ("itsomidkarami.github.io/kraft/guides/vscode.", "/guides/vscode"),
-        ("itsomidkarami.github.io/kraft/next/guides/vscode#install", "/guides/vscode#install"),
-        ("itsomidkarami.github.io/kraft/next/", "/"),
-        ("itsomidkarami.github.io/kraft/nextsteps", "/nextsteps"),
-        ("itsOmidKarami.github.io/Kraft/guides/vscode", "/guides/vscode"),
+        ("kraft-sdlc.dev/", "/"),
+        ("kraft-sdlc.dev/guides/vscode", "/guides/vscode"),
+        ("kraft-sdlc.dev/guides/vscode/#install", "/guides/vscode#install"),
+        ("kraft-sdlc.dev/guides/vscode.", "/guides/vscode"),
+        ("kraft-sdlc.dev/next/guides/vscode#install", "/guides/vscode#install"),
+        ("kraft-sdlc.dev/next/", "/"),
+        ("kraft-sdlc.dev/nextsteps", "/nextsteps"),
+        ("KRAFT-SDLC.dev/guides/vscode", "/guides/vscode"),
     ],
     ids=["home", "page", "trailing-slash", "full-stop", "next", "next-home", "not-next", "case"],
 )
@@ -306,11 +306,11 @@ def test_check_reads_the_map_and_the_links_of_one_repository(cr, content, tmp_pa
     # with the host in another case; the tests' and the docs' own URLs are not
     # Kraft's links.
     write(
-        tmp_path, "SECURITY.md", "https://itsOmidKarami.github.io/kraft/next/guides/vscode#nope\n"
+        tmp_path, "SECURITY.md", "https://kraft-sdlc.dev/next/guides/vscode#nope\n"
     )
-    write(tmp_path, "src/kraft/cli.py", "# https://itsomidkarami.github.io/kraft/guides/vscode\n")
-    write(tmp_path, "tests/test_x.py", "# https://itsomidkarami.github.io/kraft/a/fixture\n")
-    write(content, "index.md", "https://itsomidkarami.github.io/kraft/lychee/checks/this\n")
+    write(tmp_path, "src/kraft/cli.py", "# https://kraft-sdlc.dev/guides/vscode\n")
+    write(tmp_path, "tests/test_x.py", "# https://kraft-sdlc.dev/a/fixture\n")
+    write(content, "index.md", "https://kraft-sdlc.dev/lychee/checks/this\n")
     git(tmp_path, "init", "-q")
     commit_all(tmp_path)
     map_problem, link_problem = cr.check(tmp_path)

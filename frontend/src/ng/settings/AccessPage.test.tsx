@@ -267,7 +267,7 @@ describe("ng AccessPage", () => {
     const reach = await screen.findByRole("radiogroup", { name: "Reach" });
     const hint = reach.parentElement!;
     expect(hint).toHaveTextContent("0.0.0.0 listens on every network this machine is on.");
-    expect(within(hint).getByRole("link", { name: "Remote access" })).toHaveAttribute("href", "https://itsomidkarami.github.io/kraft/guides/remote-access");
+    expect(within(hint).getByRole("link", { name: "Remote access" })).toHaveAttribute("href", "https://kraft-sdlc.dev/guides/remote-access");
     expect(hint).not.toHaveTextContent(/never binds publicly/);
   });
 

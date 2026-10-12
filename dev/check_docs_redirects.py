@@ -16,8 +16,8 @@ This checks, against `docsite/content/` as it is in this checkout:
   forwards it to one. A copy of Kraft already installed keeps opening those
   addresses, so moving a section without an entry fails here.
 
-A `/kraft/next/...` link and a `/kraft/...` one are both read against this
-checkout's pages: they are what the next release publishes at `/kraft/`.
+A `/next/...` link and a root one are both read against this
+checkout's pages: they are what the next release publishes at `/`.
 
 Run directly: `uv run python dev/check_docs_redirects.py`. Exits 1 on any
 finding.
@@ -39,7 +39,7 @@ MAP_NAME = "redirects.yml"
 # tests, whose URLs are fixtures. A list of folders missed three files that
 # link to the docs; a new one is picked up here without an edit.
 LINK_SOURCES = [".", ":!docsite", ":!tests"]
-LINK = r"itsomidkarami\.github\.io/kraft/[a-zA-Z0-9/#._-]*"
+LINK = r"kraft-sdlc\.dev/[a-zA-Z0-9/#._-]*"
 
 # A site path with an optional anchor. Narrower than the pattern in
 # docsite/nuxt.config.ts on purpose: every line this accepts, the site reads,
@@ -254,7 +254,7 @@ def check_page_links(
 def site_path(url: str) -> str:
     """A docs URL as a site path: no base, no `/next`, no trailing slash."""
     # A URL that ends a sentence takes the full stop with it.
-    address = re.split("/kraft", url, maxsplit=1, flags=re.IGNORECASE)[1].rstrip(".")
+    address = re.split("kraft-sdlc.dev", url, maxsplit=1, flags=re.IGNORECASE)[1].rstrip(".")
     address = re.sub(r"^/next(?=/|#|$)", "", address)
     path, hash_, anchor = address.partition("#")
     return (path.rstrip("/") or "/") + hash_ + anchor

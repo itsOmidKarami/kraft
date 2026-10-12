@@ -39,7 +39,7 @@ from kraft.worker import steering as _steering
 logger = logging.getLogger(__name__)
 
 _NETWORK_DOCS = (
-    "https://itsomidkarami.github.io/kraft/reference/configuration/sandbox/network-policy"
+    "https://kraft-sdlc.dev/reference/configuration/sandbox/network-policy"
 )
 
 _CTX = (

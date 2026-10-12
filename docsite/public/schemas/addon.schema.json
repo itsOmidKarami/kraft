@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://itsomidkarami.github.io/kraft/schemas/addon.schema.json",
+  "$id": "https://kraft-sdlc.dev/schemas/addon.schema.json",
   "title": "Kraft add-on",
   "description": "The .kraft/addon.json in an add-on's directory: its name, version and what it needs from the instance. Its components sit beside it in fixed places: library.yaml, chains/, skills/ and profiles.yaml.",
   "type": "object",

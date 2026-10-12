@@ -314,7 +314,7 @@ jobs:
           gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl "$RUNNER_TEMP"/vsix/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/body.md"
 
       - name: rebuild the docs for this release
-        # The docs site serves the latest stable tag's pages at /kraft/. The
+        # The docs site serves the latest stable tag's pages at /. The
         # tag push above can't trigger docs.yml (GITHUB_TOKEN pushes trigger
         # nothing), and the stamp PR is outside its path filter, but a
         # dispatch with GITHUB_TOKEN is allowed. The docs are not the release:

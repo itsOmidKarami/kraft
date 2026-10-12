@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "check_llm_docs.py"
-BASE = "https://itsomidkarami.github.io/kraft/next"
+BASE = "https://kraft-sdlc.dev/next"
 
 
 @pytest.fixture(scope="module")

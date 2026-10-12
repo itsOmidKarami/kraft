@@ -1,16 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// GitHub Pages serves this repo at /kraft/, not the domain root -- every
-// Nuxt-generated asset URL (_nuxt/*, _payload.json, the _ipx image proxy)
-// needs that prefix or it 404s and the page loads unstyled.
-// dev/build_docs_site.sh builds main's docs a second time under /kraft/next/.
-const baseURL = process.env.KRAFT_DOCS_BASE || '/kraft/'
+// The site is served from the root of the custom domain (kraft-sdlc.dev), so
+// the release docs are at / and main's at /next/. A build under another base
+// (a project page at /kraft/) needs it here, or every Nuxt-generated asset URL
+// (_nuxt/*, _payload.json) 404s and the page loads unstyled.
+// dev/build_docs_site.sh builds main's docs a second time under /next/.
+const baseURL = process.env.KRAFT_DOCS_BASE || '/'
 // stable, next, or empty: a local or PR build shows no version UI.
 const channel = process.env.KRAFT_DOCS_CHANNEL || ''
 // The bare origin. Site config joins app.baseURL onto it itself, so an origin
 // that already ends in /kraft/ doubles the prefix (og:image at /kraft/kraft/).
-const origin = 'https://itsomidkarami.github.io'
+const origin = 'https://kraft-sdlc.dev'
 
 // content/redirects.yml: the addresses that moved in this build's content, as
 // site paths without the base. The file documents the format, and
@@ -119,7 +120,7 @@ export default defineNuxtConfig({
   },
   // nuxt-llms writes no llms.txt or llms-full.txt without a domain, and Docus
   // infers none on GitHub Pages. Its links are the domain plus a router path,
-  // so the domain carries this build's base (/kraft or /kraft/next).
+  // so the domain carries this build's base ('' or /next).
   llms: {
     domain: `${origin}${baseURL.replace(/\/$/, '')}`,
   },
@@ -141,8 +142,8 @@ export default defineNuxtConfig({
       docs: {
         channel,
         stableVersion: process.env.KRAFT_DOCS_STABLE_VERSION || '',
-        stableBase: '/kraft/',
-        nextBase: '/kraft/next/',
+        stableBase: '/',
+        nextBase: '/next/',
       },
       // Every moved address, old to new. app/plugins/moved.ts forwards them:
       // not a `routeRules` redirect, which Nuxt follows in the browser before
@@ -152,7 +153,7 @@ export default defineNuxtConfig({
     },
   },
   // The IPX image proxy double-prefixes app.baseURL for content images
-  // (/kraft/_ipx/_/kraft/assets/...), 404ing every screenshot. These are
+  // (/_ipx/_/assets/...), 404ing every screenshot. These are
   // already correctly-sized PNGs with no need for runtime resizing, so skip
   // the proxy and serve them as plain static files instead.
   image: {
@@ -180,14 +181,14 @@ export default defineNuxtConfig({
       routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
       // The version switch links to the other build's root, which the crawler
       // would take for one of this build's own pages and fail as a 404.
-      // Exactly that path: a prefix match on /kraft/ would skip every page.
+      // Exactly that path: a prefix match on / would skip every page.
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
       // to indexing.
       ignore: [
         '/200.html',
-        ...(channel ? [new RegExp(`^${channel === 'next' ? '/kraft/' : '/kraft/next/'}$`)] : []),
+        ...(channel ? [new RegExp(`^${channel === 'next' ? '/' : '/next/'}$`)] : []),
       ],
     },
   },

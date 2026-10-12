@@ -6,9 +6,9 @@ What a release writes into what it ships, which a tag alone does not:
       Points the wheel's description (README.md, as PyPI renders it) at <tag>
       instead of `main`, so a version's PyPI page keeps the screenshots that
       version shipped with. On a stable tag its links to `main`'s docs
-      (`/<repo>/next/`) go to the release's (`/<repo>/`) too. Only this
-      repository's links move: $GITHUB_REPOSITORY, or itsOmidKarami/kraft when
-      that is unset.
+      (`kraft-sdlc.dev/next/`) go to the release's (`kraft-sdlc.dev/`) too.
+      Only this repository's links move for the asset pins: $GITHUB_REPOSITORY,
+      or itsOmidKarami/kraft when that is unset.
   python3 dev/release_artifacts.py vsix-version <tag>
       Prints <tag> as the version `vsce package` stamps on the .vsix, in
       semver: v1.5.0 -> 1.5.0, v1.5.0rc2 -> 1.5.0-rc.2.
@@ -36,6 +36,7 @@ from pathlib import Path
 from next_tag import PRE_MARKS
 
 REPOSITORY = "itsOmidKarami/kraft"
+DOCS_ORIGIN = "https://kraft-sdlc.dev"
 
 _TAG = re.compile(rf"v?(\d+\.\d+\.\d+)(?:({'|'.join(PRE_MARKS.values())})(\d+))?")
 _SEMVER_PRE = {mark: kind for kind, mark in PRE_MARKS.items()}
@@ -56,11 +57,11 @@ def pin_refs(text: str, tag: str, repository: str = REPOSITORY) -> str:
     return moving.sub(lambda m: f"{m[1]}/{tag}/", text)
 
 
-def pin_docs(text: str, tag: str, repository: str = REPOSITORY) -> str:
-    """`text` with `repository`'s links to `main`'s docs moved to the release's, on a stable `tag`.
+def pin_docs(text: str, tag: str, docs_origin: str = DOCS_ORIGIN) -> str:
+    """`text` with the links to `main`'s docs moved to the release's, on a stable `tag`.
 
-    The docs site serves the latest stable release at `/<repo>/` and `main` at
-    `/<repo>/next/`. A README links a page that exists only on `main` under
+    The docs site serves the latest stable release at `/` and `main` at
+    `/next/`. A README links a page that exists only on `main` under
     `/next/` until the release that adds it is out; on that release's own PyPI
     page the link would then lead to whatever `main` says later. A
     pre-release's page keeps `/next/`: the stable docs are still the last
@@ -71,8 +72,7 @@ def pin_docs(text: str, tag: str, repository: str = REPOSITORY) -> str:
         raise ValueError(f"cannot read a version out of {tag!r}")
     if match[2] is not None:
         return text
-    owner, name = (re.escape(part) for part in repository.split("/", 1))
-    docs = re.compile(rf"(https://{owner}\.github\.io/{name})/next/", re.IGNORECASE)
+    docs = re.compile(rf"({re.escape(docs_origin)})/next/", re.IGNORECASE)
     return docs.sub(lambda m: f"{m[1]}/", text)
 
 
@@ -93,7 +93,7 @@ def pin_wheel(wheel: Path, tag: str, repository: str = REPOSITORY) -> None:
         infos = src.infolist()
         contents = {info.filename: src.read(info) for info in infos}
     (meta,) = (n for n in contents if re.fullmatch(r"[^/]+\.dist-info/METADATA", n))
-    pinned = pin_docs(pin_refs(contents[meta].decode(), tag, repository), tag, repository).encode()
+    pinned = pin_docs(pin_refs(contents[meta].decode(), tag, repository), tag).encode()
     if pinned == contents[meta]:
         return
     contents[meta] = pinned

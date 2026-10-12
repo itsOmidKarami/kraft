@@ -5,7 +5,7 @@ description: "Approves or rejects the gate a Kraft work item is waiting on, file
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
+https://kraft-sdlc.dev/get-started/install rather than reporting a
 connection error.
 
 # Gates and steering

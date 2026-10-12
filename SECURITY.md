@@ -22,4 +22,4 @@ Only the latest release gets security fixes.
 ## Threat model
 
 What Kraft protects against, and what it deliberately does not, is documented in
-the [threat model](https://itsomidkarami.github.io/kraft/project/security).
+the [threat model](https://kraft-sdlc.dev/project/security).

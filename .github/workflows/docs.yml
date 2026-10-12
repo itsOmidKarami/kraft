@@ -1,5 +1,5 @@
 # Builds the docs site with dev/build_docs_site.sh: the latest stable release's
-# pages at /kraft/ and main's at /kraft/next/, both with main's site code. Runs
+# pages at / and main's at /next/, both with main's site code. Runs
 # on every PR that touches it, building both versions, so a change to
 # docsite/app that breaks the release's older pages fails the PR, not a merge
 # to main after the fact. Publishes to GitHub Pages on push to main and on a
@@ -73,7 +73,7 @@ jobs:
             fi
           done
 
-      # Every link on main's pages (/kraft/next/), internal and external,
+      # Every link on main's pages (/next/), internal and external,
       # anchors included. PRs only: a link that rots between PRs must not
       # block the Pages deploy on push; the next docs PR catches it instead.
       #
@@ -83,13 +83,12 @@ jobs:
       # link rel="nofollow", and lychee skips those in HTML. The Markdown's
       # own /... links are left to the HTML (the linkroot exclude below).
       #
-      # The pages link to /kraft/..., so --root-dir is a directory whose
-      # kraft/ is the built site. A route like /kraft/next/guides/vscode is a
-      # directory (holding only _payload.json) beside vscode.html, the file
+      # The pages link to /..., so --root-dir is the built site. A route like
+      # /next/guides/vscode is a directory (holding only _payload.json) beside vscode.html, the file
       # Pages serves for it: --index-files index.html,. with
       # --fallback-extensions html resolves it the same way.
       #
-      # Excluded: the site outside /kraft/next/. The "Docs for the release"
+      # Excluded: the site outside /next/. The "Docs for the release"
       # banner links every page to its release twin, which a page new on main
       # does not have yet (VersionBanner.vue says so). The example domains
       # the docs use (example.com and the like) lychee skips on its own.
@@ -99,9 +98,6 @@ jobs:
       # adds; and the repo's blob/tree/edit links on main, to this checkout,
       # for the same reason and because github.com rate-limits a runner that
       # fetches dozens of them.
-      - name: link root
-        if: github.event_name == 'pull_request'
-        run: mkdir -p "$RUNNER_TEMP/linkroot" && ln -s "$RUNNER_TEMP/site" "$RUNNER_TEMP/linkroot/kraft"
       - name: check links
         if: github.event_name == 'pull_request'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
@@ -109,14 +105,14 @@ jobs:
           args: >-
             --no-progress
             --include-fragments
-            --root-dir ${{ runner.temp }}/linkroot
+            --root-dir ${{ runner.temp }}/site
             --index-files index.html,.
             --fallback-extensions html
-            --exclude '^file:///.*/linkroot/'
-            --include '^file:///.*/linkroot/kraft/next(/|#|$)'
-            --remap 'https://itsomidkarami\.github\.io/kraft/ file://${{ runner.temp }}/linkroot/kraft/'
+            --exclude '^file:///.*/site/'
+            --include '^file:///.*/site/next(/|#|$)'
+            --remap 'https://kraft-sdlc\.dev/ file://${{ runner.temp }}/site/'
             --remap 'https://github\.com/itsOmidKarami/kraft/(?:blob|tree|edit)/main/ file://${{ github.workspace }}/'
-            '${{ runner.temp }}/linkroot/kraft/next/**/*.html'
+            '${{ runner.temp }}/site/next/**/*.html'
             'docsite/content/**/*.md'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

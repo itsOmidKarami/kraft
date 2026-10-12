@@ -24,7 +24,7 @@ flagged as you type.
    ```
 
    or with Homebrew: `brew tap itsOmidKarami/kraft && brew install kraft`.
-   The [Install page](https://itsomidkarami.github.io/kraft/get-started/install)
+   The [Install page](https://kraft-sdlc.dev/get-started/install)
    covers the other ways.
 2. Start it: run `kraft`.
 3. Open VS Code. The extension finds the running Kraft on its own: it reads
@@ -97,7 +97,7 @@ startup.
 
 ## Learn more
 
-- [Kraft for VS Code](https://itsomidkarami.github.io/kraft/guides/vscode), the guide to this extension
-- [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft): what it does that a session, a loop or a skill does not
-- [Documentation](https://itsomidkarami.github.io/kraft/)
+- [Kraft for VS Code](https://kraft-sdlc.dev/guides/vscode), the guide to this extension
+- [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill does not
+- [Documentation](https://kraft-sdlc.dev/)
 - [GitHub](https://github.com/itsOmidKarami/kraft): source, releases and issues

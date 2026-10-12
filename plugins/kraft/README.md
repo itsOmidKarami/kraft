@@ -4,7 +4,7 @@ Eleven skills for driving [Kraft](https://github.com/itsOmidKarami/kraft) from a
 coding-agent session. Claude Code, Codex, Cursor and Antigravity install this
 plugin. It also registers Kraft's MCP server, which the skills call, so the
 `kraft` program must be installed and on your `PATH`. See the
-[install guide](https://itsomidkarami.github.io/kraft/get-started/install).
+[install guide](https://kraft-sdlc.dev/get-started/install).
 
 ## Install
 
@@ -56,7 +56,7 @@ To update, clone again and run the import with `--force`. Remove with
 
 OpenCode, Amp and Gemini CLI have no plugin. They register the MCP server by
 hand, and Amp adds these skills with `amp skill add`. The commands are on the
-install guide's [agent tabs](https://itsomidkarami.github.io/kraft/get-started/install#connect-your-agent).
+install guide's [agent tabs](https://kraft-sdlc.dev/get-started/install#connect-your-agent).
 
 ## Get started
 
@@ -91,7 +91,7 @@ without the slash (`kraft:board`).
 
 What an agent files through the MCP tools lands paused: a person starts it from the board. Details, the MCP
 tools behind each skill, and the by-hand install are in the
-[agent integration guide](https://itsomidkarami.github.io/kraft/guides/agent-integration).
+[agent integration guide](https://kraft-sdlc.dev/guides/agent-integration).
 
 Published from `plugins/kraft/` in the Kraft repository, alongside
 [kraft-lite](../kraft-lite). The version is Kraft's own release tag, so plugin

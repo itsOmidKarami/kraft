@@ -20,8 +20,8 @@ export interface UpdateState {
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
-const DOCS = "https://itsomidkarami.github.io/kraft/";
-const SUPPORT = "https://itsomidkarami.github.io/kraft/project/status-and-support";
+const DOCS = "https://kraft-sdlc.dev/";
+const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown": it
  *  is never read as "up to date" (the server sends null, not false). */
@@ -104,7 +104,7 @@ export function AboutPage() {
           {error && <span className="set-error" role="alert">{error}</span>}
           {installedOlder(health) ? (
             <p className="set-hint is-warn" role="status">
-              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="set-link" href="https://itsomidkarami.github.io/kraft/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
+              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="set-link" href="https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
             </p>
           ) : restartPending(health) && (
             <p className="set-hint is-warn" role="status">

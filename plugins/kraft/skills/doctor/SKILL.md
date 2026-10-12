@@ -5,7 +5,7 @@ description: "Diagnoses an unhealthy Kraft server and applies the reload, restar
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
+https://kraft-sdlc.dev/get-started/install rather than reporting a
 connection error.
 
 # When Kraft itself is unwell

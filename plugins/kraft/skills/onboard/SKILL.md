@@ -5,7 +5,7 @@ description: "Connects a repository to Kraft and verifies that its test and setu
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
+https://kraft-sdlc.dev/get-started/install rather than reporting a
 connection error.
 
 # Onboarding a repo
@@ -61,7 +61,7 @@ it did was right. Then hand off to `kraft:check`.
    say what you changed. The running server reads that file fresh on each
    request, so no restart is needed. A convention Kraft keeps getting wrong
    across repos belongs in `~/.kraft/config/detectors.yaml` instead: see
-   https://itsomidkarami.github.io/kraft/reference/configuration/repos/detectors
+   https://kraft-sdlc.dev/reference/configuration/repos/detectors
 
    If the repo has submodules, connect writes each `.gitmodules` path as its
    own repo entry, not a sub-field of this one — run `kraft repo list --all`

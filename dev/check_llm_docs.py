@@ -4,7 +4,7 @@
 pages meant for a model rather than a browser: `raw/<page>.md` (the target of
 llms.txt, "Copy page" and "Open in Claude/ChatGPT") and `llms-full.txt`. The
 lychee step in docs.yml reads neither, and both once shipped hundreds of dead
-links: root-relative `/reference/x` in raw/, which resolve outside `/kraft/`,
+links: root-relative `/reference/x` in raw/, which resolve outside the build's base,
 and same-page `#anchor` links in llms-full.txt that landed on the landing page.
 docsite/server/plugins/llm-links.ts is what keeps them out; this is what
 notices when it stops.
@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-ORIGIN = "https://itsomidkarami.github.io"
+ORIGIN = "https://kraft-sdlc.dev"
 # A path from the domain root, written as a markdown link, as the href/src/to
 # of raw HTML, as a key of a component's JSON prop (raw/index.md's hero) or of
 # its YAML (the same prop in llms-full.txt). `//` is another site's.
@@ -92,9 +92,9 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     site = Path(argv[1])
-    channels = [(site, f"{ORIGIN}/kraft")]
+    channels = [(site, ORIGIN)]
     if (site / "next").is_dir():
-        channels.append((site / "next", f"{ORIGIN}/kraft/next"))
+        channels.append((site / "next", f"{ORIGIN}/next"))
     problems = [p for root, base in channels for p in check_channel(root, base)]
     for problem in problems:
         print(problem)

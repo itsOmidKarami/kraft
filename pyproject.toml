@@ -167,8 +167,8 @@ required-imports = ["from __future__ import annotations"]
 "conftest.py" = ["I002"]
 
 [project.urls]
-Homepage = "https://itsomidkarami.github.io/kraft/"
-Documentation = "https://itsomidkarami.github.io/kraft/"
+Homepage = "https://kraft-sdlc.dev/"
+Documentation = "https://kraft-sdlc.dev/"
 Source = "https://github.com/itsOmidKarami/kraft"
 Issues = "https://github.com/itsOmidKarami/kraft/issues"
 Releases = "https://github.com/itsOmidKarami/kraft/releases"

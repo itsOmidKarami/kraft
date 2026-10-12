@@ -16,8 +16,8 @@ interface UpdateState {
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
-const DOCS = "https://itsomidkarami.github.io/kraft/";
-const SUPPORT = "https://itsomidkarami.github.io/kraft/project/status-and-support";
+const DOCS = "https://kraft-sdlc.dev/";
+const SUPPORT = "https://kraft-sdlc.dev/project/status-and-support";
 
 /** What the update feed said, in words. A feed that did not answer is "unknown", never "up to date": the server sends null, not false (W16 E). */
 export function updateVerdict(u: UpdateState | null): { tone: "ok" | "warn" | "muted"; text: string } {

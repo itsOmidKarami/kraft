@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://itsomidkarami.github.io/kraft/schemas/collection.schema.json",
+  "$id": "https://kraft-sdlc.dev/schemas/collection.schema.json",
   "title": "Kraft collection",
   "description": "The .kraft/collection.json at a collection's root: who publishes it and which of its directories are Kraft add-ons.",
   "type": "object",

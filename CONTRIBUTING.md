@@ -385,8 +385,8 @@ page you're touching, not just the code.
 ### Two versions of the docs
 
 The site publishes two versions: the latest stable release's pages at
-[`/kraft/`](https://itsomidkarami.github.io/kraft/), and `main`'s at
-[`/kraft/next/`](https://itsomidkarami.github.io/kraft/next/). Write docs on
+[`/kraft/`](https://kraft-sdlc.dev/), and `main`'s at
+[`/kraft/next/`](https://kraft-sdlc.dev/next/). Write docs on
 `main`, in the same pull request as the code. They appear at `/next/` when it
 merges and become the default at the next stable release. There is nothing
 else to do. Link to `/kraft/next/` for a feature that hasn't shipped in a

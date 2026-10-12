@@ -730,7 +730,7 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
             "(picking Local network asks for it), or with "
             f"`curl -X PUT http://127.0.0.1:{port}/api/access "
             "-H 'Content-Type: application/json' -d '{\"password\": \"...\"}'`. "
-            "See https://itsomidkarami.github.io/kraft/guides/remote-access"
+            "See https://kraft-sdlc.dev/guides/remote-access"
         )
     return host, port
 

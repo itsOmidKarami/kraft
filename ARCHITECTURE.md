@@ -10,13 +10,13 @@ index that Kraft can rebuild at any time.
 
 The full page, with the parts, how a work item moves from filing to merge, the
 trust boundaries and what is kept on disk, lives on the docs site:
-[Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
+[Architecture](https://kraft-sdlc.dev/project/architecture).
 Its source is
 [`docsite/content/6.project/5.architecture.md`](docsite/content/6.project/5.architecture.md).
 
 The map of every module in `src/kraft/` and the "where to change things" table
 are on the
-[Source map](https://itsomidkarami.github.io/kraft/project/source-map) page.
+[Source map](https://kraft-sdlc.dev/project/source-map) page.
 Its source is
 [`docsite/content/6.project/6.source-map.md`](docsite/content/6.project/6.source-map.md).
 
@@ -25,12 +25,12 @@ collection, are handled by `src/kraft/addons/`. It fetches a collection into a
 bare mirror, extracts each add-on into a content-addressed store under
 `run/addons/`, and hands the template library a read-only layer per add-on.
 See
-[Add-ons and collections](https://itsomidkarami.github.io/kraft/reference/configuration/addons).
+[Add-ons and collections](https://kraft-sdlc.dev/reference/configuration/addons).
 
 For how one work item moves from filing to merge, and its seven statuses, see
-[How a work item runs](https://itsomidkarami.github.io/kraft/concepts/how-a-work-item-runs).
+[How a work item runs](https://kraft-sdlc.dev/concepts/how-a-work-item-runs).
 For the vocabulary, see
-[Concepts](https://itsomidkarami.github.io/kraft/concepts/vocabulary).
+[Concepts](https://kraft-sdlc.dev/concepts/vocabulary).
 
 The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to SVG with
 `just docs-diagrams`.

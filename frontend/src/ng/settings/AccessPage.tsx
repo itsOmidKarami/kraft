@@ -15,7 +15,7 @@ import "./settings.css";
 import { tip } from "../ui/Tooltip";
 
 const LOOPBACK = "127.0.0.1";
-const REMOTE_ACCESS = "https://itsomidkarami.github.io/kraft/guides/remote-access";
+const REMOTE_ACCESS = "https://kraft-sdlc.dev/guides/remote-access";
 const EXPIRIES = [1, 7, 30].map((d) => ({ value: String(d), label: `${d}d` }));
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

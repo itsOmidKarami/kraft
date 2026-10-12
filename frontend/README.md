@@ -3,7 +3,7 @@
 The single-page app Kraft serves at `/`: the board, a work item's page, the
 review page, the template and settings screens, and a separate layout for
 phones. This page is for someone changing it. For the product, see the
-[docs site](https://itsomidkarami.github.io/kraft/); for the whole repository,
+[docs site](https://kraft-sdlc.dev/); for the whole repository,
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Everything below was written from the code. Where a rule is enforced, the test

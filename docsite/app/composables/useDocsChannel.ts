@@ -1,7 +1,7 @@
 // Which docs channel the reader is on, and the current page's path inside it,
 // for links to the same page in the other channel. Usually that is this
 // build's own channel, but the root 404.html comes from the stable build and
-// answers a missing page under /kraft/next/ too. There the router path is
+// answers a missing page under /next/ too. There the router path is
 // /next/<page>, so read the channel off the full path, not the build.
 export function useDocsChannel() {
   const docs = useRuntimeConfig().public.docs

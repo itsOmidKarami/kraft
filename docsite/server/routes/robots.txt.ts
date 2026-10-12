@@ -1,6 +1,6 @@
 // This build's robots.txt. A crawler reads robots.txt only at the domain root,
-// which belongs to another repo, so this file under /kraft/ or /kraft/next/
-// steers nothing; it should still not contradict the pages. The /next/ build
+// so the stable build's is the one that steers; the /next/ build's copy
+// steers nothing, but it should still not contradict the pages. The /next/ build
 // keeps its pages out of search with a noindex tag on each, so its robots.txt
 // allows crawling (a crawler that may not fetch a page never sees the tag) and
 // names no sitemap. Every other build points at its own.

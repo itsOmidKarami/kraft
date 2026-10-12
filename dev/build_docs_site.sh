@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the published docs site into OUT_DIR: the latest stable release's text
-# at the root (/kraft/) and main's at /kraft/next/. Both builds use this
+# at the root (/) and main's at /next/. Both builds use this
 # checkout's site code (theme, components, config), so a site fix reaches the
 # release docs without a release; only docsite/content and .github/assets come
 # from the tag. Needs docsite/node_modules (npm ci) and the repo's tags.
@@ -27,12 +27,12 @@ generate() { # DOCSITE_DIR BASE CHANNEL DEST
 }
 
 if [ -z "$TAG" ]; then
-  echo "::warning::no stable vX.Y.Z tag; building main alone at /kraft/"
-  generate "$ROOT/docsite" /kraft/ "" "$OUT"
+  echo "::warning::no stable vX.Y.Z tag; building main alone at /"
+  generate "$ROOT/docsite" / "" "$OUT"
   exit 0
 fi
 
-generate "$ROOT/docsite" /kraft/next/ next "$OUT/next"
+generate "$ROOT/docsite" /next/ next "$OUT/next"
 
 # The stable build: a copy of this working tree's site code with the tag's
 # content in place of main's. A copy, not a worktree of HEAD, so it builds the
@@ -50,5 +50,5 @@ git -C "$ROOT" archive "$TAG" docsite/content .github/assets | tar -xf - -C "$TM
 ln -s "$ROOT/docsite/node_modules" "$TMP/docsite/node_modules"
 # The root 404.html comes from here, so GitHub Pages answers a missing path
 # anywhere, /next/ included, with the release's 404 page.
-generate "$TMP/docsite" /kraft/ stable "$OUT"
+generate "$TMP/docsite" / stable "$OUT"
 echo "built $TAG at $OUT and main at $OUT/next"
