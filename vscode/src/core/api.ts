@@ -2,12 +2,12 @@ import type {
   ChainNode, CommentReview, Finding, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
   WorkerSession, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
-import type { WorkItemDiff } from "../../../frontend/src/types/documents";
+import type { DocumentDetail, WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 import { parseSse } from "./logStream";
 
 export type {
-  CommentReview, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  CommentReview, DocumentDetail, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
   WorkItemDiff,
 };
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
@@ -20,6 +20,8 @@ export type WorkItemDetail = WorkItem & {
   judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
   worker_sessions?: WorkerSession[];
 };
+/** A spec or plan as it was attached at intake (`GET /work-items/{id}/attachments/{kind}`). */
+export interface AttachmentDoc { work_item_id: string; kind: "spec" | "plan"; path: string; title: string; content: string; truncated: boolean }
 export interface Artifact { path: string; title: string; content: string; digest?: string; truncated: boolean }
 export interface Position { file: string; line: number; column: number }
 export interface ConfigIssue { file: string; chain: string | null; message: string; line: number; column: number; related: Position | null }
@@ -191,6 +193,10 @@ export class Api {
       throw e;
     }
   }
+
+  /** 404 when the item has none of that kind, or Kraft lost its copy. */
+  attachment = (id: string, kind: "spec" | "plan") => this.req<AttachmentDoc>("GET", this.item(id, `/attachments/${kind}`));
+  document = (docId: string) => this.req<DocumentDetail>("GET", `/documents/${encodeURIComponent(docId)}`);
 
   approve = (id: string, gate: string, digest?: string) =>
     this.req("POST", this.item(id, `/gates/${encodeURIComponent(gate)}/approve`), digest ? { digest } : {});

@@ -9,6 +9,7 @@ import type { Artifact } from "./core/api";
 import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
 import type { WorkspaceScope } from "./core/repoScope";
+import { docPath, docText } from "./core/docs";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 import type { ThreadCache } from "./core/threadCache";
@@ -41,8 +42,8 @@ export function registerGates(
 
   // Resolves once the tab is up; only then is the render remembered as read.
   const show = async (id: string, gate: string | undefined, a: Artifact) => {
-    const path = `/${id}/${a.title.replace(/[\\/]/g, "-")}.md`;
-    artifacts.set(path, a.truncated ? `${a.content}\n\n---\n*Truncated: open it in the web UI for the whole document.*\n` : a.content);
+    const path = docPath(id, a.title);
+    artifacts.set(path, docText(a.content, a.truncated));
     const uri = vscode.Uri.parse(`kraft-artifact:${path}`);
     changed.fire(uri); // a tab already open on this path reloads
     const doc = await vscode.workspace.openTextDocument(uri);

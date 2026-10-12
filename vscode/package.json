@@ -170,6 +170,21 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.openMergeRequest",
+        "title": "Open Merge Request",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.openSpec",
+        "title": "Open Spec",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.openPlan",
+        "title": "Open Plan",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.toggleAllRepos",
         "title": "Show All Repos",
         "category": "Kraft",
@@ -411,6 +426,21 @@
           "group": "3_open"
         },
         {
+          "command": "kraft.openMergeRequest",
+          "when": "view == kraft.board && viewItem =~ /\\bmr\\b/",
+          "group": "3_open"
+        },
+        {
+          "command": "kraft.openSpec",
+          "when": "view == kraft.board && viewItem =~ /\\battSpec\\b/",
+          "group": "3_open"
+        },
+        {
+          "command": "kraft.openPlan",
+          "when": "view == kraft.board && viewItem =~ /\\battPlan\\b/",
+          "group": "3_open"
+        },
+        {
           "command": "kraft.reviewChanges",
           "when": "view == kraft.board && viewItem =~ /^item:/",
           "group": "3_open"
@@ -504,6 +534,18 @@
         },
         {
           "command": "kraft.showWorkerLog",
+          "when": "false"
+        },
+        {
+          "command": "kraft.openMergeRequest",
+          "when": "false"
+        },
+        {
+          "command": "kraft.openSpec",
+          "when": "false"
+        },
+        {
+          "command": "kraft.openPlan",
           "when": "false"
         },
         {

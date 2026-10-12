@@ -73,6 +73,16 @@ describe("Api", () => {
     expect(JSON.parse((init as RequestInit).body as string)).toEqual(body);
   });
 
+  it.each([
+    ["an attachment", (a: Api) => a.attachment("K 1", "plan"), "/work-items/K%201/attachments/plan"],
+    ["a document", (a: Api) => a.document("doc/1"), "/documents/doc%2F1"],
+  ])("reads %s", async (_, call, path) => {
+    const f = fakeFetch(200, { title: "T" });
+    expect(await call(new Api("http://h:1", undefined, f as any))).toEqual({ title: "T" });
+    expect(f.mock.calls[0][0]).toBe(`http://h:1/api${path}`);
+    expect((f.mock.calls[0][1] as RequestInit).method).toBe("GET");
+  });
+
   it("maps a missing artifact to null", async () => {
     expect(await new Api("http://h:1", undefined, fakeFetch(404, { detail: "none" }) as any).getArtifact("W-1")).toBeNull();
   });
