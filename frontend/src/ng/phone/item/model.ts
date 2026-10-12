@@ -215,7 +215,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
         case "cap": return { secondary: a("steer", "Steer"), primary: stopLimitOf(item) ? a("raise", "Raise cap") : a("retry", "Retry") };
         case "question": return { secondary: a("escalate", "Escalate"), primary: a("answer", "Answer") };
         case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", "Review the conflicts") };
-        case "mr_closed": return { secondary: a("cancel", "Cancel…", true), primary: a("reopen-mr", "Reopen MR") };
+        // No merge request on file to reopen: Retry, as the desktop header's `needsYouMain` falls back.
+        case "mr_closed": return { secondary: a("cancel", "Cancel…", true), primary: admits(item, "reopen_mr", true) ? a("reopen-mr", "Reopen MR") : a("retry", "Retry") };
         default: return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
       }
     case "done":

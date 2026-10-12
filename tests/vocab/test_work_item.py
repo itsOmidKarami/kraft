@@ -199,6 +199,11 @@ BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
             "retry complete cancel abandon",
         ),
         (F(S.PAUSED, unmet_dependency=True), "resume steer unblock complete cancel abandon"),
+        (F(S.PAUSED, chainless=True), "complete cancel abandon"),
+        (
+            F(NH, started=True, question=True, chainless=True),
+            "escalate complete cancel abandon",
+        ),
     ],
     ids=[
         "budget-closes-escalate",
@@ -220,6 +225,8 @@ BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
         "off-chain-closes-retry-and-its-composites",
         "walk-closes-raise-budget-not-retry",
         "unmet-dependency-opens-unblock",
+        "chainless-closes-resume-and-steer",
+        "chainless-question-keeps-escalate",
     ],
 )
 def test_open_doors_reads_the_second_facts(facts, want):

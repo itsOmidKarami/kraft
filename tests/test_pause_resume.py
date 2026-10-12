@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 import pytest
 from support.api import _started
-from support.harness import commit_all, git
+from support.harness import commit_all, git, v1_chain
 
 from kraft.config import git_read
 
@@ -500,7 +500,7 @@ _WAIT_CHAIN = (
 )
 
 
-def _seed_waiting(client, repo, wid="w1"):
+def _seed_waiting(client, repo, wid="w1", chain=None):
     """A node parked on a pipeline (Kraft-ru98), built straight from `store` so
     no real agent or forge CLI ever runs -- these tests are about the status
     guard on pause/abandon, not the wait itself.
@@ -523,6 +523,7 @@ def _seed_waiting(client, repo, wid="w1"):
                 repo=str(repo),
                 chain_template="quick-task",
                 chain_definition=_WAIT_CHAIN,
+                materialized_chain=chain.to_json() if chain is not None else None,
             )
         )
         await db_.write(lambda c: store.enter_node(c, wid, "mr_checks"))
@@ -663,7 +664,12 @@ def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):
         return "completed"
 
     monkeypatch.setattr(executor, "run", fake_run)
-    _seed_waiting(client, repo)
+    # A chain to walk: `/resume` refuses a legacy row with none.
+    nodes = [
+        {"id": n, "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+        for n in ("implementation", "mr_checks")
+    ]
+    _seed_waiting(client, repo, chain=v1_chain(nodes, repo=str(repo)))
     assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
     client.portal.call(
         lambda: client.app.state.db.write(lambda c: store.set_current_step(c, "w1", 1))

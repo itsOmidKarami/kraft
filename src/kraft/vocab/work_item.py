@@ -223,6 +223,9 @@ class DoorFacts:
     dead_dependency: bool = False
     #: Its gate has unresolved must-fix review threads.
     must_fix_open: bool = False
+    #: It has no materialized chain (a row the legacy loader filed): nothing
+    #: walks it, and nothing reads a note left on it (`lifecycle.chain_or_409`).
+    chainless: bool = False
 
 
 def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
@@ -249,15 +252,17 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         ItemAction.APPROVE: f.pending_gate and not held and s not in ENDED and not f.must_fix_open,
         # gates.py reject_gate.
         ItemAction.REJECT: f.pending_gate and not held and s not in ENDED,
-        # resume_work_item: paused or a question; no escalation turn, no walk,
-        # no abandoned dependency.
+        # resume_work_item: paused or a question with a chain; no escalation
+        # turn, no walk, no abandoned dependency.
         ItemAction.RESUME: (s == S.PAUSED or (s == S.NEEDS_HUMAN and f.question))
+        and not f.chainless
         and not f.escalation_live
         and not f.walk_live
         and not f.dead_dependency,
         # steer_work_item: a question, or a paused item never started or with
-        # a paused agent task (`paused_steer_refusal`).
+        # a paused agent task (`paused_steer_refusal`), on a chain.
         ItemAction.STEER: a(V.STEER)
+        and not f.chainless
         and (f.question if s == S.NEEDS_HUMAN else (not f.started or f.agent_paused)),
         ItemAction.RETRY: retry_ok,
         # raise_budget: a cap it takes, then `_refuse_a_retry_that_cannot_start`.

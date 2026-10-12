@@ -135,7 +135,8 @@ export const escalatable = (item: EscalateFields) =>
 /** The ways on from a `needs_you` stop, by its kind, first choice first: the
  *  same table as the phone's bottom bar (`phone/item/model`'s `pairOf`), so the
  *  two layouts offer the same door (R11b-01). Never Pause: `/pause` refuses
- *  every stopped item. A budget stop's Raise falls back to Retry. */
+ *  every stopped item. A budget stop's Raise, and a closed merge request's
+ *  Reopen when none is on file, fall back to Retry. */
 function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
   switch (item.stop?.kind) {
     case "gate": return ["gate"];
@@ -143,7 +144,7 @@ function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
     case "budget": return budgetRaise(item) ? ["raise", "retry"] : ["retry"];
     case "cap": return ["raise"];
     case "conflict": return ["conflicts"];
-    case "mr_closed": return ["reopen"];
+    case "mr_closed": return ["reopen", "retry"];
     // stuck, and any stop a later server adds: /retry claims every needs_human item.
     default: return ["retry"];
   }
