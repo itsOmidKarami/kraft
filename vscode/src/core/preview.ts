@@ -45,6 +45,15 @@ export function previewTarget(arg: unknown, groups: readonly GroupLike[], opened
   return found.length && found.every((p) => same(p, found[0])) ? found[0] : undefined;
 }
 
+/** A title bar's click (a `webview-panel` uri) that previewTarget could not
+ *  pin to one preview: another group's active tab is a webview too. The
+ *  command would otherwise do nothing; it says this instead. */
+export const previewUnresolved = (arg: unknown, target: ShownPreview | undefined): boolean =>
+  target === undefined && isUri(arg) && arg.scheme === "webview-panel";
+
+export const PREVIEW_UNRESOLVED =
+  "Kraft can't tell which preview this is while another editor group shows a webview. Click in the preview, then run the command from the Command Palette.";
+
 /** A gate command's call, normalised: the title bar passes `(uri, { groupId })`,
  *  so only a string is a gate or a note. `stale` when the item came from a
  *  preview of an older render than the latest (`latest`: id → basename). */

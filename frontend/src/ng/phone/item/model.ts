@@ -8,7 +8,7 @@ import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
-import { steerDoor } from "./Composer";
+import { steerDoor } from "./steer";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the

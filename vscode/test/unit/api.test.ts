@@ -196,12 +196,20 @@ describe("Api", () => {
     expect(await new Api("http://h:1", undefined, f as any).deleteThread("t1")).toBeUndefined();
   });
 
-  it("reports a refused call to onError", async () => {
-    const api = new Api("http://h:1", undefined, fakeFetch(401, { detail: "bad token" }) as any);
+  const raw = (status: number, body: string, statusText?: string) =>
+    vi.fn(async () => new Response(body, { status, statusText, headers: { "content-type": "text/html" } }));
+  it.each([
+    ["a refusal's detail", fakeFetch(401, { detail: "bad token" }), 401, "bad token"],
+    ["a plain-text 500, as its text", raw(500, "Internal Server Error"), 500, "Internal Server Error"],
+    ["a proxy's HTML 502, as its text", raw(502, "<html>Bad Gateway</html>"), 502, "<html>Bad Gateway</html>"],
+    ["an empty 503, as its status text", raw(503, "", "Service Unavailable"), 503, "Service Unavailable"],
+    ["a 2xx that is not JSON, as unreadable", raw(200, "<html>login</html>"), 0, "Kraft's answer is not JSON: <html>login</html>"],
+  ])("reports %s to onError", async (_, f, status, detail) => {
+    const api = new Api("http://h:1", undefined, f as any);
     const seen: ApiFailure[] = [];
-    api.onError = (f) => seen.push(f);
+    api.onError = (x) => seen.push(x);
     await expect(api.listItems()).rejects.toBeInstanceOf(ApiError);
-    expect(seen).toEqual([{ method: "GET", path: "/work-items?include_abandoned=true", status: 401, detail: "bad token" }]);
+    expect(seen).toEqual([{ method: "GET", path: "/work-items?include_abandoned=true", status, detail }]);
   });
 
   it("reports an unreachable server as status 0", async () => {

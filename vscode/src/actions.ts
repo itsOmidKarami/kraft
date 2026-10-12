@@ -74,7 +74,8 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
         break;
       }
     }
-    await store.refresh(item.id);
+    // The action went through: a failed re-read must not read as a failed action, inviting a second Skip.
+    await store.refresh(item.id).catch(() => {});
   } catch (e) {
     await reportError(e, store, item.id);
   }

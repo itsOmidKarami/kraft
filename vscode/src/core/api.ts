@@ -111,8 +111,13 @@ export class Api {
         : `Kraft is not reachable at ${this.base}: ${(e as Error).message}`;
       throw this.fail(method, path, 0, detail);
     }
-    const data = text ? JSON.parse(text) : undefined;
-    if (!res.ok) throw this.fail(method, path, res.status, typeof data?.detail === "string" ? data.detail : text || res.statusText);
+    // A proxy's HTML 502 or a plain-text 500 is not JSON: it is still Kraft's failure, as its text.
+    let data: unknown;
+    let json = true;
+    try { data = text ? JSON.parse(text) : undefined; } catch { json = false; }
+    const detail = (data as { detail?: unknown } | undefined)?.detail;
+    if (!res.ok) throw this.fail(method, path, res.status, typeof detail === "string" ? detail : text || res.statusText);
+    if (!json) throw this.fail(method, path, 0, `Kraft's answer is not JSON: ${text.slice(0, 200)}`);
     return data as T;
   }
 

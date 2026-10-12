@@ -9,6 +9,16 @@ export function reviewGone(item: Pick<WorkItem, "status" | "display_status"> | u
   return !item || item.display_status === "archived" || item.status === "abandoned";
 }
 
+/** Whether the board loads an item's threads before its review is opened, so
+ *  a row's Submit and Discard know its drafts, the web UI's and the CLI's
+ *  included: at a gate, or stopped on a resume or retry, the doors a gateless
+ *  Request changes goes through. A running item is left until it is opened,
+ *  so a board of them costs no request each. */
+export function preloadsDrafts(item: WorkItem): boolean {
+  if (reviewGone(item)) return false;
+  return !!item.pending_gate || (item.actions ?? []).some((a) => a === "resume" || a === "retry");
+}
+
 interface Entry {
   threads?: ReviewThread[];
   text?: string;

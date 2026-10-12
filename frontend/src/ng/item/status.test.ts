@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem, WorkItemStop } from "../../types";
-import { steerDoor } from "../phone/item/Composer";
+import { steerDoor } from "../phone/item/steer";
 import { kebabOf, pairOf, type ActId } from "../phone/item/model";
 import { nodeBar, type NodeActId } from "../phone/node/model";
 import { chainGraph } from "./graph";

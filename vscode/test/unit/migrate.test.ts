@@ -79,6 +79,8 @@ describe("migrateItem", () => {
     [422, true],
     [408, false],
     [429, false],
+    // The server failing is not the draft refused: it is kept for the next try.
+    [500, false],
   ])("a %i on a draft drops it: %s", async (status, drops) => {
     const { d } = deps({ post: async (_id, t) => { if (t.body.startsWith("a.py")) throw new ApiError(status, "no"); } });
     const r = await migrateItem("K-1", draft, d);

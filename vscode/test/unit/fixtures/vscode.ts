@@ -1,4 +1,4 @@
-/** The few parts of the `vscode` module that `src/board.ts` touches, for unit
+/** The few parts of the `vscode` module that `src/board.ts` and `src/gates.ts` touch, for unit
  *  tests: vitest.config.ts aliases `vscode` here. A test replaces what it
  *  watches (`window.createTreeView`) with `vi.spyOn`. */
 
@@ -26,6 +26,7 @@ export class ThemeIcon {
 
 export const commands = {
   executeCommand: async (..._a: unknown[]) => undefined,
+  getCommands: async (_filterInternal?: boolean): Promise<string[]> => [],
   registerCommand: (_id: string, _run: unknown) => ({ dispose() {} }),
 };
 
@@ -37,7 +38,19 @@ export const window = {
   showInputBox: async (..._a: unknown[]): Promise<string | undefined> => undefined,
   createTerminal: () => ({ sendText() {}, show() {} }),
   createQuickPick: (): unknown => ({}),
+  showQuickPick: async (..._a: unknown[]): Promise<unknown> => undefined,
+  showTextDocument: async (..._a: unknown[]) => undefined,
+};
+
+export const workspace = {
+  getConfiguration: (_section?: string) => ({ get: <T>(_key: string, fallback?: T) => fallback }),
+  registerTextDocumentContentProvider: (_scheme: string, _provider: unknown) => ({ dispose() {} }),
+  openTextDocument: async (uri: unknown) => ({ uri }),
 };
 
 export const env = { openExternal: async () => true };
-export const Uri = { parse: (s: string) => ({ toString: () => s }), file: (s: string) => ({ fsPath: s }) };
+export const Uri = {
+  parse: (s: string) => ({ toString: () => s }),
+  file: (s: string) => ({ fsPath: s }),
+  from: (c: { scheme: string; path: string }) => ({ ...c, toString: () => `${c.scheme}:${c.path}` }),
+};

@@ -47,11 +47,12 @@ window, or open it in the web UI.
 
 ## Gates
 
-![A notification that a work item is waiting at its spec approval gate, with Open, Approve and Reject](media/screenshot-gate-notification.png)
+![A notification that a work item is waiting at its spec approval gate, with Open and Reject…](media/screenshot-gate-notification.png)
 
-When a gate opens, a notification offers **Open**, **Approve** and **Reject**.
-Open shows the gate's document in a tab, with Approve and Reject in its title
-bar. A reject asks for a reason, which goes to the agent.
+When a gate opens, a notification offers **Open** and **Reject…**; read-only, it
+offers Open only. Open shows the gate's document in a tab, with Approve and
+Reject in its title bar: you approve a document once you have read it. A reject
+asks for a reason, which goes to the agent.
 
 ## Review
 
@@ -73,7 +74,9 @@ a paused item queues until you resume it. Request changes asks where the work
 restarts. Approve with a must-fix thread open lists the threads that block it.
 Approving with drafts asks to send them with the approval. **Discard Review
 Comments** deletes every draft on the item, the web UI's and the CLI's
-included. Both show on an item with draft comments.
+included. Both show on an item with draft comments that is at a gate or stopped
+on you (paused, failed or out of budget), and on any other item once its review
+is open.
 
 ## Config
 
@@ -105,6 +108,9 @@ startup.
 - `kraft.url`: where Kraft listens. Empty reads `KRAFT_HOST` and `KRAFT_PORT`,
   then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`. Set it in your
   user or Remote settings only: a workspace's settings cannot change it.
+- `kraft.path`: the `kraft` binary **Start Kraft** runs, and the restart a
+  config change offers. Empty runs `kraft` on your `PATH`; a leading `~` means
+  your home folder. Set it in your user or Remote settings only.
 - `kraft.notifications`: `all`, `gates` or `off`, which states raise a
   notification. `gates` announces only gates; `all` also announces an item that
   stopped and needs you.

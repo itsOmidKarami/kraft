@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewThread } from "../../src/core/api";
-import { COALESCE_MS, reviewGone, ThreadCache } from "../../src/core/threadCache";
-import { item } from "./fixtures/item";
+import { COALESCE_MS, preloadsDrafts, reviewGone, ThreadCache } from "../../src/core/threadCache";
+import { item, stopped } from "./fixtures/item";
 import { T } from "./fixtures/thread";
 
 /** A `listThreads` whose answers the test hands out one request at a time. */
@@ -134,3 +134,14 @@ it.each([
   { id: "done, still listed", it: item({ status: "completed", display_status: "done" }), gone: false },
   { id: "running", it: item(), gone: false },
 ])("reviewGone: $id", ({ it: i, gone }) => expect(reviewGone(i)).toBe(gone));
+
+it.each([
+  { id: "at a gate", it: stopped("gate", { pending_gate: "spec", actions: ["approve", "reject"] }), want: true },
+  { id: "at a gate, before `actions`", it: stopped("gate", { pending_gate: "spec", actions: undefined }), want: true },
+  // Gateless, a review is Request changes: a resume or retry carries it, so its drafts may wait there.
+  { id: "paused", it: item({ display_status: "paused", actions: ["resume", "steer", "cancel"] }), want: true },
+  { id: "stopped, retry only", it: stopped("cap", { actions: ["retry", "cancel"] }), want: true },
+  { id: "running: no door that stops on you", it: item({ actions: ["pause", "steer", "cancel"] }), want: false },
+  { id: "done", it: item({ status: "completed", display_status: "done", actions: ["archive"] }), want: false },
+  { id: "abandoned, though resumable", it: item({ status: "abandoned", display_status: "cancelled", actions: ["resume"] }), want: false },
+])("preloadsDrafts: $id", ({ it: i, want }) => expect(preloadsDrafts(i)).toBe(want));

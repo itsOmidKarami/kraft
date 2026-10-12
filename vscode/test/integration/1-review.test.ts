@@ -13,11 +13,20 @@ suite("review", () => {
     const opened = await until("the diff to open", () => k.review.lastOpened);
 
     const t = await k.review.createThread(item.id, opened.files[0], "new", { start: 0, end: 0 }, "must fix this", "must_fix");
-    // Refused locally: without the refusal this answers read-first (or approves), never must-fix.
-    assert.deepStrictEqual(await k.review.submit(item.id, { outcome: "approve" }), { ok: false, why: "must-fix" });
+    // Every door an approve could leave by, counted: the refusal is proof only if none was called.
+    const sent: string[] = [];
+    const doors = { approve: k.api.approve, submitReview: k.api.submitReview };
+    k.api.approve = (...a) => (sent.push("approve"), doors.approve.apply(k.api, a));
+    k.api.submitReview = (...a) => (sent.push("submitReview"), doors.submitReview.apply(k.api, a));
+    try {
+      // Refused locally: without the refusal this answers read-first (or approves), never must-fix.
+      assert.deepStrictEqual(await k.review.submit(item.id, { outcome: "approve" }), { ok: false, why: "must-fix" });
+    } finally {
+      Object.assign(k.api, doors);
+    }
     await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+    assert.deepStrictEqual(sent, [], "no approve left for the server");
 
-    await new Promise((r) => setTimeout(r, 5_000));
     const evs = (await (await fetch(`${k.api.base}/api/work-items/${item.id}/events`)).json()) as { type: string }[];
     assert.ok(!evs.some((e) => e.type === "gate_approved"), "nothing was approved");
     assert.equal(k.store.item(item.id)?.pending_gate, gate, "the gate is still pending");

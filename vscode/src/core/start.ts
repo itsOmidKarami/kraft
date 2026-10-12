@@ -12,6 +12,16 @@ export function startInvocation(setting: string | undefined, home: string): { fi
   return { file, args: [...START_ARGS] };
 }
 
+/** The line a terminal runs to restart Kraft with the binary Start Kraft runs
+ *  (`kraft.path`), quoted for the terminal's shell: POSIX single quotes, or on
+ *  Windows PowerShell's call operator, since a quoted path alone is a string there. */
+export function restartLine(setting: string | undefined, home: string, platform: NodeJS.Platform): string {
+  const { file } = startInvocation(setting, home);
+  const bare = platform === "win32" ? /^[\w@%+=:,./\\-]+$/ : /^[\w@%+=:,./-]+$/;
+  const exe = bare.test(file) ? file : platform === "win32" ? `& '${file.replace(/'/g, "''")}'` : `'${file.replace(/'/g, "'\\''")}'`;
+  return `${exe} admin restart`;
+}
+
 /** A rejected execFile: `code` is the errno string (`ENOENT`) or the exit status. */
 export type StartError = { code?: string | number | null; stderr?: string | Buffer; killed?: boolean; message?: string };
 

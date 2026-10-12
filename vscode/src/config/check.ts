@@ -1,8 +1,10 @@
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import type { Api } from "../core/api";
 import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
+import { restartLine } from "../core/start";
 import { log } from "../log";
 
 const SOURCE = "Kraft · config";
@@ -66,9 +68,10 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
     }
   };
 
+  // The binary Start Kraft runs, from the home folder as Start Kraft runs it: not the workspace's.
   const restartInTerminal = () => {
-    const t = vscode.window.createTerminal("Kraft");
-    t.sendText("kraft admin restart");
+    const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir() });
+    t.sendText(restartLine(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir(), process.platform));
     t.show();
   };
 
