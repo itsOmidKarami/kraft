@@ -69,6 +69,8 @@ export function registerReviewSubmit(
         info(submitMessage("approve", sent, { id, n, gate: g, fixNode: null, paused: false }));
       } else {
         const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }) });
+        // The gate's document will be revised: the render shown so far no longer binds an approve.
+        if (gate && outcome === "request_changes") shown.forget(id);
         info(submitMessage(outcome, r, { id, n, gate, fixNode: detail!.fix_target?.node, paused: detail!.status === "paused" }));
       }
     } catch (e) {

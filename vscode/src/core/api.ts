@@ -28,8 +28,8 @@ export const REQUEST_TIMEOUT = 10_000;
 /** For the calls that can legitimately take long: a big diff, a library lint, reload, apply. */
 export const SLOW_TIMEOUT = 60_000;
 export interface Timeouts { fast: number; slow: number }
-/** A new thread: no `start_side`, `quote` or `anchor_sha` (the server fills those). */
-export interface ThreadIn { body: string; file_path?: string; side?: "old" | "new"; start_line?: number; end_line?: number; label?: ThreadLabel | null }
+/** A new thread: no `start_side` or `anchor_sha` (the server fills those); `quote` is the lines as the editor shows them. */
+export interface ThreadIn { body: string; file_path?: string; side?: "old" | "new"; start_line?: number; end_line?: number; label?: ThreadLabel | null; quote?: string }
 export interface ReviewIn { outcome: ReviewOutcome; summary?: string; node?: string; digest?: string }
 /** A gate's approve or reject answers with the item. */
 export type ReviewResult = CommentReview | GatelessChanges | WorkItemDetail;

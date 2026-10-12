@@ -4,14 +4,15 @@ import type { Api, ReviewComment, ReviewThread, ThreadLabel } from "../core/api"
 import { mutating } from "../core/guard";
 import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review";
 import type { Store } from "../core/store";
-import type { ThreadCache } from "../core/threadCache";
+import { reviewGone, type ThreadCache } from "../core/threadCache";
 import {
-  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread,
+  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread, quoteOf,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type Side,
 } from "../core/threads";
 import type { registerDiff } from "./diff";
 
 const OTHER = "kraft-threads";
+const lineSource = (doc: vscode.TextDocument) => ({ lineCount: doc.lineCount, lineAt: (n: number) => doc.lineAt(n).text });
 const otherUri = (id: string) => vscode.Uri.parse(`${OTHER}:/${id}/Other threads.md`);
 
 /** One drawn comment, and the server comment it shows. */
@@ -91,7 +92,7 @@ export function registerComments(
         try {
           // Loaded before it is measured: never clamp against a document VS Code has not read.
           const doc = await vscode.workspace.openTextDocument(uri);
-          p = fitPlace(t, p, { lineCount: doc.lineCount, lineAt: (n) => doc.lineAt(n).text });
+          p = fitPlace(t, p, lineSource(doc), opened.dirty);
           if (p.kind === "file") ranges.set(t.id, { uri, range: new vscode.Range(p.lines.start, 0, p.lines.end, doc.lineAt(p.lines.end).text.length) });
         } catch {
           p = { kind: "elsewhere" };
@@ -99,6 +100,8 @@ export function registerComments(
       }
       places.set(t.id, p);
     }
+    // Forgotten or reloaded while documents opened: the newer state draws itself.
+    if (cache.get(id) !== threads) return;
     const other = otherThreadsText(id, threads, places);
     others.set(id, other.text);
     othersChanged.fire(otherUri(id));
@@ -147,6 +150,20 @@ export function registerComments(
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(otherUri(id)), { preview: false });
   };
 
+  /** Drops everything kept for an item: its cache entry, its drawn threads and its Other threads text. */
+  const forgetItem = (id: string) => {
+    cache.forget(id);
+    for (const d of drawn.get(id)?.values() ?? []) d.vt.dispose();
+    drawn.delete(id);
+    others.delete(id);
+    noticed.delete(id);
+    drawing.delete(id);
+  };
+  const sweep = (ids: string[] | "all") => {
+    const seen = ids === "all" ? new Set([...cache.loaded(), ...drawn.keys()]) : ids;
+    for (const id of seen) if (reviewGone(store.item(id))) forgetItem(id);
+  };
+
   /** Reload an item's threads; draws follow from the cache's change. */
   const reload = (id: string) => cache.load(id).then(() => redraw(id));
 
@@ -160,6 +177,7 @@ export function registerComments(
     { dispose: diff.onOpened((id) => { noticed.delete(id); void reload(id).catch(() => {}); }) },
     { dispose: cache.onChange((id) => void redraw(id)) },
     { dispose: store.onEvent((ev) => cache.onEvent(ev)) },
+    { dispose: store.onChange(sweep) },
     vscode.window.onDidChangeWindowState((s) => s.focused && cache.loaded().forEach((id) => cache.poke(id))),
   );
 
@@ -171,7 +189,11 @@ export function registerComments(
 
   /** A new thread on a review document, written to Kraft. */
   const createThread = async (id: string, file: string, side: Side, lines: Lines, body: string, label: ThreadLabel | null) => {
-    const t = toThreadIn(side === "old" ? "kraft-git" : "kraft-wt", file, lines, body, label, diff.opened.get(id)?.renames);
+    const scheme = side === "old" ? "kraft-git" : "kraft-wt";
+    const opened = diff.opened.get(id);
+    const doc = await vscode.workspace.openTextDocument(
+      vscode.Uri.parse(side === "new" ? rightUri(id, file) : leftUri(id, file, opened?.baseRef ?? "HEAD")));
+    const t = toThreadIn(scheme, file, lines, body, label, opened?.renames, quoteOf(lineSource(doc), lines));
     const thread = await api.createThread(id, t!);
     await reload(id);
     return thread;
@@ -201,7 +223,9 @@ export function registerComments(
     }
     const lines = selectionLines(reply.thread.range.start, reply.thread.range.end);
     try {
-      const t = await api.createThread(id, toThreadIn(reply.thread.uri.scheme, file, lines, reply.text, pick, diff.opened.get(id)?.renames)!);
+      const doc = await vscode.workspace.openTextDocument(reply.thread.uri);
+      const quote = quoteOf(lineSource(doc), lines);
+      const t = await api.createThread(id, toThreadIn(reply.thread.uri.scheme, file, lines, reply.text, pick, diff.opened.get(id)?.renames, quote)!);
       // The thread VS Code drew for the reply becomes this one, unless a draw already drew it; the reload moves it if need be.
       await queue(id, () => (drawnOf(id).has(t.id) ? reply.thread.dispose() : adopt(id, reply.thread, t, reply.thread.uri.toString())));
     } catch (e) {

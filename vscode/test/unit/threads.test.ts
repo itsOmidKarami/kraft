@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewComment, ReviewThread } from "../../src/core/api";
 import {
-  authorName, clampLines, commentContext, commentMarkdown, commentPatch, discardPlan, fitPlace, otherThreadsText, placeKey, placeThread,
+  authorName, clampLines, commentContext, commentMarkdown, commentPatch, discardPlan, fitPlace, otherThreadsText, placeKey, placeThread, quoteOf, QUOTE_LINES,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type WriteTarget,
 } from "../../src/core/threads";
 import { C, T } from "./fixtures/thread";
@@ -26,7 +26,7 @@ describe("placeThread", () => {
 describe("fitPlace", () => {
   const doc = (lines: string[]) => ({ lineCount: lines.length, lineAt: (n: number) => lines[n] });
   const at = (start: number, end: number): Place => ({ kind: "file", file: "src/a.py", side: "new", lines: { start, end } });
-  it.each<{ id: string; t: Partial<ReviewThread>; place: Place; lines: string[]; want: Place }>([
+  it.each<{ id: string; t: Partial<ReviewThread>; place: Place; lines: string[]; dirty?: boolean; want: Place }>([
     { id: "a quote that still reads stays", t: { quote: "+b\n c" }, place: at(1, 2), lines: ["a", "b", "c"], want: at(1, 2) },
     { id: "a quote that no longer reads goes elsewhere", t: { quote: "+b\n c" }, place: at(1, 2), lines: ["a", "x", "c"], want: { kind: "elsewhere" } },
     { id: "a clipped quote compares as a prefix", t: { quote: "+bee…" }, place: at(1, 1), lines: ["a", "beetle"], want: at(1, 1) },
@@ -35,7 +35,19 @@ describe("fitPlace", () => {
     { id: "across sides is not compared", t: { side: "new", start_side: "old", quote: "-x\n+y" }, place: at(1, 1), lines: ["a", "b"], want: at(1, 1) },
     { id: "past the end: drawn on the last line", t: { quote: "+zz" }, place: at(9, 11), lines: ["a", "b"], want: at(1, 1) },
     { id: "whole stays whole", t: {}, place: { kind: "whole" }, lines: [], want: { kind: "whole" } },
-  ])("$id", ({ t, place, lines, want }) => expect(fitPlace(T(t), place, doc(lines))).toEqual(want));
+    { id: "an uncommitted file's new side is not compared with a HEAD quote", t: { quote: "+b" }, place: at(1, 1), lines: ["a", "edited"], dirty: true, want: at(1, 1) },
+    {
+      id: "an uncommitted file's old side still is", t: { side: "old", quote: "-b" }, place: { kind: "file", file: "src/a.py", side: "old", lines: { start: 1, end: 1 } },
+      lines: ["a", "x"], dirty: true, want: { kind: "elsewhere" },
+    },
+  ])("$id", ({ t, place, lines, dirty, want }) => expect(fitPlace(T(t), place, doc(lines), dirty ? new Set(["src/a.py"]) : undefined)).toEqual(want));
+
+  it("a quote read off the document fits where it was taken, edits and all", () => {
+    const lines = ["a", "edited in the worktree", "c"];
+    const q = quoteOf(doc(lines), { start: 1, end: 2 });
+    expect(q).toBe(" edited in the worktree\n c");
+    expect(fitPlace(T({ quote: q }), at(1, 2), doc(lines))).toEqual(at(1, 2));
+  });
 });
 
 it.each<[Lines, number, Lines]>([
@@ -82,6 +94,9 @@ describe("toThreadIn", () => {
     for (const k of ["start_side", "quote", "anchor_sha", "suggestion"]) expect(got).not.toHaveProperty(k);
   });
 
+  it("carries the quote it is given", () =>
+    expect(toThreadIn("kraft-wt", "src/a.py", { start: 0, end: 0 }, "b", null, undefined, " x")).toMatchObject({ quote: " x" }));
+
   it("is undefined off a review document", () => expect(toThreadIn("kraft-artifact", "a.py", { start: 0, end: 0 }, "b", null)).toBeUndefined());
 
   it.each([
@@ -94,12 +109,20 @@ describe("toThreadIn", () => {
   });
 });
 
+it("quoteOf stops at the server's line limit with its marker", () => {
+  const lines = Array.from({ length: QUOTE_LINES + 5 }, (_, i) => `l${i}`);
+  const q = quoteOf({ lineCount: lines.length, lineAt: (n) => lines[n] }, { start: 0, end: lines.length - 1 }).split("\n");
+  expect(q).toHaveLength(QUOTE_LINES + 1);
+  expect(q.at(-1)).toBe("…");
+});
+
 describe("threadLabel", () => {
   it.each<{ id: string; t: Partial<ReviewThread>; want: string | undefined }>([
     { id: "draft must-fix", t: { draft: true, label: "must_fix" }, want: "Draft · Must fix" },
     { id: "submitted claimed question", t: { label: "question", state: "claimed" }, want: "Question · Claimed" },
     { id: "submitted open, no label", t: {}, want: undefined },
     { id: "resolved nit", t: { label: "nit", state: "resolved" }, want: "Nit · Resolved" },
+    { id: "a draft says nothing of its state", t: { draft: true, state: "claimed" }, want: "Draft" },
   ])("$id", ({ t, want }) => expect(threadLabel(T(t))).toBe(want));
 });
 

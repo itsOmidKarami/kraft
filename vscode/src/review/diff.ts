@@ -11,7 +11,7 @@ import type { Store } from "../core/store";
 const run = promisify(execFile);
 
 /** A review as last opened: its files, the base it compares against, and its renames (new path → old path). */
-export interface Opened { files: string[]; baseRef: string; renames: Map<string, string> }
+export interface Opened { files: string[]; baseRef: string; renames: Map<string, string>; dirty: Set<string> }
 
 export function registerDiff(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string) {
   const openedL = new Set<(id: string) => void>();
@@ -75,7 +75,9 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
       if (files.length === 0) return void vscode.window.showInformationMessage(`${id} has no changes.`);
       const renames = diff.worktree_path ? await renamesOf(diff.worktree_path, diff.base_ref) : new Map<string, string>();
       state.lastOpened = { id, files };
-      state.opened.set(id, { files, baseRef: diff.base_ref, renames });
+      // Uncommitted and untracked: their branch side is the working tree, ahead of HEAD.
+      const dirty = new Set([...(diff.files ?? []).map((f) => f.path), ...(diff.untracked ?? [])]);
+      state.opened.set(id, { files, baseRef: diff.base_ref, renames, dirty });
       // A renamed file's base side is its old path.
       const resources = files.map((f) => [
         vscode.Uri.parse(rightUri(id, f)),

@@ -1,8 +1,13 @@
-import type { Api, ReviewThread } from "./api";
+import type { Api, ReviewThread, WorkItem } from "./api";
 
 /** The events after which an item's threads may have changed (the web UI's `THREAD_EVENTS`). */
 export const THREAD_EVENTS = /^(thread_updated|review_submitted|rewind_requested|rewind_cancelled|reply_agent_.+)$/;
 export const COALESCE_MS = 250;
+
+/** An item whose threads no longer need keeping: gone from the board, archived or abandoned. */
+export function reviewGone(item: Pick<WorkItem, "status" | "display_status"> | undefined): boolean {
+  return !item || item.display_status === "archived" || item.status === "abandoned";
+}
 
 interface Entry {
   threads?: ReviewThread[];

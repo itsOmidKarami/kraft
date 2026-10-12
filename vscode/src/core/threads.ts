@@ -18,7 +18,11 @@ export type Lines = { start: number; end: number };
 export type Place = { kind: "file"; file: string; side: Side; lines: Lines } | { kind: "whole" } | { kind: "elsewhere" };
 
 /** The files a review shows, and its renames (new path → old path). */
-export interface Shown { files: readonly string[]; renames?: ReadonlyMap<string, string> }
+/**
+ * The files a review shows, its renames (new path → old path), and the files
+ * with uncommitted changes: their new side is the working tree, not HEAD.
+ */
+export interface Shown { files: readonly string[]; renames?: ReadonlyMap<string, string>; dirty?: ReadonlySet<string> }
 
 const across = (t: ReviewThread) => !!t.start_side && t.start_side !== t.side;
 
@@ -69,10 +73,29 @@ export function quoteFits(t: ReviewThread, lines: Lines, doc: DocLines): boolean
  * line; lines that no longer read as quoted, not on the file in this
  * comparison. Only ever called with a loaded document.
  */
-export function fitPlace(t: ReviewThread, p: Place, doc: DocLines): Place {
+export function fitPlace(t: ReviewThread, p: Place, doc: DocLines, dirty?: ReadonlySet<string>): Place {
   if (p.kind !== "file") return p;
   if (p.lines.end >= doc.lineCount) return { ...p, lines: clampLines(p.lines, doc.lineCount) };
+  // A server quote of an uncommitted file's new side read HEAD, not the working tree this side shows.
+  if (p.side === "new" && dirty?.has(p.file)) return p;
   return quoteFits(t, p.lines, doc) ? p : { kind: "elsewhere" };
+}
+
+/** The server's quote limit in lines (`review.QUOTE_LINES`). */
+export const QUOTE_LINES = 200;
+
+/**
+ * A new thread's quote, read off the document the comment was made on, so it
+ * matches what this side shows (the server would read HEAD). Each line is led
+ * by " ": this side alone does not say which lines the change touched.
+ */
+export function quoteOf(doc: DocLines, lines: Lines): string {
+  const out: string[] = [];
+  for (let n = lines.start; n <= lines.end && n < doc.lineCount; n++) {
+    if (out.length === QUOTE_LINES) return [...out, "…"].join("\n");
+    out.push(` ${doc.lineAt(n).replace(/\r$/, "")}`);
+  }
+  return out.join("\n");
 }
 
 type Pos = { line: number; character: number };
@@ -85,6 +108,7 @@ export function selectionLines(start: Pos, end: Pos): Lines {
 /**
  * A new thread on a review document. Always the NEW path: on a renamed file's
  * old side, `file` is the old path and `renames` (new → old) maps it back.
+ * `quote` is the lines as this side shows them (`quoteOf`).
  * `undefined` for a document that is not a side of the review.
  */
 export function toThreadIn(
@@ -94,11 +118,12 @@ export function toThreadIn(
   body: string,
   label: ThreadLabel | null,
   renames?: ReadonlyMap<string, string>,
+  quote?: string,
 ): ThreadIn | undefined {
   const side = sideOfScheme(scheme);
   if (!side) return undefined;
   const path = side === "old" ? ([...(renames ?? [])].find(([, old]) => old === file)?.[0] ?? file) : file;
-  return { body, file_path: path, side, start_line: lines.start + 1, end_line: lines.end + 1, ...(label && { label }) };
+  return { body, file_path: path, side, start_line: lines.start + 1, end_line: lines.end + 1, ...(label && { label }), ...(quote !== undefined && { quote }) };
 }
 
 export const LABEL_TEXT: Record<ThreadLabel, string> = { must_fix: "Must fix", question: "Question", nit: "Nit" };

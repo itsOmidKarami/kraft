@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewThread } from "../../src/core/api";
-import { COALESCE_MS, ThreadCache } from "../../src/core/threadCache";
+import { COALESCE_MS, reviewGone, ThreadCache } from "../../src/core/threadCache";
+import { item } from "./fixtures/item";
 import { T } from "./fixtures/thread";
 
 /** A `listThreads` whose answers the test hands out one request at a time. */
@@ -112,3 +113,24 @@ it("onChange fires only on a different answer", async () => {
   await cache.load("K-1");
   expect(seen).toEqual(["K-1", "K-1"]);
 });
+
+it("an item forgotten while its load is in flight fires no onChange", async () => {
+  const api = controlled();
+  const cache = new ThreadCache(api);
+  const seen: string[] = [];
+  cache.onChange((id) => seen.push(id));
+  const load = cache.load("K-1");
+  cache.forget("K-1");
+  await api.answer(one);
+  await load;
+  expect(seen).toEqual([]);
+  expect(cache.loaded()).toEqual([]);
+});
+
+it.each([
+  { id: "gone from the board", it: undefined, gone: true },
+  { id: "archived", it: item({ display_status: "archived" }), gone: true },
+  { id: "abandoned", it: item({ status: "abandoned", display_status: "cancelled" }), gone: true },
+  { id: "done, still listed", it: item({ status: "completed", display_status: "done" }), gone: false },
+  { id: "running", it: item(), gone: false },
+])("reviewGone: $id", ({ it: i, gone }) => expect(reviewGone(i)).toBe(gone));
