@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, tooltipOf, type Action, type ItemState } from "../../src/core/board";
+import { actionsFor, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, type Action, type ItemState } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -129,4 +129,12 @@ it.each([
   ["a row with no display status", item({ display_status: undefined }), "K-1 — active"],
 ])("tooltip: %s", (_, it_, want) => {
   expect(tooltipOf(it_)).toBe(want);
+});
+
+it.each([
+  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 asks: Keep the header? Your answer steers it (optional)"],
+  ["a question with no reason", stopped("question"), "Steer for K-1 (optional)"],
+  ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
+])("steer prompt for %s", (_, it_, want) => {
+  expect(steerPrompt(it_)).toBe(want);
 });
