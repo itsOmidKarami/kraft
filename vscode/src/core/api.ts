@@ -1,9 +1,8 @@
-import type { Finding, WorkItem as BoardItem } from "../../../frontend/src/types";
+import type { ChainNode, Finding, Repo, TemplateSummary, WorkItem as BoardItem } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
-import type { ConnectedRepo } from "./repoScope";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
-export type { Finding, ItemAction, WorkItemDiff };
+export type { Finding, ItemAction, Repo, TemplateSummary, WorkItemDiff };
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
 export type WorkItem = BoardItem & { actions?: ItemAction[] };
 
@@ -20,6 +19,23 @@ export interface LintReport { valid: boolean; chains: string[]; issues: ConfigIs
 export interface ReloadReport { valid: string[]; invalid_templates: Record<string, string>; refused_policy: string | null; refused_intake: string | null }
 export interface ApplyItem { id: string; file: string; text: string; problem?: string }
 export interface ApplyReport { restart: ApplyItem[]; reload: ApplyItem[]; managed: boolean }
+/** `POST /work-items`'s body as VS Code files it: `chain` absent is the repo's default. */
+export interface NewWorkItem {
+  title: string; description: string; repo: string; chain?: string;
+  attachments?: { kind: "spec" | "plan"; path: string }[]; cwd?: string; autostart: boolean;
+}
+/** `?dry_run=1`'s answer: the chain as it would be filed, and what it drops. */
+export interface DryRun {
+  dry_run: true; nodes: ChainNode[]; gates: string[];
+  skipped: { node: string; why: "covered_by" | "skip"; kind?: "spec" | "plan" }[];
+}
+/** What a create answers; the warnings are present only when there is one. */
+export interface Created {
+  id: string; status: string; bead_id?: string | null;
+  duplicate_warning?: string; bead_warning?: string; repo_warning?: string;
+  waiting_on?: { id: string; title: string; status: string }[];
+  slots?: { busy: number; limit: number; storage?: { used_bytes: number; limit_bytes: number } };
+}
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -64,7 +80,10 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
-  repos = () => this.req<{ repos: ConnectedRepo[] }>("GET", "/repos");
+  repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
+  chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
+  preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body);
+  create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body);
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
@@ -95,6 +114,7 @@ export class Api {
   unblock = (id: string) => this.req("POST", this.item(id, "/unblock"));
   complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
   restore = (id: string) => this.req("POST", this.item(id, "/restore"));
+  abandon = (id: string) => this.req("POST", this.item(id, "/abandon"), {});
 
   check = (file: string, text: string) => this.req<{ issues: ConfigIssue[] }>("POST", "/templates/check", { file, text });
   lint = () => this.req<LintReport>("GET", "/templates/lint");
