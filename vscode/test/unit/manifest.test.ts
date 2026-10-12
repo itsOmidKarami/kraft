@@ -5,8 +5,8 @@ import { MUTATING_PRIMARY, PRIMARY_COMMAND, primaryToken, type Primary } from ".
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8"));
 
-it("lets only user settings set kraft.url", () =>
-  expect(pkg.contributes.configuration.properties["kraft.url"].scope).toBe("machine"));
+it.each(["kraft.url", "kraft.path"])("lets only user settings set %s", (key) =>
+  expect(pkg.contributes.configuration.properties[key].scope).toBe("machine"));
 
 it("declares limited support in untrusted workspaces", () =>
   expect(pkg.capabilities).toEqual({ untrustedWorkspaces: {

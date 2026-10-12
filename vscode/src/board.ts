@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
@@ -10,8 +11,10 @@ import { mutating } from "./core/guard";
 import type { PickVerb } from "./core/picks";
 import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
+import { ALREADY_STARTING, alreadyRunning, oneAtATime, startFailure, startInvocation, type StartError } from "./core/start";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
+import { log } from "./log";
 import { pickItem } from "./palette";
 
 type Node =
@@ -282,11 +285,11 @@ export function registerBoard(
       if (item) void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(item.id)}`));
     }),
     // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
-    // From home, so the workspace's shell hooks, venv or shims cannot pick the `kraft` binary.
+    // From home, so the workspace's venv or shims cannot pick the `kraft` binary; detached,
+    // so it needs no terminal. One start at a time: a second click says so.
     vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : null), warn, () => {
-      const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir() });
-      t.sendText("kraft admin start");
-      t.show();
+      const { file, args } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
+      return startOnce(() => vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Starting Kraft…" }, () => startKraft(file, args, store)));
     })),
   );
   /** Selects an item on the board, without taking focus. False when the board
@@ -303,4 +306,29 @@ export function registerBoard(
     return true;
   };
   return { board, reveal, inScope };
+}
+
+const startOnce = oneAtATime(() => void vscode.window.showInformationMessage(ALREADY_STARTING));
+
+/** Runs `kraft admin start --detach`, which returns once the server answers, then reconnects. */
+async function startKraft(file: string, args: string[], store: Store): Promise<void> {
+  try {
+    await new Promise<void>((ok, fail) =>
+      execFile(file, args, { cwd: homedir(), timeout: 30_000 }, (err, _stdout, stderr) =>
+        err ? fail(Object.assign(err, { stderr })) : ok()));
+    store.retryNow();
+  } catch (e) {
+    const err = e as StartError;
+    const stderr = String(err.stderr ?? "").trim();
+    log.warn(`Start Kraft: ${file} ${args.join(" ")} failed${stderr ? `:\n${stderr}` : `: ${err.message}`}`);
+    if (alreadyRunning(err)) {
+      void vscode.window.showInformationMessage(startFailure(err, file));
+      return store.retryNow();
+    }
+    const settings = err.code === "ENOENT" ? ["Open Settings"] : [];
+    // Not awaited: an open toast must not hold the progress notification or the next start.
+    void vscode.window.showErrorMessage(startFailure(err, file), ...settings).then((pick) => {
+      if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "kraft.path");
+    });
+  }
 }

@@ -78,6 +78,12 @@
           ],
           "default": "all",
           "description": "Which Kraft states raise a notification."
+        },
+        "kraft.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "The kraft binary Start Kraft runs. Empty: `kraft` on PATH."
         }
       }
     },

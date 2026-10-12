@@ -1,0 +1,44 @@
+/** What Start Kraft runs. `admin start --detach` returns once the server answers,
+ *  so the command finishes and needs no terminal. */
+export const START_ARGS = ["admin", "start", "--detach"] as const;
+
+export const ALREADY_STARTING = "Kraft is already starting.";
+
+/** The `kraft.path` setting as a file to run: trimmed, a leading bare `~`, `~/` or `~\`
+ *  taken as `home` (execFile runs no shell to do it), `kraft` on PATH when empty. */
+export function startInvocation(setting: string | undefined, home: string): { file: string; args: string[] } {
+  const s = (setting ?? "").trim();
+  const file = !s ? "kraft" : s === "~" || s.startsWith("~/") || s.startsWith("~\\") ? home + s.slice(1) : s;
+  return { file, args: [...START_ARGS] };
+}
+
+/** A rejected execFile: `code` is the errno string (`ENOENT`) or the exit status. */
+export type StartError = { code?: string | number | null; stderr?: string | Buffer; killed?: boolean; message?: string };
+
+const lastLine = (s: string | Buffer | undefined) =>
+  String(s ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop();
+
+/** `kraft admin start` refused because a server holds the pidfile: Kraft is up. */
+export const alreadyRunning = (err: StartError) => err.code === 1 && /\balready running\b/.test(lastLine(err.stderr) ?? "");
+
+/** What a failed start says: the binary that was not found, else Kraft's own last
+ *  stderr line (it ends with the error), else the timeout or Node's message. */
+export function startFailure(err: StartError, file: string): string {
+  if (err.code === "ENOENT") return `Kraft couldn't find \`${file}\`. Install it, or set kraft.path to the kraft binary.`;
+  const line = lastLine(err.stderr);
+  if (line) return line;
+  if (err.killed) return "Kraft didn't start within 30 seconds.";
+  return `Kraft didn't start: ${err.message || "unknown error"}`;
+}
+
+/** A single-flight gate: `run(fn)` calls fn and returns its promise; while an
+ *  earlier run has not settled it calls `onBusy` instead and returns undefined. */
+export function oneAtATime(onBusy: () => void): <T>(fn: () => PromiseLike<T>) => Promise<T> | undefined {
+  let busy = false;
+  return <T>(fn: () => PromiseLike<T>) => {
+    if (busy) return void onBusy();
+    busy = true;
+    // A synchronous throw becomes a rejection, so it still frees the gate.
+    return new Promise<T>((ok) => ok(fn())).finally(() => (busy = false));
+  };
+}
