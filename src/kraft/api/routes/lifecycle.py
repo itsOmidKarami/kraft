@@ -119,6 +119,16 @@ class Escalate(BaseModel):
     new_thread: bool = False
 
 
+def chain_or_409(row):
+    """The item's frozen chain, for a door that walks it. A legacy row has
+    none: `walk.chain_of` would raise LookupError and the route would 500, so
+    this refuses with 409 instead."""
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        raise HTTPException(409, "this work item has no materialized chain to act on")
+    return chain
+
+
 def _terminate(pid: int | None) -> None:
     """SIGINT the session's whole process group.
 
@@ -1260,7 +1270,7 @@ async def _retry(wid: str, body: Retry, request: Request):
                     "steer": "\n\n".join(filter(None, [rewind["note"], body.steer])),
                 }
             )
-    chain = walk.chain_of(row)
+    chain = chain_or_409(row)
     target = _retry_target(chain, row, body)
     override = _retry_override(chain, target, body)
     # The node the rerun starts at: what a steer has to reach from, whose
@@ -1922,7 +1932,7 @@ def _skip_target(row, path: str | None) -> ChainPath | None:
     if path is None:
         return None
     try:
-        target = ChainPath.parse(walk.chain_of(row), path)
+        target = ChainPath.parse(chain_or_409(row), path)
     except PathError as exc:
         raise HTTPException(422, f"path: {exc}") from None
     if not target.skippable:

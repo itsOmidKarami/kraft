@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from kraft import events, executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
-from kraft.api.routes.lifecycle import _stop_live_sessions, held_refusal
+from kraft.api.routes.lifecycle import _stop_live_sessions, chain_or_409, held_refusal
 from kraft.executor import stops
 from kraft.templates import revision
 from kraft.templates.models import GateNode
@@ -19,7 +19,7 @@ def gate_nodes(st, row) -> tuple:
     (`store.effective_nodes`). One reader for every gate route, so the
     approve door, the reject door and the walk cannot disagree about where a
     gate sits."""
-    return store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+    return store.effective_nodes(chain_or_409(row), store.node_overrides_of(row))
 
 
 def _gate_or_404(nodes, gate: str):
