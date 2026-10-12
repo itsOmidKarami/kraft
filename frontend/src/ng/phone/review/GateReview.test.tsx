@@ -195,6 +195,26 @@ describe("Request changes (F.3)", () => {
     await waitFor(() => expect(where()).toBe("/work-items/w1?sel=plan"));
   });
 
+  it.each([
+    ["a server with no fix target: none named", gateItem({ fix_target: null }), "/work-items/w1/review?compose=reject", null],
+    ["an older server sending no fix_target: the chain's guess", gateItem({ fix_target: undefined, chain_definition: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }] } }), "/work-items/w1/review?compose=reject", "Goes back to: plan"],
+  ] as [string, ReturnType<typeof gateItem>, string, string | null][])("names the target the server sends: %s", async (_id, item, path, line) => {
+    mount(item, path);
+    await screen.findByRole("textbox", { name: "Your note" });
+    if (line) expect(screen.getByText(line)).toBeInTheDocument();
+    else expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["reject admitted", ["approve", "reject"], true],
+    ["reject not admitted", ["approve"], false],
+    ["an older server with no actions", undefined, true],
+  ] as [string, string[] | undefined, boolean][])("offers Request changes only where the server admits reject: %s", async (_id, actions, shown) => {
+    mount(gateItem({ actions }));
+    await screen.findByRole("button", { name: "Approve" });
+    expect(!!screen.queryByRole("button", { name: "Request changes" })).toBe(shown);
+  });
+
   it("stays on the composer, with the text, when the server refuses", async () => {
     mount(gateItem(), "/work-items/w1/review?compose=reject", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "no fix rounds left" }] });
     await userEvent.type(await screen.findByRole("textbox", { name: "Your note" }), "x");

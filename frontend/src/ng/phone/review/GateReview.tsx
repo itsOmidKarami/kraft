@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { docBody } from "../../../format";
 import type { KraftEvent, ReviewThread } from "../../../types";
 import { rejectTarget } from "../../item/graph";
+import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
 import { approveBlock, drafts } from "../../review/finish";
@@ -76,7 +77,12 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const sheet = useSheet();
   const verdict = gate ? autoVerdict(events, gate) : null;
   const block = approveBlock(item, gate, threads);
-  const target = (item.pending_gate === gate ? item.fix_target?.node : null) ?? (gate ? rejectTarget(item.chain_definition.nodes, gate) : null);
+  // At the waiting gate the server's `fix_target` names where a rejection goes, and its null that there is
+  // none (a legacy row, where the reject route answers 409): only a server that sends no `fix_target` gets
+  // the chain's guess, as does a gate the item is not waiting at.
+  const atGate = item.pending_gate === gate && item.fix_target !== undefined;
+  const target = atGate ? item.fix_target?.node ?? null : gate ? rejectTarget(item.chain_definition.nodes, gate) : null;
+  const rejectable = admits(item, "reject", true);
   const [openFile, setOpenFile] = useState<string | null>(place.file);
   useEffect(() => setOpenFile(place.file), [place.file]);
 
@@ -166,7 +172,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
       </div>
       {block && <p className="ph-block-reason" role="status">{block}</p>}
       <ActionBar>
-        <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>
+        {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>}
         <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block}>Approve</Button>
       </ActionBar>
       {sheet.is("approve-drafts") && (
@@ -231,9 +237,9 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
         <span className="ph-composer-pad" />
       </header>
       <div className="ph-content">
-        <p className="ph-help">{`The item goes back to ${target ?? "the previous node"} with your note as the first thing the agent reads.`}</p>
+        <p className="ph-help">{`The item goes back${target ? ` to ${target}` : ""} with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
-        <p className="ph-target">Goes back to: {target ?? "the previous node"}</p>
+        {target && <p className="ph-target">Goes back to: {target}</p>}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       <div className="ph-actionbar">
