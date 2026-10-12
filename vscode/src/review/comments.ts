@@ -76,9 +76,7 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
     const n = drafts(id).comments.length;
     if (!n) return true;
     const pick = await vscode.window.showWarningMessage(`Discard ${n} review comment${n === 1 ? "" : "s"} and approve?`, { modal: true }, "Discard and Approve");
-    if (pick !== "Discard and Approve") return false;
-    await clear(id);
-    return true;
+    return pick === "Discard and Approve"; // only asks: the drafts go once the approve has landed
   };
 
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact"]);
@@ -98,5 +96,5 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
     })),
   );
 
-  return { drafts, addDraft, submit, confirmApprove };
+  return { drafts, addDraft, submit, confirmApprove, discardDrafts: clear };
 }
