@@ -142,6 +142,29 @@ export function describe(item: WorkItem): string {
   return tail ? `${item.id} · ${tail}` : item.id;
 }
 
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+/** Milliseconds until the text of a countdown row ("retry in 5m", `until`)
+ *  next changes, or undefined when it never will (no clock, or expired).
+ *  `until` floors to the minute below an hour, the hour below a day: the text
+ *  turns over when the time left drops under a multiple of that unit, and
+ *  "in 1m" holds to expiry. */
+export function nextTick(items: Pick<WorkItem, "display_status" | "stop" | "retry_at">[], now: number): number | undefined {
+  let next: number | undefined;
+  for (const i of items) {
+    const at = i.display_status === "waiting" ? (i.stop?.resume_at ?? i.retry_at) : undefined;
+    const left = at ? Date.parse(at) - now : NaN;
+    if (!(left > 0)) continue;
+    const unit = left < 2 * MIN ? 0 : left < HOUR ? MIN : left < DAY ? HOUR : DAY;
+    // Past the boundary by a millisecond, so the redraw reads the new text.
+    const wait = unit ? left - Math.floor(left / unit) * unit + 1 : left;
+    next = Math.min(next ?? Infinity, wait);
+  }
+  return next;
+}
+
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 

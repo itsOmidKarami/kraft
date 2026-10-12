@@ -246,15 +246,32 @@ export function draftNote(link: DraftLink, repo: string): string | undefined {
  *  repo, the one place beyond it the server will look (`_attachment_roots`).
  *  None when every attachment is in the repo; refused when they sit in two
  *  different worktrees, which one `cwd` cannot cover. `top` is each one's
- *  git toplevel. */
-export function cwdFor(attachments: { path: string; top: string }[], repo: string): { cwd?: string } | { refusal: string } {
+ *  git toplevel. In a remote window `top` is only the attachment's folder (no
+ *  git runs there), so folders that differ say nothing about worktrees: the
+ *  first outside folder is sent, the daemon resolves its toplevel itself, and
+ *  its 422 still catches a truly separate worktree at the preview. */
+export function cwdFor(attachments: { path: string; top: string }[], repo: string, remote = false): { cwd?: string } | { refusal: string } {
   const outside = attachments.filter((a) => !inside(a.path, repo));
+  if (remote) return outside.length ? { cwd: outside[0].top } : {};
   const tops = [...new Set(outside.map((a) => a.top))];
   if (tops.length <= 1) return tops.length ? { cwd: tops[0] } : {};
   return {
     refusal: `${outside.map((a) => basename(a.path)).join(" and ")} are in different worktrees (${tops.join(", ")}). `
       + `Kraft takes documents from ${repo} and one of its worktrees: move one of them first.`,
   };
+}
+
+/** A window whose folder is not on this machine's disk (`vscode-remote`, a dev
+ *  container, WSL): no git runs for it here, so `top` is only a folder. */
+export const isRemoteFolder = (scheme: string): boolean => scheme !== "file";
+
+/** The preview's 422 "attachment path escapes the repo", in a remote window that
+ *  sent a `cwd`: the daemon's own toplevel check refused it, so the documents sit
+ *  in different worktrees, said as the local refusal says it. Undefined for any
+ *  other failure, which is reported as it came. */
+export function remoteEscape(err: unknown, sentCwd: boolean, repo: string): string | undefined {
+  if (!sentCwd || !(err instanceof ApiError) || err.status !== 422 || !err.detail.startsWith("attachment path escapes the repo")) return undefined;
+  return `The documents are in different worktrees, or outside ${repo}. Kraft takes documents from ${repo} and one of its worktrees: move one of them first.`;
 }
 
 /** Why Abandon, offered when the item was filed, no longer applies (D24):

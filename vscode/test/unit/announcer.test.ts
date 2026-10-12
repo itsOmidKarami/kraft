@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus } from "../../../frontend/src/types";
-import { Announcer } from "../../src/core/announcer";
+import { Announcer, toastActions } from "../../src/core/announcer";
 import { announceable } from "../../src/core/board";
 import { WorkspaceScope, type ScopeDeps } from "../../src/core/repoScope";
 import { item, stopped } from "./fixtures/item";
@@ -99,4 +99,19 @@ describe("toasts follow the window's scope", () => {
     toasts.push(stored());
     expect(toasts).toEqual([[], ["K-1"], [], [], [], [], [], ["K-3"]]);
   });
+});
+
+describe("toastActions", () => {
+  const web = { label: "Open in Web UI", command: "kraft.openInWebUi" };
+  const answer = { label: "Answer", command: "kraft.answer" };
+  const retry = { label: "Retry", command: "kraft.retry" };
+  it.each([
+    ["a question offers Answer, running kraft.answer, when the server admits resume", stopped("question", { actions: ["resume", "cancel"] }), false, [web, answer]],
+    ["a question offers no Answer once resume is gone", stopped("question", { actions: ["cancel"] }), false, [web]],
+    ["a question from a server without actions offers none", stopped("question"), false, [web]],
+    ["a read-only window keeps only the web door on a question", stopped("question", { actions: ["resume"] }), true, [web]],
+    ["a cap keeps Retry, running kraft.retry", stopped("cap", { actions: ["resume", "retry"] }), false, [web, retry]],
+    ["a failed item keeps Retry", item({ display_status: "failed", status: "needs_human" }), false, [web, retry]],
+    ["a read-only window keeps only the web door on a failure", item({ display_status: "failed", status: "needs_human" }), true, [web]],
+  ])("%s", (_, it_, readOnly, want) => expect(toastActions(it_, readOnly)).toEqual(want));
 });

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import { ApiError, type BulkResult } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
-import { announceable, archivedChildren, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
+import { announceable, archivedChildren, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
 import { log } from "../../src/log";
 import { item, stopped } from "./fixtures/item";
 
@@ -583,5 +583,67 @@ describe("The Archived group", () => {
     expect(listArchived).not.toHaveBeenCalled();
     expand({ element: { kind: "archived" } });
     expect(listArchived).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("nextTick", () => {
+  const now = Date.parse("2026-10-12T12:00:00Z");
+  const waiting = (ms: number, over: Parameters<typeof item>[0] = {}) =>
+    item({ display_status: "waiting", retry_at: new Date(now + ms).toISOString(), ...over });
+  it.each([
+    ["no countdown row", [item(), stopped("question")], undefined],
+    ["a waiting row with no clock", [item({ display_status: "waiting" })], undefined],
+    ["an expired one, which never changes again", [waiting(-1)], undefined],
+    ["a countdown on a row that is not waiting", [item({ retry_at: new Date(now + 5 * 60_000).toISOString() })], undefined],
+    ["the minute turning over, 1ms past it", [waiting(5 * 60_000 + 30_000)], 30_001],
+    ["exactly on a minute, the next one", [waiting(5 * 60_000)], 1],
+    ["in 1m, held until it expires", [waiting(90_000)], 90_000],
+    ["under a minute, until it expires", [waiting(20_000)], 20_000],
+    ["the hour turning over", [waiting(2 * 3_600_000 + 5 * 60_000)], 5 * 60_000 + 1],
+    ["the day turning over", [waiting(2 * 86_400_000 + 3_600_000)], 3_600_001],
+    ["the soonest of several", [waiting(10 * 60_000 + 40_000), waiting(3 * 60_000 + 10_000)], 10_001],
+    ["a wait stop's resume_at over retry_at", [waiting(9 * 60_000, { stop: { kind: "wait", node: "ci", reason: null, resume_at: new Date(now + 4 * 60_000 + 5_000).toISOString() } })], 5_001],
+  ])("%s", (_, items, want) => expect(nextTick(items, now)).toBe(want));
+});
+
+describe("Board, a countdown row", () => {
+  afterEach(() => vi.useRealTimers());
+  const boardOf = (items: () => ReturnType<typeof item>[]) => {
+    const store = { items, item: () => undefined, detail: () => undefined,
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {}, connected: true } as unknown as Store;
+    const board = new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    const fired = vi.fn();
+    board.onDidChangeTreeData(fired);
+    return { board, fired };
+  };
+  const at = (ms: number) => item({ display_status: "waiting", retry_at: new Date(Date.now() + ms).toISOString() });
+
+  it("redraws the tree when its text turns over, and keeps counting", () => {
+    vi.useFakeTimers();
+    const { board, fired } = boardOf(() => [at(5 * 60_000 + 30_000)]);
+    board.getChildren();
+    vi.advanceTimersByTime(30_000);
+    expect(fired).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(fired).toHaveBeenCalledTimes(1);
+    board.getChildren();
+    vi.advanceTimersByTime(60_000);
+    expect(fired).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops when no shown row counts down, and when the board is disposed", () => {
+    vi.useFakeTimers();
+    let rows = [at(5 * 60_000)];
+    const { board, fired } = boardOf(() => rows);
+    board.getChildren();
+    rows = [item()];
+    board.getChildren();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(fired).not.toHaveBeenCalled();
+    rows = [at(5 * 60_000)];
+    board.getChildren();
+    board.dispose();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(fired).not.toHaveBeenCalled();
   });
 });

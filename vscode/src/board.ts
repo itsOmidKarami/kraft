@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -41,6 +41,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
   // Bumped by every read of it: a reply a newer read overtook does nothing.
   private archivedGen = 0;
   private archivedTimer?: ReturnType<typeof setTimeout>;
+  // Redraws when a visible countdown row ("retry in 5m") next changes; armed by each draw of the root.
+  private tickTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private store: Store,
@@ -76,6 +78,14 @@ export class Board implements vscode.TreeDataProvider<Node> {
   dispose(): void {
     clearTimeout(this.archivedTimer);
     clearTimeout(this.draftsTimer);
+    clearTimeout(this.tickTimer);
+  }
+
+  /** Arm one redraw for the next countdown to turn over, or none when no shown row has one. */
+  private armTick(items: WorkItem[]) {
+    clearTimeout(this.tickTimer);
+    const wait = nextTick(items, Date.now());
+    this.tickTimer = wait === undefined ? undefined : setTimeout(() => this.changed.fire(), wait);
   }
 
   /** Read the Archived group's rows again. Only on its expand, a connect and
@@ -113,6 +123,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node) return [];
     const groups = groupItems(this.store.items(), this.include);
     const visible = groups.reduce((n, g) => n + g.items.length, 0);
+    this.armTick(groups.flatMap((g) => g.items));
     this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible, this.unconnected()));
     if (!this.store.connected && visible === 0) return [{ kind: "down" }];
     return withArchived<Node>(groups.map((g) => ({ kind: "group", ...g })));
