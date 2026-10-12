@@ -58,4 +58,25 @@ describe("Api", () => {
     });
     await expect(new Api("http://h:1", undefined, f as any).health()).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("reads what applies from GET /apply", async () => {
+    const body = { restart: [], reload: [{ id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded" }], managed: false };
+    const f = fakeFetch(200, body);
+    expect(await new Api("http://h:1", undefined, f as any).pending()).toEqual(body);
+    expect(f.mock.calls[0][0]).toBe("http://h:1/api/apply");
+    expect((f.mock.calls[0][1] as RequestInit).method).toBe("GET");
+  });
+
+  it.each([
+    ["202 restarting", 202, { restarting: true }],
+    ["409 not managed", 409, { detail: "started from a terminal: restart it there" }],
+    ["500 could not start", 500, { detail: "could not start the restart: boom" }],
+  ])("POST /apply/restart: %s", async (_id, status, body) => {
+    const f = fakeFetch(status, body);
+    const call = new Api("http://h:1", undefined, f as any).restart();
+    if (status === 202) await expect(call).resolves.toEqual({ restarting: true });
+    else await expect(call).rejects.toMatchObject({ status, detail: (body as { detail: string }).detail });
+    expect(f.mock.calls[0][0]).toBe("http://h:1/api/apply/restart");
+    expect((f.mock.calls[0][1] as RequestInit).method).toBe("POST");
+  });
 });

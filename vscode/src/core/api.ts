@@ -13,7 +13,9 @@ export interface Artifact { path: string; title: string; content: string; digest
 export interface Position { file: string; line: number; column: number }
 export interface ConfigIssue { file: string; chain: string | null; message: string; line: number; column: number; related: Position | null }
 export interface LintReport { valid: boolean; chains: string[]; issues: ConfigIssue[] }
-export interface ReloadReport { valid: string[]; invalid_templates: Record<string, string>; refused_policy: string | null }
+export interface ReloadReport { valid: string[]; invalid_templates: Record<string, string>; refused_policy: string | null; refused_intake: string | null }
+export interface ApplyItem { id: string; file: string; text: string; problem?: string }
+export interface ApplyReport { restart: ApplyItem[]; reload: ApplyItem[]; managed: boolean }
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -89,4 +91,6 @@ export class Api {
   parse = (text: string) => this.req<{ chain: unknown; error: string | null }>("POST", "/templates/parse", { text });
   resolve = (chain: unknown) => this.req<{ chains: unknown[]; issues: ConfigIssue[] }>("POST", "/templates/resolve", { chain });
   reload = () => this.req<ReloadReport>("POST", "/templates/reload");
+  pending = () => this.req<ApplyReport>("GET", "/apply");
+  restart = () => this.req<{ restarting: boolean }>("POST", "/apply/restart");
 }
