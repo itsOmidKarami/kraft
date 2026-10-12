@@ -129,8 +129,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const cache = new ThreadCache(api);
   const diff = registerDiff(context, store, api, () => runDir);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache);
-  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache);
-  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
   const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.

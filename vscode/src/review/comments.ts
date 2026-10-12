@@ -306,16 +306,16 @@ export function registerComments(
     }),
   );
 
-  /** Shows a drawn thread; false when it is not drawn. */
-  const reveal = async (tid: string): Promise<boolean> => {
-    for (const m of drawn.values()) {
-      const d = m.get(tid);
-      if (!d) continue;
-      await vscode.window.showTextDocument(d.vt.uri, { selection: d.vt.range, preview: false });
-      d.vt.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-      return true;
-    }
-    return false;
+  /** Shows a thread, opening its item's review first if need be; false when it is gone after a reload. */
+  const reveal = async (id: string, tid: string): Promise<boolean> => {
+    if (!diff.opened.has(id)) await vscode.commands.executeCommand("kraft.reviewChanges", id);
+    if (!diff.opened.has(id)) return false; // the review did not open; it has said why
+    await reload(id).catch(() => {});
+    const d = drawn.get(id)?.get(tid);
+    if (!d) return false;
+    await vscode.window.showTextDocument(d.vt.uri, { selection: d.vt.range, preview: false });
+    d.vt.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    return true;
   };
 
   return {

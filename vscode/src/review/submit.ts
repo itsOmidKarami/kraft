@@ -4,6 +4,7 @@ import { reportError } from "../actions";
 import { ApiError, type Api, type Artifact, type FixTarget, type ReviewResult } from "../core/api";
 import { approveOrRead, isStaleRevision } from "../core/approve";
 import { mutating } from "../core/guard";
+import { approveFlow } from "../core/mustFix";
 import { commandItemId } from "../core/review";
 import { nodeToSend, restartChoices } from "../core/restart";
 import type { ShownRenders } from "../core/shown";
@@ -11,6 +12,11 @@ import type { Store } from "../core/store";
 import { canSend, OUTCOME_LABEL, outcomeChoices, submitMessage, type Outcome } from "../core/submit";
 import type { ThreadCache } from "../core/threadCache";
 import { discardPlan } from "../core/threads";
+import { showRefusal } from "./refusal";
+
+/** Why a Submit sent nothing: refused up front, a must-fix thread open, the document to read first, backed out, nothing to send, or an error. */
+export type SubmitResult = { ok: true } | { ok: false; why: "refused" | "must-fix" | "read-first" | "cancelled" | "nothing" | "error" };
+const not = (why: Extract<SubmitResult, { ok: false }>["why"]): SubmitResult => ({ ok: false, why });
 
 /** Submit Review and Discard Review Comments: the item's drafts, wherever they were written, through the server. */
 export function registerReviewSubmit(
@@ -22,21 +28,22 @@ export function registerReviewSubmit(
   shown: ShownRenders,
   show: (id: string, gate: string, a: Artifact) => Promise<void>,
   openArtifact: (id: string, gate?: string) => Promise<boolean>,
+  reveal: (id: string, tid: string) => Promise<boolean>,
 ) {
   const info = (msg: string) => void vscode.window.showInformationMessage(msg);
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
-  /** True once a review was sent. With `choice`, no picker or input box opens. */
-  const submit = async (id: string, choice?: { outcome: Outcome; summary?: string; node?: string }): Promise<boolean> => {
+  /** Whether a review was sent, and why not. With `choice`, no picker or input box opens. */
+  const submit = async (id: string, choice?: { outcome: Outcome; summary?: string; node?: string }): Promise<SubmitResult> => {
     const no = refusal();
-    if (no) return warn(no), false;
+    if (no) return warn(no), not("refused");
     let threads;
     try {
       await store.refresh(id);
       threads = await cache.load(id);
     } catch (e) {
       await reportError(e, store, id);
-      return false;
+      return not("error");
     }
     const detail = store.detail(id);
     const gate = detail?.pending_gate ?? null;
@@ -51,8 +58,8 @@ export function registerReviewSubmit(
       }
     }
     const choices = outcomeChoices(detail, fix, unknown);
-    if ("refused" in choices) return warn(choices.refused), false;
-    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${id} now.`), false;
+    if ("refused" in choices) return warn(choices.refused), not("refused");
+    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${id} now.`), not("refused");
     let { outcome, summary } = choice ?? {};
     if (!outcome) {
       const rows = outcomes(detail!, gate, threads, fix);
@@ -60,22 +67,22 @@ export function registerReviewSubmit(
         choices.map((o) => ({ label: OUTCOME_LABEL[o], detail: rows.find((r) => r.key === o)?.parts.map((p) => p.t).join(""), o })),
         { placeHolder: `Submit your review of ${id}` },
       );
-      if (!picked) return false;
+      if (!picked) return not("cancelled");
       outcome = picked.o;
       summary = await vscode.window.showInputBox({ prompt: "Overall note for the agent (optional)" });
-      if (summary === undefined) return false;
+      if (summary === undefined) return not("cancelled");
     }
     summary = summary?.trim() || undefined;
     const n = drafts(threads).length;
-    if (!canSend(outcome, n, summary)) return info("No review comments to send."), false;
+    if (!canSend(outcome, n, summary)) return info("No review comments to send."), not("nothing");
     let node = choice?.node;
     let fixNode = fix?.node;
     if (outcome === "request_changes" && !choice) {
       const at = gate ? { gate } : { current: detail!.current_node_id ?? "" };
       const restart = restartChoices(detail!.chain_definition?.nodes ?? [], at, fix!);
-      if ("refused" in restart) return warn(restart.refused), false;
+      if ("refused" in restart) return warn(restart.refused), not("refused");
       const picked = await vscode.window.showQuickPick(restart, { title: `Request changes on ${id}: restart at` });
-      if (!picked) return false;
+      if (!picked) return not("cancelled");
       node = nodeToSend(picked);
       fixNode = picked.node;
     } else if (node) fixNode = node;
@@ -83,12 +90,17 @@ export function registerReviewSubmit(
       if (outcome === "approve") {
         const g = gate!;
         let sent: ReviewResult | undefined;
-        const r = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, async (digest) => {
-          sent = await api.submitReview(id, g, { outcome: "approve", ...(summary && { summary }), digest });
-          return true;
+        const r = await approveFlow({
+          threads: async () => threads,
+          refuse: (refusal) => showRefusal(id, refusal, reveal),
+          readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, async (digest) => {
+            sent = await api.submitReview(id, g, { outcome: "approve", ...(summary && { summary }), digest });
+            return true;
+          }),
         });
-        if (r === "read-first") return info(`Read ${g} first: the document is open.`), false;
-        if (r === "cancelled" || !sent) return false;
+        if (r === "refused") return not("must-fix");
+        if (r === "read-first") return info(`Read ${g} first: the document is open.`), not("read-first");
+        if (r === "cancelled" || !sent) return not("cancelled");
         info(submitMessage("approve", sent, { id, n, gate: g, fixNode: null, paused: false }));
       } else {
         const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }), ...(outcome === "request_changes" && node && { node }) });
@@ -98,13 +110,13 @@ export function registerReviewSubmit(
       }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.
-      if (isStaleRevision(e) && gate && !(await openArtifact(id, gate))) return false;
+      if (isStaleRevision(e) && gate && !(await openArtifact(id, gate))) return not("error");
       await reportError(e, store, id);
-      return false;
+      return not("error");
     }
     await cache.load(id).catch(() => {});
     await store.refresh(id).catch(() => {});
-    return true;
+    return { ok: true };
   };
 
   /** Deletes every draft on the item, one request each, stopping at the first refusal. */

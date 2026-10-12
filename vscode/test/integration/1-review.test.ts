@@ -32,7 +32,7 @@ suite("review", () => {
     await k.review.reload(item.id);
     await until("both threads drawn", () => k.review.drawn(item.id).length === 2 || undefined);
 
-    assert.ok(await k.review.submit(item.id, { outcome: "request_changes", summary: "one fix, then ship" }));
+    assert.deepStrictEqual(await k.review.submit(item.id, { outcome: "request_changes", summary: "one fix, then ship" }), { ok: true });
     const rejected = await until("the gate_rejected event", async () => {
       const evs = (await (await fetch(`${k.api.base}/api/work-items/${item.id}/events`)).json()) as { type: string; payload: { note?: string } }[];
       return evs.find((e) => e.type === "gate_rejected");
