@@ -183,7 +183,7 @@ export function otherThreadsText(id: string, threads: ReviewThread[], places: Re
     lines.push("", `## ${heading}`, "");
     for (const t of group) {
       lineOf.set(t.id, lines.length);
-      const where = kind === "whole" ? "" : `${t.file_path}${t.start_line ? `:${t.start_line}` : ""}: `;
+      const where = kind === "whole" ? "" : `${t.file_path}${t.start_line ? `:${t.start_line}${t.side === "old" ? " (base)" : ""}` : ""}: `;
       lines.push(`- ${where}${firstLine(t.comments[0]?.body ?? "")}`);
     }
   }

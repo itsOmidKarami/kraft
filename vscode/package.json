@@ -212,6 +212,52 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.review.editComment",
+        "title": "Edit",
+        "category": "Kraft",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "kraft.review.saveComment",
+        "title": "Save",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.review.cancelEdit",
+        "title": "Cancel",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.review.deleteComment",
+        "title": "Delete",
+        "category": "Kraft",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "kraft.review.setLabel",
+        "title": "Set Label\u2026",
+        "category": "Kraft",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "kraft.review.resolveThread",
+        "title": "Resolve",
+        "category": "Kraft",
+        "icon": "$(check)"
+      },
+      {
+        "command": "kraft.review.reopenThread",
+        "title": "Reopen",
+        "category": "Kraft",
+        "icon": "$(issue-reopened)"
+      },
+      {
+        "command": "kraft.review.otherThreads",
+        "title": "Show Threads Not on a File in This Review",
+        "category": "Kraft",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "kraft.lintLibrary",
         "title": "Lint Template Library",
         "category": "Kraft"
@@ -409,6 +455,38 @@
           "when": "false"
         },
         {
+          "command": "kraft.review.editComment",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.saveComment",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.cancelEdit",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.deleteComment",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.setLabel",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.resolveThread",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.reopenThread",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.otherThreads",
+          "when": "false"
+        },
+        {
           "command": "kraft.lintLibrary",
           "when": "isWorkspaceTrusted"
         },
@@ -437,13 +515,59 @@
           "command": "kraft.review.submit",
           "when": "resourceScheme =~ /^kraft-(wt|git|artifact)$/ && !kraft.readOnly",
           "group": "navigation@4"
+        },
+        {
+          "command": "kraft.review.otherThreads",
+          "when": "resourceScheme =~ /^kraft-(wt|git)$/",
+          "group": "navigation@5"
         }
       ],
       "comments/commentThread/context": [
         {
           "command": "kraft.review.addComment",
           "group": "inline",
+          "when": "commentController == kraft.review && !kraft.readOnly"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "kraft.review.editComment",
+          "group": "inline@1",
+          "when": "commentController == kraft.review && comment =~ /\\bmine-draft\\b/ && !kraft.readOnly"
+        },
+        {
+          "command": "kraft.review.deleteComment",
+          "group": "inline@2",
+          "when": "commentController == kraft.review && comment =~ /\\bmine-draft\\b/ && !kraft.readOnly"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "kraft.review.saveComment",
+          "group": "inline@1",
+          "when": "commentController == kraft.review && !kraft.readOnly"
+        },
+        {
+          "command": "kraft.review.cancelEdit",
+          "group": "inline@2",
           "when": "commentController == kraft.review"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "kraft.review.setLabel",
+          "group": "inline@1",
+          "when": "commentController == kraft.review && commentThread =~ /\\bcan-label\\b/ && !kraft.readOnly"
+        },
+        {
+          "command": "kraft.review.resolveThread",
+          "group": "inline@2",
+          "when": "commentController == kraft.review && commentThread =~ /\\bcan-resolve\\b/ && !kraft.readOnly"
+        },
+        {
+          "command": "kraft.review.reopenThread",
+          "group": "inline@3",
+          "when": "commentController == kraft.review && commentThread =~ /\\bcan-reopen\\b/ && !kraft.readOnly"
         }
       ]
     }

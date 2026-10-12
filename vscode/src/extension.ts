@@ -8,6 +8,7 @@ import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
+import { ThreadCache } from "./core/threadCache";
 import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
@@ -82,9 +83,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
 
   registerBoard(context, store, api, () => runDir, () => refusal(state()));
   context.subscriptions.push(status, { dispose: () => store.stop() });
-  const comments = registerComments(context, store, api, () => refusal(state()));
-  const gates = registerGates(context, store, api, () => refusal(state()), comments.confirmApprove, comments.discardDrafts);
+  const cache = new ThreadCache(api);
   const diff = registerDiff(context, store, api, () => runDir);
+  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache);
+  const gates = registerGates(context, store, api, () => refusal(state()));
   const review = Object.assign(diff, comments);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.

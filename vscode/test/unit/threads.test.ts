@@ -158,7 +158,7 @@ it("discardPlan deletes draft threads whole and your draft replies one by one, c
 
 describe("otherThreadsText", () => {
   const threads = [
-    T({ id: "a", file_path: "x.py", start_line: 3, comments: [C({ body: "on x\nmore" })] }),
+    T({ id: "a", file_path: "x.py", side: "old", start_line: 3, comments: [C({ body: "on x\nmore" })] }),
     T({ id: "b", file_path: null, comments: [C({ body: "overall" })] }),
     T({ id: "c", file_path: "y.py", start_line: null, comments: [C({ body: "on y" })] }),
     T({ id: "d", comments: [C({ body: "drawn" })] }),
@@ -170,7 +170,7 @@ describe("otherThreadsText", () => {
     expect(text).toBe([
       "# K-1: threads not on a file in this review", "",
       "## On the whole change", "", "- overall", "",
-      "## Threads on files not in this comparison", "", "- x.py:3: on x", "- y.py: on y", "",
+      "## Threads on files not in this comparison", "", "- x.py:3 (base): on x", "- y.py: on y", "",
     ].join("\n"));
     expect([...lineOf]).toEqual([["b", 4], ["a", 8], ["c", 9]]);
   });
