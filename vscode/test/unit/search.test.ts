@@ -3,7 +3,11 @@ import * as vscode from "vscode";
 import type { SearchResult } from "../../../frontend/src/types/documents";
 import { ApiError, type Api } from "../../src/core/api";
 import { latest, searchPicks } from "../../src/core/search";
+import { openReadOnlyDoc } from "../../src/docs";
 import { registerSearch } from "../../src/search";
+
+// The editor tab itself is VS Code's; what matters here is what it is asked to show.
+vi.mock("../../src/docs", () => ({ openReadOnlyDoc: vi.fn(async () => {}) }));
 
 const link = (work_item_id: string | null) => ({ work_item_id, node_id: null, hook_point: null, worker_session_id: null });
 const hit = (over: Partial<SearchResult> = {}): SearchResult => ({
@@ -74,12 +78,30 @@ describe("Kraft: Search…", () => {
     replies[1](answer(hit({ id: "new" })));
     replies[0](answer(hit({ id: "old" })));
     await vi.advanceTimersByTimeAsync(0);
-    expect((qp.items as { pick: { docId: string } }[]).map((i) => i.pick.docId)).toEqual(["new"]);
+    // `alwaysShow`: the server chose these, so the quick pick's own filter must not hide one.
+    expect((qp.items as { pick: { docId: string }; alwaysShow?: boolean }[]).map((i) => [i.pick.docId, i.alwaysShow])).toEqual([["new", true]]);
+  });
+
+  it("stays busy until the latest request's answer lands", async () => {
+    const replies: ((v: unknown) => void)[] = [];
+    const { on, qp } = setUp(() => new Promise((r) => replies.push(r)));
+    on.value!("gate");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(qp.busy).toBe(true);
+    on.value!("gates");
+    await vi.advanceTimersByTimeAsync(250);
+    replies[0](answer());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(qp.busy).toBe(true); // a stale answer leaves the newer request spinning
+    replies[1](answer());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(qp.busy).toBe(false);
   });
 
   it.each([
     ["the server's note", async () => ({ ...answer(hit()), note: "text search only" }), "Kraft: Search — text search only"],
     ["a refusal's detail", async () => { throw new ApiError(422, "bad search query"); }, "Kraft: Search — bad search query"],
+    ["an empty answer", async () => answer(), "Kraft: Search — nothing found"],
   ])("puts %s in the title", async (_, search, want) => {
     const { on, qp } = setUp(search);
     on.value!("x");
@@ -106,6 +128,15 @@ describe("Kraft: Search…", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(reveal).toHaveBeenCalledWith("K-1");
     expect(exec.mock.calls).toEqual(want);
+  });
+
+  it("opens a document with no item under the document's own title", async () => {
+    const doc = { id: "d9", title: "", content: "Fixed the flaky gate test\nmore", kind: null, links: [] };
+    const { on, qp } = setUp(async () => answer(), undefined, vi.fn().mockResolvedValue(doc));
+    qp.selectedItems = [{ pick: searchPicks([hit({ id: "d9", title: "", snippet: "the [gate] test" })])[0] }];
+    on.accept!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.mocked(openReadOnlyDoc).mock.calls).toEqual([["doc/d9", "Fixed the flaky gate test", doc.content]]);
   });
 
   it("says why a document with no item cannot be opened", async () => {

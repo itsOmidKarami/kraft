@@ -201,8 +201,8 @@ export class Api {
   /** 404 when the item has none of that kind, or Kraft lost its copy. */
   attachment = (id: string, kind: "spec" | "plan") => this.req<AttachmentDoc>("GET", this.item(id, `/attachments/${kind}`));
   document = (docId: string) => this.req<DocumentDetail>("GET", `/documents/${encodeURIComponent(docId)}`);
-  /** Blank `q` is a 422; the server clamps `limit` to 1–100. */
-  search = (q: string, limit = 20) => this.req<SearchResponse>("GET", `/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  /** Blank `q` is a 422; the server clamps `limit` to 1–100. Slow: the first hybrid query can load the embedder. */
+  search = (q: string, limit = 20) => this.req<SearchResponse>("GET", `/search?q=${encodeURIComponent(q)}&limit=${limit}`, undefined, SLOW);
 
   approve = (id: string, gate: string, digest?: string) =>
     this.req("POST", this.item(id, `/gates/${encodeURIComponent(gate)}/approve`), digest ? { digest } : {});

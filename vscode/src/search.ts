@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { docTitle } from "../../frontend/src/format";
 import { ApiError, type Api } from "./core/api";
 import { latest, searchPicks, type SearchPick } from "./core/search";
 import { openReadOnlyDoc } from "./docs";
@@ -18,8 +19,9 @@ export function registerSearch(context: vscode.ExtensionContext, api: Api, revea
     }
     try {
       const doc = await api.document(p.docId);
-      // Its own key space: an attachment's key is `<item id>/<kind>`.
-      await openReadOnlyDoc(`doc/${p.docId}`, p.label, doc.content);
+      // Its own key space: an attachment's key is `<item id>/<kind>`. Titled from the
+      // whole document, not the snippet the pick's label may have been read from.
+      await openReadOnlyDoc(`doc/${p.docId}`, docTitle({ ...doc, ...doc.links[0] }), doc.content);
     } catch (e) {
       void vscode.window.showErrorMessage(e instanceof ApiError ? e.detail : String(e));
     }
