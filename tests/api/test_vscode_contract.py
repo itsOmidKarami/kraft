@@ -60,3 +60,18 @@ def test_the_detail_the_extension_refreshes_a_row_from_carries_the_same_state(cl
     assert detail["display_status"] == row["display_status"] == "needs_you"
     assert {k: detail["stop"][k] for k in ("kind", "node", "reason", "resume_at")} == row["stop"]
     assert {"step", "fallback"} <= set(detail)
+
+
+def test_the_list_row_says_whether_the_worktree_is_on_disk(client, repo):
+    """The extension offers Open Worktree from the list row, with no detail
+    fetch per row: `worktree_exists` there must follow the directory."""
+    wid = _in_state(client, repo, DOORS["states"]["question"])
+
+    def listed():
+        return next(i for i in client.get(LIST).json()["items"] if i["id"] == wid)[
+            "worktree_exists"
+        ]
+
+    assert listed() is False
+    Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"]).mkdir(parents=True)
+    assert listed() is True

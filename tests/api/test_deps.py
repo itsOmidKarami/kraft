@@ -403,8 +403,7 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
 def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
     """An item that never started has no worktree "yet"; one that ran and
     lost its directory must not read the same, on all four routes that need it,
-    and the detail says which it is. The list row carries `worktree_exists`
-    too: the extension offers Open Worktree from it."""
+    and the detail says which it is."""
     wid = client.post(
         "/api/work-items",
         json={"repo": str(repo), "title": "t", "chain_template": "quick-task", "autostart": False},
@@ -423,13 +422,7 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
         assert [r.status_code for r in calls] == [404] * 4
         return {r.json()["detail"] for r in calls}
 
-    def exists():
-        row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
-        return client.get(f"/api/work-items/{wid}").json()["worktree_exists"], row[
-            "worktree_exists"
-        ]
-
-    assert exists() == (False, False)
+    assert not client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
     assert refusals() == {"this work item has not started, so it has no worktree yet"}
 
     conn.execute("UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,))
@@ -439,7 +432,7 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
 
     worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
     worktree.mkdir(parents=True)
-    assert exists() == (True, True)
+    assert client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
 
 
 # ── installed add-ons in the running library ──
