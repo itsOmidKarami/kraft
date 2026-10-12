@@ -6,7 +6,7 @@ import { deriveState } from "../../frontend/src/deriveState";
 import { registerBoard } from "./board";
 import { Api } from "./core/api";
 import type { Announcer } from "./core/announcer";
-import { baseUrl, locations, readToken, type Locations } from "./core/connection";
+import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
@@ -33,8 +33,15 @@ function read(path: string): string | undefined {
 
 export async function activate(context: vscode.ExtensionContext): Promise<KraftApi> {
   const loc = locations(process.env, homedir());
-  const setting = vscode.workspace.getConfiguration("kraft").get<string>("url");
-  const api = new Api(baseUrl(setting, process.env, read(join(loc.templatesDir, "access.yaml"))), readToken(loc.runDir));
+  const cfg = vscode.workspace.getConfiguration("kraft");
+  const { base, token } = connectionFor({
+    setting: cfg.get<string>("url"),
+    globalSetting: cfg.inspect<string>("url")?.globalValue,
+    env: process.env,
+    accessYaml: read(join(loc.templatesDir, "access.yaml")),
+    token: readToken(loc.runDir),
+  });
+  const api = new Api(base, token);
   const store = new Store(api, wsSocket);
   const own = (context.extension.packageJSON as { version: string }).version;
   let readOnly = false;

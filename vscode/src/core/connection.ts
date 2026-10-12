@@ -44,6 +44,44 @@ export function baseUrl(setting: string | undefined, env: NodeJS.ProcessEnv, acc
   return `http://${host}:${port}`;
 }
 
+const LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
+
+// Exact hostname match on the parsed URL: `127.0.0.1@evil.example`,
+// `localhost.evil.example` and a malformed value are not loopback.
+export function isLoopback(base: string): boolean {
+  try {
+    return LOOPBACK.has(new URL(base).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// No `kraft.url` in effect (the URL then comes from the environment and
+// $KRAFT_HOME, which no workspace file writes), or the user's own global value.
+export function machineChosen(effective: string | undefined, globalValue: string | undefined): boolean {
+  const value = effective?.trim();
+  return !value || value === globalValue?.trim();
+}
+
+export function tokenFor(base: string, machine: boolean, token: string | undefined): string | undefined {
+  return machine || isLoopback(base) ? token : undefined;
+}
+
+export interface ConnectionInput {
+  setting: string | undefined;
+  globalSetting: string | undefined;
+  env: NodeJS.ProcessEnv;
+  accessYaml: string | undefined;
+  token: string | undefined;
+}
+
+// The daemon URL and the token to send it: a workspace can point the extension
+// elsewhere, but the bearer token goes only to loopback or a machine-chosen URL.
+export function connectionFor(input: ConnectionInput): { base: string; token: string | undefined } {
+  const base = baseUrl(input.setting, input.env, input.accessYaml);
+  return { base, token: tokenFor(base, machineChosen(input.setting, input.globalSetting), input.token) };
+}
+
 export function readToken(runDir: string): string | undefined {
   try {
     const token = readFileSync(join(runDir, "mcp-token"), "utf8").trim();
