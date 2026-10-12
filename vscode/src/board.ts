@@ -174,15 +174,18 @@ export function registerBoard(
       t.show();
     })),
   );
-  /** Selects an item on the board, without taking focus; one not shown is no error. */
-  const reveal = async (id: string): Promise<void> => {
+  /** Selects an item on the board, without taking focus. False when the board
+   *  does not show it (unknown, archived, or outside the scope), so a caller can
+   *  open it somewhere else; that is no error. */
+  const reveal = async (id: string): Promise<boolean> => {
     const item = store.item(id);
-    if (!item || !groupHolding(store.items(), include, id)) return;
+    if (!item || !groupHolding(store.items(), include, id)) return false;
     try {
       await view.reveal({ kind: "item", item }, { select: true, focus: false });
     } catch {
       // The view may not be resolved yet; the item is on the board either way.
     }
+    return true;
   };
   return { board, reveal };
 }

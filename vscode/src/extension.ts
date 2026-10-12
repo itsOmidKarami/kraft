@@ -11,6 +11,7 @@ import { registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
 import { registerDocs } from "./docs";
+import { registerSearch } from "./search";
 import { fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
@@ -61,7 +62,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     const line = `${f.method} ${f.path}: ${f.status} ${f.detail}`;
     // Gone, or moved on before the call landed: expected, not an error.
     // Today's spend is a hover nicety: an older server without the route, or a blip, is not an error.
-    if (f.status === 404 || f.status === 409 || f.path === "/budget/today") log.info(line);
+    // A query search cannot parse (a stray quote, say) is the person still typing.
+    if (f.status === 404 || f.status === 409 || f.path === "/budget/today" || (f.status === 422 && f.path.startsWith("/search?"))) log.info(line);
     else log.error(line);
   };
   const store = new Store(api, wsSocket, (level, msg) => log[level](msg));
@@ -134,6 +136,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope);
   registerWorkerLog(context, store, api);
   registerDocs(context, store, api);
+  registerSearch(context, api, reveal);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,

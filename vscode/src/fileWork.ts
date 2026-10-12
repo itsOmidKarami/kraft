@@ -18,7 +18,7 @@ interface Seed { uri?: vscode.Uri; as?: Kind; selection?: string }
 export interface FileWorkDeps {
   api: Api;
   store: Store;
-  reveal: (id: string) => Promise<void>;
+  reveal: (id: string) => Promise<boolean>;
   /** Restricted Mode, a refused version, then the local-only rule (`fileRefusal`). */
   refusal: () => string | null;
   runDir: () => string;

@@ -233,8 +233,21 @@ describe("Board, revealing an item", () => {
     const reveal = vi.fn().mockRejectedValue(new Error("not resolved yet"));
     vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal, dispose() {} } as never);
     const { reveal: show } = registerBoard({ subscriptions: [] } as never, store, {} as never, () => null, here, scope);
-    await expect(show("run")).resolves.toBeUndefined();
+    await expect(show("run")).resolves.toBe(true);
     await show("other");
     expect(reveal.mock.calls).toEqual([[{ kind: "item", item: items[0] }, { select: true, focus: false }]]);
+  });
+
+  it.each([
+    ["an item it shows, even before the view resolves", "run", true],
+    ["an item outside the scope", "other", false],
+    ["an archived item", "arch", false],
+    ["an id it does not know", "nope", false],
+  ])("says whether it holds %s", async (_, id, want) => {
+    const held = [...items, item({ id: "arch", display_status: "archived", archived_at: "x" })];
+    const s = { ...store, items: () => held, item: (i: string) => held.find((x) => x.id === i) } as unknown as Store;
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn().mockRejectedValue(new Error("not resolved yet")), dispose() {} } as never);
+    const { reveal } = registerBoard({ subscriptions: [] } as never, s, {} as never, () => null, here, scope);
+    expect(await reveal(id)).toBe(want);
   });
 });

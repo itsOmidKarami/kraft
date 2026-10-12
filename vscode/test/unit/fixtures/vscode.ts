@@ -35,6 +35,7 @@ export const window = {
   showWarningMessage: async (..._a: unknown[]) => undefined,
   showErrorMessage: async (..._a: unknown[]) => undefined,
   createTerminal: () => ({ sendText() {}, show() {} }),
+  createQuickPick: (): unknown => ({}),
 };
 
 export const env = { openExternal: async () => true };

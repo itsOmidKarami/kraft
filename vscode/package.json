@@ -170,6 +170,11 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.search",
+        "title": "Search…",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.openMergeRequest",
         "title": "Open Merge Request",
         "category": "Kraft"
@@ -535,6 +540,10 @@
         {
           "command": "kraft.showWorkerLog",
           "when": "false"
+        },
+        {
+          "command": "kraft.search",
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.openMergeRequest",
