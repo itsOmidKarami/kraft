@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { announceable, contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
+import { announceable, contextValueOf, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -56,6 +56,19 @@ describe("groupItems", () => {
   it("omits empty groups", () => {
     expect(groupItems([item()], () => true).map((g) => g.id)).toEqual(["running"]);
   });
+});
+
+describe("groupHolding", () => {
+  const items = [item({ id: "run" }), item({ id: "new", display_status: "paused", current_node_id: null }),
+    item({ id: "arch", display_status: "archived", archived_at: "x" }), item({ id: "other", repo: "/elsewhere" })];
+  const here = (i: { repo: string }) => i.repo === "/r";
+  it.each([
+    ["a running item, under Running", "run", "running"],
+    ["a just-filed paused item, under Not started", "new", "not_started"],
+    ["nothing for an archived item", "arch", undefined],
+    ["nothing for an item outside the scope", "other", undefined],
+    ["nothing for an unknown id", "nope", undefined],
+  ])("%s", (_, id, want) => expect(groupHolding(items, here, id)?.id).toBe(want));
 });
 
 describe("contextValueOf", () => {

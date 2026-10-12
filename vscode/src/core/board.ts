@@ -58,6 +58,12 @@ export function groupItems(items: WorkItem[], include: Include): { id: GroupKey;
   })).filter((g) => g.items.length > 0);
 }
 
+/** The group a shown item sits in, as `groupItems` places it; undefined when
+ *  the board does not show it (archived, or outside the window's scope). */
+export function groupHolding(items: WorkItem[], include: Include, id: string) {
+  return groupItems(items, include).find((g) => g.items.some((i) => i.id === id));
+}
+
 /** The board's welcome text: `here` says this repo has no Kraft work and
  *  offers Show all repos. Never before the scope is ready (git is async),
  *  never while disconnected (the Start row says that), and not when every
