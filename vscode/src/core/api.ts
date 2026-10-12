@@ -17,6 +17,9 @@ export interface ReloadReport { valid: string[]; invalid_templates: Record<strin
 export interface ApplyItem { id: string; file: string; text: string; problem?: string }
 export interface ApplyReport { restart: ApplyItem[]; reload: ApplyItem[]; managed: boolean }
 
+/** A daemon that takes the connection and never answers must not hold a caller forever. */
+export const REQUEST_TIMEOUT = 10_000;
+
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
     super(detail);
@@ -33,6 +36,7 @@ export class Api {
     readonly base: string,
     private token: string | undefined,
     private fetchImpl: typeof fetch = fetch,
+    private timeout = REQUEST_TIMEOUT,
   ) {}
 
   headers(): Record<string, string> {
@@ -45,16 +49,21 @@ export class Api {
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
     let res: Response;
+    let text: string;
     try {
       res = await this.fetchImpl(`${this.base}/api${path}`, {
         method,
         headers: { ...this.headers(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeout),
       });
+      text = await res.text();
     } catch (e) {
-      throw this.fail(method, path, 0, `Kraft is not reachable at ${this.base}: ${(e as Error).message}`);
+      const detail = (e as Error).name === "TimeoutError"
+        ? `Kraft did not answer within ${this.timeout / 1000}s`
+        : `Kraft is not reachable at ${this.base}: ${(e as Error).message}`;
+      throw this.fail(method, path, 0, detail);
     }
-    const text = await res.text();
     const data = text ? JSON.parse(text) : undefined;
     if (!res.ok) throw this.fail(method, path, res.status, typeof data?.detail === "string" ? data.detail : text || res.statusText);
     return data as T;

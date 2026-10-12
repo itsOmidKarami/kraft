@@ -36,3 +36,10 @@ export function onceEach(): (key: string) => boolean {
   const seen = new Set<string>();
   return (key) => !seen.has(key) && !!seen.add(key);
 }
+
+/** Whether a health reply may still apply: it answers the latest connect, and the
+ *  store is still connected. A reply a drop or a newer connect overtook must not
+ *  mark the status bar connected or set the version from an older server. */
+export function acceptHealth(seq: number, currentSeq: number, connected: boolean): boolean {
+  return seq === currentSeq && connected;
+}

@@ -45,7 +45,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const delays = (store: Store) => (store as any).lastDelays as number[];
+// The retry delays, in ms, from the store's "retrying in Ns" log lines.
+const delays = (log: ReturnType<typeof vi.fn>) =>
+  log.mock.calls.flatMap(([, msg]) => {
+    const m = /^retrying in ([\d.]+)s$/.exec(msg as string);
+    return m ? [Number(m[1]) * 1000] : [];
+  });
 const timers = () => vi.getTimerCount();
 
 describe("Store", () => {
@@ -73,14 +78,14 @@ describe("Store", () => {
   });
 
   it("reconnects with capped backoff and re-fetches everything", async () => {
-    const { store, sockets, api, urls } = setup();
+    const { store, sockets, api, urls, log } = setup();
     await store.start();
     sockets[0].s.open();
     api.listItems.mockRejectedValue(new Error("down"));
     sockets[0].s.close();
     expect(store.connected).toBe(false);
     for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(30_000);
-    expect(Math.max(...delays(store))).toBe(30_000);
+    expect(Math.max(...delays(log))).toBe(30_000);
     api.listItems.mockResolvedValue({ items: [item({ id: "A" }), item({ id: "B" })], cursor: 9 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(store.items().map((i) => i.id)).toEqual(["A", "B"]);
@@ -88,7 +93,7 @@ describe("Store", () => {
   });
 
   it("a refused handshake backs off and never reports connected", async () => {
-    const { store, sockets, api } = setup();
+    const { store, sockets, api, log } = setup();
     const states: boolean[] = [];
     store.onConnection((v) => states.push(v));
     await store.start();
@@ -97,31 +102,50 @@ describe("Store", () => {
     sockets[1].s.close({ status: 401, detail: "Unexpected server response: 401" });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(states).not.toContain(true);
-    expect(delays(store)).toEqual([1_000, 2_000]);
+    expect(delays(log)).toEqual([1_000, 2_000]);
     expect(store.lastError).toEqual({ status: 401, detail: "Unexpected server response: 401" });
     expect(api.listItems).toHaveBeenCalledTimes(3);
   });
 
   it("a socket that closes before it opens, with no error, is still a failure", async () => {
-    const { store, sockets } = setup();
+    const { store, sockets, log } = setup();
     await store.start();
     sockets[0].s.close();
     expect(store.lastError).toEqual({ status: 0, detail: "socket closed before open" });
-    expect(delays(store)).toEqual([1_000]);
+    expect(delays(log)).toEqual([1_000]);
   });
 
-  it("a socket that opens resets the delay to 1s", async () => {
-    const { store, sockets } = setup();
+  it("a socket that stays open 5s resets the delay to 1s", async () => {
+    const { store, sockets, log } = setup();
     await store.start();
     sockets[0].s.close();
     await vi.advanceTimersByTimeAsync(1_000);
-    sockets[1].s.open();
     sockets[1].s.close();
-    expect(delays(store)).toEqual([1_000, 1_000]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    sockets[2].s.open();
+    await vi.advanceTimersByTimeAsync(5_000);
+    sockets[2].s.close();
+    expect(delays(log)).toEqual([1_000, 2_000, 1_000]);
+  });
+
+  it("a socket that opens and drops at once keeps backing off", async () => {
+    const { store, sockets, log } = setup();
+    await store.start();
+    sockets[0].s.open();
+    sockets[0].s.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    sockets[1].s.open();
+    await vi.advanceTimersByTimeAsync(4_999);
+    sockets[1].s.close();
+    await vi.advanceTimersByTimeAsync(2_000);
+    sockets[2].s.open();
+    sockets[2].s.close();
+    expect(delays(log)).toEqual([1_000, 2_000, 4_000]);
+    expect(timers()).toBe(1);
   });
 
   it("a 401 list call sets lastError and backs off", async () => {
-    const { store, api, urls } = setup();
+    const { store, api, urls, log } = setup();
     api.listItems.mockRejectedValue(new ApiError(401, "invalid token"));
     const errs: unknown[] = [];
     store.onError((e) => errs.push(e));
@@ -130,7 +154,7 @@ describe("Store", () => {
     expect(store.lastError).toEqual({ status: 401, detail: "invalid token" });
     expect(errs).toEqual([{ status: 401, detail: "invalid token" }]);
     expect(urls).toEqual([]);
-    expect(delays(store)).toEqual([1_000, 2_000]);
+    expect(delays(log)).toEqual([1_000, 2_000]);
   });
 
   it("lastError follows the latest failure and clears on open", async () => {
@@ -144,7 +168,7 @@ describe("Store", () => {
     expect(store.lastError).toBeNull();
     api.listItems.mockRejectedValue(new ApiError(0, "not reachable"));
     sockets[1].s.close();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(store.lastError).toEqual({ status: 0, detail: "not reachable" });
     expect(errs).toEqual([{ status: 401, detail: "Unexpected server response: 401" }, null, { status: 0, detail: "not reachable" }]);
   });
@@ -178,7 +202,7 @@ describe("Store", () => {
   });
 
   it("retryNow while the list call is in flight, then it rejects: one timer, one socket", async () => {
-    const { store, sockets, api } = setup();
+    const { store, sockets, api, log } = setup();
     const first = deferred<never>();
     api.listItems.mockImplementationOnce(() => first.promise);
     const started = store.start();
@@ -188,7 +212,7 @@ describe("Store", () => {
     first.reject(new ApiError(0, "not reachable"));
     await started;
     expect(timers()).toBe(0);
-    expect(delays(store)).toEqual([]);
+    expect(delays(log)).toEqual([]);
     expect(store.lastError).toBeNull();
     sockets[0].s.close();
     expect(timers()).toBe(1);
@@ -209,7 +233,7 @@ describe("Store", () => {
     await started;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(urls).toEqual([]);
-    expect(delays(store)).toEqual([]);
+    expect(delays(log)).toEqual([]);
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -317,5 +341,65 @@ describe("Store", () => {
     sockets[0].s.msg(event(8, "A", "work_item_cancelled"));
     await vi.runAllTimersAsync();
     expect(log).toHaveBeenCalledWith("warn", "re-read A failed: db locked");
+  });
+
+  it("keeps one re-read in flight per item across a reconnect", async () => {
+    const { store, sockets, api } = setup();
+    let live = 0;
+    let most = 0;
+    const pending: (() => void)[] = [];
+    api.getItem.mockImplementation((id: string) => {
+      most = Math.max(most, ++live);
+      return new Promise((r) => pending.push(() => (live--, r(item({ id })))));
+    });
+    await store.start();
+    sockets[0].s.open();
+    sockets[0].s.msg(event(8, "A", "work_item_needs_human"));
+    await vi.advanceTimersByTimeAsync(0);
+    store.retryNow();
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[1].s.open();
+    sockets[1].s.msg(event(9, "A", "work_item_needs_human"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getItem).toHaveBeenCalledTimes(1);
+    while (pending.length) {
+      pending.shift()!();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(api.getItem).toHaveBeenCalledTimes(2);
+    expect(most).toBe(1);
+  });
+
+  it("drops a re-read reply that a reconnect overtook", async () => {
+    const { store, sockets, api } = setup();
+    let release!: () => void;
+    api.getItem.mockImplementationOnce((id: string) => new Promise((r) => (release = () => r(item({ id, title: "old" })))));
+    await store.start();
+    sockets[0].s.open();
+    sockets[0].s.msg(event(8, "A", "work_item_needs_human"));
+    await vi.advanceTimersByTimeAsync(0);
+    api.listItems.mockResolvedValue({ items: [item({ id: "A", title: "new" })], cursor: 9 });
+    store.retryNow();
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.item("A")?.title).toBe("new");
+  });
+
+  it("a re-read that finishes after stop() changes nothing and tells no one", async () => {
+    const { store, sockets, api } = setup();
+    let release!: () => void;
+    api.getItem.mockImplementationOnce((id: string) => new Promise((r) => (release = () => r(item({ id, title: "late" })))));
+    await store.start();
+    sockets[0].s.open();
+    const changed: unknown[] = [];
+    store.onChange((ids) => changed.push(ids));
+    sockets[0].s.msg(event(8, "A", "work_item_needs_human"));
+    await vi.advanceTimersByTimeAsync(0);
+    store.stop();
+    release();
+    await vi.runAllTimersAsync();
+    expect(changed).toEqual([]);
+    expect(store.item("A")?.title).toBe("t");
   });
 });

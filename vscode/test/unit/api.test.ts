@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError, type ApiFailure } from "../../src/core/api";
+import { Api, ApiError, REQUEST_TIMEOUT, type ApiFailure } from "../../src/core/api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -103,4 +103,21 @@ describe("Api", () => {
     await api.health();
     expect(seen).toEqual([]);
   });
+});
+
+describe("Api timeout", () => {
+  it("gives up on a daemon that never answers, as status 0", async () => {
+    // The fetch rejects only when the request's own signal aborts, as fetch does.
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
+    const api = new Api("http://h:1", undefined, f as any, 1_000);
+    const seen: ApiFailure[] = [];
+    api.onError = (e) => seen.push(e);
+    const t0 = Date.now();
+    await expect(api.health()).rejects.toMatchObject({ status: 0, detail: "Kraft did not answer within 1s" });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+    expect(seen).toEqual([{ method: "GET", path: "/health", status: 0, detail: "Kraft did not answer within 1s" }]);
+  });
+
+  it("waits 10s by default", () => expect(REQUEST_TIMEOUT).toBe(10_000));
 });

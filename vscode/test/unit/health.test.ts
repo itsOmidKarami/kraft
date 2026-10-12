@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { downRow, onceEach, statusMenu, statusTooltip } from "../../src/core/health";
+import { acceptHealth, downRow, onceEach, statusMenu, statusTooltip } from "../../src/core/health";
 
 describe("health", () => {
   it.each([
@@ -31,4 +31,10 @@ describe("health", () => {
     ["connected in Restricted Mode", true, "Restricted Mode: trust this workspace", null, "Restricted Mode: trust this workspace"],
     ["connected and writable", true, undefined, null, undefined],
   ])("statusTooltip: %s", (_, connected, readOnly, err, want) => expect(statusTooltip(connected, readOnly, err)).toBe(want));
+
+  it.each([
+    ["the latest reply while connected", 3, 3, true, true],
+    ["a reply a newer connect overtook", 2, 3, true, false],
+    ["a reply after the store dropped", 3, 3, false, false],
+  ])("acceptHealth: %s", (_, seq, current, connected, want) => expect(acceptHealth(seq, current, connected)).toBe(want));
 });

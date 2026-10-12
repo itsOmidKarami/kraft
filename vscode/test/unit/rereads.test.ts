@@ -11,6 +11,10 @@ describe("shouldReread", () => {
     ["launch_fallback", true, true],
     ["work_item_title_edited", true, true],
     ["mr_opened", true, true],
+    ["mr_closed", true, true],
+    ["mr_reopened", true, true],
+    ["chain_loaded", true, true],
+    ["work_item_created", true, true],
     // Labels on the merge request: nothing the tree shows.
     ["mr_labels_set", true, false],
     ["node_completed", true, false],

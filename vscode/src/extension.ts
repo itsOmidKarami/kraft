@@ -17,7 +17,7 @@ import { registerComments } from "./review/comments";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { onceEach, statusMenu, statusTooltip } from "./core/health";
+import { acceptHealth, onceEach, statusMenu, statusTooltip } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -85,12 +85,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     if (connected) {
       try {
         const health = await api.health();
-        if (mine !== healthSeq) return;
+        if (!acceptHealth(mine, healthSeq, store.connected)) return;
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
         if (version && warnOnce(version)) void vscode.window.showWarningMessage(version);
       } catch (e) {
-        if (mine !== healthSeq) return;
+        if (!acceptHealth(mine, healthSeq, store.connected)) return;
         log.warn(`health check failed, so the server's version is unknown: ${(e as Error).message}`);
         version = readOnlyReason(own, null);
       }

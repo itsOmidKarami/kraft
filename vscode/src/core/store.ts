@@ -40,6 +40,9 @@ export const wsSocket: SocketFactory = (url, headers) => {
 export type StoreLog = (level: "info" | "warn" | "error", msg: string) => void;
 
 const MAX_DELAY = 30_000;
+// How long a socket must stay open before the backoff starts over: a server that
+// accepts and drops at once must not be retried, list call and all, every second.
+const STABLE_AFTER = 5_000;
 
 type Listener<T> = (v: T) => void;
 
@@ -55,10 +58,10 @@ export class Store {
   private socket?: Socket;
   private delay = 1_000;
   private timer?: ReturnType<typeof setTimeout>;
+  private stable?: ReturnType<typeof setTimeout>;
   private stopped = false;
-  // Bumped by every connect: a list call that a newer connect, or stop(), has overtaken does nothing.
+  // Bumped by every connect: a list call or re-read that a newer connect, or stop(), has overtaken does nothing.
   private gen = 0;
-  private lastDelays: number[] = [];
   // One re-read in flight per item; `again` is the one queued behind it. Kept across a
   // reconnect, so one already running is not joined by a second.
   private slots = new Map<string, { again: boolean }>();
@@ -102,14 +105,19 @@ export class Store {
     void this.connect();
   }
 
-  /** Re-read one item; false when the server no longer has it. */
+  /** Re-read one item; false when the server no longer has it. A reply that a
+   *  reconnect or stop() overtook is dropped: the new list is newer than it. */
   async refresh(id: string): Promise<boolean> {
+    const gen = this.gen;
+    const stale = () => gen !== this.gen || this.stopped;
     let found = true;
     try {
       const d = await this.api.getItem(id);
+      if (stale()) return true;
       this.byId.set(id, d);
       this.details.set(id, d);
     } catch (e) {
+      if (stale()) return true;
       if ((e as { status?: number }).status !== 404) throw e;
       this.byId.delete(id);
       this.details.delete(id);
@@ -145,7 +153,10 @@ export class Store {
     socket.onOpen(() => {
       if (this.socket !== socket || this.stopped) return;
       opened = true;
-      this.delay = 1_000;
+      this.stable = setTimeout(() => {
+        this.stable = undefined;
+        this.delay = 1_000;
+      }, STABLE_AFTER);
       this.setError(null);
       this.log("info", `connected to ${url.split("?")[0]}`);
       this.setConnected(true);
@@ -156,6 +167,7 @@ export class Store {
     socket.onClose((err) => {
       if (this.socket !== socket) return;
       this.socket = undefined;
+      this.clearStable();
       if (!opened) this.setError(err ?? { status: 0, detail: "socket closed before open" });
       this.log("warn", opened ? "disconnected" : `disconnected: ${this.lastError?.detail}`);
       this.setConnected(false);
@@ -211,7 +223,6 @@ export class Store {
     if (this.stopped) return;
     this.clearTimer();
     const delay = this.delay;
-    this.lastDelays.push(delay);
     this.delay = Math.min(this.delay * 2, MAX_DELAY);
     this.log("info", `retrying in ${delay / 1000}s`);
     this.timer = setTimeout(() => {
@@ -225,8 +236,14 @@ export class Store {
     this.timer = undefined;
   }
 
+  private clearStable(): void {
+    if (this.stable) clearTimeout(this.stable);
+    this.stable = undefined;
+  }
+
   // Detached first, so its close is not taken for a disconnect.
   private dropSocket(): void {
+    this.clearStable();
     const s = this.socket;
     this.socket = undefined;
     s?.close();
