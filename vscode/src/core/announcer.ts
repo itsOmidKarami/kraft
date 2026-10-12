@@ -16,6 +16,14 @@ function keyOf(item: WorkItem): string | undefined {
   return undefined;
 }
 
+/** The buttons a needs-you or failed toast offers. A question is answered, never
+ *  retried (slice 10: Answer resumes), and only while the server admits `resume`;
+ *  every other stop keeps Retry. */
+export function toastActions(item: Pick<WorkItem, "stop" | "actions">): ("Open in Web UI" | "Answer" | "Retry")[] {
+  if (item.stop?.kind !== "question") return ["Open in Web UI", "Retry"];
+  return item.actions?.includes("resume") ? ["Open in Web UI", "Answer"] : ["Open in Web UI"];
+}
+
 export class Announcer {
   announced = new Set<string>();
   private current = new Map<string, string>();

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { Announcer, type Announcement } from "./core/announcer";
+import { Announcer, toastActions, type Announcement } from "./core/announcer";
 import { announceable, onBoard, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
@@ -156,8 +156,9 @@ export function registerGates(
           if (pick === "Reject…") void reject(item.id, a.gate);
         });
       } else {
-        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, "Open in Web UI", "Retry").then((pick) => {
+        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, ...toastActions(item)).then((pick) => {
           if (pick === "Open in Web UI") void vscode.commands.executeCommand("kraft.openInWebUi", { item });
+          if (pick === "Answer") void vscode.commands.executeCommand("kraft.answer", { item });
           if (pick === "Retry") void vscode.commands.executeCommand("kraft.retry", { item });
         });
       }

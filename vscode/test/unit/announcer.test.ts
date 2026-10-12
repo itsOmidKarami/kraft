@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus } from "../../../frontend/src/types";
-import { Announcer } from "../../src/core/announcer";
+import { Announcer, toastActions } from "../../src/core/announcer";
 import { announceable } from "../../src/core/board";
 import { WorkspaceScope, type ScopeDeps } from "../../src/core/repoScope";
 import { item, stopped } from "./fixtures/item";
@@ -99,4 +99,14 @@ describe("toasts follow the window's scope", () => {
     toasts.push(stored());
     expect(toasts).toEqual([[], ["K-1"], [], [], [], [], [], ["K-3"]]);
   });
+});
+
+describe("toastActions", () => {
+  it.each([
+    ["a question offers Answer, not Retry, when the server admits resume", stopped("question", { actions: ["resume", "cancel"] }), ["Open in Web UI", "Answer"]],
+    ["a question offers no Answer once resume is gone", stopped("question", { actions: ["cancel"] }), ["Open in Web UI"]],
+    ["a question from a server without actions offers none", stopped("question"), ["Open in Web UI"]],
+    ["a cap keeps Retry", stopped("cap", { actions: ["resume", "retry"] }), ["Open in Web UI", "Retry"]],
+    ["a failed item keeps Retry", item({ display_status: "failed", status: "failed" }), ["Open in Web UI", "Retry"]],
+  ])("%s", (_, it_, want) => expect(toastActions(it_)).toEqual(want));
 });
