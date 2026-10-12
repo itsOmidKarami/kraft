@@ -199,7 +199,7 @@ class DoorFacts:
     #: Its current node is one of its chain's nodes.
     on_chain: bool = False
     #: The node a node skip would pass (the pending gate, or the current node)
-    #: allows skipping.
+    #: allows skipping. A skip of one task or step, by path, is not asked.
     skippable: bool = False
     pending_gate: bool = False
     #: Stopped on a `needs_context` question.

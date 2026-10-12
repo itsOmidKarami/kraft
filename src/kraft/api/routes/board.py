@@ -214,11 +214,12 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
     return executor.gate_artifact(st.run_dirs, row, gate)
 
 
-def next_skippable_node(row, pending_gate: str | None) -> str | None:
+def next_skippable_node(row, pending_gate: str | None, chain=None) -> str | None:
     """The node a node skip would pass -- the pending gate, else the current
     node -- when it is on the chain and allows skipping. None otherwise, and
-    for a legacy row with no materialized chain, which nothing walks."""
-    chain = store.materialized_chain_of(row)
+    for a legacy row with no materialized chain, which nothing walks. `chain`
+    is the row's materialized chain when the caller already read it."""
+    chain = chain or store.materialized_chain_of(row)
     node_id = pending_gate or row["current_node_id"]
     if chain is None or node_id not in {n.id for n in chain.chain.nodes}:
         return None
@@ -251,15 +252,19 @@ def item_actions(
     status whose door asks."""
     status = WorkItemStatus(row["status"])
     reason = (stop_payload or {}).get("reason") or ""
+    # Read once, and only for a door that walks it. A legacy row has none:
+    # retry, skip and a gate's doors all answer it with a failure.
+    asks = pending_gate is not None or status in (*admitting(Verb.RETRY), *admitting(Verb.SKIP))
+    chain = store.materialized_chain_of(row) if asks else None
     facts = DoorFacts(
         status,
         archived=row["archived_at"] is not None,
         started=row["current_node_id"] is not None,
-        on_chain=status in admitting(Verb.RETRY)
-        and row["current_node_id"] in store.chain_node_ids(row),
-        skippable=status in admitting(Verb.SKIP)
-        and next_skippable_node(row, pending_gate) is not None,
-        pending_gate=pending_gate is not None,
+        on_chain=chain is not None and row["current_node_id"] in {n.id for n in chain.chain.nodes},
+        skippable=chain is not None
+        and status in admitting(Verb.SKIP)
+        and next_skippable_node(row, pending_gate, chain) is not None,
+        pending_gate=chain is not None and pending_gate is not None,
         question=reason.startswith("needs_context:"),
         budget_stop=bool((stop_payload or {}).get("budget")),
         raisable=raisable(stop_payload),

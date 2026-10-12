@@ -81,8 +81,8 @@ def test_the_list_reads_no_per_item_facts(client, repo, monkeypatch):
 @pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
 def test_a_legacy_row_still_lists(client, repo, state):
     """A row the legacy loader filed has no materialized chain: nothing walks
-    it, so nothing is skippable and no agent task is paused, and the list
-    still answers."""
+    it, so no door that walks it (retry, skip, a gate's) is offered, no agent
+    task is paused, and the list still answers."""
     wid = _in_state(client, repo, DOORS["states"][state])
     legacy = {"nodes": [{"id": "spec_approval"}, {"id": "implementation"}]}
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
@@ -94,8 +94,7 @@ def test_a_legacy_row_still_lists(client, repo, state):
 
     actions = _listed(client, wid, False)["actions"]
 
-    assert "skip" not in actions
-    assert "steer" not in actions
+    assert not {"retry", "skip", "steer", "approve", "reject", "raise_budget"} & set(actions)
     assert "cancel" in actions
 
 
