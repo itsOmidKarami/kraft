@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { shortId } from "../../format";
 import type { WorkItem } from "../../types";
-import { pausable } from "../item/status";
+import { admits, pausable } from "../item/status";
 import { showToast } from "../ui/Toast";
 import { CANCEL_WINDOW_MS, cancelLater, items, sendBulk, useBulk, VERB } from "./bulk";
 
 const ended = (i: WorkItem) => i.display_status === "done" || i.display_status === "cancelled";
 
-/** The selection bar (AreaBoard 92–94, Decisions §14 Board): Pause the running
- *  ones, Cancel… anything not ended (inline confirm with a reason, then a
+/** The selection bar (AreaBoard 92–94, Decisions §14 Board): Pause what `/pause`
+ *  takes (`pausable`: running and waiting ones, and queued or blocked ones when
+ *  the server's `actions` say it takes those too), Cancel… anything not ended (inline confirm with a reason, then a
  *  window with Undo, R3), Archive the ended ones. A bulk answer with failures
  *  takes the bar's place, one line per failure. */
 export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkItem[]; byId: Record<string, WorkItem>; offline: boolean; onChecked: (ids: string[]) => void }) {
@@ -16,8 +17,9 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState("");
   const pause = checked.filter(pausable);
-  const cancel = checked.filter((i) => !ended(i));
-  const archive = checked.filter(ended);
+  // Each item only where the server's `actions` admit its door, the old reading kept for a server that sends none.
+  const cancel = checked.filter((i) => admits(i, "cancel", !ended(i)));
+  const archive = checked.filter((i) => admits(i, "archive", ended(i)));
   // Cleared before the send; the board checks the failed ones again from the answer.
   const send = (action: "pause" | "archive", list: WorkItem[]) => {
     onChecked([]);

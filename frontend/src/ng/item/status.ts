@@ -59,9 +59,17 @@ export function budgetRaise(item: Pick<WorkItem, "stop">): "limit" | "item" | nu
 }
 
 /** Whether a budget stop's Raise is offered: the item can raise the cap
- *  (`budgetRaise`, which also picks the editor) and the server admits
- *  `raise_budget`. Otherwise the way on is Retry. */
-export const offersRaise = (item: Pick<WorkItem, "stop"> & Doors) => budgetRaise(item) !== null && admits(item, "raise_budget", true);
+ *  (`budgetRaise`, which also picks the editor) and the server admits the
+ *  door that editor goes through: `raise_budget` for the item's own cap
+ *  (`/budget/raise`), `retry` for a policy limit (PATCHed, then retried).
+ *  Otherwise the way on is Retry. */
+export function offersRaise(item: Pick<WorkItem, "stop"> & Doors): boolean {
+  const how = budgetRaise(item);
+  return how === "item" ? admits(item, "raise_budget", true) : how === "limit" ? admits(item, "retry", true) : false;
+}
+
+/** What a budget stop says when the item could raise its cap but the server takes no raise now (`offersRaise`). */
+export const RAISE_REFUSED = "Kraft takes no raise for it right now.";
 
 /** What a budget stop the item cannot raise says instead of offering a raise. */
 export const NOT_RAISABLE = "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap.";
@@ -103,8 +111,12 @@ export const pausable = (item: Pick<WorkItem, "display_status"> & Doors) => admi
 /** Whether `/skip` would take this item: it refuses a rate-limited one (Kraft
  *  relaunches it at its `retry_at`; pause it first, which `/pause` takes, then
  *  Skip or Resume), and one whose escalation turn is running (R11b-01). */
-export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">> & Doors) =>
-  admits(item, "skip", item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated");
+export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">> & Doors) => admits(item, "skip", skipsNow(item));
+
+/** `skippable`'s own reading of the item, without the server's `actions`: their `skip` is the node's (whether the node
+ *  the item stands on may be skipped), and a task's or a step's skip is decided by that task or step instead. */
+export const skipsNow = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">>) =>
+  item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated";
 
 /** Whether `/escalate` would take this item: a stopped one (failed or needs
  *  you) or a paused one that has started, and not while an escalation turn
@@ -140,7 +152,7 @@ function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
 /** The door each main button goes through, or null for one that opens a view
  *  with its own decisions (a gate, the conflicts): always offered. Raise on a
  *  budget stop is `offersRaise`'s; a cap's limit editor patches, then retries. */
-export const MAIN_DOOR: Record<Main, ItemAction | null> = {
+const MAIN_DOOR: Record<Main, ItemAction | null> = {
   pause: "pause", resume: "resume", start: "resume", answer: "resume", raise: "retry", retry: "retry",
   archive: "archive", restore: "restore", reopen: "reopen_mr", gate: null, conflicts: null,
 };

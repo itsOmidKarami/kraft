@@ -20,14 +20,16 @@ describe("PathFooter", () => {
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(names);
   });
 
-  // The server's `actions` (F4): a door it does not list is no button, whatever the footer's state.
+  // The server's `actions` (F4): a door it does not list is no button, whatever the footer's state. Their `skip` is the
+  // node's: a task's Skip is the task's own to allow, which /skip reads from the path.
   it.each([
-    ["paused", "paused", ["skip", "cancel"], ["Skip task"]],
-    ["running", "running", ["pause", "cancel"], ["Pause"]],
-    ["stopped", "failed", ["escalate", "cancel"], []],
-    ["paused", "paused", ["resume", "skip"], ["Resume", "Skip task"]],
-  ] as const)("a %s footer while the item is %s, the server listing %j, shows %j", (state, status, actions, names) => {
-    render(<PathFooter item={detail({ display_status: status, actions: [...actions] })} path="v.r.code_review" what="task" state={state} reload={() => {}} />);
+    ["paused", "paused", "task", ["skip", "cancel"], ["Skip task"]],
+    ["running", "running", "node", ["pause", "cancel"], ["Pause"]],
+    ["running", "running", "task", ["pause", "cancel"], ["Pause", "Skip task"]],
+    ["stopped", "failed", "task", ["escalate", "cancel"], []],
+    ["paused", "paused", "node", ["resume", "skip"], ["Resume", "Skip node"]],
+  ] as const)("a %s footer while the item is %s, on a %s, the server listing %j, shows %j", (state, status, what, actions, names) => {
+    render(<PathFooter item={detail({ display_status: status, actions: [...actions] })} path="v.r.code_review" what={what} state={state} reload={() => {}} />);
     expect(screen.queryAllByRole("button").map((b) => b.textContent)).toEqual(names);
   });
 

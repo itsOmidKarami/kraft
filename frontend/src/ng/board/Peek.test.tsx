@@ -118,6 +118,17 @@ describe("Peek", () => {
       await waitFor(() => expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true"));
       expect(await screen.findByText(/The item can't raise this cap/)).toBeInTheDocument();
     }],
+    // F4: a raise the server takes none of now is Overview's, which says so, with the header's Retry.
+    ["the item's own cap, raise_budget not listed: the banner saying why", { ...budgetStop, actions: ["retry", "cancel"] }, async () => {
+      await waitFor(() => expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true"));
+      expect(await screen.findByText(/Kraft takes no raise for it right now/)).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "Budget in dollars" })).toBeNull();
+    }],
+    ["a policy dollar cap, retry not listed: no editor", { ...budgetStop, stop: stop("budget", { reason: "Spend cap reached", limit: { path: "", key: "budget_usd", value: 5, maximum: null } }), actions: ["raise_budget", "cancel"] }, async () => {
+      await waitFor(() => expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true"));
+      expect(await screen.findByText(/Kraft takes no raise for it right now/)).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Raise budget cap" })).toBeNull();
+    }],
   ] as const)("opens on a row's Raise budget at %s", async (_, over, opened) => {
     mount(over as Partial<ItemDetail>, { start: "config", budget: true });
     await opened();

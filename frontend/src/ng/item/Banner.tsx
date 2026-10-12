@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
-import { admits, budgetRaise, NOT_RAISABLE, offersRaise } from "./status";
+import { admits, budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -39,7 +39,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
           {/* Where first: the reason can be two sentences, and a node tacked on after them read as part of the last. */}
           {stop.node && <>Stopped at <code>{stop.node}</code>. </>}
           {sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"))}
-          {stop.kind === "budget" && !budgetRaise(item) && <> {NOT_RAISABLE}</>}
+          {stop.kind === "budget" && !offersRaise(item) && <> {budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE}</>}
         </span>
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,
             and a budget stop on the item's own cap that Config's budget editor. A budget the item cannot raise says so, and the header's Retry is the way on. */}
@@ -90,7 +90,8 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
         <span className="item-card-where">asked by {item.stop.task ? taskName(item.stop.task) : "the agent"}{where && ` · on ${where}`}</span>
       </h2>
       <blockquote className="item-quote">“{q}”</blockquote>
-      <textarea aria-label="Your answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={sendOnModEnter(send, resumes && !busy && !!answer.trim())} />
+      {/* An answer resumes the item: with no resume the server takes, nothing could send it, so there is no box. */}
+      {resumes && <textarea aria-label="Your answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={sendOnModEnter(send, !busy && !!answer.trim())} />}
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
         {resumes && <Button variant="primary" disabled={busy || !answer.trim()} onClick={send}>Send &amp; resume</Button>}

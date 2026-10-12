@@ -47,9 +47,13 @@ describe("Banner", () => {
   it.each([
     ["a budget stop on the item's own cap, raise_budget not listed", stop("budget", { scope: "work_item" }), ["retry", "cancel"]],
     ["a cap stop naming its limit, retry not listed", stop("cap", { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }), ["cancel"]],
+    // A policy limit's editor PATCHes, then retries: /budget/raise is not its door.
+    ["a policy budget_usd stop, retry not listed", stop("budget", { scope: "usd", limit: { path: "", key: "budget_usd", value: 0.01, maximum: null } }), ["raise_budget", "cancel"]],
   ] as const)("offers no raise for %s", (_name, s, actions) => {
     render(<Banner item={detail({ display_status: "needs_you", stop: s, actions: [...actions] })} onRaise={() => {}} reload={() => {}} />);
     expect(screen.queryByRole("button", { name: "Raise cap" })).toBeNull();
+    // A budget the item could raise says why there is no Raise, not that the policy or the chain sets it.
+    if ((s as { kind: string }).kind === "budget") expect(screen.getByRole("status")).toHaveTextContent(/Kraft takes no raise for it right now\.$/);
   });
 
   it("opens Config, labelled so, for a cap stop that names no limit to raise", async () => {
@@ -241,13 +245,11 @@ describe("QuestionCard", () => {
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: "Accept the finding." } }]);
   });
 
-  it("offers no Send & resume, and sends nothing on ⌘↵, when the server's actions refuse resume (F4)", async () => {
-    const calls = stubFetch(WRITES);
+  it("offers no answer box and no Send & resume when the server's actions refuse resume (F4), and keeps Open thread", () => {
     render(<QuestionCard item={{ ...asked, actions: ["steer", "cancel"] }} compact={false} reload={() => {}} onOpenThread={() => {}} />);
     expect(screen.queryByRole("button", { name: "Send & resume" })).toBeNull();
-    await userEvent.type(screen.getByLabelText("Your answer"), "Accept the finding.");
-    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
-    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    expect(screen.queryByLabelText("Your answer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open thread" })).toBeInTheDocument();
   });
 
   it("sends the answer on ⌘↵", async () => {

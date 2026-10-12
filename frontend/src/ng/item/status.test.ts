@@ -9,9 +9,23 @@ import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
 import { ITEM_ACTIONS, type ItemAction } from "../../types/vocab.generated";
-import { admits, archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
+import { admits, archivable, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
+
+/** Which lifecycle door takes which item state: `tests/api/lifecycle_doors.json`, the table the
+ *  backend's `test_a_door_takes_only_the_states_this_table_lists` drives every route against, so
+ *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
+ *  surface's link to another page: it calls nothing. */
+const LIFECYCLE: { states: Record<string, { depends_on?: string }>; doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
+
+/** The `actions` the server sends an item in `state`: the doors the table says take it, in `ItemAction` order, less the
+ *  two that answer 200 and change nothing (`tests/api/test_lifecycle_actions.py` holds the server to the same rule). */
+const serverActions = (state: string): ItemAction[] =>
+  ITEM_ACTIONS.filter((a) => Object.entries(LIFECYCLE.doors).some(([door, spec]) =>
+    (door === "budget_raise" ? "raise_budget" : door) === a && spec.takes.includes(state)
+    && !(state === "archived" && door === "archive") && !(door === "unblock" && !LIFECYCLE.states[state].depends_on)));
+const without = (state: string, ...gone: ItemAction[]) => serverActions(state).filter((a) => !gone.includes(a));
 
 type Scope = WorkItemStop["scope"];
 /** A budget stop is on the item's own cap unless a row says otherwise: the one `/budget/raise` takes. */
@@ -67,24 +81,46 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     ["an empty list admits nothing", [], true, false],
   ])("admits: %s", (_name, actions, rule, want) => expect(admits({ actions }, "pause", rule)).toBe(want));
 
-  const ALL = [...ITEM_ACTIONS];
-  const but = (...gone: ItemAction[]) => ALL.filter((a) => !gone.includes(a));
   const ownBudget = { kind: "budget", node: "n", resume_at: null, reason: null, scope: "work_item" } as WorkItemStop;
   it.each<[string, Parameters<typeof headerState>[0], Main | null, string[]]>([
-    ["running, the doors the server lists for it: today's", { display_status: "running", current_node_id: "n", stop: null, actions: ["pause", "steer", "skip", "complete", "cancel", "abandon"] }, "pause", NO_ESC],
-    ["running, the server refusing pause: no main", { display_status: "running", current_node_id: "n", stop: null, actions: ["steer", "skip", "complete", "cancel"] }, null, NO_ESC],
+    ["running, the server's own list: today's", { display_status: "running", current_node_id: "n", stop: null, actions: serverActions("running") }, "pause", NO_ESC],
+    ["running, the server refusing pause: no main", { display_status: "running", current_node_id: "n", stop: null, actions: without("running", "pause") }, null, NO_ESC],
+    ["a budget stop on the item's own cap, the server's own list: Raise", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: serverActions("budget_item_cap") }, "raise", NO_ESC],
     // A raise the item could make, which the server will not: Retry, the next way on.
-    ["a budget stop on the item's own cap, the server refusing raise_budget", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: ["retry", "complete", "cancel"] }, "retry", NO_ESC],
-    ["a budget stop, the server refusing both", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: ["complete", "cancel"] }, null, NO_ESC],
-    ["failed, the server refusing escalate: no Escalate… in the panel", { display_status: "failed", current_node_id: "n", stop: null, actions: but("escalate") }, "retry", NO_ESC],
-    ["failed, the server refusing complete and cancel", { display_status: "failed", current_node_id: "n", stop: null, actions: but("complete", "cancel") }, "retry", ["escalate", "archive"]],
+    ["a budget stop on the item's own cap, the server refusing raise_budget", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: without("budget_item_cap", "raise_budget") }, "retry", NO_ESC],
+    ["a budget stop, the server refusing both", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: without("budget_item_cap", "raise_budget", "retry") }, null, NO_ESC],
+    ["failed, the server refusing escalate: no Escalate… in the panel", { display_status: "failed", current_node_id: "n", stop: null, actions: without("failed", "escalate") }, "retry", NO_ESC],
+    ["failed, the server refusing complete and cancel", { display_status: "failed", current_node_id: "n", stop: null, actions: without("failed", "complete", "cancel") }, "retry", ["escalate", "archive"]],
     // A gate is a view with its own decisions: Open gate stays.
     ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
-    ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: but("resume", "cancel") }, null, []],
+    ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: without("not_started", "resume", "cancel") }, null, []],
     ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
   ])("%s", (_name, item, main, panel) => {
     expect(headerState(item)).toMatchObject({ main, panel });
   });
+
+  // The phone's bar on the server's own lists: Steer is the composer's pause-then-resume or retry, never `steer`.
+  const capStop = { kind: "cap", node: "verification", resume_at: null, reason: null } as WorkItemStop;
+  it.each<[string, Partial<ItemDetail>, (string | null)[]]>([
+    ["a running item keeps Pause · Steer", { display_status: "running", status: "active", actions: serverActions("running") }, ["pause", "steer"]],
+    ["a cap stop keeps Steer · Retry", { display_status: "needs_you", status: "needs_human", stop: capStop, actions: serverActions("cap") }, ["steer", "retry"]],
+    // A cap's Raise is its limit editor's PATCH, then /retry.
+    ["a cap stop showing its limit, retry refused: no Raise", { display_status: "needs_you", status: "needs_human", stop: { ...capStop, limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }, actions: without("cap", "retry") }, [null, null]],
+  ])("pairOf: %s", (_name, over, want) => {
+    const p = pairOf(detail(over));
+    expect([p.secondary?.id ?? null, p.primary?.id ?? null]).toEqual(want);
+  });
+
+  // The editor's own door: `/budget/raise` for the item's cap, a PATCH and `/retry` for a policy limit.
+  const policyBudget = { ...ownBudget, scope: "usd", limit: { path: "", key: "budget_usd", value: 0.01, maximum: null } } as WorkItemStop;
+  it.each<[string, WorkItemStop, ItemAction[] | undefined, boolean]>([
+    ["the item's own cap, an older server", ownBudget, undefined, true],
+    ["the item's own cap, raise_budget listed", ownBudget, ["raise_budget"], true],
+    ["the item's own cap, retry alone", ownBudget, ["retry"], false],
+    ["a policy limit, retry listed", policyBudget, ["retry"], true],
+    ["a policy limit, raise_budget alone", policyBudget, ["raise_budget"], false],
+    ["the daily cap, everything listed", { ...ownBudget, scope: "daily" }, [...ITEM_ACTIONS], false],
+  ])("offersRaise: %s", (_name, stop, actions, want) => expect(offersRaise({ stop, actions })).toBe(want));
 
   it("archivable: an ended item the server will not archive is not", () => {
     expect(archivable({ display_status: "done", actions: ["restore"] })).toBe(false);
@@ -111,11 +147,6 @@ describe("budgetRaise: only a budget stop the server would raise offers a raise"
   });
 });
 
-/** Which lifecycle door takes which item state: `tests/api/lifecycle_doors.json`, the table the
- *  backend's `test_a_door_takes_only_the_states_this_table_lists` drives every route against, so
- *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
- *  surface's link to another page: it calls nothing. */
-const LIFECYCLE: { doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
 type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "unblock" | "approve" | "navigate";
 const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.doors[door].takes.includes(state);
 
@@ -195,6 +226,14 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
   it.each(CASES)("%s, the server admitting nothing: links and views only", (_name, over) => {
     const left = offered(detail({ ...over, actions: [] })).filter(([where, door]) => door !== "navigate" && !VIEWS.test(where)).map(([where]) => where);
     expect(left).toEqual([]);
+  });
+
+  // The server's own list for each state (F4) takes nothing away that the UI's reading offered: every way on,
+  // Steer included, which goes through the composer's door and never through `steer` (paused agent and question only).
+  it.each(CASES)("%s, the server's own list: every surface as on an older server", (_name, over, state) => {
+    const was = offered(detail(over)).map(([where]) => where);
+    const now = offered(detail({ ...over, actions: serverActions(state) })).map(([where]) => where);
+    expect({ lost: was.filter((w) => !now.includes(w)), gained: now.filter((w) => !was.includes(w)) }).toEqual({ lost: [], gained: [] });
   });
 
   // The two layouts agree on the way on from a stop: the header's main and the phone bar's primary.

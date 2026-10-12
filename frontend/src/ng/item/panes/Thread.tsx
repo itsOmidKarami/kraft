@@ -4,6 +4,7 @@ import type { WorkerSession } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import { messagesThrough } from "../nodeGraph";
+import { admits } from "../status";
 import type { ItemDetail } from "../useItem";
 import { useEventLog } from "../useEvents";
 import { sendOnModEnter } from "../../keys";
@@ -63,12 +64,17 @@ export function Thread({ item, version, node, upTo, reload, onNode }: { item: It
         );
       })}
       {turns.length < all.length && <p className="item-muted">{all.length - turns.length} later {all.length - turns.length === 1 ? "message" : "messages"} after this turn.</p>}
-      <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={sendOnModEnter(() => send(false), !busy && !!text.trim())} />
-      {error && <p className="item-error" role="alert">{error}</p>}
-      <div className="item-actions">
-        <Button variant="primary" disabled={busy || !text.trim()} onClick={() => send(false)}>Send</Button>
-        <Button disabled={busy || !text.trim()} onClick={() => send(true)}>Send in a new thread</Button>
-      </div>
+      {/* A reply is an escalation (`/escalate`): only where the server's `actions` take one. */}
+      {admits(item, "escalate", true) ? (
+        <>
+          <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={sendOnModEnter(() => send(false), !busy && !!text.trim())} />
+          {error && <p className="item-error" role="alert">{error}</p>}
+          <div className="item-actions">
+            <Button variant="primary" disabled={busy || !text.trim()} onClick={() => send(false)}>Send</Button>
+            <Button disabled={busy || !text.trim()} onClick={() => send(true)}>Send in a new thread</Button>
+          </div>
+        </>
+      ) : <p className="item-muted">Kraft takes no reply to the escalation right now.</p>}
     </>
   );
 }

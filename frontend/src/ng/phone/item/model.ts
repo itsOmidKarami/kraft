@@ -1,7 +1,6 @@
 import { ago, elapsed, plural, until, usd } from "../../../format";
-import type { KraftEvent, StopLimit } from "../../../types";
-import type { ItemAction } from "../../../types";
-import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RELEASED } from "../../item/status";
+import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
+import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED } from "../../item/status";
 import { gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
@@ -9,6 +8,7 @@ import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
+import { steerDoor } from "./Composer";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -99,7 +99,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${item.pending_gate ?? stop.node ?? ""}`, text: gateMessage(materialized(item), item.pending_gate ?? stop.node ?? ""), facts: spent(item) };
         case "budget": return {
           tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined,
-          text: budgetRaise(item) ? "Raising the budget resumes the item at once." : NOT_RAISABLE,
+          text: offersRaise(item) ? "Raising the budget resumes the item at once." : budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE,
           facts: budgetSpent(item),
         };
         case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
@@ -158,14 +158,17 @@ export interface Act {
 }
 const a = (id: ActId, label: string, danger = false): Act => ({ id, label, ...(danger && { danger }) });
 
-/** The door each bar button goes through, or null for one that opens a view with its own decisions. A raise is
- *  `raise_budget` on a budget stop and `retry` on a cap's, whose limit editor patches, then retries. */
+/** The door each bar button goes through, or null for one that opens a view with its own decisions. Steer goes
+ *  through the composer's door (`steerDoor`: a running item's pause, then a resume the pause makes admissible; a
+ *  stop's retry; else resume), never `steer`, which the server lists for a paused agent and a question only. A
+ *  raise is the budget's own (`offersRaise`), or on a cap the limit editor's PATCH, then `retry`. */
 const actDoor = (item: ItemDetail, id: ActId): ItemAction | null => {
   switch (id) {
-    case "pause": case "unblock": case "steer": case "resume": case "retry": case "escalate": case "cancel": case "restore": case "reject": return id;
+    case "pause": case "unblock": case "resume": case "retry": case "escalate": case "cancel": case "restore": case "reject": return id;
+    case "steer": return steerDoor(item);
     case "start": case "answer": return "resume";
     case "reopen-mr": return "reopen_mr";
-    case "raise": return item.stop?.kind === "budget" ? "raise_budget" : "retry";
+    case "raise": return "retry";
     default: return null;
   }
 };
@@ -176,11 +179,14 @@ export function pairOf(item: ItemDetail): { secondary: Act | null; primary: Act 
   const kept = (a: Act | null): a is Act => {
     if (!a) return false;
     if (a.id === "steer" && item.steerable === false) return false;
+    // A budget's Raise is in the table only where `offersRaise` admits it.
+    if (a.id === "raise" && item.stop?.kind === "budget") return true;
     const door = actDoor(item, a.id);
     return door === null || admits(item, door, true);
   };
-  // Nothing dropped: the table's own layout, a lone secondary (a waiting item's Pause) included.
-  if (kept(p.secondary) === !!p.secondary && kept(p.primary) === !!p.primary) return p;
+  // Nothing to drop: the table's own layout, a lone secondary (a waiting item's Pause) included. An item no agent
+  // reads a note on always collapses, as it did before `actions` (#387).
+  if (item.steerable !== false && kept(p.secondary) === !!p.secondary && kept(p.primary) === !!p.primary) return p;
   const rest = [p.secondary, p.primary].filter(kept);
   return rest.length === 2 ? { secondary: rest[0], primary: rest[1] } : { secondary: null, primary: rest[0] ?? null };
 }

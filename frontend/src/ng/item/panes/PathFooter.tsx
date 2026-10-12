@@ -4,7 +4,7 @@ import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { holdsText, isEscape, sendOnModEnter } from "../../keys";
-import { admits, pausable, retryable, skippable } from "../status";
+import { admits, pausable, retryable, skippable, skipsNow } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -15,14 +15,17 @@ export type FooterAct = "pause" | "resume" | "skip" | "retry";
  *  Resume on a paused one, Skip where `/skip` would (not past a live walk), and Retry only on an item
  *  `/retry` claims (`retryable`): a paused one has Resume, and a running or
  *  waiting one nothing (R10b-01). An ended item runs nothing again (R8b-06).
- *  Each also only where the server's `actions` admit it (`admits`). */
-export function footerActs(item: ItemDetail, shown: FooterState): FooterAct[] {
+ *  Each also only where the server's `actions` admit it (`admits`), but a task's
+ *  or a step's Skip: their `skip` is the node's, and `/skip` takes a task or a
+ *  step its own `skippable` allows on a node that does not. */
+export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node"): FooterAct[] {
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
+  const skips = what === "node" ? skippable(item) : skipsNow(item);
   return [
     ...(state === "running" && pausable(item) ? ["pause" as const] : []),
     ...(state === "paused" && admits(item, "resume", true) ? ["resume" as const] : []),
     // Skip on a live footer only while the item runs: a stopped one with a live session (a gate's auto-review) has a walk /skip refuses.
-    ...(((state === "running" && pausable(item)) || state === "paused") && skippable(item) ? ["skip" as const] : []),
+    ...(((state === "running" && pausable(item)) || state === "paused") && skips ? ["skip" as const] : []),
     ...((state === "paused" || state === "stopped") && retryable(item) ? ["retry" as const] : []),
   ];
 }
@@ -34,7 +37,7 @@ export function footerActs(item: ItemDetail, shown: FooterState): FooterAct[] {
  *  destructive button), and Cancel or Escape hands it back to the button that
  *  opened it (R11b-03); Escape in a steer with text in it keeps the text. */
 export function PathFooter({ item, path, what, state, reload, extra, only }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode; only?: FooterAct }) {
-  const acts = footerActs(item, state).filter((x) => !only || x === only);
+  const acts = footerActs(item, state, what).filter((x) => !only || x === only);
   const [confirm, setConfirm] = useState<"skip" | "retry" | null>(null);
   const [steer, setSteer] = useState("");
   const [busy, setBusy] = useState(false);

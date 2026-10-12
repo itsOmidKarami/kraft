@@ -27,6 +27,14 @@ describe("Thread", () => {
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/escalate", body: { message: "Accept it.", new_thread: true } }]);
   });
 
+  it("offers no reply when the server's actions refuse /escalate (F4), and says so", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Allow the change?", "verification")]] });
+    render(<Thread item={detail({ actions: ["pause", "cancel"] })} version="1" node="verification" reload={() => {}} onNode={() => {}} />);
+    expect(await screen.findByText("Kraft takes no reply to the escalation right now.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Reply to the escalation")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send/ })).toBeNull();
+  });
+
   it("sends a reply in the thread on ⌘↵, a plain ↵ starting a new line", async () => {
     const calls = stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Allow the change?", "verification")]] });
     const reload = vi.fn();
