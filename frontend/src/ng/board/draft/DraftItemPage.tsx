@@ -36,7 +36,7 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   } catch {
     // Private windows: nothing kept.
   }
-  return emptyDraft({ title: q.get("title") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
+  return emptyDraft({ title: q.get("title") ?? "", brief: q.get("brief") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
 }
 const forget = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } };
 

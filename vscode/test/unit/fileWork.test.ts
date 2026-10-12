@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Repo, TemplateSummary } from "../../src/core/api";
+import type { ChainNode } from "../../../frontend/src/types";
+import type { Created, DryRun, Repo, TemplateSummary } from "../../src/core/api";
 import {
-  attachChoices, attachState, chainsFor, createBody, fileRefusal, localRefusal, MAX_TITLE, pickRepo, repoDefaultChain, titleFrom, titleProblem,
+  attachChoices, attachState, chainsFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
+  pickRepo, previewLine, repoDefaultChain, titleFrom, titleProblem, warningActions, warningsOf,
 } from "../../src/core/fileWork";
 import { RESTRICTED, VERSION_REFUSAL } from "../../src/core/readOnly";
 
@@ -127,4 +129,67 @@ describe("attachChoices", () => {
 it("MAX_TITLE matches the server's", () => {
   const py = readFileSync(join(__dirname, "../../../src/kraft/adapters/beads.py"), "utf8");
   expect(py).toMatch(new RegExp(`^MAX_TITLE = ${MAX_TITLE}$`, "m"));
+});
+
+const n = (id: string, kind: "exec" | "gate" = "exec") => ({ id, kind, tasks: [] }) as unknown as ChainNode;
+
+describe("previewLine", () => {
+  it.each([
+    ["repo default", { nodes: [n("a"), n("g", "gate")], skipped: [], gates: ["g"] }, "repo default · 2 of 2 nodes run · 1 gate"],
+    ["docs_only", { nodes: [n("impl")], skipped: [{ node: "spec", why: "covered_by", kind: "spec" }, { node: "lint", why: "skip" }], gates: [] },
+      "docs_only · 1 of 3 nodes run · 0 gates · skips spec (spec attached), lint"],
+  ])("%s", (label, dry, want) => expect(previewLine(label, { dry_run: true, ...dry } as DryRun)).toBe(want));
+});
+
+describe("outcomeMessage", () => {
+  it.each([
+    ["filed paused", false, { id: "K-1", status: "paused" }, "Filed K-1 paused. Nothing spends tokens until you start it."],
+    ["started", true, { id: "K-1", status: "active" }, "Filed K-1 and started it."],
+    ["queued on slots", true, { id: "K-1", status: "queued", slots: { busy: 2, limit: 2 } },
+      "Filed K-1, queued: 2 of 2 slots are busy. It starts when one frees."],
+    ["queued on storage", true, { id: "K-1", status: "queued", slots: { busy: 0, limit: 2, storage: { used_bytes: 2 * 1024 ** 3, limit_bytes: 2 * 1024 ** 3 } } },
+      "Filed K-1, queued: worktrees use 2G of the 2G storage limit. It starts when space frees."],
+    ["an answer it does not know, said as it is", true, { id: "K-1", status: "someday" }, "Filed K-1: it is someday."],
+  ])("%s", (_, start, c, want) => expect(outcomeMessage(start, c as Created)).toBe(want));
+});
+
+describe("warnings", () => {
+  const c = { id: "K-1", status: "paused", repo_warning: "R", duplicate_warning: "D" } as Created;
+  it("lists them in order", () => expect(warningsOf(c)).toEqual(["D", "R"]));
+  it("offers Abandon except on an active item", () => {
+    expect(warningActions(c)).toEqual(["Open item", "Abandon"]);
+    expect(warningActions({ ...c, status: "active" })).toEqual(["Open item"]);
+  });
+});
+
+describe("draftUrl", () => {
+  it("carries title, brief, repo, chain and attachments", () => {
+    const { url, briefDropped, outside } = draftUrl("http://127.0.0.1:8765", { title: "T x", description: "b", repo: "/r", chain: "docs_only", spec: "/r/s.md" });
+    const u = new URL(url);
+    expect(u.pathname).toBe("/work-items/new");
+    expect(Object.fromEntries(u.searchParams)).toEqual({ title: "T x", brief: "b", repo: "/r", chain: "docs_only", spec: "/r/s.md" });
+    expect([briefDropped, outside]).toEqual([false, []]);
+  });
+  it("drops a brief that would make the link too long", () => {
+    const { url, briefDropped } = draftUrl("http://h", { title: "T", description: "x".repeat(MAX_URL), repo: "/r" });
+    expect(new URL(url).searchParams.has("brief")).toBe(false);
+    expect(briefDropped).toBe(true);
+  });
+  it.each([
+    ["another worktree's document", "/wt/s.md", ["/wt/s.md"]],
+    ["a sibling whose name starts like the repo", "/r2/s.md", ["/r2/s.md"]],
+    ["a document in the repo", "/r/docs/s.md", []],
+  ])("leaves out %s, which the page cannot attach", (_, spec, want) => {
+    const { url, outside } = draftUrl("http://h", { title: "T", description: "", repo: "/r", spec });
+    expect(outside).toEqual(want);
+    expect(new URL(url).searchParams.has("spec")).toBe(want.length === 0);
+  });
+});
+
+describe("draftNote", () => {
+  it.each([
+    ["nothing left out", { briefDropped: false, outside: [] }, undefined],
+    ["the brief", { briefDropped: true, outside: [] }, "The description is too long for a link: it is on your clipboard. Paste it into Brief."],
+    ["a document", { briefDropped: false, outside: ["/wt/s.md"] }, "s.md is outside /r, which the web page cannot attach: it is left out."],
+  ])("%s", (_, link, want) => expect(draftNote({ url: "", ...link }, "/r")).toBe(want));
 });

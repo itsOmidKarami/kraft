@@ -3,7 +3,8 @@
  *  Quick Input steps in `../fileWork.ts` ask these. */
 
 import { basename } from "node:path";
-import type { NewWorkItem, Repo, TemplateSummary } from "./api";
+import { humanSize } from "../../../frontend/src/sizes";
+import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary } from "./api";
 import { isLoopback } from "./connection";
 import { refusal, type ReadOnlyState } from "./readOnly";
 import { samePath } from "./repoScope";
@@ -133,4 +134,80 @@ export function attachChoices(activeMd: string | undefined): AttachChoice[] {
     ...(activeMd ? [{ label: `${name} as spec`, spec: activeMd }, { label: `${name} as plan`, plan: activeMd }] : []),
     { label: "Pick files…", pick: true as const },
   ];
+}
+
+/** The preview step's title: the chain, how much of it runs, and what the attachments cover. */
+export function previewLine(chainLabel: string, dry: DryRun): string {
+  const { nodes, skipped, gates } = dry;
+  const line = `${chainLabel} · ${nodes.length} of ${nodes.length + skipped.length} nodes run · ${gates.length} gate${gates.length === 1 ? "" : "s"}`;
+  if (!skipped.length) return line;
+  return `${line} · skips ${skipped.map((s) => (s.why === "covered_by" && s.kind ? `${s.node} (${s.kind} attached)` : s.node)).join(", ")}`;
+}
+
+/** What the create answered, said once (the web Composer's `sayIfFiledPaused`).
+ *  VS Code sends no `depends_on`, so an autostart is never blocked, and a lost
+ *  slot race answers `queued`, never `paused`. */
+export function outcomeMessage(autostart: boolean, c: Created): string {
+  if (!autostart) return `Filed ${c.id} paused. Nothing spends tokens until you start it.`;
+  if (c.status === "active") return `Filed ${c.id} and started it.`;
+  if (c.status === "queued") {
+    const held = c.slots?.storage;
+    if (held) return `Filed ${c.id}, queued: worktrees use ${humanSize(held.used_bytes)} of the ${humanSize(held.limit_bytes)} storage limit. It starts when space frees.`;
+    const busy = c.slots ? `${c.slots.busy} of ${c.slots.limit} slots are` : "every slot is";
+    return `Filed ${c.id}, queued: ${busy} busy. It starts when one frees.`;
+  }
+  return `Filed ${c.id}: it is ${c.status}.`;
+}
+
+/** The warnings a create came back with, in the server's order of importance. */
+export function warningsOf(c: Created): string[] {
+  return [c.duplicate_warning, c.bead_warning, c.repo_warning].filter((w): w is string => !!w);
+}
+
+/** The warning's buttons. Abandon is offered unless the item is already
+ *  running (the server refuses it then); whether it still may is the
+ *  server's answer when it is clicked (D24). */
+export function warningActions(c: Created): ("Open item" | "Abandon")[] {
+  return c.status === "active" ? ["Open item"] : ["Open item", "Abandon"];
+}
+
+export const MAX_URL = 8000;
+
+function inside(path: string, root: string): boolean {
+  const n = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const [a, b] = [n(path), n(root)];
+  const win = /^[A-Za-z]:/.test(b);
+  const [x, y] = win ? [a.toLowerCase(), b.toLowerCase()] : [a, b];
+  return x === y || x.startsWith(`${y}/`);
+}
+
+export interface DraftLink { url: string; briefDropped: boolean; outside: string[] }
+
+/** "More options…": the web draft page (`DraftItemPage` `loadDraft`) with
+ *  this draft in its query. That page sends no `cwd`, so a document outside
+ *  the repo (another worktree's) is left out; a brief too long for a link is too. */
+export function draftUrl(base: string, d: Omit<FileDraft, "cwd">): DraftLink {
+  const outside = (["spec", "plan"] as const).map((k) => d[k]).filter((p): p is string => !!p && !inside(p, d.repo));
+  const build = (brief: boolean) => {
+    const q = new URLSearchParams({ title: d.title });
+    if (brief && d.description) q.set("brief", d.description);
+    q.set("repo", d.repo);
+    if (d.chain) q.set("chain", d.chain);
+    for (const k of ["spec", "plan"] as const) if (d[k] && !outside.includes(d[k]!)) q.set(k, d[k]!);
+    return `${base}/work-items/new?${q}`;
+  };
+  const url = build(true);
+  if (url.length <= MAX_URL) return { url, briefDropped: false, outside };
+  return { url: build(false), briefDropped: true, outside };
+}
+
+/** What "More options…" says about what the link could not carry, if anything. */
+export function draftNote(link: DraftLink, repo: string): string | undefined {
+  const notes = [
+    ...(link.briefDropped ? ["The description is too long for a link: it is on your clipboard. Paste it into Brief."] : []),
+    ...(link.outside.length
+      ? [`${link.outside.map((p) => basename(p)).join(" and ")} ${link.outside.length === 1 ? "is" : "are"} outside ${repo}, which the web page cannot attach: it is left out.`]
+      : []),
+  ];
+  return notes.length ? notes.join(" ") : undefined;
 }
