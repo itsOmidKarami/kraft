@@ -68,8 +68,12 @@ export function stateOf(item: WorkItem): ItemState {
 
 const shown = (i: WorkItem) => !i.archived_at;
 
-export function groupItems(items: WorkItem[], repos: string[] | "all"): { id: GroupKey; label: string; items: WorkItem[] }[] {
-  const listed = items.filter((i) => shown(i) && (repos === "all" || repos.includes(i.repo)));
+/** Whether an item is in the window's scope (`WorkspaceScope.includes`):
+ *  the board, the badge and the toasts all ask the same question. */
+export type Include = (item: WorkItem) => boolean;
+
+export function groupItems(items: WorkItem[], include: Include): { id: GroupKey; label: string; items: WorkItem[] }[] {
+  const listed = items.filter((i) => shown(i) && include(i));
   return STATUS_GROUPS.map((g) => ({
     id: g.key,
     label: g.label,
@@ -81,7 +85,10 @@ export const actionsFor = (item: WorkItem): Action[] => ACTIONS[stateOf(item)];
 
 export const needsYou = (item: WorkItem) => shown(item) && groupOf(item) === "needs";
 
-export const needsYouCount = (items: WorkItem[]) => items.filter(needsYou).length;
+export const needsYouCount = (items: WorkItem[], include: Include) => items.filter((i) => needsYou(i) && include(i)).length;
+
+/** The items a toast may be about: one window per repo announces a gate. */
+export const announceable = (items: WorkItem[], include: Include) => items.filter(include);
 
 export const iconOf = (item: WorkItem) => ICONS[stateOf(item)];
 

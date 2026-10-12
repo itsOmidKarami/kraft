@@ -2,10 +2,11 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action } from "./core/board";
+import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action, type Include } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
+import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
 
 type Node =
@@ -18,11 +19,11 @@ type Node =
 export class Board implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<Node | void>();
   readonly onDidChangeTreeData = this.changed.event;
-  showAll = false;
 
-  constructor(private store: Store, private repos: () => string[]) {
+  constructor(private store: Store, private include: Include, scope: Pick<WorkspaceScope, "onChange">) {
     store.onChange(() => this.changed.fire());
     store.onConnection(() => this.changed.fire());
+    scope.onChange(() => this.changed.fire());
   }
 
   refresh = () => this.changed.fire();
@@ -38,7 +39,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node?.kind === "group") return node.items.map((item) => ({ kind: "item", item }));
     if (node) return [];
     if (!this.store.connected && this.store.items().length === 0) return [{ kind: "down" }];
-    return groupItems(this.store.items(), this.showAll ? "all" : this.repos()).map((g) => ({ kind: "group", ...g }));
+    return groupItems(this.store.items(), this.include).map((g) => ({ kind: "group", ...g }));
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
@@ -70,17 +71,25 @@ export class Board implements vscode.TreeDataProvider<Node> {
   }
 
   badge(): vscode.ViewBadge | undefined {
-    const n = needsYouCount(this.store.items());
+    const n = needsYouCount(this.store.items(), this.include);
     return n ? { value: n, tooltip: `${n} waiting on you` } : undefined;
   }
 }
 
-export function registerBoard(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string, refusal: () => string | null) {
-  const repos = () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-  const board = new Board(store, repos);
+export function registerBoard(
+  context: vscode.ExtensionContext,
+  store: Store,
+  api: Api,
+  runDir: () => string,
+  refusal: () => string | null,
+  include: Include,
+  scope: Pick<WorkspaceScope, "onChange">,
+) {
+  const board = new Board(store, include, scope);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);
+  scope.onChange(updateBadge);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
   const act = (action: Action) => async (node?: { item?: WorkItem }) => {
@@ -94,10 +103,6 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
   }
   context.subscriptions.push(
     view,
-    vscode.commands.registerCommand("kraft.toggleAllRepos", () => {
-      board.showAll = !board.showAll;
-      board.refresh();
-    }),
     vscode.commands.registerCommand("kraft.openWorktree", (node?: { item?: WorkItem }) => {
       const item = itemOf(node);
       if (item) void vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(`${runDir()}/worktrees/${item.id}`), { forceNewWindow: true });

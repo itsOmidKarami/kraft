@@ -2,8 +2,10 @@ import * as vscode from "vscode";
 import { reportError } from "./actions";
 import type { Api } from "./core/api";
 import { Announcer } from "./core/announcer";
+import { announceable, type Include } from "./core/board";
 import { approveGate } from "./core/approve";
 import { mutating } from "./core/guard";
+import type { WorkspaceScope } from "./core/repoScope";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 
@@ -12,6 +14,8 @@ export function registerGates(
   store: Store,
   api: Api,
   refusal: () => string | null,
+  include: Include,
+  scope: Pick<WorkspaceScope, "onChange" | "showAll">,
   confirmApprove: (id: string) => Promise<boolean> = async () => true,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
@@ -73,7 +77,7 @@ export function registerGates(
   });
 
   const announce = (ids: string[] | "all") => {
-    const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
+    const items = announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
     for (const item of items) {
       const a = announcer.consider(item);
       if (!a) continue;
@@ -93,6 +97,16 @@ export function registerGates(
     }
   };
   store.onChange(announce);
+  // A scope that just became ready announces a gate already open, once (the
+  // announcer dedups). Widening to every repo does not: those gates were
+  // already waiting, and another window has announced them.
+  let showAll = scope.showAll;
+  scope.onChange(() => {
+    const widened = scope.showAll && !showAll;
+    showAll = scope.showAll;
+    if (!widened) return announce("all");
+    for (const item of announceable(store.items(), include)) announcer.consider(item);
+  });
 
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.openArtifact", (arg?: unknown) => openArtifact(idOf(arg))),

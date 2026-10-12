@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, type Action, type ItemState } from "../../src/core/board";
+import { actionsFor, announceable, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, type Action, type ItemState } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -24,7 +24,7 @@ it.each([
   ["pre-2.0 server", item({ display_status: undefined }), "circle-filled", "running"],
 ])("%s: icon and group", (_, it_, icon, group) => {
   expect(iconOf(it_)).toBe(icon);
-  expect(groupItems([it_], "all").map((g) => g.id)).toEqual([group]);
+  expect(groupItems([it_], () => true).map((g) => g.id)).toEqual([group]);
 });
 
 describe("groupItems", () => {
@@ -40,7 +40,7 @@ describe("groupItems", () => {
   ];
 
   it("groups in the web board's order and hides archived items", () => {
-    const groups = groupItems(items, "all");
+    const groups = groupItems(items, () => true);
     expect(groups.map((g) => [g.id, g.label])).toEqual([["needs", "Needs you"], ["running", "Running"], ["not_started", "Not started"], ["done", "Done"]]);
     expect(groups.flatMap((g) => g.items.map((i) => i.id))).not.toContain("arch");
     expect(groups.flatMap((g) => g.items.map((i) => i.id))).not.toContain("arch-needs");
@@ -48,13 +48,13 @@ describe("groupItems", () => {
   });
 
   it("scopes to the workspace's repos", () => {
-    const ids = groupItems(items, ["/r"]).flatMap((g) => g.items.map((i) => i.id));
+    const ids = groupItems(items, (i) => i.repo === "/r").flatMap((g) => g.items.map((i) => i.id));
     expect(ids).not.toContain("other");
     expect(ids).toContain("run");
   });
 
   it("omits empty groups", () => {
-    expect(groupItems([item()], "all").map((g) => g.id)).toEqual(["running"]);
+    expect(groupItems([item()], () => true).map((g) => g.id)).toEqual(["running"]);
   });
 });
 
@@ -113,8 +113,18 @@ describe("actionsFor", () => {
   });
 });
 
-it("counts what needs you", () => {
-  expect(needsYouCount([item(), item({ display_status: "paused" }), stopped("gate", { pending_gate: "g" }), stopped("cap", { display_status: "archived", archived_at: "x" }), archivedNeedsYou])).toBe(2);
+const counted = [item(), item({ display_status: "paused" }), stopped("gate", { pending_gate: "g" }), stopped("cap", { display_status: "archived", archived_at: "x" }), archivedNeedsYou, stopped("cap", { id: "away", repo: "/elsewhere" })];
+
+it.each([
+  ["everything in scope", () => true, 3],
+  ["only what is in scope", (i: { repo: string }) => i.repo === "/r", 2],
+])("counts what needs you: %s", (_, include, want) => {
+  expect(needsYouCount(counted, include)).toBe(want);
+});
+
+it("announces only what is in scope", () => {
+  const items = [stopped("gate", { id: "here", pending_gate: "g" }), stopped("gate", { id: "away", repo: "/elsewhere", pending_gate: "g" })];
+  expect(announceable(items, (i) => i.repo === "/r").map((i) => i.id)).toEqual(["here"]);
 });
 
 it.each([
