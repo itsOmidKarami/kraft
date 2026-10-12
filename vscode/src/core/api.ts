@@ -1,9 +1,10 @@
 import type {
-  ChainNode, CommentReview, Finding, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
-  WorkItem as BoardItem,
+  ChainNode, CommentReview, Finding, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  WorkerSession, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
+import { parseSse } from "./logStream";
 
 export type {
   CommentReview, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
@@ -17,6 +18,7 @@ export type WorkItemDetail = WorkItem & {
   steerable?: boolean;
   deferred_findings?: Finding[];
   judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
+  worker_sessions?: WorkerSession[];
 };
 export interface Artifact { path: string; title: string; content: string; digest?: string; truncated: boolean }
 export interface Position { file: string; line: number; column: number }
@@ -104,6 +106,54 @@ export class Api {
     const data = text ? JSON.parse(text) : undefined;
     if (!res.ok) throw this.fail(method, path, res.status, typeof data?.detail === "string" ? data.detail : text || res.statusText);
     return data as T;
+  }
+
+  /** A session's log, tail first, until the server's `end` frame. No timeout: it
+   *  lasts as long as the session. Throws `ApiError` on a refusal or a drop
+   *  (status 0, so a stream that closes before `end` is a failure too); an
+   *  abort through `signal` just ends it. */
+  async *streamLog(sid: string, signal: AbortSignal): AsyncGenerator<LogLine> {
+    const path = `/worker-sessions/${encodeURIComponent(sid)}/log?format=jsonl&follow=true`;
+    const why = (e: unknown) => (e as Error).message;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.base}/api${path}`, { headers: this.headers(), signal });
+    } catch (e) {
+      if (signal.aborted) return;
+      throw this.fail("GET", path, 0, `Kraft is not reachable at ${this.base}: ${why(e)}`);
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let detail: unknown;
+      try { detail = JSON.parse(text)?.detail; } catch { /* not JSON */ }
+      throw this.fail("GET", path, res.status, typeof detail === "string" ? detail : text || res.statusText);
+    }
+    if (!res.body) throw this.fail("GET", path, 0, "the log stream has no body");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let rest = "";
+    try {
+      for (;;) {
+        let chunk: Awaited<ReturnType<typeof reader.read>>;
+        try {
+          chunk = await reader.read();
+        } catch (e) {
+          if (signal.aborted) return;
+          throw this.fail("GET", path, 0, `the log stream dropped: ${why(e)}`);
+        }
+        if (chunk.done) break;
+        const parsed = parseSse(rest + decoder.decode(chunk.value, { stream: true }));
+        rest = parsed.rest;
+        for (const f of parsed.frames) {
+          if (f.event === "end") return;
+          if (f.event === "message") yield JSON.parse(f.data) as LogLine;
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    if (signal.aborted) return;
+    throw this.fail("GET", path, 0, "the log stream closed before the session ended");
   }
 
   private fail(method: string, path: string, status: number, detail: string): ApiError {

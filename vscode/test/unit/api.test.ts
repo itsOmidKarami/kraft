@@ -207,3 +207,51 @@ describe("Api timeout", () => {
     await expect(call(new Api("http://h:1", undefined, f as any, { fast: 50, slow: 200 }))).rejects.toMatchObject({ detail: "Kraft did not answer within 0.2s" });
   });
 });
+
+describe("Api.streamLog", () => {
+  /** A body that sends `chunks`, then stays open until the request is aborted when `hold`, or closes. */
+  function sse(chunks: string[], hold = false) {
+    return vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const s of chunks) c.enqueue(new TextEncoder().encode(s));
+        if (hold) init!.signal!.addEventListener("abort", () => c.error(init!.signal!.reason));
+        else c.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+  }
+  const drain = async (it: AsyncIterable<{ n: number }>) => {
+    const ns: number[] = [];
+    for await (const l of it) ns.push(l.n);
+    return ns;
+  };
+
+  it("streams a log until the end frame", async () => {
+    const f = sse(['data: {"n":0,"t":null,"src":"stdout","text":"a"}\n\nev', 'ent: end\ndata: {}\n\ndata: {"n":1}\n\n']);
+    const ns = await drain(new Api("http://h:1", "tok", f as any).streamLog("s 1", new AbortController().signal));
+    expect(ns).toEqual([0]);
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("http://h:1/api/worker-sessions/s%201/log?format=jsonl&follow=true");
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" });
+  });
+
+  it("ends without throwing when aborted", async () => {
+    const ctrl = new AbortController();
+    const ns: number[] = [];
+    for await (const l of new Api("http://h:1", undefined, sse(['data: {"n":0}\n\n'], true) as any).streamLog("s1", ctrl.signal)) {
+      ns.push(l.n);
+      ctrl.abort();
+    }
+    expect(ns).toEqual([0]);
+  });
+
+  it.each([
+    ["a refusal, with the server's detail", fakeFetch(404, { detail: "unknown session" }), { status: 404, detail: "unknown session" }],
+    ["a close before the end frame, as a drop", sse(['data: {"n":0}\n\n']), { status: 0, detail: "the log stream closed before the session ended" }],
+  ])("throws ApiError on %s and reports it", async (_, f, want) => {
+    const api = new Api("http://h:1", undefined, f as any);
+    const failures: ApiFailure[] = [];
+    api.onError = (x) => failures.push(x);
+    await expect(drain(api.streamLog("s1", new AbortController().signal))).rejects.toMatchObject(want);
+    expect(failures).toMatchObject([{ method: "GET", ...want }]);
+  });
+});

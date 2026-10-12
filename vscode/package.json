@@ -165,6 +165,11 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.showWorkerLog",
+        "title": "Show Worker Log",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.toggleAllRepos",
         "title": "Show All Repos",
         "category": "Kraft",
@@ -401,6 +406,11 @@
           "group": "3_open"
         },
         {
+          "command": "kraft.showWorkerLog",
+          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "group": "3_open"
+        },
+        {
           "command": "kraft.reviewChanges",
           "when": "view == kraft.board && viewItem =~ /^item:/",
           "group": "3_open"
@@ -490,6 +500,10 @@
         },
         {
           "command": "kraft.openInWebUi",
+          "when": "false"
+        },
+        {
+          "command": "kraft.showWorkerLog",
           "when": "false"
         },
         {

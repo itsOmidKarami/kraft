@@ -8,6 +8,7 @@ import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
 import { registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
+import { registerWorkerLog } from "./workerLog";
 import { fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
@@ -113,6 +114,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   applyReadOnly();
 
   const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope);
+  registerWorkerLog(context, store, api);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,
