@@ -31,10 +31,10 @@ it.each([
   ["commandPalette", "kraft.search", "kraft.connected"],
   ["commandPalette", "kraft.approveNextGate", "kraft.connected"],
   ["commandPalette", "kraft.openItem", "kraft.connected"],
-  ["editor/title", "kraft.approve", "kraft.artifactPreview && !kraft.readOnly"],
-  ["editor/title", "kraft.reject", "kraft.artifactPreview && !kraft.readOnly"],
-  ["editor/title", "kraft.review.submit", "kraft.artifactPreview && !kraft.readOnly"],
-  ["editor/title", "kraft.reviewChanges", "kraft.artifactPreview"],
+  ["editor/title", "kraft.approve", "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.reject", "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.review.submit", "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.reviewChanges", "resourceScheme == webview-panel && kraft.artifactPreview"],
 ])("%s offers %s when %s", (menu, command, when) =>
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
 

@@ -772,22 +772,22 @@
         },
         {
           "command": "kraft.approve",
-          "when": "kraft.artifactPreview && !kraft.readOnly",
+          "when": "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly",
           "group": "navigation@1"
         },
         {
           "command": "kraft.reject",
-          "when": "kraft.artifactPreview && !kraft.readOnly",
+          "when": "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly",
           "group": "navigation@2"
         },
         {
           "command": "kraft.reviewChanges",
-          "when": "kraft.artifactPreview",
+          "when": "resourceScheme == webview-panel && kraft.artifactPreview",
           "group": "navigation@3"
         },
         {
           "command": "kraft.review.submit",
-          "when": "kraft.artifactPreview && !kraft.readOnly",
+          "when": "resourceScheme == webview-panel && kraft.artifactPreview && !kraft.readOnly",
           "group": "navigation@4"
         }
       ],

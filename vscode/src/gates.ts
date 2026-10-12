@@ -12,7 +12,7 @@ import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
 import type { WorkspaceScope } from "./core/repoScope";
 import { artifactBasename, artifactUri, docText } from "./core/docs";
-import { previewIsStale } from "./core/preview";
+import { gateCall } from "./core/preview";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 import type { ThreadCache } from "./core/threadCache";
@@ -45,10 +45,8 @@ export function registerGates(
   );
 
   const direct = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
-  // A preview's title bar passes a webview-panel uri: its item is the one the active preview shows.
-  const idOf = (arg: unknown) => direct(arg) ?? preview.id();
-  // The title bar calls a command as (resource, { groupId }): only a string is a gate or a note.
-  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  // A preview's title bar passes a webview-panel uri: its item is the one that preview shows.
+  const idOf = (arg: unknown) => direct(arg) ?? preview.target(arg)?.id;
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
@@ -84,17 +82,19 @@ export function registerGates(
     }
   };
 
+  // Clicked on a preview of an older render than the latest: open the latest instead of acting.
+  const readFirst = async (id: string, gate: string) => {
+    if (await openArtifact(id, gate)) void vscode.window.showInformationMessage(`Read ${gate} first: the document is open.`);
+  };
+
   // Guarded here, not at registration: a gate notification's buttons call these directly.
-  // `stale`: clicked on a preview of an older render than the latest; it reads first, as an unread gate does.
+  // `stale`: clicked on an older render's preview; it reads first, as an unread gate does.
   const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     const g = gate;
-    if (stale) {
-      if (await openArtifact(id, g)) void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
-      return;
-    }
+    if (stale) return readFirst(id, g);
     // Read once the approve is about to go: drafts written since the document opened go with it.
     const send = async (digest: string | undefined) => {
       const n = drafts(await cache.load(id)).length;
@@ -126,10 +126,11 @@ export function registerGates(
     }
   });
 
-  const reject = mutating("kraft.reject", refusal, warn, async (id?: string, gate?: string, note?: string) => {
+  const reject = mutating("kraft.reject", refusal, warn, async (id?: string, gate?: string, note?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
+    if (stale) return readFirst(id, gate);
     note ??= await vscode.window.showInputBox({
       prompt: `Why reject ${id} at ${gate}?`,
       validateInput: (v) => (v.trim() ? undefined : "A reject needs a reason: it goes to the agent."),
@@ -174,11 +175,13 @@ export function registerGates(
     vscode.commands.registerCommand("kraft.openArtifact", async (arg?: unknown) =>
       openArtifact(idOf(arg) ?? (await pickItem("openArtifact", onBoard(store.items(), include)))?.id)),
     vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: unknown) => {
-      const id = direct(arg);
-      const p = id ? undefined : preview.current();
-      return approve(id ?? p?.id, str(gate), p !== undefined && previewIsStale(p, latest));
+      const c = gateCall(direct(arg), preview.target(arg), latest, gate);
+      return approve(c.id, c.gate, c.stale);
     }),
-    vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: unknown, note?: unknown) => reject(idOf(arg), str(gate), str(note))),
+    vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: unknown, note?: unknown) => {
+      const c = gateCall(direct(arg), preview.target(arg), latest, gate, note);
+      return reject(c.id, c.gate, c.note, c.stale);
+    }),
   );
   return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }

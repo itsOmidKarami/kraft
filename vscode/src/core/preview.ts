@@ -22,3 +22,35 @@ export function previewOf(tab: TabLike | undefined, opened: ReadonlyMap<string, 
  *  the plan gate's document is up. Approving there would send the newer
  *  render's digest, so it reads first instead. */
 export const previewIsStale = (p: ShownPreview, latest: ReadonlyMap<string, string>): boolean => latest.get(p.id) !== p.basename;
+
+/** An editor group as previewTarget reads it: whether it is active, and its active tab. */
+export type GroupLike = { isActive: boolean; activeTab?: TabLike };
+
+const isUri = (v: unknown): v is { scheme: string } => typeof (v as { scheme?: unknown } | undefined)?.scheme === "string";
+const same = (a: ShownPreview | undefined, b: ShownPreview | undefined) => a?.id === b?.id && a?.basename === b?.basename;
+
+/**
+ * The preview a command acts on when its argument names no item. From the
+ * palette (no argument): the active group's active tab. From a title bar
+ * (a `webview-panel` uri): the group clicked, which the extension API cannot
+ * name (VS Code's `{ groupId }` is an internal id no TabGroup exposes), so
+ * every group whose active tab is a webview could be it; only when all of
+ * them show the same Kraft preview is that the one. Any other argument (a
+ * diff's uri, another group's file) is no preview.
+ */
+export function previewTarget(arg: unknown, groups: readonly GroupLike[], opened: ReadonlyMap<string, string>): ShownPreview | undefined {
+  if (arg === undefined) return previewOf(groups.find((g) => g.isActive)?.activeTab, opened);
+  if (!isUri(arg) || arg.scheme !== "webview-panel") return undefined;
+  const found = groups.filter((g) => g.activeTab?.viewType !== undefined).map((g) => previewOf(g.activeTab, opened));
+  return found.length && found.every((p) => same(p, found[0])) ? found[0] : undefined;
+}
+
+/** A gate command's call, normalised: the title bar passes `(uri, { groupId })`,
+ *  so only a string is a gate or a note. `stale` when the item came from a
+ *  preview of an older render than the latest (`latest`: id → basename). */
+export function gateCall(direct: string | undefined, target: ShownPreview | undefined, latest: ReadonlyMap<string, string>, gate: unknown, note?: unknown):
+  { id?: string; gate?: string; note?: string; stale: boolean } {
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const p = direct === undefined ? target : undefined;
+  return { id: direct ?? p?.id, gate: str(gate), note: str(note), stale: p !== undefined && previewIsStale(p, latest) };
+}
