@@ -12,6 +12,7 @@ describe("pickableFor", () => {
     ["mr: a merge request on the web", "openMergeRequest", [item({ id: "m", mr_ref: { number: 1, url: "https://g/1" } }), item({ id: "x", mr_ref: { number: 2, url: "vscode://x" } })], ["m"]],
     ["answer: a question the server would resume", "answer", [stopped("question", { id: "q", actions: ["resume", "retry"] }), stopped("question", { id: "n", actions: ["retry"] }), item({ id: "p", display_status: "paused", actions: ["resume"] })], ["q"]],
     ["raiseBudget: the raise_budget door", "raiseBudget", [stopped("budget", { id: "b", actions: ["raise_budget", "retry"] }), stopped("budget", { id: "n", actions: ["retry"] })], ["b"]],
+    ["openSpec: one filed with a spec", "openSpec", [item({ id: "s", attachments: [{ kind: "spec", path: "s.md" }] }), item({ id: "p", attachments: [{ kind: "plan", path: "p.md" }] }), item({ id: "n" })], ["s"]],
     ["openWorktree: one on disk", "openWorktree", [item({ id: "w", worktree_exists: true }), item({ id: "n", worktree_exists: false })], ["w"]],
     ["openInWebUi: every item", "openInWebUi", [item({ id: "a" }), item({ id: "b", actions: [] })], ["a", "b"]],
   ])("%s", (_, verb, items, want) => expect(ids(pickableFor(verb, items))).toEqual(want));

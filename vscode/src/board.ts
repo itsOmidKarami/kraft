@@ -245,10 +245,11 @@ export function registerBoard(
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   // The board's own doors; approve and reject are registered in gates.ts, and
   // steer, reopen_mr and abandon have no command here.
-  const COMMANDS: Partial<Record<ItemAction, string>> = {
-    pause: "kraft.pause", resume: "kraft.resume", retry: "kraft.retry", raise_budget: "kraft.raiseBudget",
-    unblock: "kraft.unblock", skip: "kraft.skip", escalate: "kraft.escalate", complete: "kraft.complete",
-    cancel: "kraft.cancel", restore: "kraft.restore", archive: "kraft.archive",
+  // Each the verb its command is named after, `kraft.<verb>`, and its palette picker asks with.
+  const COMMANDS: Partial<Record<ItemAction, PickVerb>> = {
+    pause: "pause", resume: "resume", retry: "retry", raise_budget: "raiseBudget",
+    unblock: "unblock", skip: "skip", escalate: "escalate", complete: "complete",
+    cancel: "cancel", restore: "restore", archive: "archive",
   };
   // Only these four read the selection VS Code passes second; every other
   // command acts on the clicked row alone. One selected row keeps its own path.
@@ -258,8 +259,9 @@ export function registerBoard(
     if (items.length < 2) return act(a, a)(node);
     await runBulk(api, store, a, items.map((i) => store.item(i.id) ?? i));
   };
-  for (const [a, id] of Object.entries(COMMANDS) as [ItemAction, string][]) {
-    const run = BULK.has(a) ? actOnSelection(a as BulkVerb) : act(a, id.slice("kraft.".length) as PickVerb);
+  for (const [a, verb] of Object.entries(COMMANDS) as [ItemAction, PickVerb][]) {
+    const id = `kraft.${verb}`;
+    const run = BULK.has(a) ? actOnSelection(a as BulkVerb) : act(a, verb);
     context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, run)));
   }
   context.subscriptions.push(
