@@ -31,8 +31,11 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   if (carried) return emptyDraft(carried);
   try {
     const saved = sessionStorage.getItem(DRAFT_KEY);
-    // A bead in the URL is a fresh start, unless this draft already is that bead's (a reload keeps the edits).
-    if (saved && (!q.get("bead") || JSON.parse(saved).bead === q.get("bead"))) return emptyDraft(JSON.parse(saved));
+    // A bead or a title in the URL (VS Code's More options) is a fresh start,
+    // unless this draft already is that bead's or has that title (a reload keeps the edits).
+    const bead = q.get("bead"), title = q.get("title");
+    const ours = (d: Partial<DraftState>) => (bead ? d.bead === bead : title ? d.title === title : true);
+    if (saved && ours(JSON.parse(saved))) return emptyDraft(JSON.parse(saved));
   } catch {
     // Private windows: nothing kept.
   }

@@ -172,11 +172,16 @@ describe("DraftItemPage", () => {
     expect(creates(calls).at(-1)?.body.depends_on).toEqual(["a1"]);
   });
 
-  it("takes the brief from the URL, as VS Code's More options sends it", async () => {
+  it.each([
+    ["the URL wins over an older saved draft", "an older draft", "T", "Why this"],
+    ["a saved draft with the URL's title keeps its edits", "T", "T", "edited"],
+  ])("takes title and brief from the URL, as VS Code's More options sends them: %s", async (_, savedTitle, title, brief) => {
     stub();
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ title: savedTitle, brief: "edited", repo: "/code/kraft-plugins", chain: "default" }));
     mount(undefined, "/work-items/new?title=T&brief=Why%20this");
     await settle();
-    expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue("Why this");
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(title);
+    expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue(brief);
   });
 
   it("starts from a bead in the URL: its title prefilled, and Create names it as implemented", async () => {
