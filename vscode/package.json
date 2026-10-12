@@ -135,6 +135,26 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.raiseBudget",
+        "title": "Raise Budget\u2026",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.unblock",
+        "title": "Unblock",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.complete",
+        "title": "Complete\u2026",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.restore",
+        "title": "Restore",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.openWorktree",
         "title": "Open Worktree in New Window",
         "category": "Kraft"
@@ -228,12 +248,12 @@
         },
         {
           "command": "kraft.approve",
-          "when": "view == kraft.board && viewItem =~ /\\bgate\\b/ && !kraft.readOnly",
+          "when": "view == kraft.board && viewItem =~ /\\bapprove\\b/ && !kraft.readOnly",
           "group": "0_gate"
         },
         {
           "command": "kraft.reject",
-          "when": "view == kraft.board && viewItem =~ /\\bgate\\b/ && !kraft.readOnly",
+          "when": "view == kraft.board && viewItem =~ /\\breject\\b/ && !kraft.readOnly",
           "group": "0_gate"
         },
         {
@@ -252,6 +272,16 @@
           "group": "1_act"
         },
         {
+          "command": "kraft.raiseBudget",
+          "when": "view == kraft.board && viewItem =~ /\\braise_budget\\b/ && !kraft.readOnly",
+          "group": "1_act"
+        },
+        {
+          "command": "kraft.unblock",
+          "when": "view == kraft.board && viewItem =~ /\\bunblock\\b/ && !kraft.readOnly",
+          "group": "1_act"
+        },
+        {
           "command": "kraft.skip",
           "when": "view == kraft.board && viewItem =~ /\\bskip\\b/ && !kraft.readOnly",
           "group": "1_act"
@@ -267,8 +297,18 @@
           "group": "2_end"
         },
         {
+          "command": "kraft.complete",
+          "when": "view == kraft.board && viewItem =~ /\\bcomplete\\b/ && !kraft.readOnly",
+          "group": "2_end"
+        },
+        {
           "command": "kraft.archive",
           "when": "view == kraft.board && viewItem =~ /\\barchive\\b/ && !kraft.readOnly",
+          "group": "2_end"
+        },
+        {
+          "command": "kraft.restore",
+          "when": "view == kraft.board && viewItem =~ /\\brestore\\b/ && !kraft.readOnly",
           "group": "2_end"
         },
         {
@@ -328,6 +368,22 @@
         },
         {
           "command": "kraft.archive",
+          "when": "false"
+        },
+        {
+          "command": "kraft.raiseBudget",
+          "when": "false"
+        },
+        {
+          "command": "kraft.unblock",
+          "when": "false"
+        },
+        {
+          "command": "kraft.complete",
+          "when": "false"
+        },
+        {
+          "command": "kraft.restore",
           "when": "false"
         },
         {

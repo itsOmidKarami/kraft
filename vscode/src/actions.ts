@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
-import { ApiError, type Api, type WorkItem } from "./core/api";
-import { steerPrompt, type Action } from "./core/board";
+import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
+import { steerPrompt } from "./core/board";
+import { parseUsd } from "./core/budget";
 import type { Store } from "./core/store";
 import { log } from "./log";
 
@@ -17,11 +18,13 @@ export async function reportError(e: unknown, store: Store, id: string): Promise
   void vscode.window.showErrorMessage(detail);
 }
 
-export async function runAction(api: Api, store: Store, item: WorkItem, action: Action): Promise<void> {
+export async function runAction(api: Api, store: Store, item: WorkItem, action: ItemAction): Promise<void> {
   try {
     switch (action) {
       case "pause": await api.pause(item.id); break;
       case "archive": await api.archive(item.id); break;
+      case "unblock": await api.unblock(item.id); break;
+      case "restore": await api.restore(item.id); break;
       case "resume":
       case "retry": {
         const steer = await vscode.window.showInputBox({ prompt: steerPrompt(item) });
@@ -29,13 +32,32 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
         await (action === "resume" ? api.resume(item.id, steer || undefined) : api.retry(item.id, steer || undefined));
         break;
       }
-      case "cancel": {
+      case "cancel":
+      case "complete": {
+        const ask = action === "cancel"
+          ? { prompt: `Why cancel ${item.id}? (recorded on the item)`, empty: "Cancelling needs a reason." }
+          : { prompt: `Why mark ${item.id} complete? (recorded on the item)`, empty: "Completing needs a reason." };
         const reason = await vscode.window.showInputBox({
-          prompt: `Why cancel ${item.id}? (recorded on the item)`,
-          validateInput: (v) => (v.trim() ? undefined : "Cancelling needs a reason."),
+          prompt: ask.prompt,
+          validateInput: (v) => (v.trim() ? undefined : ask.empty),
         });
         if (!reason?.trim()) return;
-        await api.cancel(item.id, reason.trim());
+        await (action === "cancel" ? api.cancel(item.id, reason.trim()) : api.complete(item.id, reason.trim()));
+        break;
+      }
+      case "raise_budget": {
+        const why = item.stop?.reason ? `${item.stop.reason}. ` : "";
+        const raw = await vscode.window.showInputBox({
+          prompt: `${why}New spend cap for ${item.id} in dollars, or none`,
+          validateInput: (v) => {
+            const parsed = parseUsd(v);
+            return "error" in parsed ? parsed.error : undefined;
+          },
+        });
+        if (raw === undefined) return;
+        const parsed = parseUsd(raw);
+        if ("error" in parsed) return;
+        await api.raiseBudget(item.id, parsed.usd);
         break;
       }
       case "skip": {

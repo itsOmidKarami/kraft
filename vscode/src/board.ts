@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { runAction } from "./actions";
-import type { Api, WorkItem } from "./core/api";
-import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action } from "./core/board";
+import type { Api, ItemAction, WorkItem } from "./core/api";
+import { contextValueOf, describe, groupItems, iconOf, needsYouCount, tooltipOf } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -67,7 +67,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.id = item.id;
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(iconOf(item));
-    t.contextValue = `item:${[...(item.pending_gate ? ["gate"] : []), ...actionsFor(item)].join(",")}`;
+    t.contextValue = contextValueOf(item);
     t.tooltip = tooltipOf(item);
     return t;
   }
@@ -86,14 +86,21 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
   store.onChange(updateBadge);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
-  const act = (action: Action) => async (node?: { item?: WorkItem }) => {
+  const act = (action: ItemAction) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
     if (!item) return;
     await runAction(api, store, item, action);
   };
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
-  for (const a of ["pause", "resume", "retry", "cancel", "skip", "escalate", "archive"] as Action[]) {
-    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, mutating(`kraft.${a}`, refusal, warn, act(a))));
+  // The board's own doors; approve and reject are registered in gates.ts, and
+  // steer, reopen_mr and abandon have no command here.
+  const COMMANDS: Partial<Record<ItemAction, string>> = {
+    pause: "kraft.pause", resume: "kraft.resume", retry: "kraft.retry", raise_budget: "kraft.raiseBudget",
+    unblock: "kraft.unblock", skip: "kraft.skip", escalate: "kraft.escalate", complete: "kraft.complete",
+    cancel: "kraft.cancel", restore: "kraft.restore", archive: "kraft.archive",
+  };
+  for (const [a, id] of Object.entries(COMMANDS) as [ItemAction, string][]) {
+    context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, act(a))));
   }
   context.subscriptions.push(
     view,

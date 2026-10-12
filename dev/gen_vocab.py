@@ -5,7 +5,8 @@
 the same generate-and-commit shape as `dev/gen_theme.py`. Groups are tuples in
 enum order, so the output is byte-stable. `admits_status` and `Verb` are
 deliberately not exported: a UI keeps reading `display_status` and the
-server's refusals, not offering doors from the status matrix.
+server's refusals, not offering doors from the status matrix. `ItemAction` is
+exported: it names the server's `actions` list, not a rule.
 """
 
 from __future__ import annotations
@@ -81,6 +82,7 @@ def render() -> str:
             vocab.TRAITS,
             {"display": "DisplayStatus | null", "implied_stop_kind": "StopKind | null"},
         ),
+        _enum("ITEM_ACTIONS", "ItemAction", vocab.ItemAction),
         _enum("SESSION_STATUSES", "SessionStatus", vocab.SessionStatus),
         _group("LIVE_SESSION_STATUSES", "SessionStatus", vocab.LIVE),
         _group("UNFINISHED_SESSION_STATUSES", "SessionStatus", vocab.UNFINISHED),

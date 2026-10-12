@@ -453,7 +453,12 @@ def gate_node_index(row, gate: str, *, default=None):
     return next((i for i, n in enumerate(nodes) if n.get("gate_after") == gate), default)
 
 
-def chain_view(row) -> dict:
+#: `chain=` left out: read the row's materialized chain. A caller that already
+#: read it passes it, None for a legacy row included, so a row parses once.
+UNREAD = object()
+
+
+def chain_view(row, chain=UNREAD) -> dict:
     """The item's chain in the shape the API's `chain_definition` field and the
     SPA's `ChainDefinition` type speak, over either column.
 
@@ -489,7 +494,7 @@ def chain_view(row) -> dict:
     `auto_escalate` is whether the gate declares an `auto_review` task, which is
     what `Inspector/Config`'s toggle enables itself on.
     """
-    v1 = materialized_chain_of(row)
+    v1 = materialized_chain_of(row) if chain is UNREAD else chain
     if v1 is None:
         raw = row["chain_definition"] if "chain_definition" in row.keys() else None
         legacy = json.loads(raw) if raw else {}
