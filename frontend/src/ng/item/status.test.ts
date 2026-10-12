@@ -172,3 +172,14 @@ describe("spentLine", () => {
     ["an older server: dollars alone", { budget_cap: cap }, "$2.41 of $5.00"],
   ] as [string, Pick<WorkItem, "budget_cap" | "running_time">, string][])("%s", (_, item, line) => expect(spentLine(item)).toBe(line));
 });
+
+// R16, R27, R28: the badge and its tone are the server's display_status, never the raw status beside it.
+describe("headerState reads display_status, not the raw status", () => {
+  it.each([
+    ["active with a gate stop", { status: "active", display_status: "needs_you", stop: { kind: "gate", node: "n", resume_at: null, reason: null } }, "NEEDS YOU", "warn"],
+    ["needs_human but paused mid-chain", { status: "needs_human", display_status: "paused", current_node_id: "n" }, "PAUSED", "muted"],
+    ["completed but archived", { status: "completed", display_status: "archived" }, "ARCHIVED", "muted"],
+  ] as [string, Partial<ItemDetail>, string, string][])("%s", (_name, over, badge, tone) => {
+    expect(headerState(detail(over))).toMatchObject({ badge, tone });
+  });
+});

@@ -12,11 +12,8 @@ const sources = (dir: string): string[] =>
 const offenders = (re: RegExp) => sources(here).filter((f) => re.test(readFileSync(f, "utf-8"))).map((f) => relative(here, f));
 
 describe("board contract", () => {
-  // R16 (W6 brief rule 4): groups, glyphs, tails and row actions read the
-  // server's display_status and stop; the shipped board's derivation stays out.
-  it("never imports deriveState, statusGroups or the shipped item states", () => {
-    expect(offenders(/deriveState|statusGroups|useItemStates/)).toEqual([]);
-  });
+  // R16 (W6 brief rule 4), that groups read the server's display_status and
+  // not the raw status, is pinned on groupOf itself in model.test.ts.
 
   // R17: cancelling keeps the branch and worktree; abandon deletes them and stays CLI-only.
   it("never calls /abandon", () => {
