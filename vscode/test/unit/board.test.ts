@@ -92,6 +92,8 @@ describe("archivedChildren", () => {
     ["keeps a row the store holds archived", "still", true],
   ])("%s", (_, id, kept) =>
     expect(archivedChildren([item({ id, archived_at: "x" })], store).map((i) => i.id)).toEqual(kept ? [id] : []));
+  it("draws a row the store holds archived from the store", () =>
+    expect(archivedChildren([item({ id: "still", archived_at: "x", title: "stale" })], store)).toEqual([held[1]]));
 });
 
 describe("contextValueOf", () => {
@@ -513,6 +515,30 @@ describe("The Archived group", () => {
     expect(s.listArchived).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves out rows outside the scope", async () => {
+    const s = setup();
+    await s.board.loadArchived();
+    expect(s.rows()).toEqual(["A-1"]);
+  });
+
+  it.each([
+    ["an Error by its message", new Error("socket hang up"), "socket hang up"],
+    ["anything else as a string", "odd", "odd"],
+  ])("shows a failed read of %s", async (_, thrown, detail) => {
+    const s = setup(async () => { throw thrown; });
+    await s.board.loadArchived();
+    expect(s.rows()).toEqual([`Couldn't load archived items: ${detail}`]);
+  });
+
+  it("clears its pending timers when disposed", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    s.send("work_item_archived");
+    s.board.dispose();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(s.listArchived).not.toHaveBeenCalled();
+  });
+
   it("shows a failed read as one row", async () => {
     const s = setup(async () => { throw new ApiError(500, "db locked"); });
     await s.board.loadArchived();
@@ -530,8 +556,8 @@ describe("The Archived group", () => {
     expect(s.rows()).toEqual(["A-1"]);
   });
 
-  it("is each archived row's parent, and an error row's", async () => {
-    const s = setup(async () => { throw new Error("x"); });
+  it("is each archived row's parent, and an error row's", () => {
+    const s = setup();
     expect(s.board.getParent({ kind: "item", item: old[0] } as never)).toEqual({ kind: "archived" });
     expect(s.board.getParent({ kind: "note", text: "x" } as never)).toEqual({ kind: "archived" });
   });
@@ -549,7 +575,10 @@ describe("The Archived group", () => {
     const listArchived = vi.fn(async () => ({ items: old, cursor: 0 }));
     const store = { items: () => live, item: () => undefined, detail: () => undefined, connected: true,
       onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {} } as unknown as Store;
-    registerBoard({ subscriptions: [] } as never, store, { listArchived } as never, () => null, here, { onChange: () => () => {}, ready: true, showAll: false });
+    const subscriptions: unknown[] = [];
+    const { board } = registerBoard({ subscriptions } as never, store, { listArchived } as never, () => null, here, { onChange: () => () => {}, ready: true, showAll: false });
+    // Disposed with the extension, so its timers do not outlive it.
+    expect(subscriptions).toContain(board);
     expand({ element: { kind: "group", id: "running", label: "Running", items: live } });
     expect(listArchived).not.toHaveBeenCalled();
     expand({ element: { kind: "archived" } });

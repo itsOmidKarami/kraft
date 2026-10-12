@@ -73,11 +73,12 @@ export const withArchived = <G>(groups: G[]): (G | { kind: "archived" })[] =>
   groups.length ? [...groups, { kind: "archived" }] : [];
 
 /** The Archived group's rows: the last list read of archived items, less any
- *  the store now holds un-archived (a restore lands there before the re-read). */
+ *  the store now holds un-archived (a restore lands there before the re-read),
+ *  and the store's own copy of any it holds archived, which is the newer. */
 export const archivedChildren = (cached: WorkItem[], store: { item(id: string): WorkItem | undefined }): WorkItem[] =>
-  cached.filter((i) => {
+  cached.flatMap((i) => {
     const held = store.item(i.id);
-    return !held || !!held.archived_at;
+    return !held ? [i] : held.archived_at ? [held] : [];
   });
 
 /** The board's welcome text: `here` says this repo has no Kraft work and

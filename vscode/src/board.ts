@@ -68,6 +68,11 @@ export class Board implements vscode.TreeDataProvider<Node> {
 
   refresh = () => this.changed.fire();
 
+  dispose(): void {
+    clearTimeout(this.archivedTimer);
+    clearTimeout(this.draftsTimer);
+  }
+
   /** Read the Archived group's rows again. Only on its expand, a connect and
    *  an archive or restore: drawing the group never reads. */
   async loadArchived(): Promise<void> {
@@ -76,7 +81,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     try {
       next = { rows: await this.listArchived() };
     } catch (e) {
-      next = { error: e instanceof ApiError ? e.detail : String(e) };
+      next = { error: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) };
     }
     if (gen !== this.archivedGen) return;
     this.archived = next;
@@ -205,7 +210,7 @@ export function registerBoard(
   const board = new Board(store, include, scope, drafts, unconnected, async () => (await api.listArchived()).items);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board, canSelectMany: true });
   // Every expand reads it again: the cache may be as old as the last connect.
-  context.subscriptions.push(view.onDidExpandElement((e) => {
+  context.subscriptions.push(board, view.onDidExpandElement((e) => {
     if (e.element.kind === "archived") void board.loadArchived();
   }));
   const updateBadge = () => (view.badge = board.badge());
