@@ -55,8 +55,16 @@ export function reasonTail(i: Row, now = Date.now()): string {
       default: return "";
     }
   })();
-  const to = i.fallback?.to;
-  return typeof to === "string" && to ? `${tail} · on ${to}` : tail;
+  const on = fallbackName(i.fallback?.to);
+  return on ? `${tail} · on ${on}` : tail;
+}
+
+/** What a fallback switched to: the server sends `{harness, model, effort}`, its model when it names one. */
+function fallbackName(to: unknown): string {
+  if (typeof to === "string") return to;
+  if (!to || typeof to !== "object") return "";
+  const { model, harness } = to as { model?: unknown; harness?: unknown };
+  return typeof model === "string" && model ? model : typeof harness === "string" ? harness : "";
 }
 
 export type RowAction =

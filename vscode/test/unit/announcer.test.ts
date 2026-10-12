@@ -27,6 +27,15 @@ describe("Announcer", () => {
     expect(a.consider(question)).toBeDefined();
   });
 
+  it("an escalation in between does not re-announce the same stop", () => {
+    const a = new Announcer(() => "all");
+    expect(a.consider(question)).toBeDefined();
+    a.consider(item({ display_status: "escalated" }));
+    expect(a.consider(question)).toBeUndefined();
+    a.consider(item({ display_status: "escalated" }));
+    expect(a.consider(stopped("cap"))).toBeDefined();
+  });
+
   it("re-announces when the stop kind changes", () => {
     const a = new Announcer(() => "all");
     a.consider(stopped("cap"));

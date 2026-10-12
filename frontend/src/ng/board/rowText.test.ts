@@ -53,6 +53,9 @@ describe("reasonTail", () => {
 
   it("adds the fallback harness a run is on (GAP §2 #24)", () => {
     expect(reasonTail(row("running", { fallback: { to: "codex" } }), NOW)).toBe("verification · on codex");
+    // The server's `launch_fallback` payload: `to` is the candidate it switched to.
+    expect(reasonTail(row("running", { fallback: { to: { harness: "codex", model: "gpt-5.6-sol", effort: null } } }), NOW)).toBe("verification · on gpt-5.6-sol");
+    expect(reasonTail(row("running", { fallback: { to: { harness: "codex", model: null, effort: null } } }), NOW)).toBe("verification · on codex");
   });
 });
 

@@ -66,7 +66,7 @@ export function stateOf(item: WorkItem): ItemState {
   return d && AS_IS.has(d) ? (d as ItemState) : "unknown";
 }
 
-const shown = (i: WorkItem) => !i.archived_at && i.display_status !== "archived";
+const shown = (i: WorkItem) => !i.archived_at;
 
 export function groupItems(items: WorkItem[], repos: string[] | "all"): { id: GroupKey; label: string; items: WorkItem[] }[] {
   const listed = items.filter((i) => shown(i) && (repos === "all" || repos.includes(i.repo)));

@@ -23,6 +23,8 @@ export class Announcer {
   constructor(private level: () => "all" | "gates" | "off") {}
 
   consider(item: WorkItem): Announcement | undefined {
+    // An escalation working on the stop leaves it as it was: if the item is still stuck after, that is no news.
+    if (item.display_status === "escalated" && !item.archived_at) return undefined;
     const key = keyOf(item);
     const previous = this.current.get(item.id);
     if (key) this.current.set(item.id, key);
