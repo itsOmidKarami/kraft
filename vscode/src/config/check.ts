@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { Api } from "../core/api";
+import { reloadProblems, resolveOffer, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
 
@@ -25,7 +26,7 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
   const clean = new Map<string, boolean>(); // latest check result per file
   const seq = new Map<string, number>(); // newest check per file wins
   let linted = new Set<string>();
-  const state: { lastOffer?: "reload" | "restart"; diagnostics(uri: vscode.Uri): readonly vscode.Diagnostic[] } = {
+  const state: { lastOffer?: "reload" | "restart" | "none" | "error"; diagnostics(uri: vscode.Uri): readonly vscode.Diagnostic[] } = {
     diagnostics: (uri) => collection.get(uri) ?? [],
   };
 
@@ -64,29 +65,40 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
     }
   };
 
+  const restartInTerminal = () => {
+    const t = vscode.window.createTerminal("Kraft");
+    t.sendText("kraft admin restart");
+    t.show();
+  };
+
   const offer = async (doc: vscode.TextDocument) => {
     const rel = configFile(doc.uri.fsPath, templatesDir);
     if (!rel) return;
     await check(doc);
     const libraryValid = isLibraryFile(rel) ? await lint() : true;
     if (readOnly() || clean.get(doc.uri.fsPath) !== true || libraryValid !== true) return;
-    if (isLibraryFile(rel) || rel === "policy.yaml") {
-      state.lastOffer = "reload";
-      if ((await vscode.window.showInformationMessage(`Saved ${rel}. Load it into the running Kraft?`, "Reload Kraft")) !== "Reload Kraft") return;
+    const { offer: o, managed } = await resolveOffer(rel, api.pending);
+    state.lastOffer = o.kind;
+    if (o.kind === "none" || o.kind === "error") return;
+    if (o.kind === "reload") {
+      if ((await vscode.window.showInformationMessage(o.message, "Reload Kraft")) !== "Reload Kraft") return;
       try {
-        const r = await api.reload();
-        const problems = [...Object.entries(r.invalid_templates).map(([k, v]) => `${k}: ${v}`), ...(r.refused_policy ? [`policy.yaml: ${r.refused_policy}`] : [])];
+        const problems = reloadProblems(await api.reload());
         if (problems.length) void vscode.window.showWarningMessage(`Kraft reloaded with problems: ${problems.join("; ")}`);
         else void vscode.window.showInformationMessage("Kraft reloaded.");
       } catch (e) {
         void vscode.window.showErrorMessage(String((e as Error).message));
       }
-    } else {
-      state.lastOffer = "restart";
-      if ((await vscode.window.showInformationMessage(`Saved ${rel}. Kraft reads it at startup.`, "Restart Kraft")) !== "Restart Kraft") return;
-      const t = vscode.window.createTerminal("Kraft");
-      t.sendText("kraft admin restart");
-      t.show();
+      return;
+    }
+    if ((await vscode.window.showInformationMessage(o.message, "Restart Kraft")) !== "Restart Kraft") return;
+    if (!managed) return restartInTerminal();
+    try {
+      await api.restart();
+      void vscode.window.showInformationMessage("Kraft is restarting.");
+    } catch (e) {
+      if (restartViaTerminal(e)) restartInTerminal();
+      else void vscode.window.showErrorMessage(String((e as Error).message));
     }
   };
 
