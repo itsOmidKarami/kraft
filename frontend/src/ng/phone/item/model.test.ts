@@ -53,6 +53,8 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     // A budget the item could raise, which the server will not: Retry, as on a cap it cannot raise.
     ["budget, the item's own cap, the server refusing raise_budget", mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
     ["mr closed, the server refusing reopen_mr", mk("needs_you", stop("mr_closed"), { actions: ["cancel"] }), [null, "cancel"]],
+    // No merge request on file to reopen: Retry, as the desktop header falls back.
+    ["mr closed, nothing on file to reopen", mk("needs_you", stop("mr_closed"), { actions: ["retry", "skip", "escalate", "complete", "cancel"] }), ["cancel", "retry"]],
     ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 
