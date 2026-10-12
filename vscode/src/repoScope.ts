@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as vscode from "vscode";
-import { repoName } from "../../frontend/src/format";
-import { ApiError, type Api, type Repo } from "./core/api";
+import type { Api, Repo } from "./core/api";
+import { connectOutcome } from "./core/fileWork";
 import { mutating } from "./core/guard";
 import { refetchRepos, REFETCH_MS, WorkspaceScope, type ConnectedRepo, type Git, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
@@ -82,26 +82,34 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
     reread: () => read(),
     /** The folders' repo roots that are not connected (`WorkspaceScope.unconnected`). */
     unconnected: () => scope.unconnected(good),
+    /** Whether a `GET /repos` read has succeeded yet. */
+    reposRead: () => good !== undefined,
   };
 }
 
 /** `kraft.connectRepo`: connect the first unconnected root, then read the list again. */
 export function registerConnectRepo(
-  context: vscode.ExtensionContext, api: Api, repoScope: { unconnected(): string[]; reread(): Promise<void> }, refusal: () => string | null,
+  context: vscode.ExtensionContext, api: Api,
+  repoScope: { unconnected(): string[]; reread(): Promise<void>; reposRead(): boolean }, refusal: () => string | null,
 ) {
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   const run = async () => {
     const path = repoScope.unconnected()[0];
-    if (path === undefined) return void vscode.window.showInformationMessage("Every repo in this window is already connected to Kraft.");
+    if (path === undefined) {
+      const why = repoScope.reposRead() ? "Every repo in this window is already connected to Kraft." : "Kraft hasn't read its connected repos yet.";
+      return void vscode.window.showInformationMessage(why);
+    }
+    let err: unknown;
     try {
       await api.connectRepo(path);
-      void vscode.window.showInformationMessage(`Connected ${repoName(path)}.`);
     } catch (e) {
-      // Already connected (another window, the CLI): the outcome asked for.
-      if (e instanceof ApiError && e.status === 409) void vscode.window.showInformationMessage(e.detail);
-      else return void vscode.window.showErrorMessage(e instanceof ApiError ? e.detail : String(e));
+      err = e;
+    } finally {
+      // Even after a failure: a connect the client gave up on can still land on the server.
+      await repoScope.reread();
     }
-    await repoScope.reread();
+    const { level, message } = connectOutcome(path, err);
+    void (level === "info" ? vscode.window.showInformationMessage(message) : vscode.window.showErrorMessage(message));
   };
   context.subscriptions.push(vscode.commands.registerCommand("kraft.connectRepo", mutating("kraft.connectRepo", refusal, warn, run)));
 }

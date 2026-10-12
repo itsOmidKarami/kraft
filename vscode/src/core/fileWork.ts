@@ -3,7 +3,9 @@
  *  Quick Input steps in `../fileWork.ts` ask these. */
 
 import { basename } from "node:path";
+import { repoName } from "../../../frontend/src/format";
 import { humanSize } from "../../../frontend/src/sizes";
+import { ApiError } from "./api";
 import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary, WorkItem } from "./api";
 import { isLoopback } from "./connection";
 import { refusal, type ReadOnlyState } from "./readOnly";
@@ -123,6 +125,21 @@ export function connectRefusal(state: ReadOnlyState, base: string): string | nul
   if (no) return no;
   if (isLoopback(base)) return null;
   return `Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. Connect it from the web UI, or with \`kraft repo connect\` on that machine.`;
+}
+
+/** Whether the board offers "Connect this repo": a folder's repo is not
+ *  connected, and the daemon is on this machine (D31). */
+export function connectOffered(base: string, roots: string[]): boolean {
+  return isLoopback(base) && roots.length > 0;
+}
+
+/** What a connect of `path` tells the person: `err` is what the POST threw,
+ *  if it did. A 409 is the repo already connected (another window, the CLI):
+ *  the outcome asked for, so not an error. */
+export function connectOutcome(path: string, err?: unknown): { level: "info" | "error"; message: string } {
+  if (err === undefined) return { level: "info", message: `Connected ${repoName(path)}.` };
+  if (err instanceof ApiError) return { level: err.status === 409 ? "info" : "error", message: err.detail };
+  return { level: "error", message: err instanceof Error ? err.message : String(err) };
 }
 
 export type AttachState = "ok" | "save" | { refusal: string };
