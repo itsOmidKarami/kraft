@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { reportError } from "../actions";
 import { ApiError, type Api } from "../core/api";
 import { composeNote, destinationOf, type Draft, type DraftComment } from "../core/note";
+import { mutating } from "../core/guard";
 import { commandItemId, parseReviewUri } from "../core/review";
 import type { Store } from "../core/store";
 
@@ -81,20 +82,20 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
   };
 
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact"]);
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   context.subscriptions.push(
-    vscode.commands.registerCommand("kraft.review.submit", async (arg?: unknown) => {
+    // Refused before the summary box opens.
+    vscode.commands.registerCommand("kraft.review.submit", mutating("kraft.review.submit", refusal, warn, async (arg?: unknown) => {
       const id = idOf(arg);
       if (!id) return;
-      const no = refusal();
-      if (no) return void vscode.window.showWarningMessage(no);
       const summary = await vscode.window.showInputBox({ prompt: "Overall comment (optional)" });
       if (summary === undefined) return;
       await submit(id, summary);
-    }),
-    vscode.commands.registerCommand("kraft.review.discard", async (arg?: unknown) => {
+    })),
+    vscode.commands.registerCommand("kraft.review.discard", mutating("kraft.review.discard", refusal, warn, async (arg?: unknown) => {
       const id = idOf(arg);
       if (id) await clear(id);
-    }),
+    })),
   );
 
   return { drafts, addDraft, submit, confirmApprove };

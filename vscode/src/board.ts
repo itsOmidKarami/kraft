@@ -5,6 +5,7 @@ import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { actionsFor, describe, groupItems, needsYouCount, type Action } from "./core/board";
 import { findingsOf } from "./core/findings";
+import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
 import type { Store } from "./core/store";
 
@@ -92,12 +93,11 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
   const act = (action: Action) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
     if (!item) return;
-    const no = refusal();
-    if (no) return void vscode.window.showWarningMessage(no);
     await runAction(api, store, item, action);
   };
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   for (const a of ["pause", "resume", "retry", "cancel", "skip", "escalate", "archive"] as Action[]) {
-    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, act(a)));
+    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, mutating(`kraft.${a}`, refusal, warn, act(a))));
   }
   context.subscriptions.push(
     view,
@@ -113,14 +113,13 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
       const item = itemOf(node);
       if (item) void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(item.id)}`));
     }),
-    vscode.commands.registerCommand("kraft.startDaemon", () => {
-      // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
-      // From home, so the workspace's shell hooks, venv or shims cannot pick the `kraft` binary.
-      if (refusal() === RESTRICTED) return void vscode.window.showWarningMessage(RESTRICTED);
+    // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
+    // From home, so the workspace's shell hooks, venv or shims cannot pick the `kraft` binary.
+    vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : null), warn, () => {
       const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir() });
       t.sendText("kraft admin start");
       t.show();
-    }),
+    })),
   );
   return board;
 }

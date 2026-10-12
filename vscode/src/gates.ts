@@ -3,6 +3,7 @@ import { reportError } from "./actions";
 import type { Api } from "./core/api";
 import { Announcer } from "./core/announcer";
 import { approveGate } from "./core/approve";
+import { mutating } from "./core/guard";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 
@@ -24,11 +25,7 @@ export function registerGates(
 
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
-  const guard = () => {
-    const no = refusal();
-    if (no) void vscode.window.showWarningMessage(no);
-    return !no;
-  };
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
   const openArtifact = async (id?: string) => {
     if (!id) return;
@@ -44,8 +41,9 @@ export function registerGates(
     }
   };
 
-  const approve = async (id?: string, gate?: string) => {
-    if (!id || !guard()) return;
+  // Guarded here, not at registration: a gate notification's buttons call these directly.
+  const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string) => {
+    if (!id) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     if (!(await confirmApprove(id))) return; // Task 7: discard review drafts first
@@ -55,10 +53,10 @@ export function registerGates(
     } catch (e) {
       await reportError(e, store, id);
     }
-  };
+  });
 
-  const reject = async (id?: string, gate?: string, note?: string) => {
-    if (!id || !guard()) return;
+  const reject = mutating("kraft.reject", refusal, warn, async (id?: string, gate?: string, note?: string) => {
+    if (!id) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     note ??= await vscode.window.showInputBox({
@@ -72,7 +70,7 @@ export function registerGates(
     } catch (e) {
       await reportError(e, store, id);
     }
-  };
+  });
 
   const announce = (ids: string[] | "all") => {
     const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
