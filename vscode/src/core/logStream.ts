@@ -5,14 +5,15 @@ import type { WorkItemDetail } from "./api";
 export interface SseFrame { event: string; data: string }
 
 /** The complete frames at the head of `buffer`, and what is left of a frame still arriving. */
-export function parseSse(buffer: string): { frames: SseFrame[]; rest: string } {
+export function parseSse(input: string): { frames: SseFrame[]; rest: string } {
+  // A lone "\r" at the end stays: the next chunk's "\n" completes it.
+  const buffer = input.replace(/\r\n/g, "\n");
   const frames: SseFrame[] = [];
   let at = 0;
   for (let end = buffer.indexOf("\n\n"); end !== -1; end = buffer.indexOf("\n\n", at)) {
     let event = "message";
     const data: string[] = [];
-    for (const raw of buffer.slice(at, end).split("\n")) {
-      const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    for (const line of buffer.slice(at, end).split("\n")) {
       const colon = line.indexOf(":");
       // A line that starts with a colon is a comment.
       if (colon === 0) continue;

@@ -247,6 +247,7 @@ describe("Api.streamLog", () => {
   it.each([
     ["a refusal, with the server's detail", fakeFetch(404, { detail: "unknown session" }), { status: 404, detail: "unknown session" }],
     ["a close before the end frame, as a drop", sse(['data: {"n":0}\n\n']), { status: 0, detail: "the log stream closed before the session ended" }],
+    ["a line that is not JSON", sse(["data: {not json\n\n"]), { status: 0, detail: expect.stringMatching(/^unreadable log line: /) }],
   ])("throws ApiError on %s and reports it", async (_, f, want) => {
     const api = new Api("http://h:1", undefined, f as any);
     const failures: ApiFailure[] = [];

@@ -146,7 +146,14 @@ export class Api {
         rest = parsed.rest;
         for (const f of parsed.frames) {
           if (f.event === "end") return;
-          if (f.event === "message") yield JSON.parse(f.data) as LogLine;
+          if (f.event !== "message") continue;
+          let l: LogLine;
+          try {
+            l = JSON.parse(f.data) as LogLine;
+          } catch (e) {
+            throw this.fail("GET", path, 0, `unreadable log line: ${why(e)}`);
+          }
+          yield l;
         }
       }
     } finally {

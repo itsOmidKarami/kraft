@@ -8,6 +8,7 @@ describe("parseSse", () => {
   it.each([
     ["keeps a frame still arriving", 'data: {"n":1}\n\ndata: {"n"', [{ event: "message", data: '{"n":1}' }], 'data: {"n"'],
     ["reads a named frame", "event: end\ndata: {}\n\n", [{ event: "end", data: "{}" }], ""],
+    ["ends a frame on CRLF", 'data: {"n":1}\r\n\r\nda', [{ event: "message", data: '{"n":1}' }], "da"],
   ])("%s", (_, buffer, frames, rest) => expect(parseSse(buffer)).toEqual({ frames, rest }));
 });
 
@@ -21,7 +22,7 @@ describe("logSession", () => {
     ["the newest while running", detail({ worker_sessions: [session("s1"), session("s2")] }), "s2"],
     ["the one the stop names", stopped("failed", {
       stop: { kind: "failed", node: "implementation", reason: null, resume_at: null, facts: { session_id: "s1" } },
-      worker_sessions: [session("s1"), session("s2", { hook_point: "escalation" })],
+      worker_sessions: [session("s1"), session("s2")],
     } as Partial<WorkItemDetail>), "s1"],
     ["the stopped node's last non-escalation session", stopped("failed", {
       stop: { kind: "failed", node: "impl", reason: null, resume_at: null },
@@ -71,6 +72,7 @@ describe("followLog", () => {
     ["stops when aborted mid-stream", [[0, "abort"]], "aborted", [0]],
     ["counts a connect that closes before any line as a failure", [[0, "throw"], ["throw"], ["throw"], [1]], "lost", [0]],
     ["resets the count only on a new line, not on a replay", [[0, "throw"], [0, "throw"], [0, "throw"], [0, 1]], "lost", [0]],
+    ["writes the marker once, though no real line came yet", [[-1, "throw"], [-1, 0]], "ended", [-1, 0]],
     ["writes the marker only before the first real line", [[-1, 0, "throw"], [-1, 0, 1]], "ended", [-1, 0, 1]],
   ] as [string, Step[][], string, number[]][])("%s", async (_, connects, end, written) => {
     const got = await follow(...connects);
