@@ -7,13 +7,13 @@ import { Api, type WorkItem } from "./core/api";
 import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
-import { registerRepoScope, scopeDeps } from "./repoScope";
+import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
 import { registerDocs } from "./docs";
 import { registerSearch } from "./search";
-import { fileRefusal } from "./core/fileWork";
-import { connectionFor, locations, readToken, type Locations } from "./core/connection";
+import { connectRefusal, fileRefusal } from "./core/fileWork";
+import { connectionFor, isLoopback, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
 import { hasDrafts } from "./core/threads";
@@ -147,7 +147,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
-  });
+  }, () => isLoopback(api.base) && repoScope.unconnected().length > 0);
+  registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
   registerWorkerLog(context, store, api);
   registerDocs(context, store, api);
   registerSearch(context, api, reveal);

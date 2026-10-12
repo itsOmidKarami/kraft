@@ -172,6 +172,16 @@ it.each([
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });
 
+it.each([
+  ["this repo is not connected", true, true, false, 0, true, "connect"],
+  ["connected, nothing in it", true, true, false, 0, false, "here"],
+  ["unconnected, but something visible", true, true, false, 3, true, "none"],
+  ["unconnected, showing every repo", true, true, true, 0, true, "none"],
+  ["unconnected, scope not ready", true, false, false, 0, true, "none"],
+])("welcome with unconnected: %s", (_, connected, ready, showAll, visible, unconnected, want) => {
+  expect(welcomeState(connected, ready, showAll, visible, unconnected)).toBe(want);
+});
+
 
 it.each([
   ["exists, with a path", item({ worktree_exists: true, worktree_path: "/k/run/worktrees/K-1" }), "/k/run/worktrees/K-1"],

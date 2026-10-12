@@ -178,6 +178,8 @@ export class Api {
   health = () => this.req<Health>("GET", "/health");
   budgetToday = () => this.req<BudgetToday>("GET", "/budget/today");
   repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
+  /** 201 connected; 409 already connected, 422 no commit yet, 400 unreadable. Slow: it probes the repo. */
+  connectRepo = (path: string) => this.req<unknown>("POST", "/repos", { path }, SLOW);
   chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
   // Both resolve the chain on the server, and a create also runs intake.
   preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body, SLOW);

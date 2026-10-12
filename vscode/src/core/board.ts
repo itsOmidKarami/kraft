@@ -67,13 +67,15 @@ export function groupHolding(items: WorkItem[], include: Include, id: string) {
 }
 
 /** The board's welcome text: `here` says this repo has no Kraft work and
- *  offers Show all repos. Never before the scope is ready (git is async),
- *  never while disconnected (the Start row says that), and not when every
- *  repo is already shown. */
-export type Welcome = "none" | "here";
+ *  offers Show all repos; `connect` says this repo is not connected at all
+ *  (`unconnected`) and offers to connect it. Never before the scope is ready
+ *  (git is async), never while disconnected (the Start row says that), and
+ *  not when every repo is already shown. */
+export type Welcome = "none" | "here" | "connect";
 
-export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number): Welcome {
-  return connected && ready && !showAll && visible === 0 ? "here" : "none";
+export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number, unconnected = false): Welcome {
+  if (!(connected && ready && !showAll && visible === 0)) return "none";
+  return unconnected ? "connect" : "here";
 }
 
 /** The row's `contextValue`, which its menus match: `gate` while a gate is

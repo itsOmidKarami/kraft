@@ -38,6 +38,13 @@ describe("Api", () => {
     expect(JSON.parse((f.mock.calls[1][1] as RequestInit).body as string)).toEqual({});
   });
 
+  it("connects a repo by posting its path", async () => {
+    const f = fakeFetch(201, { path: "/r" });
+    await new Api("http://h:1", undefined, f as any).connectRepo("/r");
+    const [url, init] = f.mock.calls[0];
+    expect([url, (init as RequestInit).method, JSON.parse((init as RequestInit).body as string)]).toEqual(["http://h:1/api/repos", "POST", { path: "/r" }]);
+  });
+
   it("encodes a gate path segment", async () => {
     const f = fakeFetch(200, {});
     await new Api("http://h:1", undefined, f as any).reject("W-1", "review gate", "n");
@@ -214,7 +221,8 @@ describe("Api timeout", () => {
   it.each([
     ["a preview", (a: Api) => a.preview({ title: "T", description: "", repo: "/r", autostart: false })],
     ["a create", (a: Api) => a.create({ title: "T", description: "", repo: "/r", autostart: false })],
-  ])("gives %s the slow limit: the server resolves the chain", async (_, call) => {
+    ["a connect", (a: Api) => a.connectRepo("/r")],
+  ])("gives %s the slow limit: the server resolves the chain or probes the repo", async (_, call) => {
     const f = vi.fn((_url: string, init?: RequestInit) =>
       new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
     await expect(call(new Api("http://h:1", undefined, f as any, { fast: 50, slow: 200 }))).rejects.toMatchObject({ detail: "Kraft did not answer within 0.2s" });

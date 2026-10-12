@@ -175,6 +175,11 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.connectRepo",
+        "title": "Connect This Repo",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.openMergeRequest",
         "title": "Open Merge Request",
         "category": "Kraft"
@@ -328,7 +333,12 @@
       {
         "view": "kraft.board",
         "contents": "No Kraft work in this repo. [Show all repos](command:kraft.toggleAllRepos)",
-        "when": "kraft.welcome == here"
+        "when": "kraft.welcome == here || kraft.welcome == connect && kraft.readOnly"
+      },
+      {
+        "view": "kraft.board",
+        "contents": "This repo isn't connected to Kraft.\n[Connect this repo](command:kraft.connectRepo)\nFor test and setup commands, use the web UI or `kraft repo connect`.\n[Show all repos](command:kraft.toggleAllRepos)",
+        "when": "kraft.welcome == connect && !kraft.readOnly"
       }
     ],
     "menus": {
@@ -544,6 +554,10 @@
         {
           "command": "kraft.search",
           "when": "kraft.connected"
+        },
+        {
+          "command": "kraft.connectRepo",
+          "when": "kraft.welcome == connect && !kraft.readOnly"
         },
         {
           "command": "kraft.openMergeRequest",

@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as vscode from "vscode";
-import type { Api } from "./core/api";
+import { repoName } from "../../frontend/src/format";
+import { ApiError, type Api, type Repo } from "./core/api";
+import { mutating } from "./core/guard";
 import { refetchRepos, REFETCH_MS, WorkspaceScope, type ConnectedRepo, type Git, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
 
@@ -23,6 +25,7 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
   let runDir = initialRunDir;
   let connected: ConnectedRepo[] = []; // the last list read
   let known: ConnectedRepo[] | undefined; // undefined while the last read failed
+  let good: Repo[] | undefined; // the last list read that succeeded; undefined before the first
   let lastRead = -Infinity;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
@@ -32,14 +35,19 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
   const read = async () => {
     lastRead = Date.now();
     if (retry) clearTimeout(retry);
+    let repos: Repo[];
     try {
-      known = (await api.repos()).repos;
+      repos = (await api.repos()).repos;
     } catch {
       known = undefined;
       retry = setTimeout(maybeRead, REFETCH_MS + 1_000);
       return;
     }
-    if (sameList(known, connected)) return;
+    known = repos;
+    // The first success changes what `unconnected` answers even when the list is the empty one assumed before.
+    const first = good === undefined;
+    good = repos;
+    if (!first && sameList(known, connected)) return;
     connected = known;
     await recompute();
   };
@@ -70,5 +78,30 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
       }
       await read();
     },
+    /** Read `GET /repos` again now, and recompute the scope from it. */
+    reread: () => read(),
+    /** The folders' repo roots that are not connected (`WorkspaceScope.unconnected`). */
+    unconnected: () => scope.unconnected(good),
   };
+}
+
+/** `kraft.connectRepo`: connect the first unconnected root, then read the list again. */
+export function registerConnectRepo(
+  context: vscode.ExtensionContext, api: Api, repoScope: { unconnected(): string[]; reread(): Promise<void> }, refusal: () => string | null,
+) {
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
+  const run = async () => {
+    const path = repoScope.unconnected()[0];
+    if (path === undefined) return void vscode.window.showInformationMessage("Every repo in this window is already connected to Kraft.");
+    try {
+      await api.connectRepo(path);
+      void vscode.window.showInformationMessage(`Connected ${repoName(path)}.`);
+    } catch (e) {
+      // Already connected (another window, the CLI): the outcome asked for.
+      if (e instanceof ApiError && e.status === 409) void vscode.window.showInformationMessage(e.detail);
+      else return void vscode.window.showErrorMessage(e instanceof ApiError ? e.detail : String(e));
+    }
+    await repoScope.reread();
+  };
+  context.subscriptions.push(vscode.commands.registerCommand("kraft.connectRepo", mutating("kraft.connectRepo", refusal, warn, run)));
 }

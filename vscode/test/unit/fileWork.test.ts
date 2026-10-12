@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode } from "../../../frontend/src/types";
 import type { Created, DryRun, Repo, TemplateSummary } from "../../src/core/api";
 import {
-  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
+  abandonRefusal, attachChoices, connectRefusal, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
   pickRepo, previewLine, repoDefaultChain, titleFrom, titleProblem, warningActions, warningsOf,
 } from "../../src/core/fileWork";
 import { RESTRICTED, VERSION_REFUSAL } from "../../src/core/readOnly";
@@ -102,6 +102,15 @@ describe("fileRefusal", () => {
     ["the remote URL", { trusted: true, version: null }, remote, localRefusal(remote)],
     ["nothing, on loopback", { trusted: true, version: null }, "http://127.0.0.1:8765", null],
   ])("%s", (_, state, base, want) => expect(fileRefusal(state, base)).toBe(want));
+});
+
+describe("connectRefusal", () => {
+  it.each([
+    ["Restricted Mode first", { trusted: false, version: null }, "https://kraft.example", RESTRICTED],
+    ["a remote daemon: the web UI or the CLI", { trusted: true, version: null }, "https://kraft.example:8765",
+      "Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at kraft.example. Connect it from the web UI, or with `kraft repo connect` on that machine."],
+    ["nothing, on loopback", { trusted: true, version: null }, "http://127.0.0.1:8765", null],
+  ])("%s", (_, state, base, want) => expect(connectRefusal(state, base)).toBe(want));
 });
 
 describe("attachState", () => {

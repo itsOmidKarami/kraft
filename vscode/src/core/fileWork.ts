@@ -98,19 +98,31 @@ export function repoDefaultChain(repo: Repo, chains: TemplateSummary[]): string 
  *  host talks to a loopback daemon is that machine. */
 export function localRefusal(base: string): string | null {
   if (isLoopback(base)) return null;
-  let host = base;
+  return `Filing work needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. File it from the web UI instead.`;
+}
+
+function hostOf(base: string): string {
   try {
-    host = new URL(base).hostname || base;
+    return new URL(base).hostname || base;
   } catch {
-    // Not a URL: name it as written.
+    return base; // Not a URL: name it as written.
   }
-  return `Filing work needs Kraft on the machine with this window's files, and kraft.url points at ${host}. File it from the web UI instead.`;
 }
 
 /** Restricted Mode and a refused server version first, as every action
  *  says them; then the local-only rule. */
 export function fileRefusal(state: ReadOnlyState, base: string): string | null {
   return refusal(state) ?? localRefusal(base);
+}
+
+/** D31, after D23: "Connect this repo" posts this window's path, which
+ *  names a folder only on a daemon that runs on this machine. Off loopback
+ *  it is refused, naming the ways that work there. */
+export function connectRefusal(state: ReadOnlyState, base: string): string | null {
+  const no = refusal(state);
+  if (no) return no;
+  if (isLoopback(base)) return null;
+  return `Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. Connect it from the web UI, or with \`kraft repo connect\` on that machine.`;
 }
 
 export type AttachState = "ok" | "save" | { refusal: string };

@@ -175,6 +175,40 @@ describe("WorkspaceScope runs git once per folder", () => {
   });
 });
 
+describe("FolderScope root and git", () => {
+  it.each([
+    ["a checkout: git answered", "/r/src", { [`/r/src|${TOP}`]: "/r", [`/r/src|${COMMON}`]: "/r/.git" }, { root: "/r", git: true }],
+    ["a plain folder: git did not", "/tmp/x", {}, { root: "/tmp/x", git: false }],
+  ])("%s", async (_, folder, git, want) => {
+    const { root, git: isGit } = await folderScope(folder, "/k", deps(git));
+    expect({ root, git: isGit }).toEqual(want);
+  });
+});
+
+describe("WorkspaceScope.unconnected", () => {
+  const repo = (p: string, top = p) => ({ [`${p}|${TOP}`]: top });
+  type Row = [string, string[], Record<string, string>, NodeJS.Platform, ConnectedRepo[] | undefined, string[]];
+  it.each<Row>([
+    ["its repo connected", ["/a"], repo("/a"), "linux", [{ path: "/a" }], []],
+    ["one of two folders connected", ["/a", "/b"], { ...repo("/a"), ...repo("/b") }, "linux", [{ path: "/a" }], ["/b"]],
+    ["win32 compares case and separators", ["C:\\Repo"], repo("C:\\Repo", "C:/Repo"), "win32", [{ path: "c:\\repo" }], []],
+    ["linux paths differ by case", ["/A"], repo("/A"), "linux", [{ path: "/a" }], ["/A"]],
+    ["a submodule under a managed superproject", ["/super/sub"],
+      { [`/super/sub|${TOP}`]: "/super/sub", [`/super/sub|${COMMON}`]: "/super/.git/modules/sub" }, "linux",
+      [{ path: "/super", managed: true }], []],
+    ["two folders of one repo, once", ["/r/src", "/r/lib"], { ...repo("/r/src", "/r"), ...repo("/r/lib", "/r") }, "linux", [], ["/r"]],
+    ["a folder that is not a git repo", ["/tmp/x"], {}, "linux", [], []],
+    ["no /repos read has succeeded", ["/b"], repo("/b"), "linux", undefined, []],
+  ])("%s", async (_, folders, git, platform, connected, want) => {
+    const scope = new WorkspaceScope(platform);
+    await scope.update(folders, "/k", deps(git, {}, platform), connected ?? []);
+    expect(scope.unconnected(connected as { path: string; managed: boolean }[] | undefined)).toEqual(want);
+  });
+
+  it("offers nothing before the scope is ready", () =>
+    expect(new WorkspaceScope("linux").unconnected([])).toEqual([]));
+});
+
 describe("refetchRepos", () => {
   const T = 100_000;
   const known: ConnectedRepo[] = [{ path: "/r" }];

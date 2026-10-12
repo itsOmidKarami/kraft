@@ -29,6 +29,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
     private include: Include,
     private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
     private drafts?: Drafts,
+    /** Whether "Connect this repo" applies: a folder's repo is not connected, on a loopback daemon. */
+    private unconnected: () => boolean = () => false,
   ) {
     // Coalesced: a reconnect preloads every gate item, one answer at a time.
     drafts?.onChange(() => {
@@ -55,7 +57,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node) return [];
     const groups = groupItems(this.store.items(), this.include);
     const visible = groups.reduce((n, g) => n + g.items.length, 0);
-    this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible));
+    this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible, this.unconnected()));
     if (!this.store.connected && visible === 0) return [{ kind: "down" }];
     return groups.map((g) => ({ kind: "group", ...g }));
   }
@@ -138,8 +140,9 @@ export function registerBoard(
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
   drafts?: Drafts,
+  unconnected?: () => boolean,
 ) {
-  const board = new Board(store, include, scope, drafts);
+  const board = new Board(store, include, scope, drafts, unconnected);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);
