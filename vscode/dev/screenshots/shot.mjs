@@ -165,7 +165,11 @@ async function launch() {
   sh(cli, [`--user-data-dir=${ud}`, `--extensions-dir=${join(ud, "ext")}`, "--install-extension", vsix], EXT);
   return _electron.launch({
     executablePath: exe,
-    args: [join(home, "repo"), `--user-data-dir=${ud}`, `--extensions-dir=${join(ud, "ext")}`, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust"],
+    // Linux (xvfb) renders at 1x; the committed images are 2x, as a Retina display takes them.
+    args: [
+      join(home, "repo"), `--user-data-dir=${ud}`, `--extensions-dir=${join(ud, "ext")}`, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust",
+      ...(process.platform === "linux" ? ["--force-device-scale-factor=2"] : []),
+    ],
     env,
   });
 }
@@ -202,7 +206,12 @@ async function drive(app) {
   await shot("screenshot-board", { x: 48, y: 32, width: 304, height: 168 });
   // Only the gate's toast: close any other (the Red Hat YAML nudge) that would stack on it.
   const others = page.locator(".notification-toast").filter({ hasNotText: "spec_approval" });
-  while (await others.count()) await others.first().locator(".codicon-notifications-clear").click();
+  // The clear button only shows while the toast is hovered (VS Code 1.141).
+  while (await others.count()) {
+    const o = others.first();
+    await o.hover();
+    await o.locator(".codicon-notifications-clear").click();
+  }
   const toast = page.locator(".notification-toast", { hasText: "spec_approval" });
   await page.mouse.move(0, 0); // off the close button it just clicked
   await shot("screenshot-gate-notification", await toast.boundingBox());

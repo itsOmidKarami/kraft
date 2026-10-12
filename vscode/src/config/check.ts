@@ -4,7 +4,7 @@ import type { Api } from "../core/api";
 import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
-import { RESTART_ARGS, RESTART_FAILED, startInvocation } from "../core/start";
+import { RESTART_ARGS, RESTART_FAILED, RESTART_SKIPPED, startInvocation } from "../core/start";
 import { log } from "../log";
 
 const SOURCE = "Kraft · config";
@@ -25,8 +25,9 @@ function toDiagnostic(d: Diag): vscode.Diagnostic {
 
 /** `kraft admin restart` in a terminal: the binary Start Kraft runs, from the home folder as
  *  Start Kraft runs it, not the workspace's. The terminal's process is kraft itself, so no
- *  shell has to quote the path; its output closes with it, so a failure is said here. */
-export function restartInTerminal(): void {
+ *  shell has to quote the path; its output closes with it, so a failure is said here, and
+ *  Start Kraft offered only when Kraft no longer answers. */
+export function restartInTerminal(api: Pick<Api, "health">): void {
   const { file } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
   const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir(), shellPath: file, shellArgs: [...RESTART_ARGS] });
   const closed = vscode.window.onDidCloseTerminal(async (c) => {
@@ -34,6 +35,7 @@ export function restartInTerminal(): void {
     closed.dispose();
     const code = c.exitStatus?.code;
     if (!code) return;
+    if (await api.health().then(() => true, () => false)) return void vscode.window.showWarningMessage(RESTART_SKIPPED(code));
     if ((await vscode.window.showWarningMessage(RESTART_FAILED(code), "Start Kraft")) === "Start Kraft")
       void vscode.commands.executeCommand("kraft.startDaemon");
   });
@@ -107,12 +109,12 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
       return;
     }
     if ((await vscode.window.showInformationMessage(o.message, "Restart Kraft")) !== "Restart Kraft") return;
-    if (restartRoute(managed) === "terminal") return restartInTerminal();
+    if (restartRoute(managed) === "terminal") return restartInTerminal(api);
     try {
       await api.restart();
       void vscode.window.showInformationMessage("Kraft is restarting.");
     } catch (e) {
-      if (restartViaTerminal(e)) restartInTerminal();
+      if (restartViaTerminal(e)) restartInTerminal(api);
       else {
         log.error(`restart failed: ${(e as Error).message}`);
         void vscode.window.showErrorMessage(String((e as Error).message));

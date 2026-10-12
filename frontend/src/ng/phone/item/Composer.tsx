@@ -19,10 +19,12 @@ export const isComposeKind = (v: string | null): v is ComposeKind => COMPOSE_KIN
 const gateOf = (item: ItemDetail) => item.pending_gate ?? item.stop?.node ?? "";
 const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
 
-/** Steer on a running item pauses it, then resumes it with the note, one call
- *  after the other and never together (R12, R66): the pause is what lets the
- *  agent read the note at its next launch. A pause that went through and a
- *  resume that was refused leaves the item paused, and says so. */
+/** Sends the note through the door `steerDoor` names. A stopped item's retry
+ *  carries it, at the node it stopped on. A running item is paused, then
+ *  resumed with it, one call after the other and never together (R12, R66):
+ *  the pause is what lets the agent read the note at its next launch, and a
+ *  pause that went through with its resume refused leaves the item paused, and
+ *  says so. Anything else resumes with it. */
 export async function steer(item: ItemDetail, text: string): Promise<Done & { paused?: boolean }> {
   const door = steerDoor(item);
   if (door === "retry") {

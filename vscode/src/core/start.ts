@@ -21,6 +21,10 @@ export const RESTART_ARGS = ["admin", "restart"] as const;
 export const RESTART_FAILED = (code: number) =>
   `Kraft didn't restart (exit ${code}). A Kraft that was running in a terminal stops and waits to be started again there with \`kraft\`, or here with Start Kraft.`;
 
+/** The same exit with Kraft still answering: `kraft admin restart` also exits 1 when its
+ *  running-agents question is answered no, and then nothing was stopped. */
+export const RESTART_SKIPPED = (code: number) => `Kraft didn't restart (exit ${code}); it is still running.`;
+
 /** A rejected execFile: `code` is the errno string (`ENOENT`) or the exit status. */
 export type StartError = { code?: string | number | null; stderr?: string | Buffer; killed?: boolean; message?: string };
 

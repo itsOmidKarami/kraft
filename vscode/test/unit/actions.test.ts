@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { runAction } from "../../src/actions";
 import { restartInTerminal } from "../../src/config/check";
-import { RESTART_FAILED } from "../../src/core/start";
+import { RESTART_FAILED, RESTART_SKIPPED } from "../../src/core/start";
 import type { Store } from "../../src/core/store";
 import { offerWarnings } from "../../src/fileWork";
 import { item } from "./fixtures/item";
@@ -28,20 +28,24 @@ it.each<[string, () => Promise<boolean>, (api: never, store: Store) => Promise<v
 
 // `kraft admin restart` on a Kraft attached to a terminal stops it and exits 1; the
 // terminal running it closes with its message, so the extension says what happened.
-it.each<[string, { code: number | undefined } | undefined, boolean, string | undefined, unknown[][], unknown[][]]>([
-  ["exited 1: says Kraft may be stopped, offers Start", { code: 1 }, true, undefined, [[RESTART_FAILED(1), "Start Kraft"]], []],
-  ["exited 1, Start picked: starts Kraft", { code: 1 }, true, "Start Kraft", [[RESTART_FAILED(1), "Start Kraft"]], [["kraft.startDaemon"]]],
-  ["exited 0: nothing to say", { code: 0 }, true, undefined, [], []],
-  ["closed by hand: nothing to say", { code: undefined }, true, undefined, [], []],
-  ["another terminal closing", { code: 1 }, false, undefined, [], []],
-])("the restart terminal %s", async (_, exitStatus, ours, pick, said, ran) => {
+// It also exits 1 with Kraft still up (no to its running-agents question, nothing
+// running): Kraft still answering is what tells the two apart.
+it.each<[string, { code: number | undefined } | undefined, boolean, boolean, string | undefined, unknown[][], unknown[][]]>([
+  ["exited 1: says Kraft may be stopped, offers Start", { code: 1 }, true, false, undefined, [[RESTART_FAILED(1), "Start Kraft"]], []],
+  ["exited 1, Start picked: starts Kraft", { code: 1 }, true, false, "Start Kraft", [[RESTART_FAILED(1), "Start Kraft"]], [["kraft.startDaemon"]]],
+  ["exited 1, Kraft still answering: says it still runs, no Start", { code: 1 }, true, true, undefined, [[RESTART_SKIPPED(1)]], []],
+  ["exited 0: nothing to say", { code: 0 }, true, false, undefined, [], []],
+  ["closed by hand: nothing to say", { code: undefined }, true, false, undefined, [], []],
+  ["another terminal closing", { code: 1 }, false, false, undefined, [], []],
+])("the restart terminal %s", async (_, exitStatus, ours, up, pick, said, ran) => {
   const closes: ((t: unknown) => void)[] = [];
   const term = { sendText() {}, show() {}, exitStatus: undefined as unknown };
   vi.spyOn(vscode.window, "createTerminal").mockReturnValue(term as never);
   vi.spyOn(vscode.window, "onDidCloseTerminal").mockImplementation(((cb: (t: unknown) => void) => (closes.push(cb), { dispose() {} })) as never);
   const warn = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(pick as never);
   const exec = vi.spyOn(vscode.commands, "executeCommand");
-  restartInTerminal();
+  const api = { health: vi.fn(async () => { if (!up) throw new Error("Kraft is not reachable"); return {}; }) };
+  restartInTerminal(api as never);
   const closed = ours ? Object.assign(term, { exitStatus }) : { exitStatus };
   for (const cb of closes) await cb(closed);
   expect([warn.mock.calls, exec.mock.calls]).toEqual([said, ran]);
