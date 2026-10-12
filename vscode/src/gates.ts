@@ -11,11 +11,12 @@ import type { Artifact } from "./core/api";
 import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
 import type { WorkspaceScope } from "./core/repoScope";
-import { docPath, docText } from "./core/docs";
+import { artifactBasename, docText } from "./core/docs";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 import type { ThreadCache } from "./core/threadCache";
 import { pickItem } from "./palette";
+import type { ArtifactPreview } from "./preview";
 
 export function registerGates(
   context: vscode.ExtensionContext,
@@ -26,9 +27,11 @@ export function registerGates(
   scope: Pick<WorkspaceScope, "onChange" | "showAll">,
   cache: ThreadCache,
   reveal: (id: string, tid: string) => Promise<boolean | undefined>,
+  preview: ArtifactPreview,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
+  const sources = new Map<string, vscode.Uri>(); // item id → its gate document's last uri
   const shown = new ShownRenders(); // what each item's tab last showed, so Approve binds to it
   const changed = new vscode.EventEmitter<vscode.Uri>();
 
@@ -40,18 +43,21 @@ export function registerGates(
     }),
   );
 
-  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
+  // A gate document's preview passes no kraft-artifact uri: its item is the one the active preview shows.
+  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]) ?? preview.id();
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
-  // Resolves once the tab is up; only then is the render remembered as read.
+  // Resolves once the preview is up; only then is the render remembered as read.
   const show = async (id: string, gate: string | undefined, a: Artifact) => {
-    const path = docPath(id, a.title);
+    const path = `/${id}/${artifactBasename(id, a.title)}`;
     artifacts.set(path, docText(a.content, a.truncated));
-    const uri = vscode.Uri.parse(`kraft-artifact:${path}`);
-    changed.fire(uri); // a tab already open on this path reloads
-    const doc = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(doc, { preview: false });
+    const uri = vscode.Uri.from({ scheme: "kraft-artifact", path });
+    sources.set(id, uri);
+    changed.fire(uri); // a preview already open on this path re-renders
+    await vscode.workspace.openTextDocument(uri);
+    preview.opening(id); // before the tab appears, so its tab change finds the id
+    await vscode.commands.executeCommand("markdown.showPreview", uri);
     if (gate) shown.record(id, gate, a.digest); // no gate to bind it to: shown, not remembered
   };
 
@@ -156,6 +162,13 @@ export function registerGates(
       openArtifact(idOf(arg) ?? (await pickItem("openArtifact", onBoard(store.items(), include)))?.id)),
     vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: string) => approve(idOf(arg), gate)),
     vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: string, note?: string) => reject(idOf(arg), gate, note)),
+    // The preview's markdown as text, for search, copy, or a line to quote.
+    vscode.commands.registerCommand("kraft.openArtifactSource", async (arg?: unknown) => {
+      const id = idOf(arg);
+      const uri = id ? sources.get(id) : undefined;
+      if (!uri) return void vscode.window.showInformationMessage("Open a gate document first: its source is the one it showed.");
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
+    }),
   );
   return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }

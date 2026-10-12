@@ -27,6 +27,12 @@ it.each([
   ["commandPalette", "kraft.search", "kraft.connected"],
   ["commandPalette", "kraft.approveNextGate", "kraft.connected"],
   ["commandPalette", "kraft.openItem", "kraft.connected"],
+  ["editor/title", "kraft.approve", "kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.reject", "kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.review.submit", "kraft.artifactPreview && !kraft.readOnly"],
+  ["editor/title", "kraft.reviewChanges", "kraft.artifactPreview"],
+  ["editor/title", "kraft.openArtifactSource", "kraft.artifactPreview"],
+  ["commandPalette", "kraft.openArtifactSource", "kraft.artifactPreview"],
 ])("%s offers %s when %s", (menu, command, when) =>
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
 

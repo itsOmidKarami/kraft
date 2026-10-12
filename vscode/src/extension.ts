@@ -22,6 +22,7 @@ import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
 import { registerGates } from "./gates";
+import { registerArtifactPreview } from "./preview";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
 import { registerReviewSubmit } from "./review/submit";
@@ -178,11 +179,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       }
     }),
   );
-  const diff = registerDiff(context, store, api, () => runDir);
+  const preview = registerArtifactPreview(context);
+  const diff = registerDiff(context, store, api, () => runDir, preview.id);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include, (cb) => scope.onChange(cb));
   migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
-  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
-  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal, preview);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, preview.id);
   const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.

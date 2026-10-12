@@ -13,7 +13,7 @@ const run = promisify(execFile);
 /** A review as last opened: its files, the base it compares against, and its renames (new path → old path). */
 export interface Opened { files: string[]; baseRef: string; renames: Map<string, string>; dirty: Set<string> }
 
-export function registerDiff(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string) {
+export function registerDiff(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string, previewId: () => string | undefined) {
   const openedL = new Set<(id: string) => void>();
   const state: {
     lastOpened?: { id: string; files: string[] };
@@ -96,7 +96,7 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
     vscode.workspace.registerTextDocumentContentProvider("kraft-git", gitShow),
     vscode.workspace.registerTextDocumentContentProvider("kraft-wt", worktreeFile),
     vscode.commands.registerCommand("kraft.reviewChanges", (arg?: unknown) =>
-      open(commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"])),
+      open(commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]) ?? previewId()),
     ),
   );
   return state;
