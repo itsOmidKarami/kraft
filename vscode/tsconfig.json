@@ -11,5 +11,5 @@
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "test/unit", "../frontend/src/ng/board/model.ts", "../frontend/src/ng/board/rowText.ts", "../frontend/src/types"]
+  "include": ["src", "test/unit", "../frontend/src/ng/board/model.ts", "../frontend/src/ng/board/rowText.ts", "../frontend/src/ng/review/finish.ts", "../frontend/src/types"]
 }
