@@ -110,7 +110,7 @@ describe("Store", () => {
     expect(delays(store)).toEqual([1_000]);
   });
 
-  it("open then close reconnects at 1s", async () => {
+  it("a socket that opens resets the delay to 1s", async () => {
     const { store, sockets } = setup();
     await store.start();
     sockets[0].s.close();
@@ -174,6 +174,7 @@ describe("Store", () => {
     sockets[0].s.close();
     expect(timers()).toBe(0);
     expect(sockets).toHaveLength(2);
+    expect(store.connected).toBe(false);
   });
 
   it("retryNow while the list call is in flight, then it rejects: one timer, one socket", async () => {

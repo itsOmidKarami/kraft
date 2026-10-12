@@ -78,21 +78,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   };
   // One toast per distinct reason a session: a flapping connection must not repeat it.
   const warnOnce = onceEach();
+  // Each connect bumps it: a health reply that a newer connect or a drop overtook changes nothing.
+  let healthSeq = 0;
   store.onConnection(async (connected) => {
+    const mine = ++healthSeq;
     if (connected) {
       try {
         const health = await api.health();
+        if (mine !== healthSeq) return;
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
         if (version && warnOnce(version)) void vscode.window.showWarningMessage(version);
       } catch (e) {
+        if (mine !== healthSeq) return;
         log.warn(`health check failed, so the server's version is unknown: ${(e as Error).message}`);
         version = readOnlyReason(own, null);
       }
     }
-    applyReadOnly(connected);
+    applyReadOnly(store.connected);
   });
-  store.onError(() => setStatus(connected));
+  store.onError(() => setStatus(store.connected));
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 

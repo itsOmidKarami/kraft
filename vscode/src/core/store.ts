@@ -22,7 +22,8 @@ export function handshakeError(e: Error): ConnError {
 }
 
 export const wsSocket: SocketFactory = (url, headers) => {
-  const ws = new WebSocket(url, { headers });
+  // A daemon that accepts the connection and never answers fails like any other, and backs off.
+  const ws = new WebSocket(url, { headers, handshakeTimeout: 10_000 });
   let err: Error | undefined;
   ws.on("error", (e) => {
     err = e;
@@ -58,7 +59,8 @@ export class Store {
   // Bumped by every connect: a list call that a newer connect, or stop(), has overtaken does nothing.
   private gen = 0;
   private lastDelays: number[] = [];
-  // One re-read in flight per item; `again` is the one queued behind it.
+  // One re-read in flight per item; `again` is the one queued behind it. Kept across a
+  // reconnect, so one already running is not joined by a second.
   private slots = new Map<string, { again: boolean }>();
   private changeL = new Set<Listener<string[] | "all">>();
   private eventL = new Set<Listener<KraftEvent>>();
@@ -94,6 +96,7 @@ export class Store {
     if (this.stopped) return;
     this.clearTimer();
     this.dropSocket();
+    this.setConnected(false);
     this.delay = 1_000;
     this.log("info", "retrying now");
     void this.connect();
@@ -118,7 +121,6 @@ export class Store {
 
   private async connect(): Promise<void> {
     const gen = ++this.gen;
-    this.slots.clear();
     try {
       const { items, cursor } = await this.api.listItems();
       if (gen !== this.gen || this.stopped) return;
@@ -188,9 +190,9 @@ export class Store {
         slot.again = false;
         // Gone is gone: a queued re-read must not bring a dropped item back.
         if (!(await this.refreshLogged(id))) break;
-      } while (slot.again && this.slots.get(id) === slot);
+      } while (slot.again);
     } finally {
-      if (this.slots.get(id) === slot) this.slots.delete(id);
+      this.slots.delete(id);
     }
   }
 
