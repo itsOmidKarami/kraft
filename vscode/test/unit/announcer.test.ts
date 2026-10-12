@@ -107,6 +107,6 @@ describe("toastActions", () => {
     ["a question offers no Answer once resume is gone", stopped("question", { actions: ["cancel"] }), ["Open in Web UI"]],
     ["a question from a server without actions offers none", stopped("question"), ["Open in Web UI"]],
     ["a cap keeps Retry", stopped("cap", { actions: ["resume", "retry"] }), ["Open in Web UI", "Retry"]],
-    ["a failed item keeps Retry", item({ display_status: "failed", status: "failed" }), ["Open in Web UI", "Retry"]],
+    ["a failed item keeps Retry", item({ display_status: "failed", status: "needs_human" }), ["Open in Web UI", "Retry"]],
   ])("%s", (_, it_, want) => expect(toastActions(it_)).toEqual(want));
 });
