@@ -152,6 +152,7 @@ def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
     target = client.get(f"/api/work-items/{wid}/fix-target")
 
     assert detail.status_code == 200, detail.text
+    assert bool(detail.json()["pending_gate"]) == (state == "gate")
     assert detail.json()["actions"] == _listed(client, wid, False)["actions"]
     assert (detail.json()["fix_target"], detail.json()["reject_default"]) == (None, None)
     assert target.status_code == 409, target.text
