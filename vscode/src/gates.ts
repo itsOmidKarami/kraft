@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api } from "./core/api";
 import { Announcer } from "./core/announcer";
@@ -8,14 +9,14 @@ import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
+import type { ThreadCache } from "./core/threadCache";
 
 export function registerGates(
   context: vscode.ExtensionContext,
   store: Store,
   api: Api,
   refusal: () => string | null,
-  confirmApprove: (id: string) => Promise<boolean> = async () => true,
-  discardDrafts: (id: string) => PromiseLike<void> = async () => {},
+  cache: ThreadCache,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
@@ -66,9 +67,23 @@ export function registerGates(
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     const g = gate;
+    // Read once the approve is about to go: drafts written since the document opened go with it.
+    const send = async (digest: string | undefined) => {
+      const n = drafts(await cache.load(id)).length;
+      if (!n) return api.approve(id, g, digest).then(() => true);
+      const ok = await vscode.window.showWarningMessage(
+        `Approve ${g} and send ${n} draft comment${n === 1 ? "" : "s"} with it? No agent acts on comments sent with an approval.`,
+        { modal: true },
+        "Approve and Send",
+      );
+      if (ok !== "Approve and Send") return false;
+      // The review route stamps the drafts as part of this approval.
+      await api.submitReview(id, g, { outcome: "approve", digest });
+      await cache.load(id).catch(() => {});
+      return true;
+    };
     try {
-      // confirmApprove discards review drafts, so it runs only once an approve will really be sent.
-      const outcome = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), () => confirmApprove(id), () => discardDrafts(id));
+      const outcome = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send);
       if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
       if (outcome === "approved") await store.refresh(id);
     } catch (e) {
@@ -123,5 +138,5 @@ export function registerGates(
     vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: string) => approve(idOf(arg), gate)),
     vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: string, note?: string) => reject(idOf(arg), gate, note)),
   );
-  return { announcer };
+  return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }
