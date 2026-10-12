@@ -268,7 +268,8 @@ def test_the_list_row_carries_mr_ref_like_the_detail(client, repo):
 def test_the_list_row_carries_the_current_step_and_its_task(client, repo):
     """`default`'s verification node has two steps (tests, review). The row's
     `step` is the step of the node's latest non-escalation session; an item
-    with no session yet, or on a single-step node, has none."""
+    with no session yet, or on a single-step node, has none. The detail
+    carries the same `step`, so a row refreshed from it keeps its tail."""
     wid = client.post(
         "/api/work-items",
         json={"repo": str(repo), "title": "t", "chain_template": "default", "autostart": False},
@@ -279,9 +280,9 @@ def test_the_list_row_carries_the_current_step_and_its_task(client, repo):
     conn.close()
 
     def step():
-        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)[
-            "step"
-        ]
+        listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+        assert client.get(f"/api/work-items/{wid}").json()["step"] == listed["step"]
+        return listed["step"]
 
     assert step() is None
     _seed_session(

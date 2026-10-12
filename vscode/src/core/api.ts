@@ -60,7 +60,8 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
-  listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items");
+  // Cancelled items stay listed: the board shows them under Done.
+  listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
   getDiff = (id: string) => this.req<WorkItemDiff & { worktree_path?: string }>("GET", this.item(id, "/diff"));
 

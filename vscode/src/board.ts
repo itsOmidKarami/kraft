@@ -1,9 +1,8 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
-import { deriveState } from "../../frontend/src/deriveState";
 import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { actionsFor, describe, groupItems, needsYouCount, type Action } from "./core/board";
+import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
@@ -15,12 +14,6 @@ type Node =
   | { kind: "findings"; item: WorkItem }
   | { kind: "finding"; text: string }
   | { kind: "down" };
-
-const ICONS: Record<string, string> = {
-  gate: "pass", paused: "debug-pause", not_started: "circle-outline", blocked: "watch", running: "sync~spin",
-  rate_limited: "watch", waiting: "watch", escalating: "comment-discussion", escalated: "comment",
-  capped: "error", question: "question", budget: "credit-card", done: "check", abandoned: "circle-slash",
-};
 
 export class Board implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<Node | void>();
@@ -70,9 +63,9 @@ export class Board implements vscode.TreeDataProvider<Node> {
     const t = new vscode.TreeItem(item.title, this.unlocated(item).length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     t.id = item.id;
     t.description = describe(item);
-    t.iconPath = new vscode.ThemeIcon(ICONS[deriveState(item).state] ?? "circle-filled");
+    t.iconPath = new vscode.ThemeIcon(iconOf(item));
     t.contextValue = `item:${[...(item.pending_gate ? ["gate"] : []), ...actionsFor(item)].join(",")}`;
-    t.tooltip = `${item.id} — ${item.status}`;
+    t.tooltip = tooltipOf(item);
     return t;
   }
 

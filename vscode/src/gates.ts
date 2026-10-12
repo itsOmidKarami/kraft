@@ -85,10 +85,9 @@ export function registerGates(
           if (pick === "Reject") void reject(item.id, a.gate);
         });
       } else {
-        const action = a.state === "paused" ? "Resume" : "Retry";
-        void vscode.window.showInformationMessage(`${item.id} needs you (${a.state}): ${item.title}`, "Open in Web UI", action).then((pick) => {
+        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, "Open in Web UI", "Retry").then((pick) => {
           if (pick === "Open in Web UI") void vscode.commands.executeCommand("kraft.openInWebUi", { item });
-          if (pick === action) void vscode.commands.executeCommand(`kraft.${action.toLowerCase()}`, { item });
+          if (pick === "Retry") void vscode.commands.executeCommand("kraft.retry", { item });
         });
       }
     }

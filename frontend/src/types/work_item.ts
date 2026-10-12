@@ -367,7 +367,7 @@ export interface WorkItem {
   summary?: WorkItemSummary;
   /** The current node's step out of its steps, with the step's id and the
    *  latest task's (absent when the task's path has no step or task segment), when the node declares more than one step and a session
-   *  has run. List only; `summary.step` is the detail's. */
+   *  has run. List and detail; `summary.step` is the same without `name` and `task`. */
   step?: { index: number; count: number; name?: string; task?: string } | null;
 }
 

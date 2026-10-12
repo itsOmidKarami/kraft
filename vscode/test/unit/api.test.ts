@@ -11,7 +11,7 @@ describe("Api", () => {
     const api = new Api("http://h:1", "tok", f as any);
     expect(await api.listItems()).toEqual({ items: [], cursor: 3 });
     const [url, init] = f.mock.calls[0];
-    expect(url).toBe("http://h:1/api/work-items");
+    expect(url).toBe("http://h:1/api/work-items?include_abandoned=true");
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" });
   });
 

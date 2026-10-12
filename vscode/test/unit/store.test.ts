@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Store, type Socket } from "../../src/core/store";
+import { item } from "./fixtures/item";
 
 function fakeSocket() {
   const s = { msg: (_: string) => {}, close: () => {}, closed: false } as any;
@@ -11,14 +12,12 @@ function fakeSocket() {
   return { s, socket };
 }
 
-const item = (id: string, extra = {}) => ({ id, title: id, status: "active", current_node_id: "n", ...extra }) as any;
-
 function setup() {
   const sockets: ReturnType<typeof fakeSocket>[] = [];
   const urls: string[] = [];
   const api = {
-    listItems: vi.fn(async () => ({ items: [item("A")], cursor: 7 })),
-    getItem: vi.fn(async (id: string) => item(id, { status: "needs_human", pending_gate: "spec" })),
+    listItems: vi.fn(async () => ({ items: [item({ id: "A" })], cursor: 7 })),
+    getItem: vi.fn(async (id: string) => item({ id, status: "needs_human", pending_gate: "spec" })),
     wsUrl: (n: number) => `ws://x/api/ws/events?after_seq=${n}`,
     headers: () => ({}),
   } as any;
@@ -63,7 +62,7 @@ describe("Store", () => {
     for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(30_000);
     const delays = (store as any).lastDelays as number[];
     expect(Math.max(...delays)).toBe(30_000);
-    api.listItems.mockResolvedValue({ items: [item("A"), item("B")], cursor: 9 });
+    api.listItems.mockResolvedValue({ items: [item({ id: "A" }), item({ id: "B" })], cursor: 9 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(store.items().map((i) => i.id)).toEqual(["A", "B"]);
     expect(urls.at(-1)).toBe("ws://x/api/ws/events?after_seq=9");

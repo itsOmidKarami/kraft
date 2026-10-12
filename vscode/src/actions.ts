@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ApiError, type Api, type WorkItem } from "./core/api";
-import type { Action } from "./core/board";
+import { steerPrompt, type Action } from "./core/board";
 import type { Store } from "./core/store";
 
 export async function reportError(e: unknown, store: Store, id: string): Promise<void> {
@@ -19,7 +19,7 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
       case "archive": await api.archive(item.id); break;
       case "resume":
       case "retry": {
-        const steer = await vscode.window.showInputBox({ prompt: `Steer for ${item.id} (optional)` });
+        const steer = await vscode.window.showInputBox({ prompt: steerPrompt(item) });
         if (steer === undefined) return;
         await (action === "resume" ? api.resume(item.id, steer || undefined) : api.retry(item.id, steer || undefined));
         break;
