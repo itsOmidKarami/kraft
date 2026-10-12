@@ -142,13 +142,48 @@ def test_raisable_is_the_caps_budget_raise_takes(budget, want):
     assert board.raisable({"reason": "r", "budget": budget} if budget else None) is want
 
 
-@pytest.mark.parametrize("state", ["paused_agent", "failed"])
+@pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
 def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
-    """Not at a gate: there the detail's `fix_target` reads the chain and
-    raises for a legacy row, a refusal older than `actions`."""
+    """The detail renders with no restart target, even at a pending gate."""
     wid = _legacy(client, repo, state)
 
     detail = client.get(f"/api/work-items/{wid}")
 
     assert detail.status_code == 200, detail.text
+    assert bool(detail.json()["pending_gate"]) == (state == "gate")
     assert detail.json()["actions"] == _listed(client, wid, False)["actions"]
+    assert (detail.json()["fix_target"], detail.json()["reject_default"]) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("state", "method", "path", "body"),
+    [
+        ("gate", "get", "fix-target", None),
+        ("gate", "post", "gates/spec_approval/approve", {}),
+        ("gate", "post", "gates/spec_approval/reject", {"note": "no"}),
+        ("gate", "post", "gates/spec_approval/review", {"outcome": "request_changes"}),
+        ("gate", "post", "review", {"outcome": "request_changes"}),
+        ("failed", "post", "retry", {}),
+        ("gate", "post", "skip", {"path": "spec_approval"}),
+        ("paused_agent", "post", "skip", {"path": "implementation"}),
+    ],
+    ids=[
+        "fix-target",
+        "approve",
+        "reject",
+        "gate-review",
+        "item-review",
+        "retry",
+        "skip-path-gate",
+        "skip-path-paused",
+    ],
+)
+def test_a_legacy_rows_walking_doors_refuse(client, repo, state, method, path, body):
+    """A legacy row has no chain to find a gate in, restart from or skip
+    along: every door that walks it answers 409, not a 500."""
+    wid = _legacy(client, repo, state)
+    kw = {"json": body} if body is not None else {}
+
+    r = getattr(client, method)(f"/api/work-items/{wid}/{path}", **kw)
+
+    assert r.status_code == 409, r.text
