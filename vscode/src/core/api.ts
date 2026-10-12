@@ -19,6 +19,9 @@ export interface ApplyReport { restart: ApplyItem[]; reload: ApplyItem[]; manage
 
 /** A daemon that takes the connection and never answers must not hold a caller forever. */
 export const REQUEST_TIMEOUT = 10_000;
+/** For the calls that can legitimately take long: a big diff, a library lint, reload, apply. */
+export const SLOW_TIMEOUT = 60_000;
+export interface Timeouts { fast: number; slow: number }
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -28,6 +31,8 @@ export class ApiError extends Error {
 
 export interface ApiFailure { method: string; path: string; status: number; detail: string }
 
+const SLOW = { slow: true };
+
 export class Api {
   /** Every failed call, just before it throws: the extension logs them. */
   onError?: (f: ApiFailure) => void;
@@ -36,7 +41,7 @@ export class Api {
     readonly base: string,
     private token: string | undefined,
     private fetchImpl: typeof fetch = fetch,
-    private timeout = REQUEST_TIMEOUT,
+    private timeouts: Timeouts = { fast: REQUEST_TIMEOUT, slow: SLOW_TIMEOUT },
   ) {}
 
   headers(): Record<string, string> {
@@ -47,7 +52,8 @@ export class Api {
     return `${this.base.replace(/^http/, "ws")}/api/ws/events?after_seq=${afterSeq}`;
   }
 
-  private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async req<T>(method: string, path: string, body?: unknown, { slow = false }: { slow?: boolean } = {}): Promise<T> {
+    const timeout = slow ? this.timeouts.slow : this.timeouts.fast;
     let res: Response;
     let text: string;
     try {
@@ -55,12 +61,12 @@ export class Api {
         method,
         headers: { ...this.headers(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeout),
+        signal: AbortSignal.timeout(timeout),
       });
       text = await res.text();
     } catch (e) {
       const detail = (e as Error).name === "TimeoutError"
-        ? `Kraft did not answer within ${this.timeout / 1000}s`
+        ? `Kraft did not answer within ${timeout / 1000}s`
         : `Kraft is not reachable at ${this.base}: ${(e as Error).message}`;
       throw this.fail(method, path, 0, detail);
     }
@@ -82,7 +88,7 @@ export class Api {
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
-  getDiff = (id: string) => this.req<WorkItemDiff & { worktree_path?: string }>("GET", this.item(id, "/diff"));
+  getDiff = (id: string) => this.req<WorkItemDiff & { worktree_path?: string }>("GET", this.item(id, "/diff"), undefined, SLOW);
 
   async getArtifact(id: string): Promise<Artifact | null> {
     try {
@@ -106,11 +112,11 @@ export class Api {
   archive = (id: string) => this.req("POST", this.item(id, "/archive"));
 
   check = (file: string, text: string) => this.req<{ issues: ConfigIssue[] }>("POST", "/templates/check", { file, text });
-  lint = () => this.req<LintReport>("GET", "/templates/lint");
-  resolved = (id: string) => this.req<unknown>("GET", `/templates/chains/${encodeURIComponent(id)}/resolved`);
-  parse = (text: string) => this.req<{ chain: unknown; error: string | null }>("POST", "/templates/parse", { text });
-  resolve = (chain: unknown) => this.req<{ chains: unknown[]; issues: ConfigIssue[] }>("POST", "/templates/resolve", { chain });
-  reload = () => this.req<ReloadReport>("POST", "/templates/reload");
-  pending = () => this.req<ApplyReport>("GET", "/apply");
-  restart = () => this.req<{ restarting: boolean }>("POST", "/apply/restart");
+  lint = () => this.req<LintReport>("GET", "/templates/lint", undefined, SLOW);
+  resolved = (id: string) => this.req<unknown>("GET", `/templates/chains/${encodeURIComponent(id)}/resolved`, undefined, SLOW);
+  parse = (text: string) => this.req<{ chain: unknown; error: string | null }>("POST", "/templates/parse", { text }, SLOW);
+  resolve = (chain: unknown) => this.req<{ chains: unknown[]; issues: ConfigIssue[] }>("POST", "/templates/resolve", { chain }, SLOW);
+  reload = () => this.req<ReloadReport>("POST", "/templates/reload", undefined, SLOW);
+  pending = () => this.req<ApplyReport>("GET", "/apply", undefined, SLOW);
+  restart = () => this.req<{ restarting: boolean }>("POST", "/apply/restart", undefined, SLOW);
 }

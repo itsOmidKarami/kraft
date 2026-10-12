@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError, REQUEST_TIMEOUT, type ApiFailure } from "../../src/core/api";
+import { Api, ApiError, REQUEST_TIMEOUT, SLOW_TIMEOUT, type ApiFailure } from "../../src/core/api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -110,7 +110,7 @@ describe("Api timeout", () => {
     // The fetch rejects only when the request's own signal aborts, as fetch does.
     const f = vi.fn((_url: string, init?: RequestInit) =>
       new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
-    const api = new Api("http://h:1", undefined, f as any, 1_000);
+    const api = new Api("http://h:1", undefined, f as any, { fast: 1_000, slow: 60_000 });
     const seen: ApiFailure[] = [];
     api.onError = (e) => seen.push(e);
     const t0 = Date.now();
@@ -119,5 +119,15 @@ describe("Api timeout", () => {
     expect(seen).toEqual([{ method: "GET", path: "/health", status: 0, detail: "Kraft did not answer within 1s" }]);
   });
 
-  it("waits 10s by default", () => expect(REQUEST_TIMEOUT).toBe(10_000));
+  it("waits 10s by default, 60s for a slow call", () => expect([REQUEST_TIMEOUT, SLOW_TIMEOUT]).toEqual([10_000, 60_000]));
+
+  it("gives a diff the slow limit", async () => {
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
+    const api = new Api("http://h:1", undefined, f as any, { fast: 50, slow: 500 });
+    const t0 = Date.now();
+    await expect(api.getDiff("W-1")).rejects.toMatchObject({ status: 0, detail: "Kraft did not answer within 0.5s" });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(450);
+    await expect(api.getItem("W-1")).rejects.toMatchObject({ detail: "Kraft did not answer within 0.05s" });
+  });
 });
