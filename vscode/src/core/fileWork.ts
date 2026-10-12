@@ -246,9 +246,13 @@ export function draftNote(link: DraftLink, repo: string): string | undefined {
  *  repo, the one place beyond it the server will look (`_attachment_roots`).
  *  None when every attachment is in the repo; refused when they sit in two
  *  different worktrees, which one `cwd` cannot cover. `top` is each one's
- *  git toplevel. */
-export function cwdFor(attachments: { path: string; top: string }[], repo: string): { cwd?: string } | { refusal: string } {
+ *  git toplevel. In a remote window `top` is only the attachment's folder (no
+ *  git runs there), so folders that differ say nothing about worktrees: the
+ *  first outside folder is sent, the daemon resolves its toplevel itself, and
+ *  its 422 still catches a truly separate worktree at the preview. */
+export function cwdFor(attachments: { path: string; top: string }[], repo: string, remote = false): { cwd?: string } | { refusal: string } {
   const outside = attachments.filter((a) => !inside(a.path, repo));
+  if (remote) return outside.length ? { cwd: outside[0].top } : {};
   const tops = [...new Set(outside.map((a) => a.top))];
   if (tops.length <= 1) return tops.length ? { cwd: tops[0] } : {};
   return {

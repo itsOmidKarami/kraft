@@ -229,6 +229,11 @@ describe("cwdFor", () => {
     ["a refusal for two worktrees", [{ path: "/w1/s.md", top: "/w1" }, { path: "/w2/p.md", top: "/w2" }],
       { refusal: "s.md and p.md are in different worktrees (/w1, /w2). Kraft takes documents from /r and one of its worktrees: move one of them first." }],
   ])("%s", (_, atts, want) => expect(cwdFor(atts, "/r")).toEqual(want));
+  it.each([
+    ["sends the first outside folder, not a refusal, for two subfolders of one worktree", [{ path: "/wt/a/s.md", top: "/wt/a" }, { path: "/wt/b/p.md", top: "/wt/b" }], { cwd: "/wt/a" }],
+    ["skips an attachment inside the repo", [{ path: "/r/s.md", top: "/r" }, { path: "/wt/b/p.md", top: "/wt/b" }], { cwd: "/wt/b" }],
+    ["sends nothing when every document is in the repo", [{ path: "/r/s.md", top: "/r" }], {}],
+  ])("remote window: %s", (_, atts, want) => expect(cwdFor(atts, "/r", true)).toEqual(want));
 });
 
 describe("abandonRefusal", () => {

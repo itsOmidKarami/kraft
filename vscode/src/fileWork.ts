@@ -139,7 +139,7 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
     const top = folder.uri.scheme === "file" ? await deps.scope.git(["rev-parse", "--show-toplevel"], dir) : undefined;
     return { path, top: top ?? dir };
   }));
-  const where = cwdFor(tops, repo.path);
+  const where = cwdFor(tops, repo.path, folder.uri.scheme !== "file");
   if ("refusal" in where) return stop(where.refusal);
   const { cwd } = where;
 
