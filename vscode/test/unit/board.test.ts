@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
+import { ApiError } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
 import { announceable, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
@@ -314,10 +315,101 @@ describe("Answer", () => {
     vi.spyOn(vscode.commands, "registerCommand").mockImplementation(((id: string, cb: (...a: unknown[]) => unknown) => (handlers.set(id, cb), { dispose() {} })) as never);
     const input = vi.spyOn(vscode.window, "showInputBox").mockResolvedValue("use v2");
     registerBoard({ subscriptions: [] } as never, store, api as never, refusal, () => true, { onChange: () => () => {}, ready: true, showAll: false });
-    await handlers.get("kraft.answer")!({ item: asked });
+    // A selection passed along is not the Answer's: it answers the clicked row.
+    const other = stopped("question", { id: "Q-2", actions: ["resume", "retry"] });
+    await handlers.get("kraft.answer")!({ kind: "item", item: asked }, [{ kind: "item", item: asked }, { kind: "item", item: other }]);
     expect(api.resume.mock.calls).toEqual(resumed);
     expect(api.retry).not.toHaveBeenCalled();
     if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "Q-1 asks: Which API? Your answer steers it (optional)" });
     vi.restoreAllMocks();
+  });
+});
+
+describe("A multi-selection", () => {
+  const row = (i: ReturnType<typeof item>) => ({ kind: "item", item: i });
+  const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", actions: ["pause"] })];
+  const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", display_status: "paused", actions: ["resume"] })];
+  const q = stopped("question", { id: "Q-1", actions: ["resume", "retry"] });
+  const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"] }), item({ id: "D-2", display_status: "done", actions: ["archive"] })];
+
+  function setup(refusal: () => string | null = () => null, answer: string | null = "Archive") {
+    const all = [p1, p2, r1, r2, q, d1, d2];
+    const refreshed: string[] = [];
+    const store = { items: () => all, item: (id: string) => all.find((i) => i.id === id), detail: () => undefined,
+      refresh: async (id: string) => { refreshed.push(id); if (id === "P-2") throw new Error("gone"); return true; },
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+    const api = {
+      pause: vi.fn(async () => {}), archive: vi.fn(async () => {}), retry: vi.fn(async () => {}),
+      resume: vi.fn(async (id: string) => { if (id === "R-2") throw new ApiError(409, "boom"); }),
+      bulk: vi.fn(async (_a: string, ids: string[]) => ids.map((id) => (id === "P-2" ? { id, ok: false, error: "being started" } : { id, ok: true }))),
+    };
+    const handlers = new Map<string, (...a: unknown[]) => unknown>();
+    const tree = vi.spyOn(vscode.window, "createTreeView");
+    vi.spyOn(vscode.commands, "registerCommand").mockImplementation(((id: string, cb: (...a: unknown[]) => unknown) => (handlers.set(id, cb), { dispose() {} })) as never);
+    const info = vi.spyOn(vscode.window, "showInformationMessage").mockResolvedValue(undefined);
+    const warn = vi.spyOn(vscode.window, "showWarningMessage").mockImplementation((async (_m: string, o?: unknown) => (o ? answer ?? undefined : undefined)) as never);
+    const input = vi.spyOn(vscode.window, "showInputBox").mockResolvedValue("");
+    registerBoard({ subscriptions: [] } as never, store, api as never, refusal, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    return { handlers, api, info, warn, input, refreshed, tree };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("lets the board select many rows", () => {
+    const { tree } = setup();
+    expect(tree.mock.calls[0][1]).toMatchObject({ canSelectMany: true });
+  });
+
+  it("pauses in one bulk call, warns with the refusal, and refreshes each, a failed refresh ignored", async () => {
+    const { handlers, api, warn, info, refreshed } = setup();
+    await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p2)]);
+    expect(api.bulk.mock.calls).toEqual([["pause", ["P-1", "P-2"]]]);
+    expect(api.pause).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
+    expect(info).not.toHaveBeenCalled();
+    expect(refreshed).toEqual(["P-1", "P-2"]);
+  });
+
+  it("resumes one id at a time, in order and with no steer, and leaves a question to its answer", async () => {
+    const { handlers, api, warn, input } = setup();
+    await handlers.get("kraft.resume")!(row(r1), [row(r1), row(q), row(r2)]);
+    expect(api.resume.mock.calls).toEqual([["R-1"], ["R-2"]]);
+    expect(input).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: R-2 (boom), Q-1 (needs an answer).");
+  });
+
+  it.each([
+    ["archives after asking once", "Archive", [["archive", ["D-1", "D-2"]]], "Archived 2."],
+    ["archives nothing when the question is dismissed", null, [], undefined],
+  ])("%s", async (_, answer, calls, said) => {
+    const { handlers, api, warn, info } = setup(() => null, answer);
+    await handlers.get("kraft.archive")!(row(d1), [row(d1), row(d2)]);
+    expect(warn.mock.calls[0]).toEqual(["Archive 2 items? Their worktrees are deleted.", { modal: true }, "Archive"]);
+    expect(api.bulk.mock.calls).toEqual(calls);
+    expect(info.mock.calls).toEqual(said ? [[said]] : []);
+  });
+
+  it.each([
+    ["one selected row", [row(p1)]],
+    ["a click outside the selection", [row(p2)]],
+  ])("keeps the single-item path for %s", async (_, nodes) => {
+    const { handlers, api } = setup();
+    await handlers.get("kraft.pause")!(row(p1), nodes);
+    expect(api.pause.mock.calls).toEqual([["P-1"]]);
+    expect(api.bulk).not.toHaveBeenCalled();
+  });
+
+  it("does nothing while read-only, and warns once", async () => {
+    const { handlers, api, warn } = setup(() => "Kraft is read-only.");
+    await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p2)]);
+    expect(api.bulk).not.toHaveBeenCalled();
+    expect(warn.mock.calls).toEqual([["Kraft is read-only."]]);
+  });
+
+  it("leaves the selection to those four: retry acts on the clicked row", async () => {
+    const failed = item({ id: "F-1", display_status: "failed", actions: ["retry"] });
+    const { handlers, api } = setup();
+    await handlers.get("kraft.retry")!(row(failed), [row(failed), row(p1)]);
+    expect(api.retry.mock.calls).toEqual([["F-1", undefined]]);
   });
 });

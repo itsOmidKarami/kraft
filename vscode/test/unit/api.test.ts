@@ -45,6 +45,21 @@ describe("Api", () => {
     expect([url, (init as RequestInit).method, JSON.parse((init as RequestInit).body as string)]).toEqual(["http://h:1/api/repos", "POST", { path: "/r" }]);
   });
 
+  it.each([
+    ["two ids in one request", ["a", "b"], [["a", "b"]]],
+    ["201 ids in two, the server's cap of 200 first", Array.from({ length: 201 }, (_, k) => `W-${k}`),
+      [Array.from({ length: 200 }, (_, k) => `W-${k}`), ["W-200"]]],
+  ])("posts a bulk archive of %s, and joins the results", async (_, ids, batches) => {
+    const f = vi.fn(async (_url: string, init?: RequestInit) => {
+      const sent = JSON.parse(init!.body as string).ids as string[];
+      return new Response(JSON.stringify({ results: sent.map((id) => ({ id, ok: true })) }), { status: 200 });
+    });
+    const got = await new Api("http://h:1", undefined, f as any).bulk("archive", ids);
+    expect(f.mock.calls.map(([url, init]) => [url, init!.method, JSON.parse(init!.body as string)]))
+      .toEqual(batches.map((b) => ["http://h:1/api/work-items/bulk", "POST", { action: "archive", ids: b }]));
+    expect(got.map((r) => r.id)).toEqual(ids);
+  });
+
   it("encodes a gate path segment", async () => {
     const f = fakeFetch(200, {});
     await new Api("http://h:1", undefined, f as any).reject("W-1", "review gate", "n");
@@ -223,7 +238,8 @@ describe("Api timeout", () => {
     ["a create", (a: Api) => a.create({ title: "T", description: "", repo: "/r", autostart: false })],
     ["a connect", (a: Api) => a.connectRepo("/r")],
     ["a search", (a: Api) => a.search("gate")],
-  ])("gives %s the slow limit: the server resolves the chain, probes the repo or loads the embedder", async (_, call) => {
+    ["a bulk pause", (a: Api) => a.bulk("pause", ["W-1"])],
+  ])("gives %s the slow limit: the server resolves the chain, probes the repo, loads the embedder or runs each id in turn", async (_, call) => {
     const f = vi.fn((_url: string, init?: RequestInit) =>
       new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
     await expect(call(new Api("http://h:1", undefined, f as any, { fast: 50, slow: 200 }))).rejects.toMatchObject({ detail: "Kraft did not answer within 0.2s" });

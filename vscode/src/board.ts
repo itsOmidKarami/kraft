@@ -1,8 +1,9 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
-import { reportError, runAction } from "./actions";
+import { reportError, runAction, runBulk } from "./actions";
 import type { Api, ItemAction, WorkItem } from "./core/api";
 import { contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { selectedItems, type BulkVerb } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -146,11 +147,12 @@ export function registerBoard(
   unconnected?: () => boolean,
 ) {
   const board = new Board(store, include, scope, drafts, unconnected);
-  const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
+  const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board, canSelectMany: true });
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);
   scope.onChange(updateBadge);
 
+  type Row = { kind?: string; item?: WorkItem };
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
   const act = (action: ItemAction) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
@@ -165,8 +167,17 @@ export function registerBoard(
     unblock: "kraft.unblock", skip: "kraft.skip", escalate: "kraft.escalate", complete: "kraft.complete",
     cancel: "kraft.cancel", restore: "kraft.restore", archive: "kraft.archive",
   };
+  // Only these four read the selection VS Code passes second; every other
+  // command acts on the clicked row alone. One selected row keeps its own path.
+  const BULK: ReadonlySet<ItemAction> = new Set<BulkVerb>(["pause", "resume", "archive", "restore"]);
+  const actOnSelection = (a: BulkVerb) => async (node?: Row, nodes?: readonly Row[]) => {
+    const items = selectedItems(node, nodes);
+    if (items.length < 2) return act(a)(node);
+    await runBulk(api, store, a, items.map((i) => store.item(i.id) ?? i));
+  };
   for (const [a, id] of Object.entries(COMMANDS) as [ItemAction, string][]) {
-    context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, act(a))));
+    const run = BULK.has(a) ? actOnSelection(a as BulkVerb) : act(a);
+    context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, run)));
   }
   context.subscriptions.push(
     view,
