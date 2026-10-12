@@ -10,7 +10,8 @@ const git: Git = (args, cwd) =>
     execFile("git", args, { cwd, timeout: 10_000 }, (err, stdout) => ok(err ? undefined : String(stdout).trim()));
   });
 
-const deps: ScopeDeps = { git, realpath: (p) => fs.realpath(p), platform: process.platform };
+/** The real git and realpath, for anything else that asks a folder's repo. */
+export const scopeDeps: ScopeDeps = { git, realpath: (p) => fs.realpath(p), platform: process.platform };
 
 const sameList = (a: ConnectedRepo[], b: ConnectedRepo[]) =>
   a.length === b.length && a.every((r, i) => r.path === b[i].path && (r.managed ?? true) === (b[i].managed ?? true));
@@ -25,7 +26,7 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
   let lastRead = -Infinity;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-  const recompute = () => scope.update(folders(), runDir, deps, connected);
+  const recompute = () => scope.update(folders(), runDir, scopeDeps, connected);
   const setAllRepos = () => void vscode.commands.executeCommand("setContext", "kraft.allRepos", scope.showAll);
 
   const read = async () => {

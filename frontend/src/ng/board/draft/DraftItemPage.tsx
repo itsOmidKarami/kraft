@@ -31,12 +31,15 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   if (carried) return emptyDraft(carried);
   try {
     const saved = sessionStorage.getItem(DRAFT_KEY);
-    // A bead in the URL is a fresh start, unless this draft already is that bead's (a reload keeps the edits).
-    if (saved && (!q.get("bead") || JSON.parse(saved).bead === q.get("bead"))) return emptyDraft(JSON.parse(saved));
+    // A bead or a title in the URL (VS Code's More options) is a fresh start,
+    // unless this draft already is that bead's or has that title (a reload keeps the edits).
+    const bead = q.get("bead"), title = q.get("title");
+    const ours = (d: Partial<DraftState>) => (bead ? d.bead === bead : title ? d.title === title : true);
+    if (saved && ours(JSON.parse(saved))) return emptyDraft(JSON.parse(saved));
   } catch {
     // Private windows: nothing kept.
   }
-  return emptyDraft({ title: q.get("title") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
+  return emptyDraft({ title: q.get("title") ?? "", brief: q.get("brief") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
 }
 const forget = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } };
 
@@ -83,6 +86,13 @@ export function DraftItemPage() {
   useEffect(() => {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* nothing kept */ }
   }, [d]);
+  // The URL seeded the draft once; the saved draft carries it from here, so a
+  // reload resumes the edits rather than starting again from the link (D30).
+  useEffect(() => {
+    if (location.search) navigate(location.pathname, { replace: true, state: location.state });
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     setPageItem(d.repo ? { id: "new", repo: d.repo, title: d.title, bead_id: null } : null);
     return () => setPageItem(null);

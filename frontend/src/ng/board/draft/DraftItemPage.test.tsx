@@ -172,6 +172,38 @@ describe("DraftItemPage", () => {
     expect(creates(calls).at(-1)?.body.depends_on).toEqual(["a1"]);
   });
 
+  it.each([
+    ["the URL wins over an older saved draft", "an older draft", "T", "Why this"],
+    ["a saved draft with the URL's title keeps its edits", "T", "T", "edited"],
+  ])("takes title and brief from the URL, as VS Code's More options sends them: %s", async (_, savedTitle, title, brief) => {
+    stub();
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ title: savedTitle, brief: "edited", repo: "/code/kraft-plugins", chain: "default" }));
+    mount(undefined, "/work-items/new?title=T&brief=Why%20this");
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(title);
+    expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue(brief);
+  });
+
+  it("drops the URL once it seeded the draft, so a reload keeps the edits", async () => {
+    stub();
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/work-items/new?title=T&brief=B"]}>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route path="/work-items/new" element={<><DraftItemPage /><Where /></>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await settle();
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/work-items\/new$/);
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "T edited" } });
+    unmount();
+    mount(undefined, "/work-items/new");
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("T edited");
+  });
+
   it("starts from a bead in the URL: its title prefilled, and Create names it as implemented", async () => {
     const calls = stub();
     sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ title: "an older draft", repo: "/code/kraft-plugins", chain: "default" }));

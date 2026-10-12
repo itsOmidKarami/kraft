@@ -1,11 +1,14 @@
 import type {
-  CommentReview, Finding, GatelessChanges, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, ThreadLabel, WorkItem as BoardItem,
+  ChainNode, CommentReview, Finding, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
-import type { ConnectedRepo } from "./repoScope";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
-export type { CommentReview, Finding, GatelessChanges, ItemAction, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, ThreadLabel, WorkItemDiff };
+export type {
+  CommentReview, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  WorkItemDiff,
+};
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
 export type WorkItem = BoardItem & { actions?: ItemAction[] };
 
@@ -22,6 +25,23 @@ export interface LintReport { valid: boolean; chains: string[]; issues: ConfigIs
 export interface ReloadReport { valid: string[]; invalid_templates: Record<string, string>; refused_policy: string | null; refused_intake: string | null }
 export interface ApplyItem { id: string; file: string; text: string; problem?: string }
 export interface ApplyReport { restart: ApplyItem[]; reload: ApplyItem[]; managed: boolean }
+/** `POST /work-items`'s body as VS Code files it: `chain` absent is the repo's default. */
+export interface NewWorkItem {
+  title: string; description: string; repo: string; chain?: string;
+  attachments?: { kind: "spec" | "plan"; path: string }[]; cwd?: string; autostart: boolean;
+}
+/** `?dry_run=1`'s answer: the chain as it would be filed, and what it drops. */
+export interface DryRun {
+  dry_run: true; nodes: ChainNode[]; gates: string[];
+  skipped: { node: string; why: "covered_by" | "skip"; kind?: "spec" | "plan" }[];
+}
+/** What a create answers; the warnings are present only when there is one. */
+export interface Created {
+  id: string; status: string; bead_id?: string | null;
+  duplicate_warning?: string; bead_warning?: string; repo_warning?: string;
+  waiting_on?: { id: string; title: string; status: string }[];
+  slots?: { busy: number; limit: number; storage?: { used_bytes: number; limit_bytes: number } };
+}
 
 /** A daemon that takes the connection and never answers must not hold a caller forever. */
 export const REQUEST_TIMEOUT = 10_000;
@@ -96,7 +116,11 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
-  repos = () => this.req<{ repos: ConnectedRepo[] }>("GET", "/repos");
+  repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
+  chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
+  // Both resolve the chain on the server, and a create also runs intake.
+  preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body, SLOW);
+  create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body, SLOW);
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
@@ -127,6 +151,7 @@ export class Api {
   unblock = (id: string) => this.req("POST", this.item(id, "/unblock"));
   complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
   restore = (id: string) => this.req("POST", this.item(id, "/restore"));
+  abandon = (id: string) => this.req("POST", this.item(id, "/abandon"), {});
 
   listThreads = (id: string) => this.req<ReviewThread[]>("GET", this.item(id, "/threads"));
   createThread = (id: string, t: ThreadIn) => this.req<ReviewThread>("POST", this.item(id, "/threads"), t);
