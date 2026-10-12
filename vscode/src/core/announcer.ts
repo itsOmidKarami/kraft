@@ -19,6 +19,7 @@ function keyOf(item: WorkItem): string | undefined {
 export class Announcer {
   announced = new Set<string>();
   private current = new Map<string, string>();
+  private showAll = false;
 
   constructor(private level: () => "all" | "gates" | "off") {}
 
@@ -37,5 +38,25 @@ export class Announcer {
     }
     if (this.level() === "gates" || previous === key) return undefined;
     return { kind: "needs", id: item.id, text: reasonTail(item) };
+  }
+
+  /** What to toast for `items`, already scoped to the window. `quiet` only
+   *  records them: turning on Show all repos widens to stops that were
+   *  waiting before, which are not news. */
+  considerAll(items: WorkItem[], quiet = false): [WorkItem, Announcement][] {
+    const out: [WorkItem, Announcement][] = [];
+    for (const item of items) {
+      const a = this.consider(item);
+      if (a && !quiet) out.push([item, a]);
+    }
+    return out;
+  }
+
+  /** What to toast when the window's scope changes: what is waiting in it
+   *  now, once, except on turning on Show all repos, which only records. */
+  rescope(items: WorkItem[], showAll: boolean): [WorkItem, Announcement][] {
+    const quiet = showAll && !this.showAll;
+    this.showAll = showAll;
+    return this.considerAll(items, quiet);
   }
 }

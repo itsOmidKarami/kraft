@@ -3,9 +3,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { registerBoard } from "./board";
-import { Api } from "./core/api";
+import { Api, type WorkItem } from "./core/api";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
+import { registerRepoScope } from "./repoScope";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { registerConfigChecks } from "./config/check";
@@ -51,6 +52,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const state = (): ReadOnlyState => ({ trusted, version });
   let connected = false;
   let runDir = loc.runDir;
+  // Before the board: its first render already asks the scope.
+  const repoScope = registerRepoScope(context, runDir, api, store);
+  const { scope } = repoScope;
+  const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
   const setStatus = (now: boolean) => {
@@ -71,6 +76,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
         if (version) void vscode.window.showWarningMessage(version);
+        // Off the status bar's path.
+        void repoScope.setDaemon(health.run_dir);
       } catch {
         version = readOnlyReason(own, null);
       }
@@ -80,10 +87,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
-  registerBoard(context, store, api, () => runDir, () => refusal(state()));
+  registerBoard(context, store, api, () => refusal(state()), include, scope);
   context.subscriptions.push(status, { dispose: () => store.stop() });
   const comments = registerComments(context, store, api, () => refusal(state()));
-  const gates = registerGates(context, store, api, () => refusal(state()), comments.confirmApprove, comments.discardDrafts);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, comments.confirmApprove, comments.discardDrafts);
   const diff = registerDiff(context, store, api, () => runDir);
   const review = Object.assign(diff, comments);
   registerFindings(context, store);

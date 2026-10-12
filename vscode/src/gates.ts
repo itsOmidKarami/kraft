@@ -1,11 +1,13 @@
 import * as vscode from "vscode";
 import { reportError } from "./actions";
-import type { Api } from "./core/api";
-import { Announcer } from "./core/announcer";
+import type { Api, WorkItem } from "./core/api";
+import { Announcer, type Announcement } from "./core/announcer";
+import { announceable, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
 import type { Artifact } from "./core/api";
 import { ShownRenders } from "./core/shown";
 import { mutating } from "./core/guard";
+import type { WorkspaceScope } from "./core/repoScope";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 
@@ -14,6 +16,8 @@ export function registerGates(
   store: Store,
   api: Api,
   refusal: () => string | null,
+  include: Include,
+  scope: Pick<WorkspaceScope, "onChange" | "showAll">,
   confirmApprove: (id: string) => Promise<boolean> = async () => true,
   discardDrafts: (id: string) => PromiseLike<void> = async () => {},
 ) {
@@ -96,11 +100,10 @@ export function registerGates(
     }
   });
 
-  const announce = (ids: string[] | "all") => {
-    const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
-    for (const item of items) {
-      const a = announcer.consider(item);
-      if (!a) continue;
+  const scoped = (ids: string[] | "all") =>
+    announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
+  const toast = (found: [WorkItem, Announcement][]) => {
+    for (const [item, a] of found) {
       if (a.kind === "gate") {
         const buttons = ["Open", "Reject…"];
         void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
@@ -115,8 +118,12 @@ export function registerGates(
       }
     }
   };
-  store.onChange(announce);
+  store.onChange((ids) => toast(announcer.considerAll(scoped(ids))));
   store.onChange(() => shown.reconcile((id) => { const i = store.item(id); return i ? (i.pending_gate ?? null) : undefined; }));
+  // A scope that became ready announces what already waits in it, once.
+  // Items out of scope are not considered, so a stop that changed while out
+  // of scope reads as new.
+  scope.onChange(() => toast(announcer.rescope(scoped("all"), scope.showAll)));
 
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.openArtifact", (arg?: unknown) => openArtifact(idOf(arg))),
