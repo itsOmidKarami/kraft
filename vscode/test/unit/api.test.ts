@@ -159,4 +159,12 @@ describe("Api timeout", () => {
     expect(Date.now() - t0).toBeGreaterThanOrEqual(450);
     await expect(api.getItem("W-1")).rejects.toMatchObject({ detail: "Kraft did not answer within 0.05s" });
   });
+  it.each([
+    ["a preview", (a: Api) => a.preview({ title: "T", description: "", repo: "/r", autostart: false })],
+    ["a create", (a: Api) => a.create({ title: "T", description: "", repo: "/r", autostart: false })],
+  ])("gives %s the slow limit: the server resolves the chain", async (_, call) => {
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
+    await expect(call(new Api("http://h:1", undefined, f as any, { fast: 50, slow: 200 }))).rejects.toMatchObject({ detail: "Kraft did not answer within 0.2s" });
+  });
 });

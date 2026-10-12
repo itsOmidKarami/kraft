@@ -107,8 +107,9 @@ export class Api {
   health = () => this.req<Health>("GET", "/health");
   repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
   chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
-  preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body);
-  create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body);
+  // Both resolve the chain on the server, and a create also runs intake.
+  preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body, SLOW);
+  create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body, SLOW);
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
