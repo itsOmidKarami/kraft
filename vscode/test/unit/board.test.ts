@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, announceable, contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, welcomeState, worktreeTarget, type Action, type ItemState } from "../../src/core/board";
+import { announceable, contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -58,58 +58,22 @@ describe("groupItems", () => {
   });
 });
 
-describe("actionsFor", () => {
-  const OF: Record<ItemState, ReturnType<typeof item>> = {
-    gate: stopped("gate", { pending_gate: "spec" }),
-    question: stopped("question"),
-    budget: stopped("budget"),
-    cap: stopped("cap"),
-    needs_you: stopped("mr_closed"),
-    failed: item({ display_status: "failed" }),
-    paused: item({ display_status: "paused" }),
-    not_started: item({ display_status: "paused", current_node_id: null }),
-    running: item(),
-    waiting: item({ display_status: "waiting" }),
-    queued: item({ display_status: "queued" }),
-    blocked: item({ display_status: "blocked" }),
-    escalated: item({ display_status: "escalated" }),
-    done: item({ display_status: "done" }),
-    cancelled: item({ display_status: "cancelled" }),
-    archived: item({ display_status: "archived", archived_at: "x" }),
-    unknown: item({ display_status: "someday" as never }),
-  };
-  const WANT: [ItemState, Action[]][] = [
-    ["running", ["pause", "cancel"]],
-    ["waiting", ["pause", "cancel"]],
-    ["queued", ["pause", "cancel"]],
-    ["blocked", ["pause", "cancel"]],
-    ["escalated", ["cancel"]],
-    ["paused", ["resume", "cancel"]],
-    ["not_started", ["resume", "cancel"]],
-    ["gate", ["skip", "cancel"]],
-    ["question", ["retry", "skip", "escalate", "cancel"]],
-    ["cap", ["retry", "skip", "escalate", "cancel"]],
-    ["needs_you", ["retry", "skip", "escalate", "cancel"]],
-    ["failed", ["retry", "skip", "escalate", "cancel"]],
-    ["budget", ["retry", "skip", "cancel"]],
-    ["done", ["archive"]],
-    ["cancelled", ["archive"]],
-    ["archived", []],
-    ["unknown", []],
-  ];
-
-  it.each(WANT)("%s → %o", (state, want) => {
-    expect(stateOf(OF[state])).toBe(state);
-    expect(actionsFor(OF[state])).toEqual(want);
+describe("contextValueOf", () => {
+  it.each([
+    ["the server's actions, in its order", item({ actions: ["pause", "cancel"] }), "item:pause,cancel"],
+    ["gate first while one is pending", stopped("gate", { pending_gate: "spec", actions: ["reject", "retry"] }), "item:gate,reject,retry"],
+    ["no actions from an older server", item(), "item:"],
+    ["worktree last while it is on disk", item({ actions: ["pause", "cancel"], worktree_exists: true }), "item:pause,cancel,worktree"],
+    ["no worktree once it was reclaimed", item({ actions: ["pause", "cancel"], worktree_exists: false }), "item:pause,cancel"],
+    ["a gate with its worktree", stopped("gate", { pending_gate: "spec", actions: ["reject"], worktree_exists: true }), "item:gate,reject,worktree"],
+  ])("%s", (_, it_, want) => {
+    expect(contextValueOf(it_)).toBe(want);
   });
 
-  it("an archived row has no actions, whatever its display status", () => {
-    expect(stateOf(archivedNeedsYou)).toBe("archived");
-    expect(actionsFor(archivedNeedsYou)).toEqual([]);
-  });
-
-  it("covers every state", () => {
-    expect(WANT.map(([s]) => s).sort()).toEqual(Object.keys(OF).sort());
+  it("a menu keyed on one action matches no other", () => {
+    const value = contextValueOf(stopped("budget", { actions: ["raise_budget"] }));
+    expect(value).not.toMatch(/\bbudget\b/);
+    expect(value).toMatch(/\braise_budget\b/);
   });
 });
 
@@ -164,14 +128,6 @@ it.each([
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });
 
-it.each([
-  ["a worktree on disk", item({ id: "x", worktree_exists: true }), "item:pause,cancel,worktree"],
-  ["a reclaimed worktree", item({ id: "x", worktree_exists: false }), "item:pause,cancel"],
-  ["an older server's row", item({ id: "x" }), "item:pause,cancel"],
-  ["a gate", stopped("gate", { pending_gate: "spec", worktree_exists: true }), "item:gate,skip,cancel,worktree"],
-])("context value: %s", (_, it_, want) => {
-  expect(contextValueOf(it_)).toBe(want);
-});
 
 it.each([
   ["exists, with a path", item({ worktree_exists: true, worktree_path: "/k/run/worktrees/K-1" }), "/k/run/worktrees/K-1"],

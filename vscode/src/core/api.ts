@@ -1,8 +1,11 @@
-import type { Finding, WorkItem } from "../../../frontend/src/types";
+import type { Finding, WorkItem as BoardItem } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ConnectedRepo } from "./repoScope";
+import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
-export type { Finding, WorkItem, WorkItemDiff };
+export type { Finding, ItemAction, WorkItemDiff };
+/** A board row, with the doors the server would admit now (absent from a server before `actions`). */
+export type WorkItem = BoardItem & { actions?: ItemAction[] };
 
 export interface Health { version: string; run_dir: string; status: string }
 export type WorkItemDetail = WorkItem & {
@@ -87,6 +90,11 @@ export class Api {
   skip = (id: string, note?: string) => this.req("POST", this.item(id, "/skip"), note ? { note } : {});
   escalate = (id: string, message: string) => this.req("POST", this.item(id, "/escalate"), { message });
   archive = (id: string) => this.req("POST", this.item(id, "/archive"));
+  /** `usd` null lifts the cap. */
+  raiseBudget = (id: string, usd: number | null) => this.req("POST", this.item(id, "/budget/raise"), { budget_usd: usd });
+  unblock = (id: string) => this.req("POST", this.item(id, "/unblock"));
+  complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
+  restore = (id: string) => this.req("POST", this.item(id, "/restore"));
 
   check = (file: string, text: string) => this.req<{ issues: ConfigIssue[] }>("POST", "/templates/check", { file, text });
   lint = () => this.req<LintReport>("GET", "/templates/lint");

@@ -100,6 +100,20 @@ class SteerError(ValueError):
         self.field = field
 
 
+def agent_task_paths(row, chain=store.UNREAD) -> list[str]:
+    """The agent task paths of the node the item stands on, in chain order:
+    `[]` off its chain, and for a legacy row with no materialized chain.
+    `chain` is the row's materialized chain when the caller already read it."""
+    from kraft.templates.models import AgentTask
+
+    chain = store.materialized_chain_of(row) if chain is store.UNREAD else chain
+    if chain is None:
+        return []
+    node = next((n for n in chain.chain.nodes if n.id == row["current_node_id"]), None)
+    own = [t for s in node.steps for t in s.tasks] if node is not None else []
+    return [t.path for t in own if isinstance(t.task, AgentTask)]
+
+
 def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str, str | None] | None:
     """Who a resume's steer reaches, by task path.
 
@@ -114,16 +128,14 @@ def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str,
     from kraft.templates.forks import ChainPath, PathError
     from kraft.templates.models import AgentTask
 
-    chain = store.materialized_chain_of(row)
-    if chain is None:
-        # A legacy row, which no walk can run: the walk says so, not this.
-        return None
     node_id = row["current_node_id"]
-    node = next((n for n in chain.chain.nodes if n.id == node_id), None)
-    own = [t for s in node.steps for t in s.tasks] if node is not None else []
-    agents = [t.path for t in own if isinstance(t.task, AgentTask)]
+    agents = agent_task_paths(row)
     latest = db.read(lambda c: store.latest_session_per_task(c, row["id"], node_id, agents))
     paused = [r["hook_point"] for r in latest if r["status"] == SessionStatus.PAUSED]
+    chain = store.materialized_chain_of(row) if steers else None
+    if steers and chain is None:
+        # A legacy row, which no walk can run: the walk says so, not this.
+        return None
     for path in steers:
         field = f"steers.{path}"
         try:

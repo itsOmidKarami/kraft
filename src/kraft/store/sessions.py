@@ -19,6 +19,7 @@ from kraft.vocab import (
     SessionEvent,
     SessionStatus,
     WorkItemEvent,
+    WorkItemStatus,
 )
 from kraft.vocab.sql import in_list
 
@@ -389,6 +390,10 @@ def reusable_session(
     ).fetchone()
 
 
+#: Which of a task's sessions is its latest: a still-open one, then the newest.
+_LATEST_FIRST = f"(status IN ({in_list(LIVE)})) DESC, created_at DESC, id DESC"
+
+
 def latest_session_per_task(
     conn: sqlite3.Connection, work_item_id: str, node_id: str, tasks: list[str]
 ) -> list[sqlite3.Row]:
@@ -432,13 +437,35 @@ def latest_session_per_task(
     for hook_point in tasks:
         row = conn.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND hook_point = ? "
-            f"ORDER BY (status IN ({in_list(LIVE)})) DESC, created_at DESC LIMIT 1",
+            f"AND hook_point = ? ORDER BY {_LATEST_FIRST} LIMIT 1",
             (work_item_id, node_id, hook_point),
         ).fetchone()
         if row is not None:
             rows.append(row)
     return rows
+
+
+def latest_session_per_task_at_current_node(
+    conn: sqlite3.Connection,
+) -> dict[str, list[sqlite3.Row]]:
+    """`latest_session_per_task` for every paused work item at once, by item
+    id: the latest session of each hook point that has run at the node the
+    item stands on, in one query. A caller picks the hook points it declares.
+    Paused items only: what the board asks is which agent task a pause stopped."""
+    rows = conn.execute(
+        "SELECT * FROM ("
+        f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY work_item_id, hook_point "
+        f"  ORDER BY {_LATEST_FIRST}) AS latest FROM ("
+        "    SELECT s.* FROM worker_sessions s"
+        "    JOIN work_items w ON w.id = s.work_item_id AND w.current_node_id = s.node_id"
+        "    WHERE w.status = ?))"
+        " WHERE latest = 1",
+        (WorkItemStatus.PAUSED,),
+    ).fetchall()
+    out: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        out.setdefault(row["work_item_id"], []).append(row)
+    return out
 
 
 def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -> None:

@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction } from "./actions";
-import type { Api, WorkItem } from "./core/api";
-import { contextValueOf, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Action, type Include, type Welcome } from "./core/board";
+import type { Api, ItemAction, WorkItem } from "./core/api";
+import { contextValueOf, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
@@ -102,14 +102,21 @@ export function registerBoard(
   scope.onChange(updateBadge);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
-  const act = (action: Action) => async (node?: { item?: WorkItem }) => {
+  const act = (action: ItemAction) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
     if (!item) return;
     await runAction(api, store, item, action);
   };
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
-  for (const a of ["pause", "resume", "retry", "cancel", "skip", "escalate", "archive"] as Action[]) {
-    context.subscriptions.push(vscode.commands.registerCommand(`kraft.${a}`, mutating(`kraft.${a}`, refusal, warn, act(a))));
+  // The board's own doors; approve and reject are registered in gates.ts, and
+  // steer, reopen_mr and abandon have no command here.
+  const COMMANDS: Partial<Record<ItemAction, string>> = {
+    pause: "kraft.pause", resume: "kraft.resume", retry: "kraft.retry", raise_budget: "kraft.raiseBudget",
+    unblock: "kraft.unblock", skip: "kraft.skip", escalate: "kraft.escalate", complete: "kraft.complete",
+    cancel: "kraft.cancel", restore: "kraft.restore", archive: "kraft.archive",
+  };
+  for (const [a, id] of Object.entries(COMMANDS) as [ItemAction, string][]) {
+    context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, act(a))));
   }
   context.subscriptions.push(
     view,

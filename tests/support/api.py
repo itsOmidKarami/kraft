@@ -395,18 +395,24 @@ def run_with_app(api, scenario):
 
 
 def _create_escalation_session(
-    wid: str, session_id: str, node_id: str, *, pid: int | None = None
+    wid: str,
+    session_id: str,
+    node_id: str,
+    *,
+    pid: int | None = None,
+    hook_point: str = "escalation",
+    status: str = "running",
 ) -> None:
-    """A live `worker_sessions` row for `wid` (`hook_point='escalation'`,
-    `status='running'`) -- the shape `retry`'s self-retry check reads,
-    without actually dispatching an agent."""
+    """A `worker_sessions` row for `wid`, by default a live escalation turn
+    (`hook_point='escalation'`, `status='running'`) -- the shape `retry`'s
+    self-retry check reads, without actually dispatching an agent."""
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     try:
         conn.execute(
             "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
-            "log_path, result_path, status, created_at) VALUES (?, ?, ?, 'escalation', ?, "
-            "'x', 'x', 'running', datetime('now'))",
-            (session_id, wid, node_id, pid),
+            "log_path, result_path, status, created_at) VALUES (?, ?, ?, ?, ?, "
+            "'x', 'x', ?, datetime('now'))",
+            (session_id, wid, node_id, hook_point, pid, status),
         )
         conn.commit()
     finally:
@@ -416,6 +422,8 @@ def _create_escalation_session(
 def _in_state(client, repo, state: dict) -> str:
     """A default-chain item put in `state` (a `lifecycle_doors.json` row) directly."""
     from kraft import events, store
+    from kraft.templates.models import AgentTask
+    from kraft.vocab import ThreadLabel
 
     wid = _paused(client, repo, chain_template="default")
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
@@ -448,6 +456,12 @@ def _in_state(client, repo, state: dict) -> str:
             )
         if dep:
             c.execute("UPDATE work_items SET depends_on = ? WHERE id = ?", (json.dumps([dep]), wid))
+            if state["depends_on"] == "abandoned":
+                c.execute("UPDATE work_items SET status = 'abandoned' WHERE id = ?", (dep,))
+        if state.get("must_fix"):
+            store.create_thread(
+                c, wid=wid, gate=state["gate"], anchor_sha="x", body="b", label=ThreadLabel.MUST_FIX
+            )
         if state.get("archived"):
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
@@ -459,6 +473,17 @@ def _in_state(client, repo, state: dict) -> str:
             c,
         ):
             events.append(c, wid, "escalation_message", {"session_id": f"esc-{wid}"})
+    if state.get("paused_agent"):
+        # Paused at the node's first agent task, as a pause leaves it.
+        with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        chain = store.materialized_chain_of(row).chain
+        node = next(n for n in chain.nodes if n.id == state["node"])
+        task = next(t for s in node.steps for t in s.tasks if isinstance(t.task, AgentTask))
+        _create_escalation_session(
+            wid, f"agent-{wid}", state["node"], hook_point=task.path, status="paused"
+        )
     return wid
 
 

@@ -6,15 +6,17 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, events, executor, storage, store
+from kraft import caps, escalate, events, executor, storage, store
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 from kraft.cap_levels import SCOPE_CAP_FIELDS
+from kraft.templates.forks import ChainPath
 from kraft.vocab import (
     COMMANDS_MAY_START,
+    ENDED,
     FAILURE_KINDS,
     GATE_CLOSED,
     LIVE,
@@ -22,15 +24,21 @@ from kraft.vocab import (
     TRAITS,
     ChainEvent,
     DisplayStatus,
+    DoorFacts,
     EscalationEvent,
     ForgeEvent,
     GateEvent,
     LimitEvent,
     SessionEvent,
+    SessionStatus,
     StopKind,
+    ThreadLabel,
     ThreadState,
+    Verb,
     WorkItemEvent,
     WorkItemStatus,
+    admitting,
+    open_doors,
 )
 from kraft.vocab.sql import in_list
 
@@ -206,6 +214,74 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
     return executor.gate_artifact(st.run_dirs, row, gate)
 
 
+def next_skippable_node(row, pending_gate: str | None, chain=None) -> str | None:
+    """The node a node skip would pass -- the pending gate, else the current
+    node -- when it is on the chain and allows skipping. None otherwise, and
+    for a legacy row with no materialized chain, which nothing walks. `chain`
+    is the row's materialized chain when the caller already read it."""
+    chain = chain or store.materialized_chain_of(row)
+    node_id = pending_gate or row["current_node_id"]
+    if chain is None or node_id not in {n.id for n in chain.chain.nodes}:
+        return None
+    return node_id if ChainPath.parse(chain, node_id).skippable else None
+
+
+def raisable(stop_payload: dict | None) -> bool:
+    """Whether `budget/raise` takes the spend cap this stop names: the item's
+    own, or its policy's item-wide `budget_usd` (`lifecycle.raise_budget`)."""
+    budget = (stop_payload or {}).get("budget") or {}
+    scope = budget.get("scope")
+    return scope == "work_item" or (scope == "usd" and budget.get("path") == "")
+
+
+def item_actions(
+    app,
+    row,
+    *,
+    pending_gate: str | None,
+    stop_payload: dict | None,
+    mr_ref: dict | None,
+    escalation_live: bool,
+    agent_paused: bool,
+    unmet_dependency: bool,
+    dead_dependency: bool,
+    must_fix_open: bool,
+    chain=store.UNREAD,
+) -> list[str]:
+    """`actions`: the doors `open_doors` finds open on the facts the routes
+    check. The caller reads the per-item facts (the list from its grouped
+    queries, the detail per item). The chain is read here, and only for a
+    status whose door asks, unless the caller passes the one it read."""
+    status = WorkItemStatus(row["status"])
+    reason = (stop_payload or {}).get("reason") or ""
+    # Read once, and only for a door that walks it. A legacy row has none:
+    # retry, skip and a gate's doors all answer it with a failure.
+    asks = pending_gate is not None or status in (*admitting(Verb.RETRY), *admitting(Verb.SKIP))
+    if chain is store.UNREAD:
+        chain = store.materialized_chain_of(row) if asks else None
+    facts = DoorFacts(
+        status,
+        archived=row["archived_at"] is not None,
+        started=row["current_node_id"] is not None,
+        on_chain=chain is not None and row["current_node_id"] in {n.id for n in chain.chain.nodes},
+        skippable=chain is not None
+        and status in admitting(Verb.SKIP)
+        and next_skippable_node(row, pending_gate, chain) is not None,
+        pending_gate=chain is not None and pending_gate is not None,
+        question=reason.startswith("needs_context:"),
+        budget_stop=bool((stop_payload or {}).get("budget")),
+        raisable=raisable(stop_payload),
+        mr_closed=row["stop_kind"] == StopKind.MR_CLOSED and mr_ref is not None,
+        walk_live=deps.task_is_live(app, row["id"]),
+        escalation_live=escalation_live,
+        agent_paused=agent_paused,
+        unmet_dependency=unmet_dependency,
+        dead_dependency=dead_dependency,
+        must_fix_open=must_fix_open,
+    )
+    return [str(a) for a in open_doors(facts)]
+
+
 # B10.
 @api_router.get("/budget/today")
 async def budget_today(request: Request):
@@ -292,7 +368,46 @@ async def list_work_items(request: Request):
             " JOIN work_items w ON w.id = s.work_item_id AND w.current_node_id = s.node_id"
             " WHERE s.hook_point != 'escalation' ORDER BY s.created_at"
         ).fetchall()
-        return rows, cursor, gates, launches, boundaries, escalations, mr_events, roots, tasks
+        # `actions`' second facts, each one grouped query rather than the
+        # per-item read a door makes.
+        doors = {
+            "escalating": {
+                r[0]
+                for r in c.execute(
+                    "SELECT DISTINCT work_item_id FROM worker_sessions "
+                    f"WHERE hook_point = 'escalation' AND status IN ({in_list(LIVE)})"
+                )
+            },
+            "latest": store.latest_session_per_task_at_current_node(c),
+            # The status of every item some item comes after.
+            "dependency": {
+                r[0]: r[1]
+                for r in c.execute(
+                    "SELECT DISTINCT d.value, w.status FROM work_items x, json_each(x.depends_on) d"
+                    " JOIN work_items w ON w.id = d.value"
+                )
+            },
+            "must_fix": {
+                r[0]
+                for r in c.execute(
+                    "SELECT DISTINCT work_item_id FROM review_threads "
+                    "WHERE label = ? AND state != ?",
+                    (ThreadLabel.MUST_FIX, ThreadState.RESOLVED),
+                )
+            },
+        }
+        return (
+            rows,
+            cursor,
+            gates,
+            launches,
+            boundaries,
+            escalations,
+            mr_events,
+            roots,
+            tasks,
+            doors,
+        )
 
     (
         rows,
@@ -304,6 +419,7 @@ async def list_work_items(request: Request):
         mr_event_rows,
         root_rows,
         task_rows,
+        doors,
     ) = st.db.read(_read)
     latest: dict[tuple[str, str], dict] = {
         (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
@@ -328,9 +444,33 @@ async def list_work_items(request: Request):
             and _turn_live(last["session_status"], last["created_at"])
         )
 
-    chains = {r["id"]: store.chain_view(r) for r in rows}
-    items = [
-        {
+    def _list_actions(r, mr_ref: dict | None, chain) -> list[str]:
+        wid, status = r["id"], r["status"]
+        latest = doors["latest"].get(wid, []) if status == WorkItemStatus.PAUSED else []
+        paused = {s["hook_point"] for s in latest if s["status"] == SessionStatus.PAUSED}
+        statuses = (doors["dependency"].get(d) for d in json.loads(r["depends_on"] or "[]"))
+        unmet = [s for s in statuses if s not in (None, WorkItemStatus.COMPLETED)]
+        return item_actions(
+            request.app,
+            r,
+            pending_gate=pending.get(wid),
+            stop_payload=_boundary_payload(boundary_by_item.get(wid)),
+            mr_ref=mr_ref,
+            escalation_live=wid in doors["escalating"],
+            agent_paused=bool(paused) and bool(paused & set(executor.agent_task_paths(r, chain))),
+            unmet_dependency=bool(unmet),
+            dead_dependency=WorkItemStatus.ABANDONED in unmet,
+            must_fix_open=wid in doors["must_fix"],
+            chain=chain,
+        )
+
+    def _item(r) -> dict:
+        mr_ref = _pick_mr_ref(
+            r["id"] in root_mr_by_item,
+            root_mr_by_item.get(r["id"]),
+            mr_event_by_item.get(r["id"]),
+        )
+        return {
             "id": r["id"],
             "title": r["title"],
             "description": r["description"],
@@ -365,18 +505,18 @@ async def list_work_items(request: Request):
             ),
             "stop": _list_stop(r, pending.get(r["id"]), boundary_by_item.get(r["id"])),
             "step": _step_of(r, chains[r["id"]], task_by_item.get(r["id"]), with_task=True),
-            "mr_ref": _pick_mr_ref(
-                r["id"] in root_mr_by_item,
-                root_mr_by_item.get(r["id"]),
-                mr_event_by_item.get(r["id"]),
-            ),
+            "mr_ref": mr_ref,
+            # The doors a request would be admitted through now (`open_doors`).
+            "actions": _list_actions(r, mr_ref, parsed[r["id"]]),
             # One `is_dir` per row: the VS Code board offers Open Worktree only
             # while the directory is there, without a detail fetch per row.
             "worktree_exists": (st.run_dirs.worktrees / r["id"]).is_dir(),
         }
-        for r in rows
-    ]
-    return {"items": items, "cursor": cursor}
+
+    # Each row's chain parsed once, for the stage bar and `actions` both.
+    parsed = {r["id"]: store.materialized_chain_of(r) for r in rows}
+    chains = {r["id"]: store.chain_view(r, parsed[r["id"]]) for r in rows}
+    return {"items": [_item(r) for r in rows], "cursor": cursor}
 
 
 def _boundary_payload(boundary) -> dict | None:
@@ -1085,6 +1225,28 @@ async def get_work_item(wid: str, request: Request):
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
     progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid)
+    mr_ref = _mr_ref(st, wid)
+    status = row["status"]
+    # What it still comes after: unblock, and resume or retry past an abandoned one.
+    unmet = (
+        st.db.read(lambda c: store.unmet_dependencies(c, wid))
+        if status in (*admitting(Verb.UNBLOCK), *admitting(Verb.RETRY))
+        else []
+    )
+    actions = item_actions(
+        request.app,
+        row,
+        pending_gate=pending,
+        stop_payload=stop_payload,
+        mr_ref=mr_ref,
+        escalation_live=status not in ENDED and escalate.escalation_running(st.db, wid) is not None,
+        agent_paused=status == WorkItemStatus.PAUSED
+        and executor.resume_steer(st.db, row, None, {}) is not None,
+        unmet_dependency=bool(unmet),
+        dead_dependency=any(d["status"] == WorkItemStatus.ABANDONED for d in unmet),
+        must_fix_open=pending is not None
+        and bool(st.db.read(lambda c: store.open_must_fix(c, wid))),
+    )
     return {
         # The override columns decoded, as every action and gate echo has them.
         **payload,
@@ -1212,7 +1374,9 @@ async def get_work_item(wid: str, request: Request):
         "needs_context_question": _needs_context_question(st, wid),
         # The root repo's merge request, once `open_mr` has run -- the detail
         # screen's one link out to the forge.
-        "mr_ref": _mr_ref(st, wid),
+        "mr_ref": mr_ref,
+        # The doors a request would be admitted through now (`open_doors`).
+        "actions": actions,
         # Whether a steer given now would be accepted (Kraft-bz9b, Ruling
         # 183): the detail screen uses this to drop the steer box entirely
         # rather than offer text the route would 409 on. A paused item needs

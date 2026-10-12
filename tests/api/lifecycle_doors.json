@@ -22,6 +22,16 @@
       "node": "implementation",
       "walk": true
     },
+    "paused_agent": {
+      "status": "paused",
+      "node": "implementation",
+      "paused_agent": true
+    },
+    "paused_after_abandoned": {
+      "status": "paused",
+      "node": "implementation",
+      "depends_on": "abandoned"
+    },
     "not_started": {
       "status": "paused",
       "node": null
@@ -42,6 +52,12 @@
       "node": "spec_approval",
       "gate": "spec_approval",
       "escalation": true
+    },
+    "gate_must_fix": {
+      "status": "needs_human",
+      "node": "spec_approval",
+      "gate": "spec_approval",
+      "must_fix": true
     },
     "question": {
       "status": "needs_human",
@@ -79,6 +95,13 @@
       "node": "implementation",
       "stop": "infra",
       "reason": "a session was lost"
+    },
+    "failed_after_abandoned": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "failed",
+      "reason": "the forge refused",
+      "depends_on": "abandoned"
     },
     "budget_item_cap": {
       "status": "needs_human",
@@ -167,6 +190,7 @@
       "body": {},
       "takes": [
         "paused",
+        "paused_agent",
         "not_started",
         "question"
       ]
@@ -177,6 +201,7 @@
       "takes": [
         "gate",
         "gate_with_escalation",
+        "gate_must_fix",
         "question",
         "stuck",
         "cap",
@@ -196,13 +221,17 @@
         "running",
         "waiting_ci",
         "paused",
+        "paused_agent",
+        "paused_after_abandoned",
         "gate",
+        "gate_must_fix",
         "question",
         "stuck",
         "cap",
         "conflict",
         "failed",
         "infra",
+        "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
         "mr_closed"
@@ -215,13 +244,17 @@
       },
       "takes": [
         "paused",
+        "paused_agent",
+        "paused_after_abandoned",
         "gate",
+        "gate_must_fix",
         "question",
         "stuck",
         "cap",
         "conflict",
         "failed",
         "infra",
+        "failed_after_abandoned",
         "mr_closed"
       ]
     },
@@ -252,16 +285,54 @@
         "rate_limited",
         "paused",
         "paused_walk_live",
+        "paused_agent",
+        "paused_after_abandoned",
         "not_started",
         "gate",
         "gate_under_review",
         "gate_with_escalation",
+        "gate_must_fix",
         "question",
         "stuck",
         "cap",
         "conflict",
         "failed",
         "infra",
+        "failed_after_abandoned",
+        "budget_item_cap",
+        "budget_daily",
+        "mr_closed",
+        "escalated",
+        "queued",
+        "queued_at_gate",
+        "blocked"
+      ]
+    },
+    "complete": {
+      "path": "complete",
+      "body": {
+        "reason": "r"
+      },
+      "takes": [
+        "running",
+        "waiting_ci",
+        "rate_limited",
+        "paused",
+        "paused_walk_live",
+        "paused_agent",
+        "paused_after_abandoned",
+        "not_started",
+        "gate",
+        "gate_under_review",
+        "gate_with_escalation",
+        "gate_must_fix",
+        "question",
+        "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
+        "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
@@ -296,12 +367,25 @@
         "gate_with_escalation"
       ]
     },
+    "reject": {
+      "path": "gates/spec_approval/reject",
+      "body": {
+        "note": "r"
+      },
+      "takes": [
+        "gate",
+        "gate_under_review",
+        "gate_with_escalation",
+        "gate_must_fix"
+      ]
+    },
     "steer": {
       "path": "steer",
       "body": {
         "text": "go left"
       },
       "takes": [
+        "paused_agent",
         "not_started",
         "question"
       ]
@@ -314,16 +398,20 @@
         "rate_limited",
         "paused",
         "paused_walk_live",
+        "paused_agent",
+        "paused_after_abandoned",
         "not_started",
         "gate",
         "gate_under_review",
         "gate_with_escalation",
+        "gate_must_fix",
         "question",
         "stuck",
         "cap",
         "conflict",
         "failed",
         "infra",
+        "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
@@ -342,6 +430,8 @@
       "takes": [
         "paused",
         "paused_walk_live",
+        "paused_agent",
+        "paused_after_abandoned",
         "not_started",
         "blocked"
       ]

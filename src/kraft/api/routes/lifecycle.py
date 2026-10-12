@@ -1844,7 +1844,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         if node_index is None or node_index >= len(node_ids):
             raise HTTPException(409, "work item has no current node to skip")
         node_id = node_ids[node_index]
-        if not ChainPath.parse(walk.chain_of(row), node_id).skippable:
+        if board.next_skippable_node(row, gate) != node_id:
             raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
