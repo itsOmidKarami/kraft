@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewThread } from "../../src/core/api";
-import { T } from "./fixtures/thread";
+import type { ReviewComment, ReviewThread } from "../../src/core/api";
 import {
-  clampLines, fitPlace, placeKey, placeThread, selectionLines, sideOfScheme, toThreadIn, type Lines, type Place,
+  authorName, clampLines, commentContext, commentMarkdown, commentPatch, discardPlan, fitPlace, otherThreadsText, placeKey, placeThread,
+  selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type WriteTarget,
 } from "../../src/core/threads";
+import { C, T } from "./fixtures/thread";
 
 const shown = { files: ["src/a.py", "gone.py", "new/name.py"], renames: new Map([["new/name.py", "old/name.py"]]) };
 
@@ -91,4 +92,98 @@ describe("toThreadIn", () => {
     const t = toThreadIn(scheme, file, lines, "b", null, shown.renames)!;
     expect(placeThread(T(t as Partial<ReviewThread>), shown)).toEqual({ kind: "file", file, side: sideOfScheme(scheme), lines });
   });
+});
+
+describe("threadLabel", () => {
+  it.each<{ id: string; t: Partial<ReviewThread>; want: string | undefined }>([
+    { id: "draft must-fix", t: { draft: true, label: "must_fix" }, want: "Draft · Must fix" },
+    { id: "submitted claimed question", t: { label: "question", state: "claimed" }, want: "Question · Claimed" },
+    { id: "submitted open, no label", t: {}, want: undefined },
+    { id: "resolved nit", t: { label: "nit", state: "resolved" }, want: "Nit · Resolved" },
+  ])("$id", ({ t, want }) => expect(threadLabel(T(t))).toBe(want));
+});
+
+describe("threadContext", () => {
+  it.each<{ id: string; t: Partial<ReviewThread>; want: string }>([
+    { id: "a draft can be relabelled, never resolved", t: { draft: true }, want: "kraft-thread:can-label" },
+    { id: "open submitted", t: {}, want: "kraft-thread:can-resolve" },
+    { id: "claimed", t: { state: "claimed" }, want: "kraft-thread:can-resolve" },
+    { id: "resolved", t: { state: "resolved" }, want: "kraft-thread:can-reopen" },
+  ])("$id", ({ t, want }) => expect(threadContext(T(t))).toBe(want));
+});
+
+it.each([
+  { id: "your draft", c: { draft: true }, want: "kraft-comment:mine-draft" },
+  { id: "your submitted", c: {}, want: "kraft-comment:" },
+  { id: "an agent's", c: { author: "implement", review_id: null }, want: "kraft-comment:" },
+])("commentContext: $id", ({ c, want }) => expect(commentContext(T(), C(c))).toBe(want));
+
+it.each([
+  { c: { draft: true }, want: "You (draft)" },
+  { c: {}, want: "You" },
+  { c: { author: "implement" }, want: "implement" },
+])("authorName $want", ({ c, want }) => expect(authorName(C(c))).toBe(want));
+
+describe("writeTarget", () => {
+  const first = C({ id: "c1", draft: true });
+  const second = C({ id: "c2", draft: true });
+  it.each<{ id: string; t: ReviewThread; c: ReviewComment; want: WriteTarget }>([
+    { id: "a draft thread's first comment is the thread", t: T({ draft: true, comments: [first, second] }), c: first, want: { kind: "thread", tid: "t1" } },
+    { id: "your draft reply on a submitted thread", t: T({ comments: [C(), second] }), c: second, want: { kind: "comment", cid: "c2" } },
+    { id: "your draft second comment on a draft thread", t: T({ draft: true, comments: [first, second] }), c: second, want: { kind: "comment", cid: "c2" } },
+  ])("$id", ({ t, c, want }) => expect(writeTarget(t, c)).toEqual(want));
+});
+
+it("commentPatch sends the comment's suggestion back", () => {
+  const suggestion = { start_line: 1, end_line: 1, replacement: "y" };
+  expect(commentPatch(C({ suggestion }), "x")).toEqual({ body: "x", suggestion });
+});
+
+describe("commentMarkdown", () => {
+  it("fences a replacement holding triple backticks with four", () =>
+    expect(commentMarkdown(C({ body: "b", suggestion: { start_line: 2, end_line: 3, replacement: "a ``` b" } }))).toBe(
+      "b\n\nSuggested replacement for lines 2-3:\n\n````\na ``` b\n````"));
+  it("adds the claim", () => expect(commentMarkdown(C({ body: "done", claim: "fixed" }))).toBe("done\n\n_fixed_"));
+  it("is the body alone otherwise", () => expect(commentMarkdown(C({ body: "b" }))).toBe("b"));
+});
+
+it("discardPlan deletes draft threads whole and your draft replies one by one, counting every draft", () => {
+  const threads = [
+    T({ id: "t1", draft: true, comments: [C({ id: "c1", draft: true }), C({ id: "c2", draft: true })] }),
+    T({ id: "t2", comments: [C({ id: "c3" }), C({ id: "c_reply_on_t2", draft: true }), C({ id: "c5", author: "implement" })] }),
+    T({ id: "t3", comments: [C({ id: "c6" })] }),
+  ];
+  expect(discardPlan(threads)).toEqual({ threads: ["t1"], comments: ["c_reply_on_t2"], count: 3 });
+});
+
+describe("otherThreadsText", () => {
+  const threads = [
+    T({ id: "a", file_path: "x.py", start_line: 3, comments: [C({ body: "on x\nmore" })] }),
+    T({ id: "b", file_path: null, comments: [C({ body: "overall" })] }),
+    T({ id: "c", file_path: "y.py", start_line: null, comments: [C({ body: "on y" })] }),
+    T({ id: "d", comments: [C({ body: "drawn" })] }),
+  ];
+  const places = new Map<string, Place>([["a", { kind: "elsewhere" }], ["b", { kind: "whole" }], ["c", { kind: "elsewhere" }]]);
+
+  it("lists the whole change, then the files not in this comparison", () => {
+    const { text, lineOf } = otherThreadsText("K-1", threads, places);
+    expect(text).toBe([
+      "# K-1: threads not on a file in this review", "",
+      "## On the whole change", "", "- overall", "",
+      "## Threads on files not in this comparison", "", "- x.py:3: on x", "- y.py: on y", "",
+    ].join("\n"));
+    expect([...lineOf]).toEqual([["b", 4], ["a", 8], ["c", 9]]);
+  });
+
+  it("leaves out an empty group's heading", () =>
+    expect(otherThreadsText("K-1", threads, new Map([["a", { kind: "elsewhere" }]])).text).not.toContain("On the whole change"));
+});
+
+it("syncPlan draws the new, redraws the moved, updates the rest and drops the gone", () => {
+  const drawn = new Map([["same", "k1"], ["moved", "k2"], ["gone", "k3"]]);
+  const next = [{ id: "same", k: "k1" }, { id: "moved", k: "k9" }, { id: "fresh", k: "k4" }];
+  const plan = syncPlan(drawn, next, (t) => t.k);
+  expect(plan.create.map((t) => t.id)).toEqual(["moved", "fresh"]);
+  expect(plan.update.map((t) => t.id)).toEqual(["same"]);
+  expect(plan.remove).toEqual(["moved", "gone"]);
 });
