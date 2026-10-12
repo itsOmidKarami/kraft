@@ -1,3 +1,5 @@
+import type { BudgetToday } from "../../../frontend/src/types";
+import { todayLine } from "./spend";
 import type { ConnError } from "./store";
 
 export const NOT_RUNNING = "Kraft isn't running — Start";
@@ -23,12 +25,24 @@ export function statusMenu(connected: boolean): { label: string; choice: MenuCho
   ];
 }
 
-/** The status bar's hover. Connected: the read-only reasons (`readOnly.tooltip`). Down:
- *  the down row's reason, since that row shows only while the board is empty; with no
- *  error yet (a socket that dropped after it opened), it is reconnecting. */
-export function statusTooltip(connected: boolean, readOnly: string | undefined, err: ConnError | null): string | undefined {
-  if (connected) return readOnly;
+/** The status bar's hover. Connected: the read-only reasons (`readOnly.tooltip`) and
+ *  today's spend, either alone. Down: the down row's reason, since that row shows only
+ *  while the board is empty; with no error yet (a socket that dropped after it opened),
+ *  it is reconnecting. Spend is ignored while down: it may be stale. */
+export function statusTooltip(connected: boolean, readOnly: string | undefined, err: ConnError | null, today?: BudgetToday | null): string | undefined {
+  if (connected) return [readOnly, todayLine(today)].filter(Boolean).join("\n\n") || undefined;
   return err ? downRow(err).label : RECONNECTING;
+}
+
+/** A gate that opens at most once per `ms`. `force` always opens it and restarts the window. */
+export function every(ms: number, now: () => number = Date.now): (force?: boolean) => boolean {
+  let last = -Infinity;
+  return (force = false) => {
+    const t = now();
+    if (!force && t - last < ms) return false;
+    last = t;
+    return true;
+  };
 }
 
 /** True the first time it sees each key, false after. */

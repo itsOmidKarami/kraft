@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptHealth, downRow, onceEach, statusMenu, statusTooltip } from "../../src/core/health";
+import { acceptHealth, downRow, every, onceEach, statusMenu, statusTooltip } from "../../src/core/health";
 
 describe("health", () => {
   it.each([
@@ -30,7 +30,22 @@ describe("health", () => {
     ["reconnecting after the socket dropped", false, undefined, null, "Kraft: reconnecting…"],
     ["connected in Restricted Mode", true, "Restricted Mode: trust this workspace", null, "Restricted Mode: trust this workspace"],
     ["connected and writable", true, undefined, null, undefined],
-  ])("statusTooltip: %s", (_, connected, readOnly, err, want) => expect(statusTooltip(connected, readOnly, err)).toBe(want));
+    ["writable with today's spend", true, undefined, null, "Today: $1.20 of $20.00", { spent_usd: 1.2, cap_usd: 20 }],
+    ["read-only with today's spend", true, "why", null, "why\n\nToday: $0.500 (no daily cap)", { spent_usd: 0.5, cap_usd: null }],
+    ["down ignores today's spend", false, undefined, null, "Kraft: reconnecting…", { spent_usd: 1.2, cap_usd: 20 }],
+  ])("statusTooltip: %s", (_, connected, readOnly, err, want, today?) => expect(statusTooltip(connected, readOnly, err, today)).toBe(want));
+
+  it("every opens at most once per window, and always when forced", () => {
+    let t = 0;
+    const due = every(30_000, () => t);
+    const seen = [due()];
+    t = 29_999; seen.push(due());
+    t = 30_000; seen.push(due());
+    t = 30_001; seen.push(due(), due(true));
+    t = 59_999; seen.push(due());
+    t = 60_001; seen.push(due());
+    expect(seen).toEqual([true, false, true, false, true, false, true]);
+  });
 
   it.each([
     ["the latest reply while connected", 3, 3, true, true],

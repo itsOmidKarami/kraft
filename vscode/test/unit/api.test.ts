@@ -76,6 +76,7 @@ describe("Api", () => {
   it.each([
     ["an attachment", (a: Api) => a.attachment("K 1", "plan"), "/work-items/K%201/attachments/plan"],
     ["a document", (a: Api) => a.document("doc/1"), "/documents/doc%2F1"],
+    ["today's spend", (a: Api) => a.budgetToday(), "/budget/today"],
   ])("reads %s", async (_, call, path) => {
     const f = fakeFetch(200, { title: "T" });
     expect(await call(new Api("http://h:1", undefined, f as any))).toEqual({ title: "T" });

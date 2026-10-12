@@ -1,5 +1,5 @@
 import type {
-  ChainNode, CommentReview, Finding, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  BudgetToday, ChainNode, CommentReview, Finding, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
   WorkerSession, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { DocumentDetail, WorkItemDiff } from "../../../frontend/src/types/documents";
@@ -175,6 +175,7 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
+  budgetToday = () => this.req<BudgetToday>("GET", "/budget/today");
   repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
   chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
   // Both resolve the chain on the server, and a create also runs intake.
