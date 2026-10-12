@@ -80,15 +80,23 @@ describe("toasts follow the window's scope", () => {
     const here = gate("spec");
     const there = stopped("gate", { id: "K-2", repo: "/other", pending_gate: "spec" });
     let items = [here, there];
-    const pass = (quiet = false) => a.considerAll(announceable(items, (i) => scope.includes(i, () => undefined)), quiet).map(([i]) => i.id);
+    const inScope = () => announceable(items, (i) => scope.includes(i, () => undefined));
+    const ids = (found: [{ id: string }, unknown][]) => found.map(([i]) => i.id);
+    // A store change, and a scope change, as gates.ts wires them.
+    const stored = () => ids(a.considerAll(inScope()));
+    const rescoped = () => ids(a.rescope(inScope(), scope.showAll));
 
-    const toasts = [pass()];
+    const toasts = [stored()];
     await scope.update(["/r"], "/k", noGit);
-    toasts.push(pass(), pass());
+    toasts.push(rescoped(), rescoped());
     scope.toggleAll();
-    toasts.push(pass(true), pass());
+    toasts.push(rescoped(), stored());
+    scope.toggleAll();
+    toasts.push(rescoped());
+    scope.toggleAll();
+    toasts.push(rescoped());
     items = [...items, stopped("gate", { id: "K-3", repo: "/other", pending_gate: "plan" })];
-    toasts.push(pass());
-    expect(toasts).toEqual([[], ["K-1"], [], [], [], ["K-3"]]);
+    toasts.push(stored());
+    expect(toasts).toEqual([[], ["K-1"], [], [], [], [], [], ["K-3"]]);
   });
 });

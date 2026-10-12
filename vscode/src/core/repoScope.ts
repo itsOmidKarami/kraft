@@ -79,10 +79,12 @@ function managedAncestor(root: string, connected: ConnectedRepo[], platform: Nod
   return undefined;
 }
 
-export async function folderScope(folder: string, runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = []): Promise<FolderScope> {
+export async function folderScope(
+  folder: string, runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = [], rootOf: typeof repoRoot = repoRoot,
+): Promise<FolderScope> {
   const real = await deps.realpath(folder).catch(() => folder);
   const realRun = await deps.realpath(runDir).catch(() => runDir);
-  const root = await repoRoot(folder, deps);
+  const root = await rootOf(folder, deps);
   const roots: string[] = [];
   for (const p of [folder, real, root, managedAncestor(root, connected, deps.platform)]) {
     if (p !== undefined && !roots.some((r) => samePath(r, p, deps.platform))) roots.push(p);
@@ -98,6 +100,8 @@ export class WorkspaceScope {
   private _showAll = false;
   private gen = 0;
   private listeners = new Set<() => void>();
+  // git runs once per folder: a new run_dir or connected list redoes only the cheap steps.
+  private rootCache = new Map<string, Promise<string>>();
 
   constructor(private platform: NodeJS.Platform) {}
 
@@ -113,8 +117,18 @@ export class WorkspaceScope {
   /** git is slow and folders change under it: the last call started wins. */
   async update(folders: string[], runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = []): Promise<void> {
     const gen = ++this.gen;
+    for (const f of this.rootCache.keys()) if (!folders.includes(f)) this.rootCache.delete(f);
+    const rootOf = (f: string, d: ScopeDeps) => {
+      let root = this.rootCache.get(f);
+      if (!root) {
+        root = repoRoot(f, d);
+        this.rootCache.set(f, root);
+        root.catch(() => this.rootCache.delete(f));
+      }
+      return root;
+    };
     const scopes = await Promise.all(
-      folders.map((f) => folderScope(f, runDir, deps, connected).catch((): FolderScope => {
+      folders.map((f) => folderScope(f, runDir, deps, connected, rootOf).catch((): FolderScope => {
         const worktreeItem = worktreeItemId(f, runDir, this.platform);
         return worktreeItem === undefined ? { roots: [f] } : { roots: [f], worktreeItem };
       })),
@@ -142,4 +156,18 @@ export class WorkspaceScope {
   private fire(): void {
     for (const cb of this.listeners) cb();
   }
+}
+
+/** At most one `GET /repos` per this long when the reason to read it again persists. */
+export const REFETCH_MS = 30_000;
+
+/** Whether to read `GET /repos` again: the last read failed (`known`
+ *  undefined), or an item is in a repo the list does not have, which a repo
+ *  connected since this window last read it would be. */
+export function refetchRepos(
+  items: Pick<WorkItem, "repo">[], known: ConnectedRepo[] | undefined, lastRead: number, now: number, platform: NodeJS.Platform,
+): boolean {
+  if (now - lastRead < REFETCH_MS) return false;
+  if (!known) return true;
+  return items.some((i) => !known.some((c) => samePath(c.path, i.repo, platform)));
 }

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { reportError } from "./actions";
-import type { Api } from "./core/api";
-import { Announcer } from "./core/announcer";
+import type { Api, WorkItem } from "./core/api";
+import { Announcer, type Announcement } from "./core/announcer";
 import { announceable, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
 import type { Artifact } from "./core/api";
@@ -100,9 +100,10 @@ export function registerGates(
     }
   });
 
-  const announce = (ids: string[] | "all", quiet = false) => {
-    const items = announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
-    for (const [item, a] of announcer.considerAll(items, quiet)) {
+  const scoped = (ids: string[] | "all") =>
+    announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
+  const toast = (found: [WorkItem, Announcement][]) => {
+    for (const [item, a] of found) {
       if (a.kind === "gate") {
         const buttons = ["Open", "Reject…"];
         void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
@@ -117,18 +118,12 @@ export function registerGates(
       }
     }
   };
-  store.onChange(announce);
+  store.onChange((ids) => toast(announcer.considerAll(scoped(ids))));
   store.onChange(() => shown.reconcile((id) => { const i = store.item(id); return i ? (i.pending_gate ?? null) : undefined; }));
-  // A scope that became ready announces what already waits in it, once (the
-  // announcer dedups). Turning on Show all repos only records what it adds:
-  // those stops were waiting before (amendment 7). Items out of scope are not
-  // considered, so a stop that changed while out of scope reads as new.
-  let showAll = scope.showAll;
-  scope.onChange(() => {
-    const widened = scope.showAll && !showAll;
-    showAll = scope.showAll;
-    announce("all", widened);
-  });
+  // A scope that became ready announces what already waits in it, once.
+  // Items out of scope are not considered, so a stop that changed while out
+  // of scope reads as new.
+  scope.onChange(() => toast(announcer.rescope(scoped("all"), scope.showAll)));
 
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.openArtifact", (arg?: unknown) => openArtifact(idOf(arg))),

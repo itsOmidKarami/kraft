@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderScope, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
+import { folderScope, REFETCH_MS, refetchRepos, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
 
 const TOP = "rev-parse --show-toplevel";
 const COMMON = "rev-parse --path-format=absolute --git-common-dir";
@@ -26,7 +26,7 @@ describe("repoRoot", () => {
     ["submodule", "/s/sub", { [`/s/sub|${TOP}`]: "/s/sub", [`/s/sub|${COMMON}`]: "/s/.git/modules/sub" }, {}, "/s/sub"],
     ["non-repo", "/tmp/x", {}, {}, "/tmp/x"],
     // git < 2.31 echoes the flag it does not know and prints the relative common dir, exit 0.
-    ["old git", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "--path-format=absolute\n/r/.git" }, {}, "/wt"],
+    ["old git", "/r/src", { [`/r/src|${TOP}`]: "/r", [`/r/src|${COMMON}`]: "--path-format=absolute\n../.git" }, {}, "/r"],
     ["more than one line", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "/a\n/r/.git" }, {}, "/wt"],
     ["relative common dir", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "../r/.git" }, {}, "/wt"],
     ["windows common dir", "C:/wt", { [`C:/wt|${TOP}`]: "C:/wt", [`C:/wt|${COMMON}`]: "C:/r/.git" }, {}, "C:/r"],
@@ -158,5 +158,33 @@ describe("WorkspaceScope", () => {
     const broken: ScopeDeps = { ...deps({}), git: async () => { throw new Error("spawn git ENOENT"); } };
     await scope.update(["/r", "/k/worktrees/A"], "/k", broken);
     expect([scope.ready, scope.includes({ id: "x", repo: "/r" }, none), scope.includes({ id: "A", repo: "/elsewhere" }, none)]).toEqual([true, true, true]);
+  });
+});
+
+describe("WorkspaceScope runs git once per folder", () => {
+  it("a new connected list or run_dir redoes only the cheap steps; a new folder asks git", async () => {
+    const calls: string[] = [];
+    const base = deps({ [`/s/sub|${TOP}`]: "/s/sub", [`/s/sub|${COMMON}`]: "/s/.git/modules/sub", [`/t|${TOP}`]: "/t", [`/t|${COMMON}`]: "/t/.git" });
+    const counted: ScopeDeps = { ...base, git: (args, cwd) => (calls.push(cwd), base.git(args, cwd)) };
+    const scope = new WorkspaceScope("linux");
+    await scope.update(["/s/sub"], "/k", counted);
+    await scope.update(["/s/sub"], "/k2", counted, [{ path: "/s" }]);
+    const afterRepeat = calls.length;
+    await scope.update(["/s/sub", "/t"], "/k2", counted, [{ path: "/s" }]);
+    expect([afterRepeat, calls.length, scope.includes({ id: "x", repo: "/s" }, () => undefined)]).toEqual([2, 4, true]);
+  });
+});
+
+describe("refetchRepos", () => {
+  const T = 100_000;
+  const known: ConnectedRepo[] = [{ path: "/r" }];
+  it.each([
+    ["every item's repo is known", [{ repo: "/r" }], known, T - REFETCH_MS, false],
+    ["an item in an unknown repo", [{ repo: "/r" }, { repo: "/new" }], known, T - REFETCH_MS, true],
+    ["an unknown repo, read less than 30s ago", [{ repo: "/new" }], known, T - REFETCH_MS + 1, false],
+    ["the last read failed", [], undefined, T - REFETCH_MS, true],
+    ["the last read failed less than 30s ago", [], undefined, T - 1, false],
+  ])("%s", (_, items, k, lastRead, want) => {
+    expect(refetchRepos(items, k as ConnectedRepo[] | undefined, lastRead, T, "linux")).toBe(want);
   });
 });

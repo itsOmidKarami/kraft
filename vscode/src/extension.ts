@@ -6,7 +6,6 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
-import type { ConnectedRepo } from "./core/repoScope";
 import { registerRepoScope } from "./repoScope";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
@@ -54,10 +53,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   let connected = false;
   let runDir = loc.runDir;
   // Before the board: its first render already asks the scope.
-  const repoScope = registerRepoScope(context, runDir);
+  const repoScope = registerRepoScope(context, runDir, api, store);
   const { scope } = repoScope;
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
-  let connectedRepos: ConnectedRepo[] = [];
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
   const setStatus = (now: boolean) => {
@@ -78,11 +76,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
         if (version) void vscode.window.showWarningMessage(version);
-        // Once per connect, off the status bar's path: a repo connected later shows after a reconnect.
-        void api.repos().then((r) => r.repos, () => connectedRepos).then((list) => {
-          connectedRepos = list;
-          return repoScope.setDaemon(health.run_dir, list);
-        });
+        // Off the status bar's path.
+        void repoScope.setDaemon(health.run_dir);
       } catch {
         version = readOnlyReason(own, null);
       }
