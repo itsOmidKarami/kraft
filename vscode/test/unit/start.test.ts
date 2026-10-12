@@ -20,7 +20,8 @@ describe("startFailure", () => {
   it.each([
     ["not found", { code: "ENOENT", message: "spawn kraft ENOENT" }, "Kraft couldn't find `kraft`. Install it, or set kraft.path to the kraft binary."],
     ["already running", { code: 1, stderr: "kraft: already running (pid 9) - kraft admin stop\n" }, "kraft: already running (pid 9) - kraft admin stop"],
-    ["stderr's last line", { code: 1, stderr: "Traceback\n  ...\nkraft: detached start failed: OSError: port in use\n\n" }, "kraft: detached start failed: OSError: port in use"],
+    ["Kraft's first kraft: line", { code: 1, stderr: "kraft: detached start failed: RuntimeError: x\nTraceback\n  ...\nRuntimeError: x\nkraft: the whole log is /p\n" }, "kraft: detached start failed: RuntimeError: x"],
+    ["no kraft: line, the last wins", { code: 2, stderr: "usage: kraft admin start [-h]\nkraft admin start: error: unrecognized arguments: --detach\n\n" }, "kraft admin start: error: unrecognized arguments: --detach"],
     ["timed out", { code: null, killed: true, stderr: "", message: "Command failed" }, "Kraft didn't start within 30 seconds."],
     ["no stderr", { code: "EACCES", message: "spawn /opt/kraft EACCES" }, "Kraft didn't start: spawn /opt/kraft EACCES"],
   ])("%s", (_, err, msg) => expect(startFailure(err, "kraft")).toBe(msg));
@@ -32,6 +33,7 @@ describe("startFailure", () => {
 describe("alreadyRunning", () => {
   it.each([
     ["exit 1, already running", { code: 1, stderr: "kraft: already running (pid 9) - kraft admin stop\n" }, true],
+    ["exit 1, a warning after it", { code: 1, stderr: "kraft: already running (pid 9) - kraft admin stop\nDeprecationWarning: x\n" }, true],
     ["exit 1, other error", { code: 1, stderr: "kraft: detached start failed: x\n" }, false],
     ["other exit", { code: 2, stderr: "kraft: already running (pid 9) - kraft admin stop\n" }, false],
     ["not found", { code: "ENOENT" }, false],

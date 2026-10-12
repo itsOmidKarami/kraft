@@ -290,6 +290,7 @@ export function registerBoard(
     // From home, so the workspace's venv or shims cannot pick the `kraft` binary; detached,
     // so it needs no terminal. One start at a time: a second click says so.
     vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : null), warn, () => {
+      // kraft.path is machine-scoped, so a workspace cannot choose the binary this runs.
       const { file, args } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
       return startOnce(() => vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Starting Kraft…" }, () => startKraft(file, args, store)));
     })),

@@ -15,17 +15,22 @@ export function startInvocation(setting: string | undefined, home: string): { fi
 /** A rejected execFile: `code` is the errno string (`ENOENT`) or the exit status. */
 export type StartError = { code?: string | number | null; stderr?: string | Buffer; killed?: boolean; message?: string };
 
-const lastLine = (s: string | Buffer | undefined) =>
-  String(s ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop();
+/** The line that says what went wrong: Kraft's own first `kraft: ` line (a failed
+ *  detached start prints its error first, then the log tail, then the log's path),
+ *  else the last non-blank line (argparse's `kraft admin start: error: …`). */
+const errorLine = (s: string | Buffer | undefined) => {
+  const lines = String(s ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return lines.find((l) => l.startsWith("kraft: ")) ?? lines.pop();
+};
 
 /** `kraft admin start` refused because a server holds the pidfile: Kraft is up. */
-export const alreadyRunning = (err: StartError) => err.code === 1 && /\balready running\b/.test(lastLine(err.stderr) ?? "");
+export const alreadyRunning = (err: StartError) => err.code === 1 && /\balready running\b/.test(errorLine(err.stderr) ?? "");
 
-/** What a failed start says: the binary that was not found, else Kraft's own last
- *  stderr line (it ends with the error), else the timeout or Node's message. */
+/** What a failed start says: the binary that was not found, else Kraft's error line
+ *  from stderr (`errorLine`), else the timeout or Node's message. */
 export function startFailure(err: StartError, file: string): string {
   if (err.code === "ENOENT") return `Kraft couldn't find \`${file}\`. Install it, or set kraft.path to the kraft binary.`;
-  const line = lastLine(err.stderr);
+  const line = errorLine(err.stderr);
   if (line) return line;
   if (err.killed) return "Kraft didn't start within 30 seconds.";
   return `Kraft didn't start: ${err.message || "unknown error"}`;
