@@ -1,5 +1,5 @@
 import type {
-  BudgetToday, ChainNode, CommentReview, Finding, FixTarget, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
+  BudgetToday, BulkResult, ChainNode, CommentReview, Finding, FixTarget, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
   ThreadLabel, WorkerSession, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { DocumentDetail, SearchResponse, WorkItemDiff } from "../../../frontend/src/types/documents";
@@ -7,7 +7,7 @@ import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 import { parseSse } from "./logStream";
 
 export type {
-  CommentReview, DocumentDetail, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
+  BulkResult, CommentReview, DocumentDetail, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
   ThreadLabel,
   WorkItemDiff,
 };
@@ -68,6 +68,11 @@ export class ApiError extends Error {
 export interface ApiFailure { method: string; path: string; status: number; detail: string }
 
 const SLOW = { slow: true };
+/** The most ids `POST /work-items/bulk` takes in one request. */
+export const BULK_LIMIT = 200;
+/** Archive's batch: the server removes each worktree and branch in turn, so a
+ *  batch of 200 could outlast the slow timeout. */
+export const ARCHIVE_BATCH = 25;
 
 export class Api {
   /** Every failed call, just before it throws: the extension logs them. */
@@ -186,6 +191,8 @@ export class Api {
   create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body, SLOW);
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
+  // Only archived items, cancelled ones too: the Archived group's rows.
+  listArchived = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?archived=true&include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
   getDiff = (id: string) => this.req<WorkItemDiff & { worktree_path?: string }>("GET", this.item(id, "/diff"), undefined, SLOW);
 
@@ -220,6 +227,18 @@ export class Api {
   unblock = (id: string) => this.req("POST", this.item(id, "/unblock"));
   complete = (id: string, reason: string) => this.req("POST", this.item(id, "/complete"), { reason });
   restore = (id: string) => this.req("POST", this.item(id, "/restore"));
+  /** One request per 200 ids, the server's cap (25 for archive), in order;
+   *  their results joined into `results`, batch by batch, so a caller keeps
+   *  what went through when a later batch throws. Slow: the server runs each
+   *  id's own route in turn. */
+  async bulk(action: "pause" | "archive" | "restore", ids: string[], results: BulkResult[] = []): Promise<BulkResult[]> {
+    const size = action === "archive" ? ARCHIVE_BATCH : BULK_LIMIT;
+    for (let k = 0; k < ids.length; k += size) {
+      const r = await this.req<{ results: BulkResult[] }>("POST", "/work-items/bulk", { action, ids: ids.slice(k, k + size) }, SLOW);
+      results.push(...r.results);
+    }
+    return results;
+  }
   abandon = (id: string) => this.req("POST", this.item(id, "/abandon"), {});
 
   listThreads = (id: string) => this.req<ReviewThread[]>("GET", this.item(id, "/threads"));

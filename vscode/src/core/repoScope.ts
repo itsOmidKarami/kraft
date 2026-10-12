@@ -111,15 +111,24 @@ export class WorkspaceScope {
   // git runs once per folder: a new run_dir or connected list redoes only the cheap steps.
   private rootCache = new Map<string, Promise<RootAnswer>>();
 
-  constructor(private platform: NodeJS.Platform) {}
+  /** `showAll` is where the window starts: the choice it remembered. */
+  constructor(private platform: NodeJS.Platform, showAll = false) {
+    this._showAll = showAll;
+  }
 
   /** False until the first update() settles: nothing is in scope before. */
   get ready(): boolean { return this._ready; }
   get showAll(): boolean { return this._showAll; }
 
-  toggleAll(): void {
-    this._showAll = !this._showAll;
+  /** Fires onChange only when the choice changes. */
+  setShowAll(v: boolean): void {
+    if (v === this._showAll) return;
+    this._showAll = v;
     this.fire();
+  }
+
+  toggleAll(): void {
+    this.setShowAll(!this._showAll);
   }
 
   /** git is slow and folders change under it: the last call started wins. */
@@ -181,6 +190,27 @@ export class WorkspaceScope {
   private fire(): void {
     for (const cb of this.listeners) cb();
   }
+}
+
+/** The workspace-state key the Show All Repos choice is kept under. */
+export const ALL_REPOS_KEY = "kraft.allRepos";
+/** The part of a `vscode.Memento` (`context.workspaceState`) the scope uses. */
+export interface ShowAllMemento {
+  get(key: string, fallback: boolean): boolean;
+  update(key: string, value: boolean): unknown;
+}
+
+/** A scope that starts from the window's remembered choice and writes it back
+ *  each time it changes, so a reload shows the board the way it was left. */
+export function rememberedScope(platform: NodeJS.Platform, memento: ShowAllMemento): WorkspaceScope {
+  const scope = new WorkspaceScope(platform, memento.get(ALL_REPOS_KEY, false) === true);
+  let last = scope.showAll;
+  scope.onChange(() => {
+    if (scope.showAll === last) return;
+    last = scope.showAll;
+    void memento.update(ALL_REPOS_KEY, last);
+  });
+  return scope;
 }
 
 /** At most one `GET /repos` per this long when the reason to read it again persists. */

@@ -30,10 +30,11 @@ export const commands = {
 };
 
 export const window = {
-  createTreeView: (_id: string, _opts: unknown): unknown => ({ reveal: async () => {}, dispose() {} }),
+  createTreeView: (_id: string, _opts: unknown): unknown => ({ reveal: async () => {}, onDidExpandElement: () => ({ dispose() {} }), dispose() {} }),
   showInformationMessage: async (..._a: unknown[]) => undefined,
   showWarningMessage: async (..._a: unknown[]) => undefined,
   showErrorMessage: async (..._a: unknown[]) => undefined,
+  showInputBox: async (..._a: unknown[]): Promise<string | undefined> => undefined,
   createTerminal: () => ({ sendText() {}, show() {} }),
   createQuickPick: (): unknown => ({}),
 };

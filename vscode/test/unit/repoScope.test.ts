@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderScope, REFETCH_MS, refetchRepos, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
+import { ALL_REPOS_KEY, folderScope, REFETCH_MS, refetchRepos, rememberedScope, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
 
 const TOP = "rev-parse --show-toplevel";
 const COMMON = "rev-parse --path-format=absolute --git-common-dir";
@@ -127,6 +127,33 @@ describe("WorkspaceScope", () => {
     scope.onChange(() => fired++);
     scope.toggleAll();
     expect([scope.showAll, fired, scope.includes({ id: "x", repo: "/q" }, none)]).toEqual([true, 1, true]);
+  });
+
+  it("setShowAll fires onChange only when the choice changes", () => {
+    const scope = new WorkspaceScope("linux");
+    let fired = 0;
+    scope.onChange(() => fired++);
+    scope.setShowAll(true);
+    scope.setShowAll(true);
+    expect([scope.showAll, fired]).toEqual([true, 1]);
+  });
+
+  it.each<[string, boolean | undefined, boolean]>([
+    ["remembered all repos: shows all before any update", true, true],
+    ["nothing remembered: this repo only", undefined, false],
+  ])("%s", (_, stored, want) => {
+    const scope = rememberedScope("linux", { get: (k, d) => (k === ALL_REPOS_KEY ? stored ?? d : d), update: () => {} });
+    expect([scope.showAll, scope.includes({ id: "x", repo: "/q" }, none)]).toEqual([want, want]);
+  });
+
+  it("writes the choice back each time it changes, and not on a rescope", async () => {
+    const writes: [string, boolean][] = [];
+    const scope = rememberedScope("linux", { get: (_k, d) => d, update: (k, v) => writes.push([k, v]) });
+    await scope.update(["/r"], "/k", deps({}));
+    scope.setShowAll(true);
+    scope.setShowAll(true);
+    scope.setShowAll(false);
+    expect(writes).toEqual([["kraft.allRepos", true], ["kraft.allRepos", false]]);
   });
 
   it("fires onChange when an update applies, until unsubscribed", async () => {

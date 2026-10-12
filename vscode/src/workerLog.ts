@@ -3,17 +3,18 @@ import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { followLog, formatLogLine, logSession } from "./core/logStream";
 import type { Store } from "./core/store";
+import { pickItem } from "./palette";
 
 interface Open { terminal?: vscode.Terminal; abort: AbortController }
 
 /** `kraft.showWorkerLog`: the item's session in a terminal, followed until it ends. A read, so unguarded. */
-export function registerWorkerLog(context: vscode.ExtensionContext, store: Store, api: Api): void {
+export function registerWorkerLog(context: vscode.ExtensionContext, store: Store, api: Api, inScope: () => WorkItem[]): void {
   // One terminal per item; a re-run replaces it.
   const open = new Map<string, Open>();
   context.subscriptions.push(
     { dispose: () => { for (const o of open.values()) o.abort.abort(); open.clear(); } },
     vscode.commands.registerCommand("kraft.showWorkerLog", async (node?: { item?: WorkItem }) => {
-      const id = node?.item?.id;
+      const id = (node?.item ?? (await pickItem("showWorkerLog", inScope())))?.id;
       if (!id) return;
       try {
         await store.refresh(id);

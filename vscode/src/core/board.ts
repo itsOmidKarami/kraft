@@ -2,6 +2,7 @@ import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
 import { linkTokens } from "./links";
+import { primaryAction, primaryToken } from "./primary";
 import { spendLine, timeLine } from "./spend";
 
 /** The board reads the server's `display_status` and `stop`, as the web board
@@ -51,8 +52,11 @@ const shown = (i: WorkItem) => !i.archived_at;
  *  the board, the badge and the toasts all ask the same question. */
 export type Include = (item: WorkItem) => boolean;
 
+/** The items the board shows: in the window's scope and not archived. */
+export const onBoard = (items: WorkItem[], include: Include) => items.filter((i) => shown(i) && include(i));
+
 export function groupItems(items: WorkItem[], include: Include): { id: GroupKey; label: string; items: WorkItem[] }[] {
-  const listed = items.filter((i) => shown(i) && include(i));
+  const listed = onBoard(items, include);
   return STATUS_GROUPS.map((g) => ({
     id: g.key,
     label: g.label,
@@ -66,6 +70,20 @@ export function groupHolding(items: WorkItem[], include: Include, id: string) {
   return groupItems(items, include).find((g) => g.items.some((i) => i.id === id));
 }
 
+/** The board's top level with the Archived group last: only under groups,
+ *  so a board with nothing on it keeps its welcome text. */
+export const withArchived = <G>(groups: G[]): (G | { kind: "archived" })[] =>
+  groups.length ? [...groups, { kind: "archived" }] : [];
+
+/** The Archived group's rows: the last list read of archived items, less any
+ *  the store now holds un-archived (a restore lands there before the re-read),
+ *  and the store's own copy of any it holds archived, which is the newer. */
+export const archivedChildren = (cached: WorkItem[], store: { item(id: string): WorkItem | undefined }): WorkItem[] =>
+  cached.flatMap((i) => {
+    const held = store.item(i.id);
+    return !held ? [i] : held.archived_at ? [held] : [];
+  });
+
 /** The board's welcome text: `here` says this repo has no Kraft work and
  *  offers Show all repos; `connect` says this repo is not connected at all
  *  (`unconnected`) and offers to connect it. Never before the scope is ready
@@ -78,10 +96,16 @@ export function welcomeState(connected: boolean, ready: boolean, showAll: boolea
   return unconnected ? "connect" : "here";
 }
 
+const primaryTokens = (item: WorkItem) => {
+  const p = primaryAction(item);
+  return p ? [primaryToken(p)] : [];
+};
+
 /** The row's `contextValue`, which its menus match: `gate` while a gate is
  *  pending, then the server's `actions`, the doors it would admit now, then
  *  `drafts` while it has draft review comments (so Submit and Discard apply),
- *  then what it links to (`linkTokens`), then `worktree` while its worktree is
+ *  then what it links to (`linkTokens`), then its inline button's token
+ *  (`primaryToken`) when it has one, then `worktree` while its worktree is
  *  on disk. A server that sends no `actions` gets no action entries, only the
  *  ones every row has. */
 export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: boolean } = {}): string =>
@@ -90,6 +114,7 @@ export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: bo
     ...(item.actions ?? []),
     ...(drafts ? ["drafts"] : []),
     ...linkTokens(item),
+    ...primaryTokens(item),
     ...(item.worktree_exists ? ["worktree"] : []),
   ].join(",")}`;
 

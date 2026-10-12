@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
+import { ApiError, type Api, type BulkResult, type ItemAction, type WorkItem } from "./core/api";
 import { steerPrompt } from "./core/board";
 import { parseUsd } from "./core/budget";
+import { bulkPlan, bulkSummary, type BulkVerb } from "./core/bulk";
 import type { Store } from "./core/store";
 import { log } from "./log";
 
@@ -77,4 +78,43 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
   } catch (e) {
     await reportError(e, store, item.id);
   }
+}
+
+/** A pause, resume, archive or restore of several items: one summary for all
+ *  of them. Resume sends no steer, and goes one id at a time, in order, since
+ *  the server has no bulk resume. */
+export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: WorkItem[]): Promise<void> {
+  const { ids, skipped } = bulkPlan(verb, items);
+  if (verb === "archive" && ids.length > 1) {
+    const ok = await vscode.window.showWarningMessage(`Archive ${ids.length} items? Their worktrees are deleted.`, { modal: true }, "Archive");
+    if (ok !== "Archive") return;
+  }
+  const results: BulkResult[] = [];
+  try {
+    if (verb === "resume") {
+      for (const id of ids) {
+        try {
+          await api.resume(id);
+          results.push({ id, ok: true });
+        } catch (e) {
+          results.push({ id, ok: false, error: e instanceof ApiError ? e.detail : String(e) });
+        }
+      }
+    } else if (ids.length) {
+      await api.bulk(verb, ids, results);
+    }
+  } catch (e) {
+    // A batch failed: the ones before it went through, and the server may have
+    // acted on some of this one, so the refresh below still reads each id.
+    const detail = e instanceof ApiError ? e.detail : String(e);
+    log.error(`${verb} ${ids.join(", ")}: ${detail}`);
+    const answered = new Set(results.map((r) => r.id));
+    results.push(...ids.filter((id) => !answered.has(id)).map((id) => ({ id, ok: false, error: detail })));
+  } finally {
+    await Promise.all(ids.map((id) => store.refresh(id).catch(() => {})));
+  }
+  const line = bulkSummary(verb, results, skipped);
+  log.info(line);
+  if (skipped.length || results.some((r) => !r.ok)) void vscode.window.showWarningMessage(line);
+  else void vscode.window.showInformationMessage(line);
 }

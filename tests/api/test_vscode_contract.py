@@ -75,3 +75,13 @@ def test_the_list_row_says_whether_the_worktree_is_on_disk(client, repo):
     assert listed() is False
     Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"]).mkdir(parents=True)
     assert listed() is True
+
+
+def test_the_extensions_archived_call_carries_restore(client, repo):
+    """The Archived group lists `?archived=true&include_abandoned=true` and
+    offers Restore from the row's `actions`, with no detail fetch per row."""
+    wid = _in_state(client, repo, DOORS["states"]["archived"])
+    rows = client.get("/api/work-items?archived=true&include_abandoned=true").json()["items"]
+    row = next(i for i in rows if i["id"] == wid)
+    assert row["archived_at"]
+    assert "restore" in row["actions"]

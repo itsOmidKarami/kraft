@@ -29,6 +29,7 @@ export function registerReviewSubmit(
   show: (id: string, gate: string, a: Artifact) => Promise<void>,
   openArtifact: (id: string, gate?: string) => Promise<boolean>,
   reveal: (id: string, tid: string) => Promise<boolean | undefined>,
+  previewId: (arg: unknown) => string | undefined,
 ) {
   const info = (msg: string) => void vscode.window.showInformationMessage(msg);
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
@@ -156,7 +157,7 @@ export function registerReviewSubmit(
     return done;
   };
 
-  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact", "kraft-threads"]);
+  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact", "kraft-threads"]) ?? previewId(arg);
   context.subscriptions.push(
     vscode.commands.registerCommand("kraft.review.submit", mutating("kraft.review.submit", refusal, warn, (arg?: unknown) => {
       // The clicked tab's item first: the title-bar key is the active editor's, which may be another group's.

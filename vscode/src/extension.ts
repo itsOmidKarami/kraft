@@ -6,11 +6,12 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
-import { needsYou } from "./core/board";
+import { needsYou, needsYouCount } from "./core/board";
 import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
 import { registerDocs } from "./docs";
+import { registerPalette } from "./palette";
 import { registerSearch } from "./search";
 import { connectOffered, connectRefusal, fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
@@ -21,6 +22,7 @@ import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
 import { registerGates } from "./gates";
+import { registerArtifactPreview } from "./preview";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
 import { registerReviewSubmit } from "./review/submit";
@@ -28,7 +30,7 @@ import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { acceptHealth, every, onceEach, statusMenu, statusTooltip } from "./core/health";
+import { acceptHealth, every, onceEach, statusMenu, statusText, statusTooltip } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -60,7 +62,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const api = new Api(base, token);
   api.onError = (f) => {
     // The store logs a failed list call itself, once per distinct failure, not on every retry.
-    if (f.method === "GET" && f.path.startsWith("/work-items?")) return;
+    // The Archived group's read is not that call: its failure is logged here, and shown as a row.
+    if (f.method === "GET" && f.path.startsWith("/work-items?") && !f.path.includes("archived=true")) return;
     const line = `${f.method} ${f.path}: ${f.status} ${f.detail}`;
     // Gone, or moved on before the call landed: expected, not an error.
     // Today's spend is a hover nicety: an older server without the route, or a blip, is not an error.
@@ -81,10 +84,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  // The text alone: a board or scope change re-renders it without refetching spend.
+  const renderText = () => {
+    status.text = statusText(connected, refusal(state()) !== null, needsYouCount(store.items(), include));
+  };
   const setStatus = (now: boolean) => {
     connected = now;
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
-    status.text = connected ? `$(check) Kraft${refusal(state()) ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
+    renderText();
     status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError, today);
     status.command = "kraft.statusMenu";
     status.show();
@@ -140,17 +147,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     }
   });
   store.onError(() => setStatus(store.connected));
+  const offStore = store.onChange(renderText);
+  const offScope = scope.onChange(renderText);
+  context.subscriptions.push({ dispose: () => { offStore(); offScope(); } });
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
   const cache = new ThreadCache(api);
-  const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
+  const { reveal, inScope } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
   }, () => connectOffered(api.base, repoScope.unconnected()));
   registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
-  registerWorkerLog(context, store, api);
-  registerDocs(context, store, api);
+  registerWorkerLog(context, store, api, inScope);
+  registerDocs(context, store, api, inScope);
+  registerPalette(context, inScope, reveal);
   registerSearch(context, api, reveal);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
@@ -168,11 +179,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       }
     }),
   );
-  const diff = registerDiff(context, store, api, () => runDir);
+  const preview = registerArtifactPreview(context);
+  const diff = registerDiff(context, store, api, () => runDir, (arg) => preview.target(arg)?.id);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include, (cb) => scope.onChange(cb));
   migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
-  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
-  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal, preview);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, (arg) => preview.target(arg)?.id);
   const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.
