@@ -54,6 +54,34 @@ const delays = (log: ReturnType<typeof vi.fn>) =>
 const timers = () => vi.getTimerCount();
 
 describe("Store", () => {
+  it("loadDetail fills the detail quietly: no listener hears it, and the row is left alone", async () => {
+    const { store, sockets, api } = setup();
+    await store.start();
+    sockets[0].s.open();
+    const changed = vi.fn();
+    store.onChange(changed);
+    const d = await store.loadDetail("A");
+    expect(d?.pending_gate).toBe("spec");
+    expect(store.detail("A")).toBe(d);
+    expect(store.item("A")?.pending_gate).toBe(null);
+    expect(api.getItem).toHaveBeenCalledWith("A");
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("loadDetail does not overwrite a detail a newer re-read wrote while it was in flight", async () => {
+    const { store, sockets, api } = setup();
+    await store.start();
+    sockets[0].s.open();
+    const slow = deferred<ReturnType<typeof item>>();
+    api.getItem.mockReturnValueOnce(slow.promise);
+    const loading = store.loadDetail("A");
+    api.getItem.mockResolvedValueOnce(item({ id: "A", title: "newer" }));
+    await store.refresh("A");
+    slow.resolve(item({ id: "A", title: "older" }));
+    expect((await loading)?.title).toBe("newer");
+    expect(store.detail("A")?.title).toBe("newer");
+  });
+
   it("loads the board, then subscribes after its cursor, and is connected only once the socket opens", async () => {
     const { store, urls, sockets } = setup();
     await store.start();

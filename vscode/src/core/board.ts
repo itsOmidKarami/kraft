@@ -1,6 +1,8 @@
 import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/board/model";
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
+import { linkTokens } from "./links";
+import { spendLine, timeLine } from "./spend";
 
 /** The board reads the server's `display_status` and `stop`, as the web board
  *  does (`groupOf`, `reasonTail`); nothing here derives state from `status`. */
@@ -65,27 +67,35 @@ export function groupHolding(items: WorkItem[], include: Include, id: string) {
 }
 
 /** The board's welcome text: `here` says this repo has no Kraft work and
- *  offers Show all repos. Never before the scope is ready (git is async),
- *  never while disconnected (the Start row says that), and not when every
- *  repo is already shown. */
-export type Welcome = "none" | "here";
+ *  offers Show all repos; `connect` says this repo is not connected at all
+ *  (`unconnected`) and offers to connect it. Never before the scope is ready
+ *  (git is async), never while disconnected (the Start row says that), and
+ *  not when every repo is already shown. */
+export type Welcome = "none" | "here" | "connect";
 
-export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number): Welcome {
-  return connected && ready && !showAll && visible === 0 ? "here" : "none";
+export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number, unconnected = false): Welcome {
+  if (!(connected && ready && !showAll && visible === 0)) return "none";
+  return unconnected ? "connect" : "here";
 }
 
 /** The row's `contextValue`, which its menus match: `gate` while a gate is
  *  pending, then the server's `actions`, the doors it would admit now, then
- *  `worktree` while its worktree is on disk. A server that sends no `actions`
- *  gets no action entries, only the ones every row has. */
-/** `drafts`: the item has draft review comments, so Submit and Discard apply. */
+ *  `drafts` while it has draft review comments (so Submit and Discard apply),
+ *  then what it links to (`linkTokens`), then `worktree` while its worktree is
+ *  on disk. A server that sends no `actions` gets no action entries, only the
+ *  ones every row has. */
 export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: boolean } = {}): string =>
   `item:${[
     ...(item.pending_gate ? ["gate"] : []),
     ...(item.actions ?? []),
     ...(drafts ? ["drafts"] : []),
+    ...linkTokens(item),
     ...(item.worktree_exists ? ["worktree"] : []),
   ].join(",")}`;
+
+/** Whether a cached detail may fill the hover as is: not while the item runs,
+ *  since its running time grows and the detail is re-read only on events. */
+export const hoverFromCache = (item: WorkItem) => stateOf(item) !== "running";
 
 /** Where Open Worktree goes: the detail's own path, only while it exists. */
 export function worktreeTarget(detail: WorkItemDetail | undefined): string | undefined {
@@ -110,11 +120,15 @@ export function describe(item: WorkItem): string {
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 
-/** The hover: the stop's whole reason when there is one (the row keeps only its first sentence). */
-export function tooltipOf(item: WorkItem): string {
+/** The hover: the stop's whole reason when there is one (the row keeps only its first sentence),
+ *  then, with the item's detail, what it has spent and how long it has run against their caps. */
+export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_cap" | "running_time">): string {
   const reason = item.stop?.reason;
-  if (reason) return item.stop?.kind === "question" ? questionText(reason) : reason;
-  return `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  const first = reason
+    ? item.stop?.kind === "question" ? questionText(reason) : reason
+    : `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  if (!detail) return first;
+  return [first, spendLine(detail.budget_cap), timeLine(detail.running_time)].filter((l) => l !== null).join("\n");
 }
 
 /** The Resume/Retry input box's prompt: a question stop shows the question, so the steer answers it. */

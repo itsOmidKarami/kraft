@@ -3,7 +3,9 @@
  *  Quick Input steps in `../fileWork.ts` ask these. */
 
 import { basename } from "node:path";
+import { repoName } from "../../../frontend/src/format";
 import { humanSize } from "../../../frontend/src/sizes";
+import { ApiError } from "./api";
 import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary, WorkItem } from "./api";
 import { isLoopback } from "./connection";
 import { refusal, type ReadOnlyState } from "./readOnly";
@@ -98,19 +100,46 @@ export function repoDefaultChain(repo: Repo, chains: TemplateSummary[]): string 
  *  host talks to a loopback daemon is that machine. */
 export function localRefusal(base: string): string | null {
   if (isLoopback(base)) return null;
-  let host = base;
+  return `Filing work needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. File it from the web UI instead.`;
+}
+
+function hostOf(base: string): string {
   try {
-    host = new URL(base).hostname || base;
+    return new URL(base).hostname || base;
   } catch {
-    // Not a URL: name it as written.
+    return base; // Not a URL: name it as written.
   }
-  return `Filing work needs Kraft on the machine with this window's files, and kraft.url points at ${host}. File it from the web UI instead.`;
 }
 
 /** Restricted Mode and a refused server version first, as every action
  *  says them; then the local-only rule. */
 export function fileRefusal(state: ReadOnlyState, base: string): string | null {
   return refusal(state) ?? localRefusal(base);
+}
+
+/** D31, after D23: "Connect this repo" posts this window's path, which
+ *  names a folder only on a daemon that runs on this machine. Off loopback
+ *  it is refused, naming the ways that work there. */
+export function connectRefusal(state: ReadOnlyState, base: string): string | null {
+  const no = refusal(state);
+  if (no) return no;
+  if (isLoopback(base)) return null;
+  return `Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. Connect it from the web UI, or with \`kraft repo connect\` on that machine.`;
+}
+
+/** Whether the board offers "Connect this repo": a folder's repo is not
+ *  connected, and the daemon is on this machine (D31). */
+export function connectOffered(base: string, roots: string[]): boolean {
+  return isLoopback(base) && roots.length > 0;
+}
+
+/** What a connect of `path` tells the person: `err` is what the POST threw,
+ *  if it did. A 409 is the repo already connected (another window, the CLI):
+ *  the outcome asked for, so not an error. */
+export function connectOutcome(path: string, err?: unknown): { level: "info" | "error"; message: string } {
+  if (err === undefined) return { level: "info", message: `Connected ${repoName(path)}.` };
+  if (err instanceof ApiError) return { level: err.status === 409 ? "info" : "error", message: err.detail };
+  return { level: "error", message: err instanceof Error ? err.message : String(err) };
 }
 
 export type AttachState = "ok" | "save" | { refusal: string };

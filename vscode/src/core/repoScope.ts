@@ -3,12 +3,16 @@
  *  subfolder, symlink, linked worktree or submodule window finds its items.
  *  Pure: git and realpath are injected, paths are strings (win32 too). */
 
-import type { WorkItem } from "./api";
+import type { Repo, WorkItem } from "./api";
 
 /** Trimmed stdout, `undefined` when git fails or is absent. */
 export type Git = (args: string[], cwd: string) => Promise<string | undefined>;
 export interface ScopeDeps { git: Git; realpath: (p: string) => Promise<string>; platform: NodeJS.Platform }
-export interface FolderScope { roots: string[]; worktreeItem?: string }
+/** `root` is `repoRoot`'s answer; `git` is whether git named a toplevel for
+ *  the folder at all (a plain folder's `root` is just its realpath). */
+export interface FolderScope { roots: string[]; root: string; git: boolean; worktreeItem?: string }
+/** `repoRoot`'s answer and whether `git rev-parse --show-toplevel` gave it. */
+export interface RootAnswer { root: string; git: boolean }
 /** An entry of `GET /repos`; `managed: false` is an auto-connected child. */
 export interface ConnectedRepo { path: string; managed?: boolean }
 
@@ -45,16 +49,20 @@ function absoluteLine(out: string | undefined): string | undefined {
   return /^(\/|[A-Za-z]:[\\/])/.test(out) ? out : undefined;
 }
 
-export async function repoRoot(folder: string, deps: ScopeDeps): Promise<string> {
+export async function rootAnswer(folder: string, deps: ScopeDeps): Promise<RootAnswer> {
   const real = await deps.realpath(folder).catch(() => folder);
   const [top, common] = await Promise.all([
     deps.git(["rev-parse", "--show-toplevel"], real),
     deps.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], real),
   ]);
-  if (top === undefined) return real;
+  if (top === undefined) return { root: real, git: false };
   const dir = absoluteLine(common);
-  if (dir !== undefined && trimSeps(dir, true).split(SEPS).pop() === ".git") return parent(dir) ?? top;
-  return top;
+  if (dir !== undefined && trimSeps(dir, true).split(SEPS).pop() === ".git") return { root: parent(dir) ?? top, git: true };
+  return { root: top, git: true };
+}
+
+export async function repoRoot(folder: string, deps: ScopeDeps): Promise<string> {
+  return (await rootAnswer(folder, deps)).root;
 }
 
 export function worktreeItemId(folder: string, runDir: string, platform: NodeJS.Platform): string | undefined {
@@ -80,17 +88,17 @@ function managedAncestor(root: string, connected: ConnectedRepo[], platform: Nod
 }
 
 export async function folderScope(
-  folder: string, runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = [], rootOf: typeof repoRoot = repoRoot,
+  folder: string, runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = [], rootOf: typeof rootAnswer = rootAnswer,
 ): Promise<FolderScope> {
   const real = await deps.realpath(folder).catch(() => folder);
   const realRun = await deps.realpath(runDir).catch(() => runDir);
-  const root = await rootOf(folder, deps);
+  const { root, git } = await rootOf(folder, deps);
   const roots: string[] = [];
   for (const p of [folder, real, root, managedAncestor(root, connected, deps.platform)]) {
     if (p !== undefined && !roots.some((r) => samePath(r, p, deps.platform))) roots.push(p);
   }
   const worktreeItem = worktreeItemId(real, realRun, deps.platform) ?? worktreeItemId(folder, runDir, deps.platform);
-  return worktreeItem === undefined ? { roots } : { roots, worktreeItem };
+  return worktreeItem === undefined ? { roots, root, git } : { roots, root, git, worktreeItem };
 }
 
 /** The one scope the board, the badge and the toasts share. */
@@ -101,7 +109,7 @@ export class WorkspaceScope {
   private gen = 0;
   private listeners = new Set<() => void>();
   // git runs once per folder: a new run_dir or connected list redoes only the cheap steps.
-  private rootCache = new Map<string, Promise<string>>();
+  private rootCache = new Map<string, Promise<RootAnswer>>();
 
   constructor(private platform: NodeJS.Platform) {}
 
@@ -121,7 +129,7 @@ export class WorkspaceScope {
     const rootOf = (f: string, d: ScopeDeps) => {
       let root = this.rootCache.get(f);
       if (!root) {
-        root = repoRoot(f, d);
+        root = rootAnswer(f, d);
         this.rootCache.set(f, root);
         root.catch(() => this.rootCache.delete(f));
       }
@@ -130,7 +138,7 @@ export class WorkspaceScope {
     const scopes = await Promise.all(
       folders.map((f) => folderScope(f, runDir, deps, connected, rootOf).catch((): FolderScope => {
         const worktreeItem = worktreeItemId(f, runDir, this.platform);
-        return worktreeItem === undefined ? { roots: [f] } : { roots: [f], worktreeItem };
+        return worktreeItem === undefined ? { roots: [f], root: f, git: false } : { roots: [f], root: f, git: false, worktreeItem };
       })),
     );
     if (gen !== this.gen) return;
@@ -146,6 +154,23 @@ export class WorkspaceScope {
     return this.scopes.some(
       (s) => s.roots.some(same) || (s.worktreeItem !== undefined && (s.worktreeItem === item.id || same(repoOf(s.worktreeItem)))),
     );
+  }
+
+  /** Each git folder's repo root that no connected entry covers, once each:
+   *  what "Connect this repo" would connect. A folder is covered when any of
+   *  its `roots` (folder, realpath, root, managed superproject) is connected.
+   *  `connected` is undefined until a `GET /repos` read has succeeded: an
+   *  unread list is not an empty one, so nothing is offered before it. Before
+   *  the scope is ready there are no folders, so nothing either. */
+  unconnected(connected: Pick<Repo, "path" | "managed">[] | undefined): string[] {
+    if (connected === undefined) return [];
+    const out: string[] = [];
+    for (const s of this.scopes) {
+      if (!s.git) continue;
+      if (s.roots.some((r) => connected.some((c) => samePath(c.path, r, this.platform)))) continue;
+      if (!out.some((o) => samePath(o, s.root, this.platform))) out.push(s.root);
+    }
+    return out;
   }
 
   onChange(cb: () => void): () => void {

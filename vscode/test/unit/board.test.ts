@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import type { Store } from "../../src/core/store";
-import { announceable, contextValueOf, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
+import { announceable, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -82,6 +82,12 @@ describe("contextValueOf", () => {
     ["worktree last while it is on disk", item({ actions: ["pause", "cancel"], worktree_exists: true }), "item:pause,cancel,worktree"],
     ["no worktree once it was reclaimed", item({ actions: ["pause", "cancel"], worktree_exists: false }), "item:pause,cancel"],
     ["a gate with its worktree", stopped("gate", { pending_gate: "spec", actions: ["reject"], worktree_exists: true }), "item:gate,reject,worktree"],
+    [
+      "links after the actions",
+      stopped("gate", { pending_gate: "spec", actions: ["approve"], mr_ref: { number: 7, url: "https://g/7" }, attachments: [{ kind: "spec", path: "s.md" }] }),
+      "item:gate,approve,mr,attSpec",
+    ],
+    ["links before the worktree", item({ actions: ["pause"], attachments: [{ kind: "plan", path: "p.md" }], worktree_exists: true }), "item:pause,attPlan,worktree"],
   ])("%s", (_, it_, want) => {
     expect(contextValueOf(it_)).toBe(want);
   });
@@ -90,6 +96,9 @@ describe("contextValueOf", () => {
     ["drafts after the actions, before the worktree", { drafts: true }, "item:reject,drafts,worktree"],
     ["no drafts token without drafts", { drafts: false }, "item:reject,worktree"],
   ])("%s", (_, opts, want) => expect(contextValueOf(item({ actions: ["reject"], worktree_exists: true }), opts)).toBe(want));
+
+  it("drafts before the links", () =>
+    expect(contextValueOf(item({ actions: ["reject"], mr_ref: { number: 7, url: "https://g/7" } }), { drafts: true })).toBe("item:reject,drafts,mr"));
 
   it("an action that merely starts with drafts is not the drafts token", () =>
     expect(contextValueOf(item({ actions: ["drafts_x" as never] }))).not.toMatch(/\bdrafts\b/));
@@ -135,6 +144,17 @@ it.each([
 });
 
 it.each([
+  ["no detail", item(), undefined, "K-1 — implementation"],
+  ["a capped spend, no running time", item(), { budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null }, "K-1 — implementation\nSpent $1.00 of $5.00"],
+  ["spend and time", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }), { budget_cap: { cap_usd: null, spent_usd: 0.12, source: "policy" as const }, running_time: { running_s: 240, cap_minutes: null } }, "Loop cap hit.\nSpent $0.120 (no cap)\nRan 4m (no cap)"],
+  ["a detail with neither", item(), {}, "K-1 — implementation"],
+])("tooltip with detail: %s", (_, it_, detail, want) => {
+  expect(tooltipOf(it_, detail)).toBe(want);
+});
+
+it("tooltip: a row alone has no spend line", () => expect(tooltipOf(item())).not.toContain("Spent"));
+
+it.each([
   ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 asks: Keep the header? Your answer steers it (optional)"],
   ["a question with no reason", stopped("question"), "Steer for K-1 (optional)"],
   ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
@@ -152,6 +172,16 @@ it.each([
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });
 
+it.each([
+  ["this repo is not connected", true, true, false, 0, true, "connect"],
+  ["connected, nothing in it", true, true, false, 0, false, "here"],
+  ["unconnected, but something visible", true, true, false, 3, true, "none"],
+  ["unconnected, showing every repo", true, true, true, 0, true, "none"],
+  ["unconnected, scope not ready", true, false, false, 0, true, "none"],
+])("welcome with unconnected: %s", (_, connected, ready, showAll, visible, unconnected, want) => {
+  expect(welcomeState(connected, ready, showAll, visible, unconnected)).toBe(want);
+});
+
 
 it.each([
   ["exists, with a path", item({ worktree_exists: true, worktree_path: "/k/run/worktrees/K-1" }), "/k/run/worktrees/K-1"],
@@ -161,6 +191,65 @@ it.each([
   ["no detail", undefined, undefined],
 ])("worktree target: %s", (_, detail, want) => {
   expect(worktreeTarget(detail)).toBe(want);
+});
+
+it.each([
+  ["running", item(), false],
+  ["paused mid-chain", item({ status: "paused", display_status: "paused" }), true],
+  ["stopped for a person", stopped("gate"), true],
+  ["done", item({ status: "completed", display_status: "done" }), true],
+])("hover from a cached detail: %s", (_, it_, want) => expect(hoverFromCache(it_)).toBe(want));
+
+describe("Board, an item's hover", () => {
+  const row = item();
+  const capped = { ...row, budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null };
+  const boardOn = (detail: () => unknown, loadDetail: () => Promise<unknown>, current = row) => {
+    const changed = vi.fn();
+    const store = { items: () => [current], item: () => current, detail, loadDetail,
+      refresh: async () => (changed(), true),
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+    const board = new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    board.onDidChangeTreeData(changed);
+    return { board, changed };
+  };
+  const node = { kind: "item", item: row } as never;
+
+  it("is set at once from a cached detail while the item is not running", () => {
+    const paused = item({ status: "paused", display_status: "paused" });
+    const pausedNode = { kind: "item", item: paused } as never;
+    expect(boardOn(() => capped, vi.fn(), paused).board.getTreeItem(pausedNode).tooltip).toBe("K-1 — paused at implementation\nSpent $1.00 of $5.00");
+  });
+
+  it("is re-read while the item runs, though a detail is cached: its running time grows", async () => {
+    const loadDetail = vi.fn(async () => capped);
+    const { board } = boardOn(() => capped, loadDetail);
+    const t = board.getTreeItem(node);
+    expect(t.tooltip).toBeUndefined();
+    await board.resolveTreeItem(t, node);
+    expect(loadDetail).toHaveBeenCalledWith("K-1");
+  });
+
+  it("is left unset without a detail, then resolved from a quiet read that redraws nothing", async () => {
+    const loadDetail = vi.fn(async () => capped);
+    const { board, changed } = boardOn(() => undefined, loadDetail);
+    const t = board.getTreeItem(node);
+    expect(t.tooltip).toBeUndefined();
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00");
+    expect(loadDetail).toHaveBeenCalledWith("K-1");
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("takes its first line from the store's current row", async () => {
+    const { board } = boardOn(() => undefined, async () => capped, stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }));
+    const t = board.getTreeItem(node);
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("Loop cap hit.\nSpent $1.00 of $5.00");
+  });
+
+  it("falls back to the row's own line when the read fails", async () => {
+    const { board } = boardOn(() => undefined, vi.fn().mockRejectedValue(new Error("down")));
+    const t = board.getTreeItem(node);
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation");
+  });
 });
 
 describe("Board, revealing an item", () => {
@@ -184,8 +273,21 @@ describe("Board, revealing an item", () => {
     const reveal = vi.fn().mockRejectedValue(new Error("not resolved yet"));
     vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal, dispose() {} } as never);
     const { reveal: show } = registerBoard({ subscriptions: [] } as never, store, {} as never, () => null, here, scope);
-    await expect(show("run")).resolves.toBeUndefined();
+    await expect(show("run")).resolves.toBe(true);
     await show("other");
     expect(reveal.mock.calls).toEqual([[{ kind: "item", item: items[0] }, { select: true, focus: false }]]);
+  });
+
+  it.each([
+    ["an item it shows, even before the view resolves", "run", true],
+    ["an item outside the scope", "other", false],
+    ["an archived item", "arch", false],
+    ["an id it does not know", "nope", false],
+  ])("says whether it holds %s", async (_, id, want) => {
+    const held = [...items, item({ id: "arch", display_status: "archived", archived_at: "x" })];
+    const s = { ...store, items: () => held, item: (i: string) => held.find((x) => x.id === i) } as unknown as Store;
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn().mockRejectedValue(new Error("not resolved yet")), dispose() {} } as never);
+    const { reveal } = registerBoard({ subscriptions: [] } as never, s, {} as never, () => null, here, scope);
+    expect(await reveal(id)).toBe(want);
   });
 });

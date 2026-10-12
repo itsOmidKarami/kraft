@@ -80,6 +80,8 @@ export interface SearchResponse {
   query: string;
   mode: string;
   results: SearchResult[];
+  /** Why a hybrid search fell back to text only, when vector search is failing. */
+  note?: string;
 }
 
 export interface DocumentDetail {

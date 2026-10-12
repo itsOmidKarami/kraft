@@ -38,6 +38,13 @@ describe("Api", () => {
     expect(JSON.parse((f.mock.calls[1][1] as RequestInit).body as string)).toEqual({});
   });
 
+  it("connects a repo by posting its path", async () => {
+    const f = fakeFetch(201, { path: "/r" });
+    await new Api("http://h:1", undefined, f as any).connectRepo("/r");
+    const [url, init] = f.mock.calls[0];
+    expect([url, (init as RequestInit).method, JSON.parse((init as RequestInit).body as string)]).toEqual(["http://h:1/api/repos", "POST", { path: "/r" }]);
+  });
+
   it("encodes a gate path segment", async () => {
     const f = fakeFetch(200, {});
     await new Api("http://h:1", undefined, f as any).reject("W-1", "review gate", "n");
@@ -71,6 +78,18 @@ describe("Api", () => {
     expect(url).toBe(`http://h:1/api${path}`);
     expect((init as RequestInit).method).toBe("POST");
     expect(JSON.parse((init as RequestInit).body as string)).toEqual(body);
+  });
+
+  it.each([
+    ["an attachment", (a: Api) => a.attachment("K 1", "plan"), "/work-items/K%201/attachments/plan"],
+    ["a document", (a: Api) => a.document("doc/1"), "/documents/doc%2F1"],
+    ["today's spend", (a: Api) => a.budgetToday(), "/budget/today"],
+    ["search hits", (a: Api) => a.search("a&b c"), "/search?q=a%26b%20c&limit=20"],
+  ])("reads %s", async (_, call, path) => {
+    const f = fakeFetch(200, { title: "T" });
+    expect(await call(new Api("http://h:1", undefined, f as any))).toEqual({ title: "T" });
+    expect(f.mock.calls[0][0]).toBe(`http://h:1/api${path}`);
+    expect((f.mock.calls[0][1] as RequestInit).method).toBe("GET");
   });
 
   it("maps a missing artifact to null", async () => {
@@ -202,9 +221,60 @@ describe("Api timeout", () => {
   it.each([
     ["a preview", (a: Api) => a.preview({ title: "T", description: "", repo: "/r", autostart: false })],
     ["a create", (a: Api) => a.create({ title: "T", description: "", repo: "/r", autostart: false })],
-  ])("gives %s the slow limit: the server resolves the chain", async (_, call) => {
+    ["a connect", (a: Api) => a.connectRepo("/r")],
+    ["a search", (a: Api) => a.search("gate")],
+  ])("gives %s the slow limit: the server resolves the chain, probes the repo or loads the embedder", async (_, call) => {
     const f = vi.fn((_url: string, init?: RequestInit) =>
       new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
     await expect(call(new Api("http://h:1", undefined, f as any, { fast: 50, slow: 200 }))).rejects.toMatchObject({ detail: "Kraft did not answer within 0.2s" });
+  });
+});
+
+describe("Api.streamLog", () => {
+  /** A body that sends `chunks`, then stays open until the request is aborted when `hold`, or closes. */
+  function sse(chunks: string[], hold = false) {
+    return vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const s of chunks) c.enqueue(new TextEncoder().encode(s));
+        if (hold) init!.signal!.addEventListener("abort", () => c.error(init!.signal!.reason));
+        else c.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+  }
+  const drain = async (it: AsyncIterable<{ n: number }>) => {
+    const ns: number[] = [];
+    for await (const l of it) ns.push(l.n);
+    return ns;
+  };
+
+  it("streams a log until the end frame", async () => {
+    const f = sse(['data: {"n":0,"t":null,"src":"stdout","text":"a"}\n\nev', 'ent: end\ndata: {}\n\ndata: {"n":1}\n\n']);
+    const ns = await drain(new Api("http://h:1", "tok", f as any).streamLog("s 1", new AbortController().signal));
+    expect(ns).toEqual([0]);
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("http://h:1/api/worker-sessions/s%201/log?format=jsonl&follow=true");
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" });
+  });
+
+  it("ends without throwing when aborted", async () => {
+    const ctrl = new AbortController();
+    const ns: number[] = [];
+    for await (const l of new Api("http://h:1", undefined, sse(['data: {"n":0}\n\n'], true) as any).streamLog("s1", ctrl.signal)) {
+      ns.push(l.n);
+      ctrl.abort();
+    }
+    expect(ns).toEqual([0]);
+  });
+
+  it.each([
+    ["a refusal, with the server's detail", fakeFetch(404, { detail: "unknown session" }), { status: 404, detail: "unknown session" }],
+    ["a close before the end frame, as a drop", sse(['data: {"n":0}\n\n']), { status: 0, detail: "the log stream closed before the session ended" }],
+    ["a line that is not JSON", sse(["data: {not json\n\n"]), { status: 0, detail: expect.stringMatching(/^unreadable log line: /) }],
+  ])("throws ApiError on %s and reports it", async (_, f, want) => {
+    const api = new Api("http://h:1", undefined, f as any);
+    const failures: ApiFailure[] = [];
+    api.onError = (x) => failures.push(x);
+    await expect(drain(api.streamLog("s1", new AbortController().signal))).rejects.toMatchObject(want);
+    expect(failures).toMatchObject([{ method: "GET", ...want }]);
   });
 });

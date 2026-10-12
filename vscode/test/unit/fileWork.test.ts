@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ChainNode } from "../../../frontend/src/types";
-import type { Created, DryRun, Repo, TemplateSummary } from "../../src/core/api";
+import { ApiError, type Created, type DryRun, type Repo, type TemplateSummary } from "../../src/core/api";
 import {
-  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
+  abandonRefusal, attachChoices, connectOffered, connectOutcome, connectRefusal, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
   pickRepo, previewLine, repoDefaultChain, titleFrom, titleProblem, warningActions, warningsOf,
 } from "../../src/core/fileWork";
 import { RESTRICTED, VERSION_REFUSAL } from "../../src/core/readOnly";
@@ -102,6 +102,33 @@ describe("fileRefusal", () => {
     ["the remote URL", { trusted: true, version: null }, remote, localRefusal(remote)],
     ["nothing, on loopback", { trusted: true, version: null }, "http://127.0.0.1:8765", null],
   ])("%s", (_, state, base, want) => expect(fileRefusal(state, base)).toBe(want));
+});
+
+describe("connectRefusal", () => {
+  it.each([
+    ["Restricted Mode first", { trusted: false, version: null }, "https://kraft.example", RESTRICTED],
+    ["a remote daemon: the web UI or the CLI", { trusted: true, version: null }, "https://kraft.example:8765",
+      "Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at kraft.example. Connect it from the web UI, or with `kraft repo connect` on that machine."],
+    ["nothing, on loopback", { trusted: true, version: null }, "http://127.0.0.1:8765", null],
+  ])("%s", (_, state, base, want) => expect(connectRefusal(state, base)).toBe(want));
+});
+
+describe("connectOffered", () => {
+  it.each([
+    ["loopback, one unconnected root", "http://127.0.0.1:8765", ["/r"], true],
+    ["a remote daemon, one unconnected root", "https://kraft.example", ["/r"], false],
+    ["loopback, nothing unconnected", "http://localhost:8765", [], false],
+  ])("%s", (_, base, roots, want) => expect(connectOffered(base, roots)).toBe(want));
+});
+
+describe("connectOutcome", () => {
+  it.each([
+    ["connected", undefined, { level: "info", message: "Connected repo." }],
+    ["already connected", new ApiError(409, "/home/u/repo is already connected"), { level: "info", message: "/home/u/repo is already connected" }],
+    ["no commit yet", new ApiError(422, "no commit"), { level: "error", message: "no commit" }],
+    ["unreadable", new ApiError(400, "cannot read it"), { level: "error", message: "cannot read it" }],
+    ["not an ApiError", new Error("boom"), { level: "error", message: "boom" }],
+  ])("%s", (_, err, want) => expect(connectOutcome("/home/u/repo", err)).toEqual(want));
 });
 
 describe("attachState", () => {

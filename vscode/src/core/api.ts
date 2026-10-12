@@ -1,12 +1,14 @@
 import type {
-  ChainNode, CommentReview, Finding, FixTarget, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
-  WorkItem as BoardItem,
+  BudgetToday, ChainNode, CommentReview, Finding, FixTarget, GatelessChanges, LogLine, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
+  ThreadLabel, WorkerSession, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
-import type { WorkItemDiff } from "../../../frontend/src/types/documents";
+import type { DocumentDetail, SearchResponse, WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
+import { parseSse } from "./logStream";
 
 export type {
-  CommentReview, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  CommentReview, DocumentDetail, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
+  ThreadLabel,
   WorkItemDiff,
 };
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
@@ -17,7 +19,10 @@ export type WorkItemDetail = WorkItem & {
   steerable?: boolean;
   deferred_findings?: Finding[];
   judge_stop_note?: { node_id: string; reasoning: string; findings: Finding[] }[];
+  worker_sessions?: WorkerSession[];
 };
+/** A spec or plan as it was attached at intake (`GET /work-items/{id}/attachments/{kind}`). */
+export interface AttachmentDoc { work_item_id: string; kind: "spec" | "plan"; path: string; title: string; content: string; truncated: boolean }
 export interface Artifact { path: string; title: string; content: string; digest?: string; truncated: boolean }
 export interface Position { file: string; line: number; column: number }
 export interface ConfigIssue { file: string; chain: string | null; message: string; line: number; column: number; related: Position | null }
@@ -106,6 +111,61 @@ export class Api {
     return data as T;
   }
 
+  /** A session's log, tail first, until the server's `end` frame. No timeout: it
+   *  lasts as long as the session. Throws `ApiError` on a refusal or a drop
+   *  (status 0, so a stream that closes before `end` is a failure too); an
+   *  abort through `signal` just ends it. */
+  async *streamLog(sid: string, signal: AbortSignal): AsyncGenerator<LogLine> {
+    const path = `/worker-sessions/${encodeURIComponent(sid)}/log?format=jsonl&follow=true`;
+    const why = (e: unknown) => (e as Error).message;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.base}/api${path}`, { headers: this.headers(), signal });
+    } catch (e) {
+      if (signal.aborted) return;
+      throw this.fail("GET", path, 0, `Kraft is not reachable at ${this.base}: ${why(e)}`);
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let detail: unknown;
+      try { detail = JSON.parse(text)?.detail; } catch { /* not JSON */ }
+      throw this.fail("GET", path, res.status, typeof detail === "string" ? detail : text || res.statusText);
+    }
+    if (!res.body) throw this.fail("GET", path, 0, "the log stream has no body");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let rest = "";
+    try {
+      for (;;) {
+        let chunk: Awaited<ReturnType<typeof reader.read>>;
+        try {
+          chunk = await reader.read();
+        } catch (e) {
+          if (signal.aborted) return;
+          throw this.fail("GET", path, 0, `the log stream dropped: ${why(e)}`);
+        }
+        if (chunk.done) break;
+        const parsed = parseSse(rest + decoder.decode(chunk.value, { stream: true }));
+        rest = parsed.rest;
+        for (const f of parsed.frames) {
+          if (f.event === "end") return;
+          if (f.event !== "message") continue;
+          let l: LogLine;
+          try {
+            l = JSON.parse(f.data) as LogLine;
+          } catch (e) {
+            throw this.fail("GET", path, 0, `unreadable log line: ${why(e)}`);
+          }
+          yield l;
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    if (signal.aborted) return;
+    throw this.fail("GET", path, 0, "the log stream closed before the session ended");
+  }
+
   private fail(method: string, path: string, status: number, detail: string): ApiError {
     this.onError?.({ method, path, status, detail });
     return new ApiError(status, detail);
@@ -116,7 +176,10 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
+  budgetToday = () => this.req<BudgetToday>("GET", "/budget/today");
   repos = () => this.req<{ repos: Repo[] }>("GET", "/repos");
+  /** 201 connected; 409 already connected, 422 no commit yet, 400 unreadable. Slow: it probes the repo. */
+  connectRepo = (path: string) => this.req<unknown>("POST", "/repos", { path }, SLOW);
   chains = () => this.req<TemplateSummary[]>("GET", "/templates/chains");
   // Both resolve the chain on the server, and a create also runs intake.
   preview = (body: NewWorkItem) => this.req<DryRun>("POST", "/work-items?dry_run=1", body, SLOW);
@@ -134,6 +197,12 @@ export class Api {
       throw e;
     }
   }
+
+  /** 404 when the item has none of that kind, or Kraft lost its copy. */
+  attachment = (id: string, kind: "spec" | "plan") => this.req<AttachmentDoc>("GET", this.item(id, `/attachments/${kind}`));
+  document = (docId: string) => this.req<DocumentDetail>("GET", `/documents/${encodeURIComponent(docId)}`);
+  /** Blank `q` is a 422; the server clamps `limit` to 1–100. Slow: the first hybrid query can load the embedder. */
+  search = (q: string, limit = 20) => this.req<SearchResponse>("GET", `/search?q=${encodeURIComponent(q)}&limit=${limit}`, undefined, SLOW);
 
   approve = (id: string, gate: string, digest?: string) =>
     this.req("POST", this.item(id, `/gates/${encodeURIComponent(gate)}/approve`), digest ? { digest } : {});

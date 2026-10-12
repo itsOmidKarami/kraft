@@ -4,11 +4,15 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
+import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
-import { registerRepoScope, scopeDeps } from "./repoScope";
+import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
-import { fileRefusal } from "./core/fileWork";
+import { registerWorkerLog } from "./workerLog";
+import { registerDocs } from "./docs";
+import { registerSearch } from "./search";
+import { connectOffered, connectRefusal, fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
@@ -24,7 +28,7 @@ import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { acceptHealth, onceEach, statusMenu, statusTooltip } from "./core/health";
+import { acceptHealth, every, onceEach, statusMenu, statusTooltip } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -59,7 +63,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     if (f.method === "GET" && f.path.startsWith("/work-items?")) return;
     const line = `${f.method} ${f.path}: ${f.status} ${f.detail}`;
     // Gone, or moved on before the call landed: expected, not an error.
-    if (f.status === 404 || f.status === 409) log.info(line);
+    // Today's spend is a hover nicety: an older server without the route, or a blip, is not an error.
+    // A query search cannot parse (a stray quote, say) is the person still typing.
+    if (f.status === 404 || f.status === 409 || f.path === "/budget/today" || (f.status === 422 && f.path.startsWith("/search?"))) log.info(line);
     else log.error(line);
   };
   const store = new Store(api, wsSocket, (level, msg) => log[level](msg));
@@ -79,13 +85,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     connected = now;
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
     status.text = connected ? `$(check) Kraft${refusal(state()) ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
-    status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError);
+    status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError, today);
     status.command = "kraft.statusMenu";
     status.show();
   };
   const applyReadOnly = (now = connected) => {
     void vscode.commands.executeCommand("setContext", "kraft.readOnly", refusal(state()) !== null);
     setStatus(now);
+  };
+  // Today's spend for the hover: the last answer, cleared by a failure or a drop. Each
+  // read bumps `todaySeq`, so only the latest one lands, and only if `fresh` still holds.
+  let today: BudgetToday | null = null;
+  let todaySeq = 0;
+  const todayDue = every(30_000);
+  const loadToday = async (fresh: () => boolean) => {
+    const mine = ++todaySeq;
+    const next = await api.budgetToday().catch(() => null);
+    if (mine !== todaySeq || !fresh()) return;
+    today = next;
+    setStatus(store.connected);
   };
   // One toast per distinct reason a session: a flapping connection must not repeat it.
   const warnOnce = onceEach();
@@ -110,7 +128,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
         log.warn(`health check failed, so the server's version is unknown: ${(e as Error).message}`);
         version = readOnlyReason(own, null);
       }
-    }
+      // Reached only by an accepted connect: a stale one returned above.
+      todayDue(true);
+      void loadToday(() => acceptHealth(mine, healthSeq, store.connected));
+    } else today = null;
     applyReadOnly(store.connected);
     // Only once this connection's read-only state is known: a read-only window posts nothing.
     if (connected && store.connected && mine === healthSeq) {
@@ -126,7 +147,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
-  });
+  }, () => connectOffered(api.base, repoScope.unconnected()));
+  registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
+  registerWorkerLog(context, store, api);
+  registerDocs(context, store, api);
+  registerSearch(context, api, reveal);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,
@@ -152,6 +177,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.
   store.onChange((ids) => {
+    if (store.connected && todayDue()) void loadToday(() => store.connected);
     if (ids !== "all") return;
     for (const i of store.items()) if (needsYou(i)) void store.refresh(i.id).catch(() => {});
   });

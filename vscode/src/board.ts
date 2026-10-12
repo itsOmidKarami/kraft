@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction } from "./actions";
 import type { Api, ItemAction, WorkItem } from "./core/api";
-import { contextValueOf, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -29,6 +29,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
     private include: Include,
     private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
     private drafts?: Drafts,
+    /** Whether "Connect this repo" applies: a folder's repo is not connected, on a loopback daemon. */
+    private unconnected: () => boolean = () => false,
   ) {
     // Coalesced: a reconnect preloads every gate item, one answer at a time.
     drafts?.onChange(() => {
@@ -55,7 +57,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node) return [];
     const groups = groupItems(this.store.items(), this.include);
     const visible = groups.reduce((n, g) => n + g.items.length, 0);
-    this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible));
+    this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible, this.unconnected()));
     if (!this.store.connected && visible === 0) return [{ kind: "down" }];
     return groups.map((g) => ({ kind: "group", ...g }));
   }
@@ -100,7 +102,24 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(iconOf(item));
     t.contextValue = contextValueOf(item, { drafts: this.drafts?.has(item.id) ?? false });
-    t.tooltip = tooltipOf(item);
+    // VS Code asks resolveTreeItem only for what is left unset here: without a
+    // cached detail the hover is filled in there, on first hover.
+    const detail = this.store.detail(item.id);
+    if (detail && hoverFromCache(item)) t.tooltip = tooltipOf(item, detail);
+    return t;
+  }
+
+  /** An item's hover, once it has the detail that carries spend and running
+   *  time. The read is `loadDetail`, which redraws nothing; a failed one keeps
+   *  the hover quiet: it shows the row's own line. */
+  async resolveTreeItem(t: vscode.TreeItem, node: Node): Promise<vscode.TreeItem> {
+    if (node.kind !== "item" || t.tooltip !== undefined) return t;
+    const item = this.store.item(node.item.id) ?? node.item;
+    try {
+      t.tooltip = tooltipOf(item, await this.store.loadDetail(item.id));
+    } catch {
+      t.tooltip = tooltipOf(item);
+    }
     return t;
   }
 
@@ -121,8 +140,9 @@ export function registerBoard(
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
   drafts?: Drafts,
+  unconnected?: () => boolean,
 ) {
-  const board = new Board(store, include, scope, drafts);
+  const board = new Board(store, include, scope, drafts, unconnected);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);
@@ -172,15 +192,18 @@ export function registerBoard(
       t.show();
     })),
   );
-  /** Selects an item on the board, without taking focus; one not shown is no error. */
-  const reveal = async (id: string): Promise<void> => {
+  /** Selects an item on the board, without taking focus. False when the board
+   *  does not show it (unknown, archived, or outside the scope), so a caller can
+   *  open it somewhere else; that is no error. */
+  const reveal = async (id: string): Promise<boolean> => {
     const item = store.item(id);
-    if (!item || !groupHolding(store.items(), include, id)) return;
+    if (!item || !groupHolding(store.items(), include, id)) return false;
     try {
       await view.reveal({ kind: "item", item }, { select: true, focus: false });
     } catch {
       // The view may not be resolved yet; the item is on the board either way.
     }
+    return true;
   };
   return { board, reveal };
 }

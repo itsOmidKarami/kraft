@@ -23,6 +23,7 @@ it.each([
   ["editor/context", "kraft.fileSelection", "editorHasSelection && !kraft.readOnly"],
   ["view/title", "kraft.fileWork", "view == kraft.board && !kraft.readOnly"],
   ["commandPalette", "kraft.fileWork", "!kraft.readOnly"],
+  ["commandPalette", "kraft.search", "kraft.connected"],
 ])("%s offers %s when %s", (menu, command, when) =>
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
 

@@ -11,6 +11,7 @@ export const MUTATING: ReadonlySet<string> = new Set([
   "kraft.review.setLabel", "kraft.review.resolveThread", "kraft.review.reopenThread",
   "kraft.startDaemon",
   "kraft.fileWork", "kraft.fileAsSpec", "kraft.fileAsPlan", "kraft.fileSelection",
+  "kraft.connectRepo",
 ]);
 
 // `run` only when nothing refuses; otherwise warn with the refusal.

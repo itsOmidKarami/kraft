@@ -127,6 +127,19 @@ export class Store {
     return found;
   }
 
+  /** Read one item's detail for a hover, quietly: it fills only `detail(id)`,
+   *  never the row, and tells no listener, so the board does not redraw under
+   *  the hover. A reply that a reconnect, stop() or a newer re-read of the
+   *  item overtook is dropped; the detail already held is returned instead. */
+  async loadDetail(id: string): Promise<WorkItemDetail | undefined> {
+    const gen = this.gen;
+    const held = this.details.get(id);
+    const d = await this.api.getItem(id);
+    if (gen !== this.gen || this.stopped || this.details.get(id) !== held) return this.details.get(id);
+    this.details.set(id, d);
+    return d;
+  }
+
   private async connect(): Promise<void> {
     const gen = ++this.gen;
     try {
