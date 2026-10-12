@@ -4,6 +4,7 @@ import type { Api, WorkItem } from "./core/api";
 import { docPath, docText } from "./core/docs";
 import { isWebUrl } from "./core/links";
 import type { Store } from "./core/store";
+import { pickItem } from "./palette";
 
 const SCHEME = "kraft-doc";
 const texts = new Map<string, string>(); // uri path → markdown
@@ -22,10 +23,11 @@ export async function openReadOnlyDoc(key: string, title: string, markdown: stri
   await vscode.window.showTextDocument(doc, { preview: false });
 }
 
-/** Open Merge Request, Open Spec and Open Plan on a board row. All reads, so unguarded. */
-export function registerDocs(context: vscode.ExtensionContext, store: Store, api: Api): void {
+/** Open Merge Request, Open Spec and Open Plan on a board row, or on an item
+ *  picked from the palette. All reads, so unguarded. */
+export function registerDocs(context: vscode.ExtensionContext, store: Store, api: Api, inScope: () => WorkItem[]): void {
   const attachment = (kind: "spec" | "plan") => async (node?: { item?: WorkItem }) => {
-    const id = node?.item?.id;
+    const id = (node?.item ?? (await pickItem(kind === "spec" ? "openSpec" : "openPlan", inScope())))?.id;
     if (!id) return;
     try {
       const a = await api.attachment(id, kind);
@@ -43,9 +45,11 @@ export function registerDocs(context: vscode.ExtensionContext, store: Store, api
       provideTextDocumentContent: (uri) => texts.get(uri.path) ?? "",
     }),
     vscode.commands.registerCommand("kraft.openMergeRequest", async (node?: { item?: WorkItem }) => {
-      const url = node?.item && (store.item(node.item.id) ?? node.item).mr_ref?.url;
+      const item = node?.item ?? (await pickItem("openMergeRequest", inScope()));
+      if (!item) return;
+      const url = (store.item(item.id) ?? item).mr_ref?.url;
       // The row token already asked; the row may be older than the store.
-      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(`${node?.item?.id ?? "This item"} has no merge request to open.`);
+      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(`${item.id} has no merge request to open.`);
       await vscode.env.openExternal(vscode.Uri.parse(url, true));
     }),
     vscode.commands.registerCommand("kraft.openSpec", attachment("spec")),

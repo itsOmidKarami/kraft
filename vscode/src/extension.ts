@@ -11,6 +11,7 @@ import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
 import { registerDocs } from "./docs";
+import { registerPalette } from "./palette";
 import { registerSearch } from "./search";
 import { connectOffered, connectRefusal, fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
@@ -145,13 +146,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   applyReadOnly();
 
   const cache = new ThreadCache(api);
-  const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
+  const { reveal, inScope } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
   }, () => connectOffered(api.base, repoScope.unconnected()));
   registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
-  registerWorkerLog(context, store, api);
-  registerDocs(context, store, api);
+  registerWorkerLog(context, store, api, inScope);
+  registerDocs(context, store, api, inScope);
+  registerPalette(context, inScope, reveal);
   registerSearch(context, api, reveal);
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(

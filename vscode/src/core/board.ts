@@ -52,8 +52,11 @@ const shown = (i: WorkItem) => !i.archived_at;
  *  the board, the badge and the toasts all ask the same question. */
 export type Include = (item: WorkItem) => boolean;
 
+/** The items the board shows: in the window's scope and not archived. */
+export const onBoard = (items: WorkItem[], include: Include) => items.filter((i) => shown(i) && include(i));
+
 export function groupItems(items: WorkItem[], include: Include): { id: GroupKey; label: string; items: WorkItem[] }[] {
-  const listed = items.filter((i) => shown(i) && include(i));
+  const listed = onBoard(items, include);
   return STATUS_GROUPS.map((g) => ({
     id: g.key,
     label: g.label,

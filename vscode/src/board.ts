@@ -2,15 +2,17 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
+import type { PickVerb } from "./core/picks";
 import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
+import { pickItem } from "./palette";
 
 type Node =
   | { kind: "group"; id: string; label: string; items: WorkItem[] }
@@ -218,8 +220,22 @@ export function registerBoard(
   scope.onChange(updateBadge);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
-  const act = (action: ItemAction) => async (node?: { item?: WorkItem }) => {
-    const item = itemOf(node);
+  // From the palette there is no row: ask for one among the window's items,
+  // or, for Restore, among its archived ones.
+  const inScope = () => onBoard(store.items(), include);
+  const pickFor = async (verb: PickVerb): Promise<WorkItem | undefined> => {
+    if (verb !== "restore") return pickItem(verb, inScope());
+    let archived: WorkItem[];
+    try {
+      archived = archivedChildren((await api.listArchived()).items, store).filter(include);
+    } catch (e) {
+      return void vscode.window.showErrorMessage(`Couldn't load archived items: ${e instanceof ApiError ? e.detail : String(e)}`);
+    }
+    return pickItem(verb, archived);
+  };
+  const itemOr = async (node: { item?: WorkItem } | undefined, verb: PickVerb) => itemOf(node) ?? pickFor(verb);
+  const act = (action: ItemAction, verb: PickVerb) => async (node?: { item?: WorkItem }) => {
+    const item = await itemOr(node, verb);
     if (!item) return;
     await runAction(api, store, item, action);
   };
@@ -236,21 +252,21 @@ export function registerBoard(
   const BULK: ReadonlySet<ItemAction> = new Set<BulkVerb>(["pause", "resume", "archive", "restore"]);
   const actOnSelection = (a: BulkVerb) => async (node?: SelectionRow, nodes?: readonly SelectionRow[]) => {
     const items = selectedItems(node, nodes);
-    if (items.length < 2) return act(a)(node);
+    if (items.length < 2) return act(a, a)(node);
     await runBulk(api, store, a, items.map((i) => store.item(i.id) ?? i));
   };
   for (const [a, id] of Object.entries(COMMANDS) as [ItemAction, string][]) {
-    const run = BULK.has(a) ? actOnSelection(a as BulkVerb) : act(a);
+    const run = BULK.has(a) ? actOnSelection(a as BulkVerb) : act(a, id.slice("kraft.".length) as PickVerb);
     context.subscriptions.push(vscode.commands.registerCommand(id, mutating(id, refusal, warn, run)));
   }
   context.subscriptions.push(
     view,
     // A row's Answer button: a resume whose input box shows the question. The
     // clicked row only, never the selection.
-    vscode.commands.registerCommand("kraft.answer", mutating("kraft.answer", refusal, warn, act("resume"))),
+    vscode.commands.registerCommand("kraft.answer", mutating("kraft.answer", refusal, warn, act("resume", "answer"))),
     // The detail, refreshed now: the row's worktree_exists may predate a reclaim.
     vscode.commands.registerCommand("kraft.openWorktree", async (node?: { item?: WorkItem }) => {
-      const id = itemOf(node)?.id;
+      const id = (await itemOr(node, "openWorktree"))?.id;
       if (!id) return;
       try {
         await store.refresh(id);
@@ -261,8 +277,8 @@ export function registerBoard(
       if (!target) return void vscode.window.showInformationMessage(`${id} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
       await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true });
     }),
-    vscode.commands.registerCommand("kraft.openInWebUi", (node?: { item?: WorkItem }) => {
-      const item = itemOf(node);
+    vscode.commands.registerCommand("kraft.openInWebUi", async (node?: { item?: WorkItem }) => {
+      const item = await itemOr(node, "openInWebUi");
       if (item) void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(item.id)}`));
     }),
     // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
@@ -286,5 +302,5 @@ export function registerBoard(
     }
     return true;
   };
-  return { board, reveal };
+  return { board, reveal, inScope };
 }

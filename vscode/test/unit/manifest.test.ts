@@ -25,6 +25,8 @@ it.each([
   ["view/title", "kraft.fileWork", "view == kraft.board && !kraft.readOnly"],
   ["commandPalette", "kraft.fileWork", "!kraft.readOnly"],
   ["commandPalette", "kraft.search", "kraft.connected"],
+  ["commandPalette", "kraft.approveNextGate", "kraft.connected"],
+  ["commandPalette", "kraft.openItem", "kraft.connected"],
 ])("%s offers %s when %s", (menu, command, when) =>
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
 
@@ -45,8 +47,8 @@ describe("a row's primary action", () => {
     expect(board.filter((e) => e.group === "inline" && e.command === command)).toEqual([{ command, when, group: "inline" }]);
   });
 
-  it("Answer is a command hidden from the palette", () => {
+  it("Answer is a command, in the palette only while writable", () => {
     expect(pkg.contributes.commands).toContainEqual({ command: "kraft.answer", title: "Answer…", category: "Kraft", icon: "$(comment)" });
-    expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.answer", when: "false" });
+    expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.answer", when: "kraft.connected && !kraft.readOnly" });
   });
 });

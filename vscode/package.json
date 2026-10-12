@@ -185,6 +185,16 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.approveNextGate",
+        "title": "Approve Next Gate\u2026",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.openItem",
+        "title": "Open Item\u2026",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.connectRepo",
         "title": "Connect This Repo",
         "category": "Kraft"
@@ -538,66 +548,74 @@
         },
         {
           "command": "kraft.pause",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.resume",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.answer",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.retry",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.cancel",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.skip",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.escalate",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.archive",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.raiseBudget",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.unblock",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.complete",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.restore",
-          "when": "false"
+          "when": "kraft.connected && !kraft.readOnly"
         },
         {
           "command": "kraft.openWorktree",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.openInWebUi",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.showWorkerLog",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.search",
+          "when": "kraft.connected"
+        },
+        {
+          "command": "kraft.approveNextGate",
+          "when": "kraft.connected"
+        },
+        {
+          "command": "kraft.openItem",
           "when": "kraft.connected"
         },
         {
@@ -606,27 +624,27 @@
         },
         {
           "command": "kraft.openMergeRequest",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.openSpec",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.openPlan",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.openArtifact",
-          "when": "false"
+          "when": "kraft.connected"
         },
         {
           "command": "kraft.approve",
-          "when": "resourceScheme == kraft-artifact"
+          "when": "resourceScheme == kraft-artifact || kraft.artifactPreview"
         },
         {
           "command": "kraft.reject",
-          "when": "resourceScheme == kraft-artifact"
+          "when": "resourceScheme == kraft-artifact || kraft.artifactPreview"
         },
         {
           "command": "kraft.reviewChanges",

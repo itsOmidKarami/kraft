@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ITEM_ACTIONS } from "../../../frontend/src/types/vocab.generated";
+import { MUTATING } from "../../src/core/guard";
 import { PRIMARY_COMMAND, primaryToken, type Primary } from "../../src/core/primary";
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8"));
@@ -24,12 +25,17 @@ describe("the board's item menu", () => {
       expect(keyed.filter((e) => token(e) === action)).toHaveLength(1);
     });
 
-  it("hides its action commands from the palette, but approve and reject on a gate document", () => {
-    const acts = new Set(keyed.filter((e) => token(e) !== "gate").map((e) => e.command));
-    for (const command of acts) {
-      const want = ["kraft.approve", "kraft.reject"].includes(command) ? "resourceScheme == kraft-artifact" : "false";
-      expect(palette).toContainEqual({ command, when: want });
-    }
+  it("offers each row command in the palette while connected, a mutating one only while writable", () => {
+    // Approve and Reject act on the gate document showing; a review's drafts and its diff only from their own places.
+    const gateDoc = new Set(["kraft.approve", "kraft.reject"]);
+    const ownPlace = new Set(["kraft.review.submit", "kraft.review.discard", "kraft.reviewChanges"]);
+    const rows = new Set(board.filter((e) => e.when?.startsWith("view == kraft.board")).map((e) => e.command));
+    const want = (command: string) =>
+      gateDoc.has(command) ? "resourceScheme == kraft-artifact || kraft.artifactPreview"
+        : ownPlace.has(command) ? "false"
+          : MUTATING.has(command) ? "kraft.connected && !kraft.readOnly" : "kraft.connected";
+    expect([...rows].map((command) => palette.find((e) => e.command === command)))
+      .toEqual([...rows].map((command) => ({ command, when: want(command) })));
   });
 });
 

@@ -3,7 +3,7 @@ import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { Announcer, type Announcement } from "./core/announcer";
-import { announceable, type Include } from "./core/board";
+import { announceable, onBoard, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
 import { showRefusal } from "./review/refusal";
@@ -15,6 +15,7 @@ import { docPath, docText } from "./core/docs";
 import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 import type { ThreadCache } from "./core/threadCache";
+import { pickItem } from "./palette";
 
 export function registerGates(
   context: vscode.ExtensionContext,
@@ -150,7 +151,9 @@ export function registerGates(
   scope.onChange(() => toast(announcer.rescope(scoped("all"), scope.showAll)));
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("kraft.openArtifact", (arg?: unknown) => openArtifact(idOf(arg))),
+    // From the palette, away from a gate document: ask which gate.
+    vscode.commands.registerCommand("kraft.openArtifact", async (arg?: unknown) =>
+      openArtifact(idOf(arg) ?? (await pickItem("openArtifact", onBoard(store.items(), include)))?.id)),
     vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: string) => approve(idOf(arg), gate)),
     vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: string, note?: string) => reject(idOf(arg), gate, note)),
   );
