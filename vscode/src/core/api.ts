@@ -188,6 +188,8 @@ export class Api {
   create = (body: NewWorkItem) => this.req<Created>("POST", "/work-items", body, SLOW);
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
+  // Only archived items, cancelled ones too: the Archived group's rows.
+  listArchived = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?archived=true&include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));
   getDiff = (id: string) => this.req<WorkItemDiff & { worktree_path?: string }>("GET", this.item(id, "/diff"), undefined, SLOW);
 

@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import { ApiError } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
-import { announceable, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
+import { announceable, archivedChildren, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -73,6 +73,24 @@ describe("groupHolding", () => {
     ["nothing for an item outside the scope", "other", undefined],
     ["nothing for an unknown id", "nope", undefined],
   ])("%s", (_, id, want) => expect(groupHolding(items, here, id)?.id).toBe(want));
+});
+
+describe("withArchived", () => {
+  it.each([
+    ["ends a board's groups with Archived", [{ id: "running" }], [{ id: "running" }, { kind: "archived" }]],
+    ["adds nothing to an empty board, so its welcome shows", [], []],
+  ])("%s", (_, groups, want) => expect(withArchived<object>(groups)).toEqual(want));
+});
+
+describe("archivedChildren", () => {
+  const held = [item({ id: "restored" }), item({ id: "still", archived_at: "x" })];
+  const store = { item: (id: string) => held.find((i) => i.id === id) };
+  it.each([
+    ["keeps a row the store does not hold", "elsewhere", true],
+    ["drops a row the store holds un-archived: it was restored", "restored", false],
+    ["keeps a row the store holds archived", "still", true],
+  ])("%s", (_, id, kept) =>
+    expect(archivedChildren([item({ id, archived_at: "x" })], store).map((i) => i.id)).toEqual(kept ? [id] : []));
 });
 
 describe("contextValueOf", () => {
@@ -209,7 +227,7 @@ describe("Board, an item's row", () => {
     const changed = vi.fn();
     const store = { items: () => [current], item: () => current, detail, loadDetail,
       refresh: async () => (changed(), true),
-      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {}, connected: true } as unknown as Store;
     const board = new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
     board.onDidChangeTreeData(changed);
     return { board, changed };
@@ -266,7 +284,7 @@ describe("Board, an item's row", () => {
 describe("Board, revealing an item", () => {
   const items = [item({ id: "run" }), item({ id: "other", repo: "/elsewhere" })];
   const store = { items: () => items, item: (id: string) => items.find((i) => i.id === id), detail: () => undefined,
-    onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+    onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {}, connected: true } as unknown as Store;
   const scope = { onChange: () => () => {}, ready: true, showAll: false };
   const here = (i: { repo: string }) => i.repo === "/r";
   const board = new Board(store, here, scope);
@@ -282,7 +300,7 @@ describe("Board, revealing an item", () => {
 
   it("selects a shown item without focus, passes over one it does not show, and swallows a miss", async () => {
     const reveal = vi.fn().mockRejectedValue(new Error("not resolved yet"));
-    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal, dispose() {} } as never);
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal, onDidExpandElement: () => ({ dispose() {} }), dispose() {} } as never);
     const { reveal: show } = registerBoard({ subscriptions: [] } as never, store, {} as never, () => null, here, scope);
     await expect(show("run")).resolves.toBe(true);
     await show("other");
@@ -297,7 +315,7 @@ describe("Board, revealing an item", () => {
   ])("says whether it holds %s", async (_, id, want) => {
     const held = [...items, item({ id: "arch", display_status: "archived", archived_at: "x" })];
     const s = { ...store, items: () => held, item: (i: string) => held.find((x) => x.id === i) } as unknown as Store;
-    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn().mockRejectedValue(new Error("not resolved yet")), dispose() {} } as never);
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn().mockRejectedValue(new Error("not resolved yet")), onDidExpandElement: () => ({ dispose() {} }), dispose() {} } as never);
     const { reveal } = registerBoard({ subscriptions: [] } as never, s, {} as never, () => null, here, scope);
     expect(await reveal(id)).toBe(want);
   });
@@ -310,7 +328,7 @@ describe("Answer", () => {
   ])("%s", async (_, refusal, resumed) => {
     const asked = stopped("question", { id: "Q-1", actions: ["resume", "retry"], stop: { kind: "question", node: "implementation", reason: "Which API?", resume_at: null } });
     const store = { items: () => [asked], item: () => asked, detail: () => undefined, refresh: async () => true,
-      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {}, connected: true } as unknown as Store;
     const api = { resume: vi.fn(async () => {}), retry: vi.fn(async () => {}) };
     const handlers = new Map<string, (...a: unknown[]) => unknown>();
     vi.spyOn(vscode.commands, "registerCommand").mockImplementation(((id: string, cb: (...a: unknown[]) => unknown) => (handlers.set(id, cb), { dispose() {} })) as never);
@@ -338,7 +356,7 @@ describe("A multi-selection", () => {
     const refreshed: string[] = [];
     const store = { items: () => all, item: (id: string) => all.find((i) => i.id === id), detail: () => undefined,
       refresh: async (id: string) => { refreshed.push(id); if (id === "P-2") throw new Error("gone"); return true; },
-      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {}, connected: true } as unknown as Store;
     const api = {
       pause: vi.fn(async () => {}), archive: vi.fn(async () => {}), retry: vi.fn(async () => {}),
       resume: vi.fn(async (id: string) => { if (id === "R-2") throw new ApiError(409, "boom"); }),
@@ -412,5 +430,108 @@ describe("A multi-selection", () => {
     const { handlers, api } = setup();
     await handlers.get("kraft.retry")!(row(failed), [row(failed), row(p1)]);
     expect(api.retry.mock.calls).toEqual([["F-1", undefined]]);
+  });
+});
+
+describe("The Archived group", () => {
+  const live = [item({ id: "run" })];
+  const old = [item({ id: "A-1", archived_at: "x", actions: ["restore"] }), item({ id: "A-2", repo: "/elsewhere", archived_at: "x" })];
+  const here = (i: { repo: string }) => i.repo === "/r";
+  function setup(list: () => Promise<ReturnType<typeof item>[]> = async () => old, items = live) {
+    const conn = new Set<(up: boolean) => void>();
+    const evs = new Set<(ev: { type: string }) => void>();
+    const store = { items: () => items, item: (id: string) => items.find((i) => i.id === id), detail: () => undefined,
+      onChange: () => () => {}, onError: () => () => {}, connected: true,
+      onConnection: (cb: (up: boolean) => void) => (conn.add(cb), () => {}),
+      onEvent: (cb: (ev: { type: string }) => void) => (evs.add(cb), () => {}) } as unknown as Store;
+    const listArchived = vi.fn(list);
+    const board = new Board(store, here, { onChange: () => () => {}, ready: true, showAll: false }, undefined, undefined, listArchived);
+    const changed = vi.fn();
+    board.onDidChangeTreeData(changed);
+    const archived = () => board.getChildren().at(-1)!;
+    const rows = () => board.getChildren(archived() as never).map((n) => (n as { item?: { id: string }; text?: string }).item?.id ?? (n as { text: string }).text);
+    return { board, listArchived, changed, archived, rows, connect: (up: boolean) => conn.forEach((cb) => cb(up)), send: (type: string) => evs.forEach((cb) => cb({ type })) };
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("is a collapsed row last on the board, keyed group:archived", () => {
+    const { board, archived } = setup();
+    const t = board.getTreeItem(archived() as never);
+    expect([t.label, t.collapsibleState, t.id, t.contextValue]).toEqual(["Archived", vscode.TreeItemCollapsibleState.Collapsed, "group:archived", "archived"]);
+  });
+
+  it("draws from its cache and never reads: empty before the first read", () => {
+    const { rows, listArchived } = setup();
+    expect(rows()).toEqual([]);
+    expect(listArchived).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a connect reads it", (s: ReturnType<typeof setup>) => s.connect(true), 1],
+    ["a disconnect does not", (s: ReturnType<typeof setup>) => s.connect(false), 0],
+  ])("%s", async (_, go, reads) => {
+    const s = setup();
+    go(s);
+    await vi.waitFor(() => expect(s.listArchived).toHaveBeenCalledTimes(reads));
+    if (reads) await vi.waitFor(() => expect(s.rows()).toEqual(["A-1"]));
+  });
+
+  it("reads once after a burst of archive and restore events, and not for another event", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    s.send("work_item_archived");
+    s.send("work_item_restored");
+    s.send("gate_requested");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(s.listArchived).toHaveBeenCalledTimes(1);
+    s.send("gate_requested");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(s.listArchived).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a failed read as one row", async () => {
+    const s = setup(async () => { throw new ApiError(500, "db locked"); });
+    await s.board.loadArchived();
+    expect(s.rows()).toEqual(["Couldn't load archived items: db locked"]);
+  });
+
+  it("keeps the newest read when an older one answers last", async () => {
+    let first!: (v: ReturnType<typeof item>[]) => void;
+    const replies = [new Promise<ReturnType<typeof item>[]>((r) => (first = r)), Promise.resolve([old[0]])];
+    const s = setup(() => replies.shift()!);
+    const slow = s.board.loadArchived();
+    await s.board.loadArchived();
+    first([item({ id: "stale", archived_at: "x" })]);
+    await slow;
+    expect(s.rows()).toEqual(["A-1"]);
+  });
+
+  it("is each archived row's parent, and an error row's", async () => {
+    const s = setup(async () => { throw new Error("x"); });
+    expect(s.board.getParent({ kind: "item", item: old[0] } as never)).toEqual({ kind: "archived" });
+    expect(s.board.getParent({ kind: "note", text: "x" } as never)).toEqual({ kind: "archived" });
+  });
+
+  it("offers Restore on its rows through the server's actions", async () => {
+    const s = setup();
+    await s.board.loadArchived();
+    const [row] = s.board.getChildren(s.archived() as never);
+    expect(s.board.getTreeItem(row as never).contextValue).toBe("item:restore");
+  });
+
+  it("is read on its expand, not on a group's", () => {
+    let expand!: (e: { element: unknown }) => void;
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn(), onDidExpandElement: (cb: typeof expand) => ((expand = cb), { dispose() {} }), dispose() {} } as never);
+    const listArchived = vi.fn(async () => ({ items: old, cursor: 0 }));
+    const store = { items: () => live, item: () => undefined, detail: () => undefined, connected: true,
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, onEvent: () => () => {} } as unknown as Store;
+    registerBoard({ subscriptions: [] } as never, store, { listArchived } as never, () => null, here, { onChange: () => () => {}, ready: true, showAll: false });
+    expand({ element: { kind: "group", id: "running", label: "Running", items: live } });
+    expect(listArchived).not.toHaveBeenCalled();
+    expand({ element: { kind: "archived" } });
+    expect(listArchived).toHaveBeenCalledTimes(1);
   });
 });

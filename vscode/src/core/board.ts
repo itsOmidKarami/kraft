@@ -67,6 +67,19 @@ export function groupHolding(items: WorkItem[], include: Include, id: string) {
   return groupItems(items, include).find((g) => g.items.some((i) => i.id === id));
 }
 
+/** The board's top level with the Archived group last: only under groups,
+ *  so a board with nothing on it keeps its welcome text. */
+export const withArchived = <G>(groups: G[]): (G | { kind: "archived" })[] =>
+  groups.length ? [...groups, { kind: "archived" }] : [];
+
+/** The Archived group's rows: the last list read of archived items, less any
+ *  the store now holds un-archived (a restore lands there before the re-read). */
+export const archivedChildren = (cached: WorkItem[], store: { item(id: string): WorkItem | undefined }): WorkItem[] =>
+  cached.filter((i) => {
+    const held = store.item(i.id);
+    return !held || !!held.archived_at;
+  });
+
 /** The board's welcome text: `here` says this repo has no Kraft work and
  *  offers Show all repos; `connect` says this repo is not connected at all
  *  (`unconnected`) and offers to connect it. Never before the scope is ready

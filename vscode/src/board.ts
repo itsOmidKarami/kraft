@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
-import type { Api, ItemAction, WorkItem } from "./core/api";
-import { contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
+import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -17,7 +17,13 @@ type Node =
   | { kind: "item"; item: WorkItem }
   | { kind: "findings"; item: WorkItem }
   | { kind: "finding"; text: string }
-  | { kind: "down" };
+  | { kind: "down" }
+  | { kind: "archived" }
+  | { kind: "note"; text: string };
+
+const ARCHIVED: Node = { kind: "archived" };
+// The events after which the Archived group's rows are read again.
+const ARCHIVE_MOVES = new Set(["work_item_archived", "work_item_restored"]);
 
 export class Board implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<Node | void>();
@@ -25,6 +31,11 @@ export class Board implements vscode.TreeDataProvider<Node> {
 
   private welcome: Welcome | undefined;
   private draftsTimer?: ReturnType<typeof setTimeout>;
+  // The Archived group's last read: its rows, or why it failed; undefined before the first.
+  private archived: { rows: WorkItem[] } | { error: string } | undefined;
+  // Bumped by every read of it: a reply a newer read overtook does nothing.
+  private archivedGen = 0;
+  private archivedTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private store: Store,
@@ -33,6 +44,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     private drafts?: Drafts,
     /** Whether "Connect this repo" applies: a folder's repo is not connected, on a loopback daemon. */
     private unconnected: () => boolean = () => false,
+    private listArchived: () => Promise<WorkItem[]> = async () => [],
   ) {
     // Coalesced: a reconnect preloads every gate item, one answer at a time.
     drafts?.onChange(() => {
@@ -40,12 +52,43 @@ export class Board implements vscode.TreeDataProvider<Node> {
       this.draftsTimer = setTimeout(() => this.changed.fire(), 100);
     });
     store.onChange(() => this.changed.fire());
-    store.onConnection(() => this.changed.fire());
+    store.onConnection((up) => {
+      this.changed.fire();
+      if (up) void this.loadArchived();
+    });
+    // Coalesced: a bulk archive or restore sends one event per item.
+    store.onEvent((ev) => {
+      if (!ARCHIVE_MOVES.has(ev.type)) return;
+      clearTimeout(this.archivedTimer);
+      this.archivedTimer = setTimeout(() => void this.loadArchived(), 100);
+    });
     store.onError(() => this.changed.fire());
     scope.onChange(() => this.changed.fire());
   }
 
   refresh = () => this.changed.fire();
+
+  /** Read the Archived group's rows again. Only on its expand, a connect and
+   *  an archive or restore: drawing the group never reads. */
+  async loadArchived(): Promise<void> {
+    const gen = ++this.archivedGen;
+    let next: { rows: WorkItem[] } | { error: string };
+    try {
+      next = { rows: await this.listArchived() };
+    } catch (e) {
+      next = { error: e instanceof ApiError ? e.detail : String(e) };
+    }
+    if (gen !== this.archivedGen) return;
+    this.archived = next;
+    this.changed.fire();
+  }
+
+  private archivedNodes(): Node[] {
+    const a = this.archived;
+    if (!a) return [];
+    if ("error" in a) return [{ kind: "note", text: `Couldn't load archived items: ${a.error}` }];
+    return archivedChildren(a.rows, this.store).filter(this.include).map((item) => ({ kind: "item", item }));
+  }
 
   private unlocated(item: WorkItem) {
     const d = this.store.detail(item.id);
@@ -56,17 +99,21 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node?.kind === "item") return this.unlocated(node.item).length ? [{ kind: "findings", item: node.item }] : [];
     if (node?.kind === "findings") return this.unlocated(node.item).map((f) => ({ kind: "finding", text: `${f.severity}: ${f.message}` }));
     if (node?.kind === "group") return node.items.map((item) => ({ kind: "item", item }));
+    if (node?.kind === "archived") return this.archivedNodes();
     if (node) return [];
     const groups = groupItems(this.store.items(), this.include);
     const visible = groups.reduce((n, g) => n + g.items.length, 0);
     this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible, this.unconnected()));
     if (!this.store.connected && visible === 0) return [{ kind: "down" }];
-    return groups.map((g) => ({ kind: "group", ...g }));
+    return withArchived<Node>(groups.map((g) => ({ kind: "group", ...g })));
   }
 
-  /** Only an item has a parent here, the group holding it: `reveal` needs no more. */
+  /** Only an item has a parent here, the group holding it, or Archived for
+   *  an archived one: `reveal` needs no more. */
   getParent(node: Node): Node | undefined {
+    if (node.kind === "note") return ARCHIVED;
     if (node.kind !== "item") return undefined;
+    if (node.item.archived_at) return ARCHIVED;
     const g = groupHolding(this.store.items(), this.include, node.item.id);
     return g && { kind: "group", ...g };
   }
@@ -92,6 +139,14 @@ export class Board implements vscode.TreeDataProvider<Node> {
       t.contextValue = "group";
       return t;
     }
+    if (node.kind === "archived") {
+      // No count: its rows are read only on expand, a connect and an archive or restore.
+      const t = new vscode.TreeItem("Archived", vscode.TreeItemCollapsibleState.Collapsed);
+      t.id = "group:archived";
+      t.contextValue = "archived";
+      return t;
+    }
+    if (node.kind === "note") return new vscode.TreeItem(node.text);
     if (node.kind === "findings") {
       const t = new vscode.TreeItem(`Findings (${this.unlocated(node.item).length})`, vscode.TreeItemCollapsibleState.Collapsed);
       t.iconPath = new vscode.ThemeIcon("warning");
@@ -147,8 +202,12 @@ export function registerBoard(
   drafts?: Drafts,
   unconnected?: () => boolean,
 ) {
-  const board = new Board(store, include, scope, drafts, unconnected);
+  const board = new Board(store, include, scope, drafts, unconnected, async () => (await api.listArchived()).items);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board, canSelectMany: true });
+  // Every expand reads it again: the cache may be as old as the last connect.
+  context.subscriptions.push(view.onDidExpandElement((e) => {
+    if (e.element.kind === "archived") void board.loadArchived();
+  }));
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);
   scope.onChange(updateBadge);

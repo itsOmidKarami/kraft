@@ -60,7 +60,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const api = new Api(base, token);
   api.onError = (f) => {
     // The store logs a failed list call itself, once per distinct failure, not on every retry.
-    if (f.method === "GET" && f.path.startsWith("/work-items?")) return;
+    // The Archived group's read is not that call: its failure is logged here, and shown as a row.
+    if (f.method === "GET" && f.path.startsWith("/work-items?") && !f.path.includes("archived=true")) return;
     const line = `${f.method} ${f.path}: ${f.status} ${f.detail}`;
     // Gone, or moved on before the call landed: expected, not an error.
     // Today's spend is a hover nicety: an older server without the route, or a blip, is not an error.
