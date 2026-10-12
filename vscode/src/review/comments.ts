@@ -334,10 +334,13 @@ export function registerComments(
     }),
   );
 
-  /** Shows a thread, opening its item's review first if need be; false when it is gone after a reload. */
-  const reveal = async (id: string, tid: string): Promise<boolean> => {
+  /**
+   * Shows a thread, opening its item's review first if need be: false when it
+   * is gone after a reload, undefined when the review did not open (it has said why).
+   */
+  const reveal = async (id: string, tid: string): Promise<boolean | undefined> => {
     if (!diff.opened.has(id)) await vscode.commands.executeCommand("kraft.reviewChanges", id);
-    if (!diff.opened.has(id)) return false; // the review did not open; it has said why
+    if (!diff.opened.has(id)) return undefined;
     await reload(id).catch(() => {});
     const d = drawn.get(id)?.get(tid);
     if (!d) return false;

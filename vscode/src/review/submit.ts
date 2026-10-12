@@ -28,7 +28,7 @@ export function registerReviewSubmit(
   shown: ShownRenders,
   show: (id: string, gate: string, a: Artifact) => Promise<void>,
   openArtifact: (id: string, gate?: string) => Promise<boolean>,
-  reveal: (id: string, tid: string) => Promise<boolean>,
+  reveal: (id: string, tid: string) => Promise<boolean | undefined>,
 ) {
   const info = (msg: string) => void vscode.window.showInformationMessage(msg);
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
@@ -50,7 +50,10 @@ export function registerReviewSubmit(
     // Where Request changes would restart: the detail's at a gate, the server's reckoning without one.
     let fix: FixTarget | null = detail?.fix_target ?? null;
     let unknown: string | undefined;
-    if (detail && !gate) {
+    // An ended or unloaded item is refused before the slow gateless reckoning.
+    const first = outcomeChoices(detail);
+    if ("refused" in first) return warn(first.refused), not("refused");
+    if (!gate) {
       try {
         fix = await api.fixTarget(id);
       } catch (e) {
@@ -69,14 +72,10 @@ export function registerReviewSubmit(
       );
       if (!picked) return not("cancelled");
       outcome = picked.o;
-      summary = await vscode.window.showInputBox({ prompt: "Overall note for the agent (optional)" });
-      if (summary === undefined) return not("cancelled");
     }
-    summary = summary?.trim() || undefined;
-    const n = drafts(threads).length;
-    if (!canSend(outcome, n, summary)) return info("No review comments to send."), not("nothing");
     let node = choice?.node;
-    let fixNode = fix?.node;
+    let fixNode = node ?? fix?.node;
+    // Where it restarts before the note: backing out here loses nothing typed.
     if (outcome === "request_changes" && !choice) {
       const at = gate ? { gate } : { current: detail!.current_node_id ?? "" };
       const restart = restartChoices(detail!.chain_definition?.nodes ?? [], at, fix!);
@@ -85,13 +84,21 @@ export function registerReviewSubmit(
       if (!picked) return not("cancelled");
       node = nodeToSend(picked);
       fixNode = picked.node;
-    } else if (node) fixNode = node;
+    }
+    if (!choice) {
+      summary = await vscode.window.showInputBox({ prompt: "Overall note for the agent (optional)" });
+      if (summary === undefined) return not("cancelled");
+    }
+    summary = summary?.trim() || undefined;
+    const n = drafts(threads).length;
+    if (!canSend(outcome, n, summary)) return info("No review comments to send."), not("nothing");
     try {
       if (outcome === "approve") {
         const g = gate!;
         let sent: ReviewResult | undefined;
         const r = await approveFlow({
-          threads: async () => threads,
+          // Again here: a thread may have been labelled must-fix while the pickers were open.
+          threads: () => cache.load(id),
           refuse: (refusal) => showRefusal(id, refusal, reveal),
           readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, async (digest) => {
             sent = await api.submitReview(id, g, { outcome: "approve", ...(summary && { summary }), digest });

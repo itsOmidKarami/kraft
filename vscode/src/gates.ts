@@ -23,7 +23,7 @@ export function registerGates(
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "showAll">,
   cache: ThreadCache,
-  reveal: (id: string, tid: string) => Promise<boolean>,
+  reveal: (id: string, tid: string) => Promise<boolean | undefined>,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
