@@ -38,6 +38,11 @@ describe("Announcer", () => {
     expect(new Announcer(() => "all").consider(failed)).toEqual({ kind: "needs", id: "K-1", text: "failed at implementation" });
   });
 
+  it("announces a failure with a stale pending gate as a failure, not a gate", () => {
+    const failed = item({ display_status: "failed", pending_gate: "spec", stop: { kind: "failed", node: "implementation", reason: null, resume_at: null } });
+    expect(new Announcer(() => "all").consider(failed)).toMatchObject({ kind: "needs" });
+  });
+
   it.each<DisplayStatus>(["paused", "escalated", "queued", "running", "waiting", "blocked", "done", "cancelled"])("%s never toasts", (d) => {
     expect(new Announcer(() => "all").consider(item({ display_status: d }))).toBeUndefined();
   });

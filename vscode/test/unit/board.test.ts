@@ -103,6 +103,11 @@ describe("actionsFor", () => {
     expect(actionsFor(OF[state])).toEqual(want);
   });
 
+  it("an archived row has no actions, whatever its display status", () => {
+    expect(stateOf(archivedNeedsYou)).toBe("archived");
+    expect(actionsFor(archivedNeedsYou)).toEqual([]);
+  });
+
   it("covers every state", () => {
     expect(WANT.map(([s]) => s).sort()).toEqual(Object.keys(OF).sort());
   });

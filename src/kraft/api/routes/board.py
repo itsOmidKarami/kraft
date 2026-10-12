@@ -415,7 +415,7 @@ def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
 def _detail_fallback(st, wid: str) -> dict | None:
     """`_ran_on_fallback` for one item: the detail's `fallback`, read the way
     the list's grouped query reads it, so a row the extension refreshes from
-    the detail keeps its "on <model>" tail."""
+    the detail keeps its fallback."""
     rows = st.db.read(
         lambda c: c.execute(
             "SELECT type, payload FROM events WHERE seq IN ("
@@ -1195,7 +1195,7 @@ async def get_work_item(wid: str, request: Request):
         "summary": _summary(st, wid, row, chain, sessions),
         # The list row's `step` and `fallback`, so a client that replaces a row
         # with this detail on every event keeps "2 of 3 · build › t1" and the
-        # "on <model>" tail (the VS Code board does).
+        # fallback it ran on (the VS Code board does).
         "step": _step_of(
             row,
             chain,
