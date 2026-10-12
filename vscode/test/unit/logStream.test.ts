@@ -36,6 +36,8 @@ describe("formatLogLine", () => {
     ["a summarised agent line", { n: 0, t: "2026-10-12T10:11:12Z", src: "agent", text: "x", summary: "Read foo.ts" }, "10:11:12 agent  Read foo.ts"],
     ["the truncation marker", { n: -1, t: null, src: "sys", text: "… 9 earlier lines", truncated: { lines: 9, bytes: 1 } }, "--:--:-- sys    … 9 earlier lines"],
     ["ANSI and OSC escapes", { n: 1, t: null, src: "stdout", text: "\x1b[31mred\x1b[0m\x1b]0;t\x07" }, "--:--:-- stdout red"],
+    // A bare two-byte escape (here ESC M, reverse index) goes whole, its final byte too.
+    ["a bare ESC pair", { n: 4, t: null, src: "stdout", text: "a\x1bMb" }, "--:--:-- stdout ab"],
     ["C1 controls and 8-bit CSI", { n: 2, t: null, src: "stdout", text: "a\u009b2Jb\u0085c\u009fd" }, "--:--:-- stdout abcd"],
     ["C0 controls but tab", { n: 3, t: null, src: "stdout", text: "a\tb\rc\x07d\x7f" }, "--:--:-- stdout a\tbcd"],
   ] as [string, LogLine, string][])("%s", (_, l, want) => expect(formatLogLine(l)).toBe(want));

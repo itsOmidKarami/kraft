@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as vscode from "vscode";
 import { artifactBasename } from "../../src/core/docs";
-import { gateCall, previewIsStale, previewOf, previewTarget, type GroupLike, type ShownPreview, type TabLike } from "../../src/core/preview";
+import { registerArtifactPreview } from "../../src/preview";
+import { gateCall, PREVIEW_UNRESOLVED, previewIsStale, previewOf, previewTarget, previewUnresolved, type GroupLike, type ShownPreview, type TabLike } from "../../src/core/preview";
 
 const MD = "mainThreadWebview-markdown.preview";
 const SPEC = "Spec (K-1).md";
@@ -49,17 +51,19 @@ describe("previewTarget", () => {
   const other: GroupLike["activeTab"] = { label: "Release Notes", viewType: "mainThreadWebview-other" };
   const TITLE = { scheme: "webview-panel", path: "webview-panel/webview-x" };
   const K1 = { id: "K-1", basename: SPEC };
-  it.each<[string, unknown, GroupLike[], ShownPreview | undefined]>([
-    ["title bar on the preview's own group", TITLE, [{ isActive: false, activeTab: k1 }, { isActive: true, activeTab: diff }], K1],
-    ["title bar on another group whose active tab is not a preview", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: other }], undefined],
-    ["title bar with two groups on different previews", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: k2 }], undefined],
-    ["title bar with two groups on the same preview", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: k1 }], K1],
-    ["palette, no argument: the active group's preview", undefined, [{ isActive: false, activeTab: k2 }, { isActive: true, activeTab: k1 }], K1],
-    ["palette while the active group shows no preview", undefined, [{ isActive: true, activeTab: diff }, { isActive: false, activeTab: k1 }], undefined],
-    ["a non-preview argument (another group's diff)", { scheme: "kraft-wt", path: "/K-2/a.py" }, [{ isActive: true, activeTab: k1 }], undefined],
-    ["a board node", { item: { id: "K-3" } }, [{ isActive: true, activeTab: k1 }], undefined],
-  ])("%s", (_, arg, groups, want) => {
+  it.each<[string, unknown, GroupLike[], ShownPreview | undefined, boolean]>([
+    ["title bar on the preview's own group", TITLE, [{ isActive: false, activeTab: k1 }, { isActive: true, activeTab: diff }], K1, false],
+    ["title bar on another group whose active tab is not a preview", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: other }], undefined, true],
+    ["title bar with two groups on different previews", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: k2 }], undefined, true],
+    ["title bar with two groups on the same preview", TITLE, [{ isActive: true, activeTab: k1 }, { isActive: false, activeTab: k1 }], K1, false],
+    ["palette, no argument: the active group's preview", undefined, [{ isActive: false, activeTab: k2 }, { isActive: true, activeTab: k1 }], K1, false],
+    ["palette while the active group shows no preview", undefined, [{ isActive: true, activeTab: diff }, { isActive: false, activeTab: k1 }], undefined, false],
+    ["a non-preview argument (another group's diff)", { scheme: "kraft-wt", path: "/K-2/a.py" }, [{ isActive: true, activeTab: k1 }], undefined, false],
+    ["a board node", { item: { id: "K-3" } }, [{ isActive: true, activeTab: k1 }], undefined, false],
+  ])("%s", (_, arg, groups, want, unresolved) => {
     expect(previewTarget(arg, groups, opened)).toEqual(want);
+    // A title-bar click that names no preview says so, rather than doing nothing.
+    expect(previewUnresolved(arg, previewTarget(arg, groups, opened))).toBe(unresolved);
   });
 });
 
@@ -76,5 +80,22 @@ describe("gateCall", () => {
     ["no item anywhere", undefined, undefined, undefined, undefined, { id: undefined, gate: undefined, note: undefined, stale: false }],
   ])("%s", (_, direct, target, gate, note, want) => {
     expect(gateCall(direct, target, latest, gate, note)).toEqual(want);
+  });
+});
+
+describe("registerArtifactPreview's target", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const tab = (label: string, viewType: string) => ({ activeTab: { label, input: new vscode.TabInputWebview(viewType) } });
+  const TITLE = { scheme: "webview-panel", path: "webview-panel/webview-x" };
+  it.each([
+    ["one webview group: its preview, nothing said", [tab(`[Preview] ${SPEC}`, MD)], { id: "K-1", basename: SPEC }, []],
+    ["another group's webview: none, and says so", [tab(`[Preview] ${SPEC}`, MD), tab("Release Notes", "mainThreadWebview-other")], undefined, [[PREVIEW_UNRESOLVED]]],
+  ])("%s", (_, groups, want, said) => {
+    vi.spyOn(vscode.window.tabGroups, "all", "get").mockReturnValue(groups.map((g) => ({ isActive: false, ...g })) as never);
+    const info = vi.spyOn(vscode.window, "showInformationMessage");
+    const preview = registerArtifactPreview({ subscriptions: [] } as never);
+    preview.opening("K-1", SPEC);
+    expect(preview.target(TITLE)).toEqual(want);
+    expect(info.mock.calls).toEqual(said);
   });
 });

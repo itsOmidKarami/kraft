@@ -83,7 +83,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "The kraft binary Start Kraft runs. Empty: `kraft` on PATH."
+          "description": "The kraft binary Start Kraft runs, and the restart a config change offers. Empty: `kraft` on PATH; a leading `~` is your home folder."
         }
       }
     },

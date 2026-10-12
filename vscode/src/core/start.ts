@@ -12,6 +12,15 @@ export function startInvocation(setting: string | undefined, home: string): { fi
   return { file, args: [...START_ARGS] };
 }
 
+/** What a config change's restart runs in a terminal, after the binary Start
+ *  Kraft runs: the terminal runs it as its process, so no shell quotes the path. */
+export const RESTART_ARGS = ["admin", "restart"] as const;
+
+/** Why the restart terminal closed on a non-zero exit, as its own message is gone with it:
+ *  `kraft admin restart` on a Kraft attached to a terminal stops it and exits 1. */
+export const RESTART_FAILED = (code: number) =>
+  `Kraft didn't restart (exit ${code}). A Kraft that was running in a terminal stops and waits to be started again there with \`kraft\`, or here with Start Kraft.`;
+
 /** A rejected execFile: `code` is the errno string (`ENOENT`) or the exit status. */
 export type StartError = { code?: string | number | null; stderr?: string | Buffer; killed?: boolean; message?: string };
 

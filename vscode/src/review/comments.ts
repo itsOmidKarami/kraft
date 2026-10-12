@@ -4,7 +4,7 @@ import type { Api, ReviewComment, ReviewThread, ThreadLabel, WorkItem } from "..
 import { mutating } from "../core/guard";
 import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review";
 import type { Store } from "../core/store";
-import { reviewGone, type ThreadCache } from "../core/threadCache";
+import { preloadsDrafts, reviewGone, type ThreadCache } from "../core/threadCache";
 import {
   authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread, quoteOf, hasDrafts,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type Side,
@@ -168,7 +168,7 @@ export function registerComments(
     for (const id of seen) if (reviewGone(store.item(id))) forgetItem(id);
   };
 
-  // A gate row's Submit and Discard need its drafts known before its review is opened.
+  // A row's Submit and Discard need its drafts known before its review is opened (preloadsDrafts).
   const preloading = new Set<string>();
   const failed = new Set<string>(); // not asked again until the next reconnect
   const load = (id: string) => {
@@ -179,10 +179,10 @@ export function registerComments(
   const preload = (ids: string[] | "all") => {
     if (ids === "all") failed.clear();
     const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
-    for (const i of items) if (i.pending_gate && include(i) && !reviewGone(i)) load(i.id);
+    for (const i of items) if (preloadsDrafts(i) && include(i)) load(i.id);
   };
 
-  // Gate items that come into scope (Show All, another folder) need their drafts known too.
+  // Items that come into scope (Show All, another folder) need their drafts known too.
   onScopeChange(() => preload(store.items().map((i) => i.id)));
 
   /** The active document's item, when it is one of a review's documents. */

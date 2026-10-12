@@ -109,6 +109,8 @@ describe("Store", () => {
     const { store, sockets, api, urls, log } = setup();
     await store.start();
     sockets[0].s.open();
+    await store.refresh("A");
+    expect(store.detail("A")).toBeDefined();
     api.listItems.mockRejectedValue(new Error("down"));
     sockets[0].s.close();
     expect(store.connected).toBe(false);
@@ -117,6 +119,8 @@ describe("Store", () => {
     api.listItems.mockResolvedValue({ items: [item({ id: "A" }), item({ id: "B" })], cursor: 9 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(store.items().map((i) => i.id)).toEqual(["A", "B"]);
+    // A detail read before the drop is as stale as the list was: dropped, not kept.
+    expect(store.detail("A")).toBeUndefined();
     expect(urls.at(-1)).toBe("ws://x/api/ws/events?after_seq=9");
   });
 

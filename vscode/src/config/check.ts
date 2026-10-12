@@ -1,8 +1,10 @@
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import type { Api } from "../core/api";
 import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
+import { RESTART_ARGS, RESTART_FAILED, startInvocation } from "../core/start";
 import { log } from "../log";
 
 const SOURCE = "Kraft · config";
@@ -19,6 +21,23 @@ function toDiagnostic(d: Diag): vscode.Diagnostic {
     ];
   }
   return diag;
+}
+
+/** `kraft admin restart` in a terminal: the binary Start Kraft runs, from the home folder as
+ *  Start Kraft runs it, not the workspace's. The terminal's process is kraft itself, so no
+ *  shell has to quote the path; its output closes with it, so a failure is said here. */
+export function restartInTerminal(): void {
+  const { file } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
+  const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir(), shellPath: file, shellArgs: [...RESTART_ARGS] });
+  const closed = vscode.window.onDidCloseTerminal(async (c) => {
+    if (c !== t) return;
+    closed.dispose();
+    const code = c.exitStatus?.code;
+    if (!code) return;
+    if ((await vscode.window.showWarningMessage(RESTART_FAILED(code), "Start Kraft")) === "Start Kraft")
+      void vscode.commands.executeCommand("kraft.startDaemon");
+  });
+  t.show();
 }
 
 export function registerConfigChecks(context: vscode.ExtensionContext, api: Api, templatesDir: string, readOnly: () => boolean) {
@@ -64,12 +83,6 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
     } catch {
       return undefined;
     }
-  };
-
-  const restartInTerminal = () => {
-    const t = vscode.window.createTerminal("Kraft");
-    t.sendText("kraft admin restart");
-    t.show();
   };
 
   const offer = async (doc: vscode.TextDocument) => {

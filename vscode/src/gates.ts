@@ -118,7 +118,8 @@ export function registerGates(
         readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send),
       });
       if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
-      if (outcome === "approved") await store.refresh(id);
+      // The approve went through: a failed re-read is not a failed approve.
+      if (outcome === "approved") await store.refresh(id).catch(() => {});
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.
       if (isStaleRevision(e) && !(await openArtifact(id, g))) return;
@@ -139,7 +140,7 @@ export function registerGates(
     try {
       await api.reject(id, gate, note.trim());
       shown.forget(id);
-      await store.refresh(id);
+      await store.refresh(id).catch(() => {});
     } catch (e) {
       await reportError(e, store, id);
     }
@@ -150,7 +151,7 @@ export function registerGates(
   const toast = (found: [WorkItem, Announcement][]) => {
     for (const [item, a] of found) {
       if (a.kind === "gate") {
-        const buttons = ["Open", "Reject…"];
+        const buttons = refusal() === null ? ["Open", "Reject…"] : ["Open"];
         void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
           if (pick === "Open") void openArtifact(item.id, a.gate);
           if (pick === "Reject…") void reject(item.id, a.gate);

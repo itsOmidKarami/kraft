@@ -30,4 +30,7 @@ export const REREAD_EVENTS: ReadonlySet<EventType> = new Set<EventType>([
   "worker_session_exited",
   "work_item_blocked",
   "work_item_unblocked",
+  // A must-fix thread resolved, reopened or sent with a review moves `must_fix_open`, and with it the approve door in `actions`.
+  "thread_updated",
+  "review_submitted",
 ]);
