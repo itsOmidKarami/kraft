@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { reportError } from "./actions";
 import { ApiError, type Api, type Repo } from "./core/api";
 import {
-  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, outcomeMessage, pickRepo, previewLine, repoDefaultChain,
+  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, isRemoteFolder, outcomeMessage, remoteEscape, pickRepo, previewLine, repoDefaultChain,
   titleFrom, titleProblem, warningActions, warningsOf, type FileDraft,
 } from "./core/fileWork";
 import { mutating } from "./core/guard";
@@ -136,17 +136,24 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
   // which resolves the toplevel of the folder itself (`_attachment_roots`).
   const tops = await Promise.all(Object.values(paths).map(async (path) => {
     const dir = dirname(path);
-    const top = folder.uri.scheme === "file" ? await deps.scope.git(["rev-parse", "--show-toplevel"], dir) : undefined;
+    const top = !isRemoteFolder(folder.uri.scheme) ? await deps.scope.git(["rev-parse", "--show-toplevel"], dir) : undefined;
     return { path, top: top ?? dir };
   }));
-  const where = cwdFor(tops, repo.path);
+  const where = cwdFor(tops, repo.path, isRemoteFolder(folder.uri.scheme));
   if ("refusal" in where) return stop(where.refusal);
   const { cwd } = where;
 
   const { chain, label } = await chainOf(api, repo);
   const draft: FileDraft = { title, description, repo: repo.path, chain, ...paths, cwd };
 
-  const dry = await api.preview(createBody(draft, false));
+  let dry;
+  try {
+    dry = await api.preview(createBody(draft, false));
+  } catch (e) {
+    const no = remoteEscape(e, !!cwd && isRemoteFolder(folder.uri.scheme), repo.path);
+    if (no) return stop(no);
+    throw e;
+  }
   const how = asked(await vscode.window.showQuickPick(
     [
       { label: "File paused", detail: "Nothing spends tokens until you start it.", start: false },
