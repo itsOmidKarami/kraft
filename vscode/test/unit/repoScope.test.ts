@@ -26,7 +26,7 @@ describe("repoRoot", () => {
     ["submodule", "/s/sub", { [`/s/sub|${TOP}`]: "/s/sub", [`/s/sub|${COMMON}`]: "/s/.git/modules/sub" }, {}, "/s/sub"],
     ["non-repo", "/tmp/x", {}, {}, "/tmp/x"],
     // git < 2.31 echoes the flag it does not know and prints the relative common dir, exit 0.
-    ["old git", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "--path-format=absolute\n.git" }, {}, "/wt"],
+    ["old git", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "--path-format=absolute\n/r/.git" }, {}, "/wt"],
     ["more than one line", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "/a\n/r/.git" }, {}, "/wt"],
     ["relative common dir", "/wt", { [`/wt|${TOP}`]: "/wt", [`/wt|${COMMON}`]: "../r/.git" }, {}, "/wt"],
     ["windows common dir", "C:/wt", { [`C:/wt|${TOP}`]: "C:/wt", [`C:/wt|${COMMON}`]: "C:/r/.git" }, {}, "C:/r"],
@@ -46,7 +46,7 @@ describe("samePath", () => {
     ["/R", "/r", "linux", false],
     ["/r/", "/r", "linux", true],
     ["/r", "/r2", "darwin", false],
-    ["/", "/", "linux", true],
+    ["//", "/", "linux", true],
   ])("%s ~ %s on %s → %s", (a, b, p, want) => expect(samePath(a, b, p as NodeJS.Platform)).toBe(want));
 });
 
@@ -59,6 +59,7 @@ describe("worktreeItemId", () => {
     ["/k/run/worktrees/", "/k/run", "linux", undefined],
     ["/k/run/worktreesX/abc", "/k/run", "linux", undefined],
     ["/k/other", "/k/run", "linux", undefined],
+    ["/worktrees/abc", "", "linux", undefined],
     ["c:\\K\\run\\worktrees\\abc", "C:/k/run", "win32", "abc"],
   ])("%s under %s → %s", (f, r, p, want) => expect(worktreeItemId(f, r, p as NodeJS.Platform)).toBe(want));
 });
@@ -155,7 +156,7 @@ describe("WorkspaceScope", () => {
   it("a folder whose scope throws still scopes to the folder", async () => {
     const scope = new WorkspaceScope("linux");
     const broken: ScopeDeps = { ...deps({}), git: async () => { throw new Error("spawn git ENOENT"); } };
-    await scope.update(["/r"], "/k", broken);
-    expect([scope.ready, scope.includes({ id: "x", repo: "/r" }, none)]).toEqual([true, true]);
+    await scope.update(["/r", "/k/worktrees/A"], "/k", broken);
+    expect([scope.ready, scope.includes({ id: "x", repo: "/r" }, none), scope.includes({ id: "A", repo: "/elsewhere" }, none)]).toEqual([true, true, true]);
   });
 });

@@ -58,6 +58,7 @@ export async function repoRoot(folder: string, deps: ScopeDeps): Promise<string>
 }
 
 export function worktreeItemId(folder: string, runDir: string, platform: NodeJS.Platform): string | undefined {
+  if (!runDir) return undefined;
   const win = platform === "win32";
   const sep = win ? "\\" : "/";
   const f = win ? folder.replace(/\//g, "\\") : folder;
@@ -113,7 +114,10 @@ export class WorkspaceScope {
   async update(folders: string[], runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = []): Promise<void> {
     const gen = ++this.gen;
     const scopes = await Promise.all(
-      folders.map((f) => folderScope(f, runDir, deps, connected).catch((): FolderScope => ({ roots: [f] }))),
+      folders.map((f) => folderScope(f, runDir, deps, connected).catch((): FolderScope => {
+        const worktreeItem = worktreeItemId(f, runDir, this.platform);
+        return worktreeItem === undefined ? { roots: [f] } : { roots: [f], worktreeItem };
+      })),
     );
     if (gen !== this.gen) return;
     this.scopes = scopes;
