@@ -95,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   registerBoard(context, store, api, () => refusal(state()), include, scope);
   context.subscriptions.push(status, { dispose: () => store.stop() });
   const comments = registerComments(context, store, api, () => refusal(state()));
-  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, comments.confirmApprove);
+  const gates = registerGates(context, store, api, () => refusal(state()), include, scope, comments.confirmApprove, comments.discardDrafts);
   const diff = registerDiff(context, store, api, () => runDir);
   const review = Object.assign(diff, comments);
   registerFindings(context, store);
