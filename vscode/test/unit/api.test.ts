@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError } from "../../src/core/api";
+import { Api, ApiError, type ApiFailure } from "../../src/core/api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -78,5 +78,29 @@ describe("Api", () => {
     else await expect(call).rejects.toMatchObject({ status, detail: (body as { detail: string }).detail });
     expect(f.mock.calls[0][0]).toBe("http://h:1/api/apply/restart");
     expect((f.mock.calls[0][1] as RequestInit).method).toBe("POST");
+  });
+
+  it("reports a refused call to onError", async () => {
+    const api = new Api("http://h:1", undefined, fakeFetch(401, { detail: "bad token" }) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await expect(api.listItems()).rejects.toBeInstanceOf(ApiError);
+    expect(seen).toEqual([{ method: "GET", path: "/work-items?include_abandoned=true", status: 401, detail: "bad token" }]);
+  });
+
+  it("reports an unreachable server as status 0", async () => {
+    const api = new Api("http://h:1", undefined, vi.fn(async () => { throw new Error("ECONNREFUSED"); }) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await expect(api.pause("W-1")).rejects.toMatchObject({ status: 0 });
+    expect(seen).toEqual([{ method: "POST", path: "/work-items/W-1/pause", status: 0, detail: "Kraft is not reachable at http://h:1: ECONNREFUSED" }]);
+  });
+
+  it("reports nothing for a call that succeeds", async () => {
+    const api = new Api("http://h:1", undefined, fakeFetch(200, {}) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await api.health();
+    expect(seen).toEqual([]);
   });
 });

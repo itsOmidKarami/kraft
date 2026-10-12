@@ -23,7 +23,12 @@ export class ApiError extends Error {
   }
 }
 
+export interface ApiFailure { method: string; path: string; status: number; detail: string }
+
 export class Api {
+  /** Every failed call, just before it throws: the extension logs them. */
+  onError?: (f: ApiFailure) => void;
+
   constructor(
     readonly base: string,
     private token: string | undefined,
@@ -47,12 +52,17 @@ export class Api {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (e) {
-      throw new ApiError(0, `Kraft is not reachable at ${this.base}: ${(e as Error).message}`);
+      throw this.fail(method, path, 0, `Kraft is not reachable at ${this.base}: ${(e as Error).message}`);
     }
     const text = await res.text();
     const data = text ? JSON.parse(text) : undefined;
-    if (!res.ok) throw new ApiError(res.status, typeof data?.detail === "string" ? data.detail : text || res.statusText);
+    if (!res.ok) throw this.fail(method, path, res.status, typeof data?.detail === "string" ? data.detail : text || res.statusText);
     return data as T;
+  }
+
+  private fail(method: string, path: string, status: number, detail: string): ApiError {
+    this.onError?.({ method, path, status, detail });
+    return new ApiError(status, detail);
   }
 
   private item(id: string, rest = ""): string {
