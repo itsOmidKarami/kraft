@@ -15,6 +15,7 @@ export function registerGates(
   api: Api,
   refusal: () => string | null,
   confirmApprove: (id: string) => Promise<boolean> = async () => true,
+  discardDrafts: (id: string) => PromiseLike<void> = async () => {},
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
   const artifacts = new Map<string, string>(); // uri path → markdown
@@ -34,26 +35,28 @@ export function registerGates(
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
   // Resolves once the tab is up; only then is the render remembered as read.
-  const show = async (id: string, gate: string, a: Artifact) => {
+  const show = async (id: string, gate: string | undefined, a: Artifact) => {
     const path = `/${id}/${a.title.replace(/[\\/]/g, "-")}.md`;
     artifacts.set(path, a.truncated ? `${a.content}\n\n---\n*Truncated: open it in the web UI for the whole document.*\n` : a.content);
     const uri = vscode.Uri.parse(`kraft-artifact:${path}`);
     changed.fire(uri); // a tab already open on this path reloads
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, { preview: false });
-    shown.record(id, gate, a.digest);
+    if (gate) shown.record(id, gate, a.digest); // no gate to bind it to: shown, not remembered
   };
 
-  const openArtifact = async (id?: string, gate?: string) => {
-    if (!id) return;
+  /** Whether the document is now showing; a failure has already been reported. */
+  const openArtifact = async (id?: string, gate?: string): Promise<boolean> => {
+    if (!id) return false;
     gate ??= gateOf(id);
     try {
       const a = await api.getArtifact(id);
-      if (!a) return void vscode.window.showInformationMessage(`${id}'s gate has no document to show.`);
-      if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
+      if (!a) return void vscode.window.showInformationMessage(`${id}'s gate has no document to show.`), false;
       await show(id, gate, a);
+      return true;
     } catch (e) {
       await reportError(e, store, id);
+      return false;
     }
   };
 
@@ -65,11 +68,12 @@ export function registerGates(
     const g = gate;
     try {
       // confirmApprove discards review drafts, so it runs only once an approve will really be sent.
-      const outcome = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), () => confirmApprove(id));
+      const outcome = await approveOrRead(api, shown, id, g, (a) => show(id, g, a), () => confirmApprove(id), () => discardDrafts(id));
       if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
       if (outcome === "approved") await store.refresh(id);
     } catch (e) {
-      if (isStaleRevision(e)) await openArtifact(id, g);
+      // A failed re-open has already said why; one toast is enough.
+      if (isStaleRevision(e) && !(await openArtifact(id, g))) return;
       await reportError(e, store, id);
     }
   });

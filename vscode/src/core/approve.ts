@@ -8,7 +8,8 @@ export async function approveGate(api: Api, id: string, gate: string, digest: st
 /**
  * Approve with the digest of the render the person's tab showed. With none shown
  * and a digest to bind to, show the document instead and do not approve.
- * `confirm` runs only once an approve is about to be sent.
+ * `confirm` only asks, and runs only once an approve is about to be sent;
+ * `approved` runs after the server accepted it, so a failed approve loses nothing.
  */
 export async function approveOrRead(
   api: Api,
@@ -17,11 +18,13 @@ export async function approveOrRead(
   gate: string,
   show: (a: Artifact) => Promise<void>,
   confirm: () => Promise<boolean> = async () => true,
+  approved: () => Promise<void> = async () => {},
 ): Promise<"approved" | "read-first" | "cancelled"> {
   const seen = shown.get(id, gate);
   if (seen) {
     if (!(await confirm())) return "cancelled";
     await approveGate(api, id, gate, seen.digest);
+    await approved();
     return "approved";
   }
   const a = await api.getArtifact(id);
@@ -32,6 +35,7 @@ export async function approveOrRead(
   }
   if (!(await confirm())) return "cancelled";
   await approveGate(api, id, gate, undefined);
+  await approved();
   return "approved";
 }
 

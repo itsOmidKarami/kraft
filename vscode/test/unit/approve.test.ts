@@ -53,10 +53,24 @@ it("asks to confirm only when the approve will be sent", async () => {
   expect(confirm).toHaveBeenCalledTimes(1);
 });
 
-it("a declined confirm approves nothing", async () => {
-  shown.record("A", "revise", "d1");
+it.each([
+  { id: "digest remembered", digest: "d1", artifact: withDigest },
+  { id: "no digest", digest: undefined, artifact: null },
+])("a declined confirm approves nothing: $id", async ({ digest, artifact }) => {
+  if (digest) shown.record("A", "revise", digest);
+  api.getArtifact.mockResolvedValue(artifact);
   expect(await approveOrRead(api, shown, "A", "revise", show, async () => false)).toBe("cancelled");
   expect(api.approve).not.toHaveBeenCalled();
+});
+
+it("keeps the drafts when the approve fails and drops them when it lands", async () => {
+  const approved = vi.fn(async () => {});
+  shown.record("A", "revise", "d1");
+  api.approve.mockRejectedValueOnce(new ApiError(409, "the revision changed since you viewed it"));
+  await expect(approveOrRead(api, shown, "A", "revise", show, async () => true, approved)).rejects.toThrow();
+  expect(approved).not.toHaveBeenCalled();
+  await approveOrRead(api, shown, "A", "revise", show, async () => true, approved);
+  expect(approved).toHaveBeenCalledTimes(1);
 });
 
 it.each([
