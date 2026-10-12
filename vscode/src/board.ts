@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action, type Include } from "./core/board";
+import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, type Action, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
@@ -20,7 +20,9 @@ export class Board implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<Node | void>();
   readonly onDidChangeTreeData = this.changed.event;
 
-  constructor(private store: Store, private include: Include, scope: Pick<WorkspaceScope, "onChange">) {
+  private welcome: Welcome | undefined;
+
+  constructor(private store: Store, private include: Include, private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">) {
     store.onChange(() => this.changed.fire());
     store.onConnection(() => this.changed.fire());
     scope.onChange(() => this.changed.fire());
@@ -38,8 +40,17 @@ export class Board implements vscode.TreeDataProvider<Node> {
     if (node?.kind === "findings") return this.unlocated(node.item).map((f) => ({ kind: "finding", text: `${f.severity}: ${f.message}` }));
     if (node?.kind === "group") return node.items.map((item) => ({ kind: "item", item }));
     if (node) return [];
-    if (!this.store.connected && this.store.items().length === 0) return [{ kind: "down" }];
-    return groupItems(this.store.items(), this.include).map((g) => ({ kind: "group", ...g }));
+    const groups = groupItems(this.store.items(), this.include);
+    const visible = groups.reduce((n, g) => n + g.items.length, 0);
+    this.setWelcome(welcomeState(this.store.connected, this.scope.ready, this.scope.showAll, visible));
+    if (!this.store.connected && visible === 0) return [{ kind: "down" }];
+    return groups.map((g) => ({ kind: "group", ...g }));
+  }
+
+  private setWelcome(w: Welcome) {
+    if (w === this.welcome) return;
+    this.welcome = w;
+    void vscode.commands.executeCommand("setContext", "kraft.welcome", w);
   }
 
   getTreeItem(node: Node): vscode.TreeItem {
@@ -83,7 +94,7 @@ export function registerBoard(
   runDir: () => string,
   refusal: () => string | null,
   include: Include,
-  scope: Pick<WorkspaceScope, "onChange">,
+  scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
 ) {
   const board = new Board(store, include, scope);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });

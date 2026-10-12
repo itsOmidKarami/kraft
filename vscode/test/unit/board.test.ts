@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, announceable, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, type Action, type ItemState } from "../../src/core/board";
+import { actionsFor, announceable, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, welcomeState, type Action, type ItemState } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -152,4 +152,14 @@ it.each([
   ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
 ])("steer prompt for %s", (_, it_, want) => {
   expect(steerPrompt(it_)).toBe(want);
+});
+
+it.each([
+  ["not connected", false, true, false, 0, "none"],
+  ["connected, scope not ready yet", true, false, false, 0, "none"],
+  ["something visible", true, true, false, 2, "none"],
+  ["connected, ready, nothing in this repo", true, true, false, 0, "here"],
+  ["showing every repo, nothing anywhere", true, true, true, 0, "none"],
+])("welcome: %s", (_, connected, ready, showAll, visible, want) => {
+  expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });

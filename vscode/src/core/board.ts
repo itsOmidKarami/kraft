@@ -81,6 +81,16 @@ export function groupItems(items: WorkItem[], include: Include): { id: GroupKey;
   })).filter((g) => g.items.length > 0);
 }
 
+/** The board's welcome text: `here` says this repo has no Kraft work and
+ *  offers Show all repos. Never before the scope is ready (git is async),
+ *  never while disconnected (the Start row says that), and not when every
+ *  repo is already shown. */
+export type Welcome = "none" | "here";
+
+export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number): Welcome {
+  return connected && ready && !showAll && visible === 0 ? "here" : "none";
+}
+
 export const actionsFor = (item: WorkItem): Action[] => ACTIONS[stateOf(item)];
 
 export const needsYou = (item: WorkItem) => shown(item) && groupOf(item) === "needs";
