@@ -17,6 +17,8 @@ import { registerComments } from "./review/comments";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
+import { onceEach, statusMenu, statusTooltip } from "./core/health";
+import { initLog, log } from "./log";
 
 export interface KraftApi {
   store: Store;
@@ -34,6 +36,7 @@ function read(path: string): string | undefined {
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<KraftApi> {
+  initLog(context);
   const loc = locations(process.env, homedir());
   const cfg = vscode.workspace.getConfiguration("kraft");
   const { base, token } = connectionFor({
@@ -44,7 +47,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     token: readToken(loc.runDir),
   });
   const api = new Api(base, token);
-  const store = new Store(api, wsSocket);
+  api.onError = (f) => {
+    // The store logs a failed list call itself, once per distinct failure, not on every retry.
+    if (f.method === "GET" && f.path.startsWith("/work-items?")) return;
+    const line = `${f.method} ${f.path}: ${f.status} ${f.detail}`;
+    // Gone, or moved on before the call landed: expected, not an error.
+    if (f.status === 404 || f.status === 409) log.info(line);
+    else log.error(line);
+  };
+  const store = new Store(api, wsSocket, (level, msg) => log[level](msg));
   const own = (context.extension.packageJSON as { version: string }).version;
   let trusted = vscode.workspace.isTrusted;
   let version: string | null = null;
@@ -57,31 +68,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     connected = now;
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
     status.text = connected ? `$(check) Kraft${refusal(state()) ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
-    status.tooltip = connected ? tooltip(state()) : undefined;
+    status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError);
+    status.command = "kraft.statusMenu";
     status.show();
   };
   const applyReadOnly = (now = connected) => {
     void vscode.commands.executeCommand("setContext", "kraft.readOnly", refusal(state()) !== null);
     setStatus(now);
   };
+  // One toast per distinct reason a session: a flapping connection must not repeat it.
+  const warnOnce = onceEach();
   store.onConnection(async (connected) => {
     if (connected) {
       try {
         const health = await api.health();
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
-        if (version) void vscode.window.showWarningMessage(version);
-      } catch {
+        if (version && warnOnce(version)) void vscode.window.showWarningMessage(version);
+      } catch (e) {
+        log.warn(`health check failed, so the server's version is unknown: ${(e as Error).message}`);
         version = readOnlyReason(own, null);
       }
     }
     applyReadOnly(connected);
   });
+  store.onError(() => setStatus(connected));
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
   registerBoard(context, store, api, () => runDir, () => refusal(state()));
-  context.subscriptions.push(status, { dispose: () => store.stop() });
+  context.subscriptions.push(
+    status,
+    { dispose: () => store.stop() },
+    vscode.commands.registerCommand("kraft.showLog", () => log.show()),
+    vscode.commands.registerCommand("kraft.statusMenu", async () => {
+      const pick = await vscode.window.showQuickPick(statusMenu(store.connected), { placeHolder: "Kraft" });
+      switch (pick?.choice) {
+        case "log": return log.show();
+        case "web": return void vscode.env.openExternal(vscode.Uri.parse(api.base));
+        // Guarded in board.ts: Restricted Mode refuses it.
+        case "start": return void vscode.commands.executeCommand("kraft.startDaemon");
+        case "retry": return store.retryNow();
+      }
+    }),
+  );
   const comments = registerComments(context, store, api, () => refusal(state()));
   const gates = registerGates(context, store, api, () => refusal(state()), comments.confirmApprove);
   const diff = registerDiff(context, store, api, () => runDir);

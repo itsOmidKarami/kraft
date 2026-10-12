@@ -16,3 +16,10 @@ it("declares limited support in untrusted workspaces", () =>
 
 it.each(["kraft.lintLibrary", "kraft.showResolved"])("hides %s from the palette until trusted", (command) =>
   expect(pkg.contributes.menus.commandPalette).toContainEqual({ command, when: "isWorkspaceTrusted" }));
+
+it("offers Show Log in the palette and keeps the status menu out of it", () => {
+  const commands = pkg.contributes.commands.map((c: { command: string }) => c.command);
+  expect(commands).toEqual(expect.arrayContaining(["kraft.showLog", "kraft.statusMenu"]));
+  expect(pkg.contributes.commands).toContainEqual({ command: "kraft.showLog", title: "Show Log", category: "Kraft" });
+  expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.statusMenu", when: "false" });
+});

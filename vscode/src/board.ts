@@ -4,6 +4,7 @@ import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, type Action } from "./core/board";
 import { findingsOf } from "./core/findings";
+import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
 import type { Store } from "./core/store";
@@ -23,6 +24,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
   constructor(private store: Store, private repos: () => string[]) {
     store.onChange(() => this.changed.fire());
     store.onConnection(() => this.changed.fire());
+    store.onError(() => this.changed.fire());
   }
 
   refresh = () => this.changed.fire();
@@ -43,9 +45,10 @@ export class Board implements vscode.TreeDataProvider<Node> {
 
   getTreeItem(node: Node): vscode.TreeItem {
     if (node.kind === "down") {
-      const t = new vscode.TreeItem("Kraft isn't running — Start");
+      const { label, command, args } = downRow(this.store.lastError);
+      const t = new vscode.TreeItem(label);
       t.iconPath = new vscode.ThemeIcon("debug-disconnect");
-      t.command = { command: "kraft.startDaemon", title: "Start Kraft" };
+      t.command = { command, title: label, arguments: args };
       return t;
     }
     if (node.kind === "group") {
