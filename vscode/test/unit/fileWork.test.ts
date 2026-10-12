@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode } from "../../../frontend/src/types";
 import { ApiError, type Created, type DryRun, type Repo, type TemplateSummary } from "../../src/core/api";
 import {
-  abandonRefusal, attachChoices, connectOffered, connectOutcome, connectRefusal, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
+  abandonRefusal, attachChoices, connectOffered, connectOutcome, connectRefusal, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, isRemoteFolder, remoteEscape, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
   pickRepo, previewLine, repoDefaultChain, titleFrom, titleProblem, warningActions, warningsOf,
 } from "../../src/core/fileWork";
 import { RESTRICTED, VERSION_REFUSAL } from "../../src/core/readOnly";
@@ -248,4 +248,24 @@ describe("abandonRefusal", () => {
       "K-1 can no longer be abandoned: it is running. Open it to see what it allows now."],
     ["offers a queued one from a server without actions", { status: "queued", display_status: "queued" }, undefined],
   ])("%s", (_, it_, want) => expect(abandonRefusal("K-1", it_ as never)).toBe(want));
+});
+
+describe("isRemoteFolder", () => {
+  it.each([
+    ["a local folder", "file", false],
+    ["a remote window", "vscode-remote", true],
+    ["a virtual workspace", "vscode-vfs", true],
+  ])("%s", (_, scheme, want) => expect(isRemoteFolder(scheme)).toBe(want));
+});
+
+describe("remoteEscape", () => {
+  const escapes = new ApiError(422, "attachment path escapes the repo: /w/s.md. A spec must be a file inside the repo");
+  it.each([
+    ["the 422 after a cwd was sent says different worktrees", escapes, true,
+      "The documents are in different worktrees, or outside /r. Kraft takes documents from /r and one of its worktrees: move one of them first."],
+    ["no cwd sent: the server's own wording stands", escapes, false, undefined],
+    ["another 422 stands", new ApiError(422, "attachment not found: /r/s.md"), true, undefined],
+    ["another status stands", new ApiError(500, "attachment path escapes the repo: x"), true, undefined],
+    ["a network failure stands", new Error("fetch failed"), true, undefined],
+  ])("%s", (_, err, sent, want) => expect(remoteEscape(err, sent, "/r")).toBe(want));
 });

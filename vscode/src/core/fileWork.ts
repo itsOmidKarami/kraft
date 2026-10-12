@@ -261,6 +261,19 @@ export function cwdFor(attachments: { path: string; top: string }[], repo: strin
   };
 }
 
+/** A window whose folder is not on this machine's disk (`vscode-remote`, a dev
+ *  container, WSL): no git runs for it here, so `top` is only a folder. */
+export const isRemoteFolder = (scheme: string): boolean => scheme !== "file";
+
+/** The preview's 422 "attachment path escapes the repo", in a remote window that
+ *  sent a `cwd`: the daemon's own toplevel check refused it, so the documents sit
+ *  in different worktrees, said as the local refusal says it. Undefined for any
+ *  other failure, which is reported as it came. */
+export function remoteEscape(err: unknown, sentCwd: boolean, repo: string): string | undefined {
+  if (!sentCwd || !(err instanceof ApiError) || err.status !== 422 || !err.detail.startsWith("attachment path escapes the repo")) return undefined;
+  return `The documents are in different worktrees, or outside ${repo}. Kraft takes documents from ${repo} and one of its worktrees: move one of them first.`;
+}
+
 /** Why Abandon, offered when the item was filed, no longer applies (D24):
  *  read again when it is clicked, from the server's own `actions` when the
  *  board has them. Undefined means ask, and let the server answer. */

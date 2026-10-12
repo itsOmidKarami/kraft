@@ -16,12 +16,18 @@ function keyOf(item: WorkItem): string | undefined {
   return undefined;
 }
 
-/** The buttons a needs-you or failed toast offers. A question is answered, never
- *  retried (slice 10: Answer resumes), and only while the server admits `resume`;
- *  every other stop keeps Retry. */
-export function toastActions(item: Pick<WorkItem, "stop" | "actions">): ("Open in Web UI" | "Answer" | "Retry")[] {
-  if (item.stop?.kind !== "question") return ["Open in Web UI", "Retry"];
-  return item.actions?.includes("resume") ? ["Open in Web UI", "Answer"] : ["Open in Web UI"];
+export interface ToastAction { label: string; command: string }
+
+/** The buttons a needs-you or failed toast offers, each with the command it runs
+ *  (on `{ item }`). A question is answered, never retried (slice 10: Answer
+ *  resumes), and only while the server admits `resume`; every other stop keeps
+ *  Retry. Read-only windows leave out what the guard would refuse: only
+ *  Open in Web UI stays. */
+export function toastActions(item: Pick<WorkItem, "stop" | "actions">, readOnly: boolean): ToastAction[] {
+  const web = { label: "Open in Web UI", command: "kraft.openInWebUi" };
+  if (readOnly) return [web];
+  if (item.stop?.kind !== "question") return [web, { label: "Retry", command: "kraft.retry" }];
+  return item.actions?.includes("resume") ? [web, { label: "Answer", command: "kraft.answer" }] : [web];
 }
 
 export class Announcer {

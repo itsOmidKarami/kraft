@@ -156,10 +156,10 @@ export function registerGates(
           if (pick === "Reject…") void reject(item.id, a.gate);
         });
       } else {
-        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, ...toastActions(item)).then((pick) => {
-          if (pick === "Open in Web UI") void vscode.commands.executeCommand("kraft.openInWebUi", { item });
-          if (pick === "Answer") void vscode.commands.executeCommand("kraft.answer", { item });
-          if (pick === "Retry") void vscode.commands.executeCommand("kraft.retry", { item });
+        const buttons = toastActions(item, refusal() !== null);
+        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, ...buttons.map((b) => b.label)).then((pick) => {
+          const run = buttons.find((b) => b.label === pick);
+          if (run) void vscode.commands.executeCommand(run.command, { item });
         });
       }
     }
