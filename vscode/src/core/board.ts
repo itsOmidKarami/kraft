@@ -5,35 +5,12 @@ import type { WorkItem } from "./api";
 /** The board reads the server's `display_status` and `stop`, as the web board
  *  does (`groupOf`, `reasonTail`); nothing here derives state from `status`. */
 
-export type Action = "pause" | "resume" | "retry" | "cancel" | "skip" | "escalate" | "archive";
-
-/** What a row is, for its icon and its actions: the `display_status`, with a
+/** What a row is, for its icon: the `display_status`, with a
  *  `needs_you` split by the stop kinds that look different and a paused item
  *  that never started apart from one paused mid-chain. */
 export type ItemState =
   | "gate" | "question" | "budget" | "cap" | "needs_you" | "failed" | "paused" | "not_started"
   | "running" | "waiting" | "queued" | "blocked" | "escalated" | "done" | "cancelled" | "archived" | "unknown";
-
-const ACTIONS: Record<ItemState, Action[]> = {
-  running: ["pause", "cancel"],
-  waiting: ["pause", "cancel"],
-  queued: ["pause", "cancel"],
-  blocked: ["pause", "cancel"],
-  escalated: ["cancel"],
-  paused: ["resume", "cancel"],
-  not_started: ["resume", "cancel"],
-  gate: ["skip", "cancel"],
-  question: ["retry", "skip", "escalate", "cancel"],
-  cap: ["retry", "skip", "escalate", "cancel"],
-  needs_you: ["retry", "skip", "escalate", "cancel"],
-  failed: ["retry", "skip", "escalate", "cancel"],
-  // The server refuses escalate on every budget stop.
-  budget: ["retry", "skip", "cancel"],
-  done: ["archive"],
-  cancelled: ["archive"],
-  archived: [],
-  unknown: [],
-};
 
 const ICONS: Record<ItemState, string> = {
   gate: "pass",
@@ -77,7 +54,11 @@ export function groupItems(items: WorkItem[], repos: string[] | "all"): { id: Gr
   })).filter((g) => g.items.length > 0);
 }
 
-export const actionsFor = (item: WorkItem): Action[] => ACTIONS[stateOf(item)];
+/** The row's `contextValue`, which its menus match: `gate` while a gate is
+ *  pending, then the server's `actions`, the doors it would admit now. A server
+ *  that sends no `actions` gets no action entries, only the ones every row has. */
+export const contextValueOf = (item: WorkItem): string =>
+  `item:${[...(item.pending_gate ? ["gate"] : []), ...(item.actions ?? [])].join(",")}`;
 
 export const needsYou = (item: WorkItem) => shown(item) && groupOf(item) === "needs";
 

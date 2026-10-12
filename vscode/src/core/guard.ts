@@ -4,6 +4,7 @@
 // while `kraft.readOnly`.
 export const MUTATING: ReadonlySet<string> = new Set([
   "kraft.pause", "kraft.resume", "kraft.retry", "kraft.cancel", "kraft.skip", "kraft.escalate", "kraft.archive",
+  "kraft.raiseBudget", "kraft.unblock", "kraft.complete", "kraft.restore",
   "kraft.approve", "kraft.reject",
   "kraft.review.submit", "kraft.review.discard",
   "kraft.startDaemon",
