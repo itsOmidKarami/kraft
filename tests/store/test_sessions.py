@@ -446,16 +446,25 @@ async def test_reusable_session_ignores_a_failed_sibling(database):
     assert _reusable(database) is None
 
 
-def _latest_per_task(database, node_id, hook_point):
-    return [
-        r["id"]
-        for r in database.read(
+async def _latest_per_task(database, node_id, hook_point, grouped):
+    """`latest_session_per_task`, or its every-item sibling with w1 standing on `node_id`."""
+    if not grouped:
+        rows = database.read(
             lambda c: store.latest_session_per_task(c, "w1", node_id, [hook_point])
         )
-    ]
+        return [r["id"] for r in rows]
+    await database.write(
+        lambda c: c.execute("UPDATE work_items SET current_node_id = ? WHERE id = 'w1'", (node_id,))
+    )
+    rows = database.read(store.latest_session_per_task_at_current_node).get("w1", [])
+    return [r["id"] for r in rows if r["hook_point"] == hook_point]
 
 
-async def test_latest_session_per_task_drops_a_failed_earlier_attempt(database):
+BOTH = pytest.mark.parametrize("grouped", [False, True], ids=["one-item", "every-item"])
+
+
+@BOTH
+async def test_latest_session_per_task_drops_a_failed_earlier_attempt(database, grouped):
     """Kraft-s15p0: an earlier attempt's failed row for the same hook_point
     must not survive alongside the current attempt's own row."""
     plan = {"node_id": "plan", "hook_point": "on.plan.requested"}
@@ -463,10 +472,13 @@ async def test_latest_session_per_task_drops_a_failed_earlier_attempt(database):
     await _exit(database, "s-attempt-1", "failed")
     await _session(database, "s-attempt-2", **plan)
     await _exit(database, "s-attempt-2", "done")
-    assert _latest_per_task(database, *plan.values()) == ["s-attempt-2"]
+    assert await _latest_per_task(database, *plan.values(), grouped) == ["s-attempt-2"]
 
 
-async def test_latest_session_per_task_ignores_a_hook_point_the_node_never_declared(database):
+@BOTH
+async def test_latest_session_per_task_ignores_a_hook_point_the_node_never_declared(
+    database, grouped
+):
     """Kraft-s15p0: an `escalation` session is never one of `node['tasks']`,
     so it must never be selected regardless of when it ran -- here it runs
     last, so recency alone would pick it."""
@@ -474,14 +486,18 @@ async def test_latest_session_per_task_ignores_a_hook_point_the_node_never_decla
     await _exit(database, "s-task", "done")
     await _session(database, "s-escalation", node_id="plan", hook_point="escalation")
     await _exit(database, "s-escalation", "done")
-    assert _latest_per_task(database, "plan", "on.plan.requested") == ["s-task"]
+    assert await _latest_per_task(database, "plan", "on.plan.requested", grouped) == ["s-task"]
 
 
-async def test_latest_session_per_task_omits_a_hook_point_with_no_session_at_all(database):
-    assert _latest_per_task(database, "plan", "on.plan.requested") == []
+@BOTH
+async def test_latest_session_per_task_omits_a_hook_point_with_no_session_at_all(database, grouped):
+    assert await _latest_per_task(database, "plan", "on.plan.requested", grouped) == []
 
 
-async def test_latest_session_per_task_surfaces_a_stuck_sibling_over_a_finished_scope(database):
+@BOTH
+async def test_latest_session_per_task_surfaces_a_stuck_sibling_over_a_finished_scope(
+    database, grouped
+):
     """A multi-scope `on.test.run` mints one session per scope sharing this
     hook_point -- a crash between scopes leaves an earlier scope `done` and
     the next one stuck `pending`. Picking the merely-latest-created row would
@@ -492,7 +508,7 @@ async def test_latest_session_per_task_surfaces_a_stuck_sibling_over_a_finished_
     await _session(database, "s-scope-a")
     await _session(database, "s-scope-b")
     await _exit(database, "s-scope-b", "done")
-    assert _latest_per_task(database, "verify", "on.test.run") == ["s-scope-a"]
+    assert await _latest_per_task(database, "verify", "on.test.run", grouped) == ["s-scope-a"]
 
 
 async def test_reusable_session_excludes_a_node_rejected_back_to_itself(database):
