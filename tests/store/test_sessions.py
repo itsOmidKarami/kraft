@@ -447,14 +447,17 @@ async def test_reusable_session_ignores_a_failed_sibling(database):
 
 
 async def _latest_per_task(database, node_id, hook_point, grouped):
-    """`latest_session_per_task`, or its every-item sibling with w1 standing on `node_id`."""
+    """`latest_session_per_task`, or its every-item sibling with w1 paused on `node_id`."""
     if not grouped:
         rows = database.read(
             lambda c: store.latest_session_per_task(c, "w1", node_id, [hook_point])
         )
         return [r["id"] for r in rows]
     await database.write(
-        lambda c: c.execute("UPDATE work_items SET current_node_id = ? WHERE id = 'w1'", (node_id,))
+        lambda c: c.execute(
+            "UPDATE work_items SET status = 'paused', current_node_id = ? WHERE id = 'w1'",
+            (node_id,),
+        )
     )
     rows = database.read(store.latest_session_per_task_at_current_node).get("w1", [])
     return [r["id"] for r in rows if r["hook_point"] == hook_point]

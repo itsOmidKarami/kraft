@@ -217,6 +217,8 @@ class DoorFacts:
     escalation_live: bool = False
     #: An agent task of its current node is paused, to take a steer.
     agent_paused: bool = False
+    #: It comes after an item that has not completed.
+    unmet_dependency: bool = False
     #: It comes after an abandoned item, which will never complete.
     dead_dependency: bool = False
     #: Its gate has unresolved must-fix review threads.
@@ -262,7 +264,8 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         ItemAction.RAISE_BUDGET: retry_ok and f.raisable and not f.walk_live,
         # reopen_mr: a closed merge request, then `_retry`.
         ItemAction.REOPEN_MR: retry_ok and f.mr_closed,
-        ItemAction.UNBLOCK: a(V.UNBLOCK),
+        # unblock_work_item answers 200 dropping nothing when nothing is unmet.
+        ItemAction.UNBLOCK: a(V.UNBLOCK) and f.unmet_dependency,
         # skip_work_item: a skippable node, no escalation turn, and no walk
         # but a running item's own.
         ItemAction.SKIP: a(V.SKIP)

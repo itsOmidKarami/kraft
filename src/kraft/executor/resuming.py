@@ -100,12 +100,13 @@ class SteerError(ValueError):
         self.field = field
 
 
-def agent_task_paths(row) -> list[str]:
+def agent_task_paths(row, chain=store.UNREAD) -> list[str]:
     """The agent task paths of the node the item stands on, in chain order:
-    `[]` off its chain, and for a legacy row with no materialized chain."""
+    `[]` off its chain, and for a legacy row with no materialized chain.
+    `chain` is the row's materialized chain when the caller already read it."""
     from kraft.templates.models import AgentTask
 
-    chain = store.materialized_chain_of(row)
+    chain = store.materialized_chain_of(row) if chain is store.UNREAD else chain
     if chain is None:
         return []
     node = next((n for n in chain.chain.nodes if n.id == row["current_node_id"]), None)

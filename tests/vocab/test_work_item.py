@@ -169,14 +169,14 @@ BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
             "resume steer retry skip escalate complete cancel abandon",
         ),
         (
-            F(S.PAUSED, **STOPPED_ON, dead_dependency=True),
+            F(S.PAUSED, **STOPPED_ON, unmet_dependency=True, dead_dependency=True),
             "unblock skip escalate complete cancel abandon",
         ),
         (
             F(S.PAUSED, **STOPPED_ON, agent_paused=True),
-            "resume steer unblock skip escalate complete cancel abandon",
+            "resume steer skip escalate complete cancel abandon",
         ),
-        (F(S.PAUSED), "resume steer unblock complete cancel abandon"),
+        (F(S.PAUSED), "resume steer complete cancel abandon"),
         (
             F(NH, **STOPPED_ON, mr_closed=True),
             "retry reopen_mr skip escalate complete cancel abandon",
@@ -198,6 +198,7 @@ BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
             F(NH, **BUDGET, walk_live=True, escalation_live=True),
             "retry complete cancel abandon",
         ),
+        (F(S.PAUSED, unmet_dependency=True), "resume steer unblock complete cancel abandon"),
     ],
     ids=[
         "budget-closes-escalate",
@@ -218,6 +219,7 @@ BUDGET = {**STOPPED_ON, "budget_stop": True, "raisable": True}
         "dead-dependency-closes-reopen-mr",
         "off-chain-closes-retry-and-its-composites",
         "walk-closes-raise-budget-not-retry",
+        "unmet-dependency-opens-unblock",
     ],
 )
 def test_open_doors_reads_the_second_facts(facts, want):

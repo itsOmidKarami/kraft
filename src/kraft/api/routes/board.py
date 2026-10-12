@@ -243,19 +243,22 @@ def item_actions(
     mr_ref: dict | None,
     escalation_live: bool,
     agent_paused: bool,
+    unmet_dependency: bool,
     dead_dependency: bool,
     must_fix_open: bool,
+    chain=store.UNREAD,
 ) -> list[str]:
     """`actions`: the doors `open_doors` finds open on the facts the routes
     check. The caller reads the per-item facts (the list from its grouped
-    queries, the detail per item); the chain is read here, and only for a
-    status whose door asks."""
+    queries, the detail per item). The chain is read here, and only for a
+    status whose door asks, unless the caller passes the one it read."""
     status = WorkItemStatus(row["status"])
     reason = (stop_payload or {}).get("reason") or ""
     # Read once, and only for a door that walks it. A legacy row has none:
     # retry, skip and a gate's doors all answer it with a failure.
     asks = pending_gate is not None or status in (*admitting(Verb.RETRY), *admitting(Verb.SKIP))
-    chain = store.materialized_chain_of(row) if asks else None
+    if chain is store.UNREAD:
+        chain = store.materialized_chain_of(row) if asks else None
     facts = DoorFacts(
         status,
         archived=row["archived_at"] is not None,
@@ -272,6 +275,7 @@ def item_actions(
         walk_live=deps.task_is_live(app, row["id"]),
         escalation_live=escalation_live,
         agent_paused=agent_paused,
+        unmet_dependency=unmet_dependency,
         dead_dependency=dead_dependency,
         must_fix_open=must_fix_open,
     )
@@ -375,10 +379,12 @@ async def list_work_items(request: Request):
                 )
             },
             "latest": store.latest_session_per_task_at_current_node(c),
-            "abandoned": {
-                r[0]
+            # The status of every item some item comes after.
+            "dependency": {
+                r[0]: r[1]
                 for r in c.execute(
-                    "SELECT id FROM work_items WHERE status = ?", (WorkItemStatus.ABANDONED,)
+                    "SELECT DISTINCT d.value, w.status FROM work_items x, json_each(x.depends_on) d"
+                    " JOIN work_items w ON w.id = d.value"
                 )
             },
             "must_fix": {
@@ -438,10 +444,12 @@ async def list_work_items(request: Request):
             and _turn_live(last["session_status"], last["created_at"])
         )
 
-    def _list_actions(r, mr_ref: dict | None) -> list[str]:
+    def _list_actions(r, mr_ref: dict | None, chain) -> list[str]:
         wid, status = r["id"], r["status"]
         latest = doors["latest"].get(wid, []) if status == WorkItemStatus.PAUSED else []
         paused = {s["hook_point"] for s in latest if s["status"] == SessionStatus.PAUSED}
+        statuses = (doors["dependency"].get(d) for d in json.loads(r["depends_on"] or "[]"))
+        unmet = [s for s in statuses if s not in (None, WorkItemStatus.COMPLETED)]
         return item_actions(
             request.app,
             r,
@@ -449,10 +457,11 @@ async def list_work_items(request: Request):
             stop_payload=_boundary_payload(boundary_by_item.get(wid)),
             mr_ref=mr_ref,
             escalation_live=wid in doors["escalating"],
-            agent_paused=bool(paused) and bool(paused & set(executor.agent_task_paths(r))),
-            dead_dependency=status in (WorkItemStatus.PAUSED, WorkItemStatus.NEEDS_HUMAN)
-            and bool(set(json.loads(r["depends_on"] or "[]")) & doors["abandoned"]),
+            agent_paused=bool(paused) and bool(paused & set(executor.agent_task_paths(r, chain))),
+            unmet_dependency=bool(unmet),
+            dead_dependency=WorkItemStatus.ABANDONED in unmet,
             must_fix_open=wid in doors["must_fix"],
+            chain=chain,
         )
 
     def _item(r) -> dict:
@@ -498,10 +507,12 @@ async def list_work_items(request: Request):
             "step": _step_of(r, chains[r["id"]], task_by_item.get(r["id"]), with_task=True),
             "mr_ref": mr_ref,
             # The doors a request would be admitted through now (`open_doors`).
-            "actions": _list_actions(r, mr_ref),
+            "actions": _list_actions(r, mr_ref, parsed[r["id"]]),
         }
 
-    chains = {r["id"]: store.chain_view(r) for r in rows}
+    # Each row's chain parsed once, for the stage bar and `actions` both.
+    parsed = {r["id"]: store.materialized_chain_of(r) for r in rows}
+    chains = {r["id"]: store.chain_view(r, parsed[r["id"]]) for r in rows}
     return {"items": [_item(r) for r in rows], "cursor": cursor}
 
 
@@ -1213,6 +1224,12 @@ async def get_work_item(wid: str, request: Request):
     progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid)
     mr_ref = _mr_ref(st, wid)
     status = row["status"]
+    # What it still comes after: unblock, and resume or retry past an abandoned one.
+    unmet = (
+        st.db.read(lambda c: store.unmet_dependencies(c, wid))
+        if status in (*admitting(Verb.UNBLOCK), *admitting(Verb.RETRY))
+        else []
+    )
     actions = item_actions(
         request.app,
         row,
@@ -1222,11 +1239,8 @@ async def get_work_item(wid: str, request: Request):
         escalation_live=status not in ENDED and escalate.escalation_running(st.db, wid) is not None,
         agent_paused=status == WorkItemStatus.PAUSED
         and executor.resume_steer(st.db, row, None, {}) is not None,
-        dead_dependency=status in (WorkItemStatus.PAUSED, WorkItemStatus.NEEDS_HUMAN)
-        and any(
-            d["status"] == WorkItemStatus.ABANDONED
-            for d in st.db.read(lambda c: store.unmet_dependencies(c, wid))
-        ),
+        unmet_dependency=bool(unmet),
+        dead_dependency=any(d["status"] == WorkItemStatus.ABANDONED for d in unmet),
         must_fix_open=pending is not None
         and bool(st.db.read(lambda c: store.open_must_fix(c, wid))),
     )
