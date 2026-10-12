@@ -10,7 +10,7 @@ export function registerGates(
   context: vscode.ExtensionContext,
   store: Store,
   api: Api,
-  readOnly: () => boolean,
+  refusal: () => string | null,
   confirmApprove: (id: string) => Promise<boolean> = async () => true,
 ) {
   const announcer = new Announcer(() => vscode.workspace.getConfiguration("kraft").get("notifications", "all"));
@@ -25,8 +25,9 @@ export function registerGates(
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const guard = () => {
-    if (readOnly()) void vscode.window.showWarningMessage("Kraft is read-only: this server's version does not work with this extension. Hover Kraft in the status bar to see which one to update.");
-    return !readOnly();
+    const no = refusal();
+    if (no) void vscode.window.showWarningMessage(no);
+    return !no;
   };
 
   const openArtifact = async (id?: string) => {

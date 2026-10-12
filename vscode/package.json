@@ -50,6 +50,15 @@
     "onStartupFinished",
     "onLanguage:yaml"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode Kraft shows the board and gates read-only and does not check config files in the workspace.",
+      "restrictedConfigurations": [
+        "kraft.url"
+      ]
+    }
+  },
   "contributes": {
     "configuration": {
       "title": "Kraft",
@@ -342,6 +351,14 @@
         {
           "command": "kraft.review.discard",
           "when": "false"
+        },
+        {
+          "command": "kraft.lintLibrary",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "kraft.showResolved",
+          "when": "isWorkspaceTrusted"
         }
       ],
       "editor/title": [

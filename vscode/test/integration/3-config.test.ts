@@ -18,17 +18,17 @@ suite("config", () => {
 
     await editor.edit((e) => e.replace(new vscode.Range(0, 0, doc.lineCount, 0), BROKEN));
     const [diag] = await until("a diagnostic on the extends line", () => {
-      const d = k.config.diagnostics(doc.uri);
+      const d = k.config!.diagnostics(doc.uri);
       return d.length ? d : undefined;
     });
     assert.equal(diag.range.start.line, 6);
     assert.match(diag.message, /no_such_task/);
 
     await editor.edit((e) => e.replace(new vscode.Range(0, 0, doc.lineCount, 0), FIXED));
-    await until("the diagnostic to clear", () => (k.config.diagnostics(doc.uri).length === 0 ? true : undefined));
+    await until("the diagnostic to clear", () => (k.config!.diagnostics(doc.uri).length === 0 ? true : undefined));
 
     await doc.save();
-    await until("the reload offer", () => (k.config.lastOffer === "reload" ? true : undefined));
+    await until("the reload offer", () => (k.config!.lastOffer === "reload" ? true : undefined));
     await k.api.reload();
     const lint = await k.api.lint();
     assert.ok(lint.chains.includes("probe"), "the daemon reports the chain valid");
