@@ -18,7 +18,7 @@ export async function approveOrRead(
   gate: string,
   show: (a: Artifact) => Promise<void>,
   confirm: () => Promise<boolean> = async () => true,
-  approved: () => Promise<void> = async () => {},
+  approved: () => PromiseLike<void> = async () => {},
 ): Promise<"approved" | "read-first" | "cancelled"> {
   const seen = shown.get(id, gate);
   if (seen) {
