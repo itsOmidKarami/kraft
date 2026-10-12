@@ -18,6 +18,7 @@ import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
 import { registerReviewSubmit } from "./review/submit";
+import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
@@ -88,6 +89,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const warnOnce = onceEach();
   // Each connect bumps it: a health reply that a newer connect or a drop overtook changes nothing.
   let healthSeq = 0;
+  let migrate: (() => Promise<void>) | undefined; // set once the review is registered
   store.onConnection(async (connected) => {
     const mine = ++healthSeq;
     if (connected) {
@@ -106,6 +108,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       }
     }
     applyReadOnly(store.connected);
+    // Only once this connection's read-only state is known: a read-only window posts nothing.
+    if (connected && store.connected) void migrate?.();
   });
   store.onError(() => setStatus(store.connected));
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
@@ -133,6 +137,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   );
   const diff = registerDiff(context, store, api, () => runDir);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include);
+  migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
   const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
   const review = Object.assign(diff, comments, submit);
@@ -150,6 +155,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     config = registerConfigChecks(context, api, loc.templatesDir, () => refusal(state()) !== null);
     registerResolved(context, api, loc.templatesDir);
     applyReadOnly();
+    if (store.connected) void migrate?.();
   });
   if (grant) context.subscriptions.push(grant);
   void store.start();
