@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction } from "./actions";
 import type { Api, ItemAction, WorkItem } from "./core/api";
-import { contextValueOf, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -105,7 +105,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     // VS Code asks resolveTreeItem only for what is left unset here: without a
     // cached detail the hover is filled in there, on first hover.
     const detail = this.store.detail(item.id);
-    if (detail) t.tooltip = tooltipOf(item, detail);
+    if (detail && hoverFromCache(item)) t.tooltip = tooltipOf(item, detail);
     return t;
   }
 

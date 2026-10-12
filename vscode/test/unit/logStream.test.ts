@@ -71,6 +71,7 @@ describe("followLog", () => {
     ["gives up after three failures in a row", [["throw"], ["throw"], ["throw"]], "lost", []],
     ["stops when aborted mid-stream", [[0, "abort"]], "aborted", [0]],
     ["counts a connect that closes before any line as a failure", [[0, "throw"], ["throw"], ["throw"], [1]], "lost", [0]],
+    ["resets the count on each new line", [[0, "throw"], ["throw"], [1, "throw"], ["throw"], [2]], "ended", [0, 1, 2]],
     ["resets the count only on a new line, not on a replay", [[0, "throw"], [0, "throw"], [0, "throw"], [0, 1]], "lost", [0]],
     ["writes the marker once, though no real line came yet", [[-1, "throw"], [-1, 0]], "ended", [-1, 0]],
     ["writes the marker only before the first real line", [[-1, 0, "throw"], [-1, 0, 1]], "ended", [-1, 0, 1]],

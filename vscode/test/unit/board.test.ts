@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import type { Store } from "../../src/core/store";
-import { announceable, contextValueOf, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
+import { announceable, contextValueOf, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -193,6 +193,13 @@ it.each([
   expect(worktreeTarget(detail)).toBe(want);
 });
 
+it.each([
+  ["running", item(), false],
+  ["paused mid-chain", item({ status: "paused", display_status: "paused" }), true],
+  ["stopped for a person", stopped("gate"), true],
+  ["done", item({ status: "completed", display_status: "done" }), true],
+])("hover from a cached detail: %s", (_, it_, want) => expect(hoverFromCache(it_)).toBe(want));
+
 describe("Board, an item's hover", () => {
   const row = item();
   const capped = { ...row, budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null };
@@ -207,8 +214,20 @@ describe("Board, an item's hover", () => {
   };
   const node = { kind: "item", item: row } as never;
 
-  it("is set at once from a cached detail", () =>
-    expect(boardOn(() => capped, vi.fn()).board.getTreeItem(node).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00"));
+  it("is set at once from a cached detail while the item is not running", () => {
+    const paused = item({ status: "paused", display_status: "paused" });
+    const pausedNode = { kind: "item", item: paused } as never;
+    expect(boardOn(() => capped, vi.fn(), paused).board.getTreeItem(pausedNode).tooltip).toBe("K-1 — paused at implementation\nSpent $1.00 of $5.00");
+  });
+
+  it("is re-read while the item runs, though a detail is cached: its running time grows", async () => {
+    const loadDetail = vi.fn(async () => capped);
+    const { board } = boardOn(() => capped, loadDetail);
+    const t = board.getTreeItem(node);
+    expect(t.tooltip).toBeUndefined();
+    await board.resolveTreeItem(t, node);
+    expect(loadDetail).toHaveBeenCalledWith("K-1");
+  });
 
   it("is left unset without a detail, then resolved from a quiet read that redraws nothing", async () => {
     const loadDetail = vi.fn(async () => capped);

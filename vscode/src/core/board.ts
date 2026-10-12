@@ -93,6 +93,10 @@ export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: bo
     ...(item.worktree_exists ? ["worktree"] : []),
   ].join(",")}`;
 
+/** Whether a cached detail may fill the hover as is: not while the item runs,
+ *  since its running time grows and the detail is re-read only on events. */
+export const hoverFromCache = (item: WorkItem) => stateOf(item) !== "running";
+
 /** Where Open Worktree goes: the detail's own path, only while it exists. */
 export function worktreeTarget(detail: WorkItemDetail | undefined): string | undefined {
   return detail?.worktree_exists === true && detail.worktree_path ? detail.worktree_path : undefined;
