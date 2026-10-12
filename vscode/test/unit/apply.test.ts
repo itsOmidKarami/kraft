@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, type ApplyItem, type ApplyReport } from "../../src/core/api";
-import { decideApply, reloadProblems, resolveOffer, restartViaTerminal } from "../../src/core/apply";
+import { decideApply, reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../../src/core/apply";
 
 const item = (o: Partial<ApplyItem>): ApplyItem => ({ id: "x", file: "", text: "t", ...o });
 const report = (restart: Partial<ApplyItem>[], reload: Partial<ApplyItem>[], managed = false): ApplyReport => ({
@@ -58,4 +58,8 @@ describe("restartViaTerminal", () => {
   it.each([[409, true], [500, true], [0, false], [401, false]])("ApiError %i → %s", (status, want) =>
     expect(restartViaTerminal(new ApiError(status, "x"))).toBe(want));
   it("a non-ApiError is not a fallback", () => expect(restartViaTerminal(new Error("x"))).toBe(false));
+});
+
+describe("restartRoute", () => {
+  it.each([[true, "api"], [false, "terminal"]])("managed %s → %s", (managed, want) => expect(restartRoute(managed)).toBe(want));
 });

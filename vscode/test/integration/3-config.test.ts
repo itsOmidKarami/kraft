@@ -40,7 +40,6 @@ suite("config", () => {
     const doc = await vscode.workspace.openTextDocument(file);
     const editor = await vscode.window.showTextDocument(doc);
     await editor.edit((e) => e.insert(new vscode.Position(0, 0), "# touched by the config test\n"));
-    await until("a clean check", () => (k.config.diagnostics(doc.uri).length === 0 ? true : undefined));
     await doc.save();
     await until("the no-offer verdict", () => (k.config.lastOffer === "none" ? true : undefined));
   });

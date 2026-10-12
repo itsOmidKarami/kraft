@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { Api } from "../core/api";
-import { reloadProblems, resolveOffer, restartViaTerminal } from "../core/apply";
+import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
 
@@ -92,7 +92,7 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
       return;
     }
     if ((await vscode.window.showInformationMessage(o.message, "Restart Kraft")) !== "Restart Kraft") return;
-    if (!managed) return restartInTerminal();
+    if (restartRoute(managed) === "terminal") return restartInTerminal();
     try {
       await api.restart();
       void vscode.window.showInformationMessage("Kraft is restarting.");

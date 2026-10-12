@@ -21,7 +21,8 @@ export default defineConfig([
     label: "kraft-yaml",
     files: files(["4-yaml"]),
     ...common,
-    installExtensions: ["redhat.vscode-yaml"],
+    // Pinned: 4-yaml asserts Red Hat's diagnostic source, which a new release could change.
+    installExtensions: ["redhat.vscode-yaml@1.25.0"],
     launchArgs: userData(),
   },
 ]);

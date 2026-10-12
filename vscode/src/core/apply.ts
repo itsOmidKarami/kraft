@@ -38,3 +38,6 @@ export function reloadProblems(r: ReloadReport): string[] {
 
 // The server answers 409 for a Kraft started from a terminal and 500 when the restart would not start.
 export const restartViaTerminal = (e: unknown): boolean => e instanceof ApiError && (e.status === 409 || e.status === 500);
+
+// A Kraft a service manager started restarts itself; one started from a terminal is restarted there.
+export const restartRoute = (managed: boolean): "api" | "terminal" => (managed ? "api" : "terminal");
