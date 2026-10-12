@@ -8,7 +8,7 @@ import {
   titleFrom, titleProblem, warningActions, warningsOf, type FileDraft,
 } from "./core/fileWork";
 import { mutating } from "./core/guard";
-import { folderScope, repoRoot, type ScopeDeps } from "./core/repoScope";
+import { folderScope, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
 
 type Kind = "spec" | "plan";
@@ -128,8 +128,11 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
     if (uri) paths[kind] = await attachable(uri, folder);
   }
   const first = paths.spec ?? paths.plan;
-  // The toplevel the first document is in widens where the server looks: a linked worktree of this repo.
-  const cwd = first && folder.uri.scheme === "file" ? await repoRoot(dirname(first), deps.scope) : undefined;
+  // The worktree the first document is in widens where the server looks, when it is a linked worktree of this
+  // repo. Its own toplevel, not repoRoot's main checkout, which the server already has. A remote window's path
+  // is on the daemon's machine, which resolves the toplevel itself (`_attachment_roots`).
+  const dir = first && dirname(first);
+  const cwd = dir && (folder.uri.scheme === "file" ? (await deps.scope.git(["rev-parse", "--show-toplevel"], dir)) ?? dir : dir);
 
   const { chain, label } = await chainOf(api, repo);
   const draft: FileDraft = { title, description, repo: repo.path, chain, ...paths, cwd };
@@ -146,7 +149,8 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
   if (how.start === undefined) {
     const link = draftUrl(api.base, draft);
     if (link.briefDropped) await vscode.env.clipboard.writeText(description);
-    await vscode.env.openExternal(vscode.Uri.parse(link.url));
+    // The string itself: Uri.parse would decode the query's %26 and %3D, and a title with & or = would split.
+    await vscode.env.openExternal(link.url as unknown as vscode.Uri);
     const note = draftNote(link, repo.path);
     if (note) void vscode.window.showInformationMessage(note);
     return;
