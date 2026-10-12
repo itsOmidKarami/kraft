@@ -370,6 +370,9 @@ async def list_work_items(request: Request):
                 root_mr_by_item.get(r["id"]),
                 mr_event_by_item.get(r["id"]),
             ),
+            # One `is_dir` per row: the VS Code board offers Open Worktree only
+            # while the directory is there, without a detail fetch per row.
+            "worktree_exists": (st.run_dirs.worktrees / r["id"]).is_dir(),
         }
         for r in rows
     ]
