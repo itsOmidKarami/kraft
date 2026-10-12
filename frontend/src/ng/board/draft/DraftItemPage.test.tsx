@@ -184,6 +184,26 @@ describe("DraftItemPage", () => {
     expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue(brief);
   });
 
+  it("drops the URL once it seeded the draft, so a reload keeps the edits", async () => {
+    stub();
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/work-items/new?title=T&brief=B"]}>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route path="/work-items/new" element={<><DraftItemPage /><Where /></>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await settle();
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/work-items\/new$/);
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "T edited" } });
+    unmount();
+    mount(undefined, "/work-items/new");
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("T edited");
+  });
+
   it("starts from a bead in the URL: its title prefilled, and Create names it as implemented", async () => {
     const calls = stub();
     sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ title: "an older draft", repo: "/code/kraft-plugins", chain: "default" }));

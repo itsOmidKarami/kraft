@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as vscode from "vscode";
+import { Board, registerBoard } from "../../src/board";
+import type { Store } from "../../src/core/store";
 import { announceable, contextValueOf, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
@@ -150,4 +153,31 @@ it.each([
   ["no detail", undefined, undefined],
 ])("worktree target: %s", (_, detail, want) => {
   expect(worktreeTarget(detail)).toBe(want);
+});
+
+describe("Board, revealing an item", () => {
+  const items = [item({ id: "run" }), item({ id: "other", repo: "/elsewhere" })];
+  const store = { items: () => items, item: (id: string) => items.find((i) => i.id === id), detail: () => undefined,
+    onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+  const scope = { onChange: () => () => {}, ready: true, showAll: false };
+  const here = (i: { repo: string }) => i.repo === "/r";
+  const board = new Board(store, here, scope);
+
+  it.each([
+    ["an item's parent is the group holding it", { kind: "item", item: items[0] }, "running"],
+    ["an item the board does not show has none", { kind: "item", item: items[1] }, undefined],
+    ["a group has none", { kind: "group", id: "running", label: "Running", items }, undefined],
+  ] as const)("%s", (_, node, want) => expect((board.getParent(node as never) as { id?: string } | undefined)?.id).toBe(want));
+
+  it("names a group row by its key, so it keeps its identity as its count changes", () =>
+    expect(board.getTreeItem({ kind: "group", id: "running", label: "Running", items } as never).id).toBe("group:running"));
+
+  it("selects a shown item without focus, passes over one it does not show, and swallows a miss", async () => {
+    const reveal = vi.fn().mockRejectedValue(new Error("not resolved yet"));
+    vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal, dispose() {} } as never);
+    const { reveal: show } = registerBoard({ subscriptions: [] } as never, store, {} as never, () => null, here, scope);
+    await expect(show("run")).resolves.toBeUndefined();
+    await show("other");
+    expect(reveal.mock.calls).toEqual([[{ kind: "item", item: items[0] }, { select: true, focus: false }]]);
+  });
 });

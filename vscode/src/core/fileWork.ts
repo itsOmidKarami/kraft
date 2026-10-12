@@ -4,7 +4,7 @@
 
 import { basename } from "node:path";
 import { humanSize } from "../../../frontend/src/sizes";
-import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary } from "./api";
+import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary, WorkItem } from "./api";
 import { isLoopback } from "./connection";
 import { refusal, type ReadOnlyState } from "./readOnly";
 import { samePath } from "./repoScope";
@@ -173,7 +173,8 @@ export function warningActions(c: Created): ("Open item" | "Abandon")[] {
 
 export const MAX_URL = 8000;
 
-function inside(path: string, root: string): boolean {
+/** Whether `path` is `root` or under it: separators either way, a drive letter case-blind. */
+export function inside(path: string, root: string): boolean {
   const n = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
   const [a, b] = [n(path), n(root)];
   const win = /^[A-Za-z]:/.test(b);
@@ -210,4 +211,28 @@ export function draftNote(link: DraftLink, repo: string): string | undefined {
       : []),
   ];
   return notes.length ? notes.join(" ") : undefined;
+}
+
+/** `cwd` for the create: the worktree holding the attachments outside the
+ *  repo, the one place beyond it the server will look (`_attachment_roots`).
+ *  None when every attachment is in the repo; refused when they sit in two
+ *  different worktrees, which one `cwd` cannot cover. `top` is each one's
+ *  git toplevel. */
+export function cwdFor(attachments: { path: string; top: string }[], repo: string): { cwd?: string } | { refusal: string } {
+  const outside = attachments.filter((a) => !inside(a.path, repo));
+  const tops = [...new Set(outside.map((a) => a.top))];
+  if (tops.length <= 1) return tops.length ? { cwd: tops[0] } : {};
+  return {
+    refusal: `${outside.map((a) => basename(a.path)).join(" and ")} are in different worktrees (${tops.join(", ")}). `
+      + `Kraft takes documents from ${repo} and one of its worktrees: move one of them first.`,
+  };
+}
+
+/** Why Abandon, offered when the item was filed, no longer applies (D24):
+ *  read again when it is clicked, from the server's own `actions` when the
+ *  board has them. Undefined means ask, and let the server answer. */
+export function abandonRefusal(id: string, item: Pick<WorkItem, "status" | "display_status" | "actions"> | undefined): string | undefined {
+  if (!item) return undefined;
+  const open = item.actions ? item.actions.includes("abandon") : item.status !== "active";
+  return open ? undefined : `${id} can no longer be abandoned: it is ${item.display_status ?? item.status}. Open it to see what it allows now.`;
 }

@@ -86,6 +86,13 @@ export function DraftItemPage() {
   useEffect(() => {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* nothing kept */ }
   }, [d]);
+  // The URL seeded the draft once; the saved draft carries it from here, so a
+  // reload resumes the edits rather than starting again from the link (D30).
+  useEffect(() => {
+    if (location.search) navigate(location.pathname, { replace: true, state: location.state });
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     setPageItem(d.repo ? { id: "new", repo: d.repo, title: d.title, bead_id: null } : null);
     return () => setPageItem(null);

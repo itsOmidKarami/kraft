@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode } from "../../../frontend/src/types";
 import type { Created, DryRun, Repo, TemplateSummary } from "../../src/core/api";
 import {
-  attachChoices, attachState, chainsFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
+  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, fileRefusal, localRefusal, MAX_TITLE, MAX_URL, outcomeMessage,
   pickRepo, previewLine, repoDefaultChain, titleFrom, titleProblem, warningActions, warningsOf,
 } from "../../src/core/fileWork";
 import { RESTRICTED, VERSION_REFUSAL } from "../../src/core/readOnly";
@@ -192,4 +192,28 @@ describe("draftNote", () => {
     ["the brief", { briefDropped: true, outside: [] }, "The description is too long for a link: it is on your clipboard. Paste it into Brief."],
     ["a document", { briefDropped: false, outside: ["/wt/s.md"] }, "s.md is outside /r, which the web page cannot attach: it is left out."],
   ])("%s", (_, link, want) => expect(draftNote({ url: "", ...link }, "/r")).toBe(want));
+});
+
+describe("cwdFor", () => {
+  it.each([
+    ["nothing when every document is in the repo", [{ path: "/r/s.md", top: "/r" }], {}],
+    ["the worktree holding the one outside it", [{ path: "/r/s.md", top: "/r" }, { path: "/wt/p.md", top: "/wt" }], { cwd: "/wt" }],
+    ["one worktree holding both", [{ path: "/wt/a/s.md", top: "/wt" }, { path: "/wt/b/p.md", top: "/wt" }], { cwd: "/wt" }],
+    ["a refusal for two worktrees", [{ path: "/w1/s.md", top: "/w1" }, { path: "/w2/p.md", top: "/w2" }],
+      { refusal: "s.md and p.md are in different worktrees (/w1, /w2). Kraft takes documents from /r and one of its worktrees: move one of them first." }],
+  ])("%s", (_, atts, want) => expect(cwdFor(atts, "/r")).toEqual(want));
+});
+
+describe("abandonRefusal", () => {
+  it.each([
+    ["asks the server about an item the board has not read", undefined, undefined],
+    ["offers it while the server lists abandon", { status: "paused", display_status: "paused", actions: ["resume", "abandon"] }, undefined],
+    ["refuses once the server no longer lists it", { status: "active", display_status: "running", actions: ["pause"] },
+      "K-1 can no longer be abandoned: it is running. Open it to see what it allows now."],
+    ["takes the server's actions over the status", { status: "paused", display_status: "paused", actions: ["resume"] },
+      "K-1 can no longer be abandoned: it is paused. Open it to see what it allows now."],
+    ["refuses an active item from a server without actions", { status: "active", display_status: "running" },
+      "K-1 can no longer be abandoned: it is running. Open it to see what it allows now."],
+    ["offers a queued one from a server without actions", { status: "queued", display_status: "queued" }, undefined],
+  ])("%s", (_, it_, want) => expect(abandonRefusal("K-1", it_ as never)).toBe(want));
 });

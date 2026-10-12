@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import { reportError } from "./actions";
 import { ApiError, type Api, type Repo } from "./core/api";
 import {
-  attachChoices, attachState, chainsFor, createBody, draftNote, draftUrl, outcomeMessage, pickRepo, previewLine, repoDefaultChain,
+  abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, outcomeMessage, pickRepo, previewLine, repoDefaultChain,
   titleFrom, titleProblem, warningActions, warningsOf, type FileDraft,
 } from "./core/fileWork";
 import { mutating } from "./core/guard";
@@ -93,9 +93,12 @@ async function offerWarnings(deps: FileWorkDeps, id: string, warnings: string[],
   if (picked === "Open item") {
     void vscode.env.openExternal(vscode.Uri.parse(`${api.base}/work-items/${encodeURIComponent(id)}`));
   } else if (picked === "Abandon") {
+    // D24: decided now, not when the item was filed: it may have started since.
+    const no = abandonRefusal(id, store.item(id));
+    if (no) return void vscode.window.showInformationMessage(no);
     const ok = await vscode.window.showWarningMessage(`Abandon ${id}? Kraft deletes its worktree and branch.`, { modal: true }, "Abandon");
     if (ok !== "Abandon") return;
-    // D24: whether it may still be abandoned is the server's answer now, not the create's.
+    // The server has the last word: a 409 shows its detail.
     try {
       await api.abandon(id);
       await store.refresh(id);
@@ -117,8 +120,9 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
   const title = asked(await vscode.window.showInputBox({
     title: `File work in ${repo.path}`, prompt: "Title", value: titleFrom(seed.selection ?? ""), validateInput: titleProblem,
   }));
-  const description = asked(await vscode.window.showInputBox({
-    title: "Description (optional)", prompt: "Context, constraints, what done looks like. Every node reads it.", value: seed.selection?.trim() ?? "",
+  // A selection is the description as it is: an input box is one line and would join its lines.
+  const description = seed.selection !== undefined ? seed.selection.trim() : asked(await vscode.window.showInputBox({
+    title: "Description (optional)", prompt: "Context, constraints, what done looks like. Every node reads it.",
   }));
 
   const uris = await attachmentsOf(seed, folder);
@@ -127,12 +131,17 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
     const uri = uris[kind];
     if (uri) paths[kind] = await attachable(uri, folder);
   }
-  const first = paths.spec ?? paths.plan;
-  // The worktree the first document is in widens where the server looks, when it is a linked worktree of this
-  // repo. Its own toplevel, not repoRoot's main checkout, which the server already has. A remote window's path
-  // is on the daemon's machine, which resolves the toplevel itself (`_attachment_roots`).
-  const dir = first && dirname(first);
-  const cwd = dir && (folder.uri.scheme === "file" ? (await deps.scope.git(["rev-parse", "--show-toplevel"], dir)) ?? dir : dir);
+  // The worktree a document outside the repo is in widens where the server looks: its own toplevel, not
+  // repoRoot's main checkout, which the server already has. A remote window's path is on the daemon's machine,
+  // which resolves the toplevel of the folder itself (`_attachment_roots`).
+  const tops = await Promise.all(Object.values(paths).map(async (path) => {
+    const dir = dirname(path);
+    const top = folder.uri.scheme === "file" ? await deps.scope.git(["rev-parse", "--show-toplevel"], dir) : undefined;
+    return { path, top: top ?? dir };
+  }));
+  const where = cwdFor(tops, repo.path);
+  if ("refusal" in where) return stop(where.refusal);
+  const { cwd } = where;
 
   const { chain, label } = await chainOf(api, repo);
   const draft: FileDraft = { title, description, repo: repo.path, chain, ...paths, cwd };
