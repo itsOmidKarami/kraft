@@ -270,7 +270,7 @@
         },
         {
           "command": "kraft.openWorktree",
-          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/",
           "group": "3_open"
         },
         {

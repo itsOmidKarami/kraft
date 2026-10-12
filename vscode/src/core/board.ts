@@ -1,6 +1,6 @@
 import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/board/model";
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
-import type { WorkItem } from "./api";
+import type { WorkItem, WorkItemDetail } from "./api";
 
 /** The board reads the server's `display_status` and `stop`, as the web board
  *  does (`groupOf`, `reasonTail`); nothing here derives state from `status`. */
@@ -92,6 +92,16 @@ export function welcomeState(connected: boolean, ready: boolean, showAll: boolea
 }
 
 export const actionsFor = (item: WorkItem): Action[] => ACTIONS[stateOf(item)];
+
+/** A row's `viewItem`, which the menus match on: its gate, its actions, and
+ *  `worktree` while its worktree is on disk. */
+export const contextValueOf = (item: WorkItem): string =>
+  "item:" + [...(item.pending_gate ? ["gate"] : []), ...actionsFor(item), ...(item.worktree_exists ? ["worktree"] : [])].join(",");
+
+/** Where Open Worktree goes: the detail's own path, only while it exists. */
+export function worktreeTarget(detail: WorkItemDetail | undefined): string | undefined {
+  return detail?.worktree_exists === true && detail.worktree_path ? detail.worktree_path : undefined;
+}
 
 export const needsYou = (item: WorkItem) => shown(item) && groupOf(item) === "needs";
 

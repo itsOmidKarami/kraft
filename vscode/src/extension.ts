@@ -91,7 +91,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
-  registerBoard(context, store, api, () => runDir, () => refusal(state()), include, scope);
+  registerBoard(context, store, api, () => refusal(state()), include, scope);
   context.subscriptions.push(status, { dispose: () => store.stop() });
   const comments = registerComments(context, store, api, () => refusal(state()));
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, comments.confirmApprove);

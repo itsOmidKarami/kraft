@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, announceable, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, welcomeState, type Action, type ItemState } from "../../src/core/board";
+import { actionsFor, announceable, contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, stateOf, steerPrompt, tooltipOf, welcomeState, worktreeTarget, type Action, type ItemState } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -162,4 +162,23 @@ it.each([
   ["showing every repo, nothing anywhere", true, true, true, 0, "none"],
 ])("welcome: %s", (_, connected, ready, showAll, visible, want) => {
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
+});
+
+it.each([
+  ["a worktree on disk", item({ id: "x", worktree_exists: true }), "item:pause,cancel,worktree"],
+  ["a reclaimed worktree", item({ id: "x", worktree_exists: false }), "item:pause,cancel"],
+  ["an older server's row", item({ id: "x" }), "item:pause,cancel"],
+  ["a gate", stopped("gate", { pending_gate: "spec", worktree_exists: true }), "item:gate,skip,cancel,worktree"],
+])("context value: %s", (_, it_, want) => {
+  expect(contextValueOf(it_)).toBe(want);
+});
+
+it.each([
+  ["exists, with a path", item({ worktree_exists: true, worktree_path: "/k/run/worktrees/K-1" }), "/k/run/worktrees/K-1"],
+  ["reclaimed", item({ worktree_exists: false, worktree_path: "/k/run/worktrees/K-1" }), undefined],
+  ["exists, no path", item({ worktree_exists: true }), undefined],
+  ["exists, empty path", item({ worktree_exists: true, worktree_path: "" }), undefined],
+  ["no detail", undefined, undefined],
+])("worktree target: %s", (_, detail, want) => {
+  expect(worktreeTarget(detail)).toBe(want);
 });

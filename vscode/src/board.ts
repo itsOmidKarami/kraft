@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import * as vscode from "vscode";
-import { runAction } from "./actions";
+import { reportError, runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { actionsFor, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, type Action, type Include, type Welcome } from "./core/board";
+import { contextValueOf, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Action, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { mutating } from "./core/guard";
 import { RESTRICTED } from "./core/readOnly";
@@ -76,7 +76,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.id = item.id;
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(iconOf(item));
-    t.contextValue = `item:${[...(item.pending_gate ? ["gate"] : []), ...actionsFor(item)].join(",")}`;
+    t.contextValue = contextValueOf(item);
     t.tooltip = tooltipOf(item);
     return t;
   }
@@ -91,7 +91,6 @@ export function registerBoard(
   context: vscode.ExtensionContext,
   store: Store,
   api: Api,
-  runDir: () => string,
   refusal: () => string | null,
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
@@ -114,9 +113,18 @@ export function registerBoard(
   }
   context.subscriptions.push(
     view,
-    vscode.commands.registerCommand("kraft.openWorktree", (node?: { item?: WorkItem }) => {
-      const item = itemOf(node);
-      if (item) void vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(`${runDir()}/worktrees/${item.id}`), { forceNewWindow: true });
+    // The detail, refreshed now: the row's worktree_exists may predate a reclaim.
+    vscode.commands.registerCommand("kraft.openWorktree", async (node?: { item?: WorkItem }) => {
+      const id = itemOf(node)?.id;
+      if (!id) return;
+      try {
+        await store.refresh(id);
+      } catch (e) {
+        return reportError(e, store, id);
+      }
+      const target = worktreeTarget(store.detail(id));
+      if (!target) return void vscode.window.showInformationMessage(`${id} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
+      await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true });
     }),
     vscode.commands.registerCommand("kraft.openInWebUi", (node?: { item?: WorkItem }) => {
       const item = itemOf(node);
