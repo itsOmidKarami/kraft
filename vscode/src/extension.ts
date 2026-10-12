@@ -10,6 +10,7 @@ import { registerRepoScope } from "./repoScope";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
+import { hasDrafts } from "./core/threads";
 import { registerConfigChecks } from "./config/check";
 import { registerResolved } from "./config/resolved";
 import { registerSchemas } from "./config/schema";
@@ -110,7 +111,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
   applyReadOnly();
 
-  registerBoard(context, store, api, () => refusal(state()), include, scope);
+  const cache = new ThreadCache(api);
+  registerBoard(context, store, api, () => refusal(state()), include, scope, {
+    has: (id) => hasDrafts(cache.get(id)),
+    onChange: (cb) => cache.onChange(cb),
+  });
   context.subscriptions.push(
     status,
     { dispose: () => store.stop() },
@@ -126,9 +131,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       }
     }),
   );
-  const cache = new ThreadCache(api);
   const diff = registerDiff(context, store, api, () => runDir);
-  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache);
+  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include);
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
   const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
   const review = Object.assign(diff, comments, submit);

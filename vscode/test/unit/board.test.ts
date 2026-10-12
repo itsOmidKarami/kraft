@@ -70,6 +70,14 @@ describe("contextValueOf", () => {
     expect(contextValueOf(it_)).toBe(want);
   });
 
+  it.each([
+    ["drafts after the actions, before the worktree", { drafts: true }, "item:reject,drafts,worktree"],
+    ["no drafts token without drafts", { drafts: false }, "item:reject,worktree"],
+  ])("%s", (_, opts, want) => expect(contextValueOf(item({ actions: ["reject"], worktree_exists: true }), opts)).toBe(want));
+
+  it("an action that merely starts with drafts is not the drafts token", () =>
+    expect(contextValueOf(item({ actions: ["drafts_x" as never] }))).not.toMatch(/\bdrafts\b/));
+
   it("a menu keyed on one action matches no other", () => {
     const value = contextValueOf(stopped("budget", { actions: ["raise_budget"] }));
     expect(value).not.toMatch(/\bbudget\b/);

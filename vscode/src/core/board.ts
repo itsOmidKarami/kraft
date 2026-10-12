@@ -72,8 +72,14 @@ export function welcomeState(connected: boolean, ready: boolean, showAll: boolea
  *  pending, then the server's `actions`, the doors it would admit now, then
  *  `worktree` while its worktree is on disk. A server that sends no `actions`
  *  gets no action entries, only the ones every row has. */
-export const contextValueOf = (item: WorkItem): string =>
-  `item:${[...(item.pending_gate ? ["gate"] : []), ...(item.actions ?? []), ...(item.worktree_exists ? ["worktree"] : [])].join(",")}`;
+/** `drafts`: the item has draft review comments, so Submit and Discard apply. */
+export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: boolean } = {}): string =>
+  `item:${[
+    ...(item.pending_gate ? ["gate"] : []),
+    ...(item.actions ?? []),
+    ...(drafts ? ["drafts"] : []),
+    ...(item.worktree_exists ? ["worktree"] : []),
+  ].join(",")}`;
 
 /** Where Open Worktree goes: the detail's own path, only while it exists. */
 export function worktreeTarget(detail: WorkItemDetail | undefined): string | undefined {

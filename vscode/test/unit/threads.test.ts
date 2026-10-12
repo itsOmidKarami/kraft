@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewComment, ReviewThread } from "../../src/core/api";
 import {
-  authorName, clampLines, commentContext, commentMarkdown, commentPatch, discardPlan, fitPlace, otherThreadsText, placeKey, placeThread, quoteOf, QUOTE_LINES,
+  authorName, clampLines, commentContext, commentMarkdown, commentPatch, discardPlan, fitPlace, hasDrafts, otherThreadsText, placeKey, placeThread, quoteOf, QUOTE_LINES,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type WriteTarget,
 } from "../../src/core/threads";
 import { C, T } from "./fixtures/thread";
@@ -210,3 +210,9 @@ it("syncPlan draws the new, redraws the moved, updates the rest and drops the go
   expect(plan.update.map((t) => t.id)).toEqual(["same"]);
   expect(plan.remove).toEqual(["moved", "gone"]);
 });
+
+it.each<{ id: string; threads: ReviewThread[] | undefined; want: boolean }>([
+  { id: "never loaded", threads: undefined, want: false },
+  { id: "only agent comments", threads: [T({ comments: [C({ author: "implement", draft: true })] })], want: false },
+  { id: "your draft reply on a submitted thread", threads: [T({ comments: [C(), C({ id: "c2", draft: true })] })], want: true },
+])("hasDrafts: $id", ({ threads, want }) => expect(hasDrafts(threads)).toBe(want));
