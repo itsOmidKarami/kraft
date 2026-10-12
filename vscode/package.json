@@ -176,6 +176,16 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.showLog",
+        "title": "Show Log",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.statusMenu",
+        "title": "Status Menu",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.openArtifact",
         "title": "Open Gate Document",
         "category": "Kraft"
@@ -335,6 +345,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "kraft.statusMenu",
+          "when": "false"
+        },
         {
           "command": "kraft.pause",
           "when": "false"

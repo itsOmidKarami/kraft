@@ -3,6 +3,7 @@ import type { Api } from "../core/api";
 import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
+import { log } from "../log";
 
 const SOURCE = "Kraft · config";
 
@@ -87,6 +88,7 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
         if (problems.length) void vscode.window.showWarningMessage(`Kraft reloaded with problems: ${problems.join("; ")}`);
         else void vscode.window.showInformationMessage("Kraft reloaded.");
       } catch (e) {
+        log.error(`reload failed: ${(e as Error).message}`);
         void vscode.window.showErrorMessage(String((e as Error).message));
       }
       return;
@@ -98,7 +100,10 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
       void vscode.window.showInformationMessage("Kraft is restarting.");
     } catch (e) {
       if (restartViaTerminal(e)) restartInTerminal();
-      else void vscode.window.showErrorMessage(String((e as Error).message));
+      else {
+        log.error(`restart failed: ${(e as Error).message}`);
+        void vscode.window.showErrorMessage(String((e as Error).message));
+      }
     }
   };
 

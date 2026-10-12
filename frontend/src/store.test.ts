@@ -319,6 +319,15 @@ describe("applyEvent", () => {
     ["work_item_blocked", "w1", "work_item_blocked", { verb: "start", from: "paused", on: ["a1"] }],
     ["work_item_unblocked", "w1", "work_item_unblocked", {}],
     ["work_item_dequeued for a blocked item", "w1", "work_item_dequeued", { why: "paused", detail: null, to: "blocked" }],
+    ["work_item_needs_human", "w1", "work_item_needs_human", { reason: "r" }],
+    ["work_item_resumed", "w1", "work_item_resumed", {}],
+    ["work_item_retried", "w1", "work_item_retried", {}],
+    ["pause_requested", "w1", "pause_requested", {}],
+    ["work_item_waiting", "w1", "work_item_waiting", { retry_at: "2026-10-12T00:00:00Z" }],
+    ["work_item_rate_limited", "w1", "work_item_rate_limited", { retry_at: "2026-10-12T00:00:00Z" }],
+    ["work_item_completed", "w1", "work_item_completed", {}],
+    ["work_item_cancelled", "w1", "work_item_cancelled", { reason: "r" }],
+    ["work_item_queued", "w1", "work_item_queued", {}],
   ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
     useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));
