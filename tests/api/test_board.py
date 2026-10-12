@@ -734,14 +734,16 @@ def _append(wid: str, type: str, payload: dict) -> int:
 def test_a_card_marks_an_item_whose_last_launch_ran_on_a_fallback(client, tmp_path):
     """`every-fallback-switch-is-logged`: the board card carries the switch
     while the item's latest launch is the fallback's, and drops it once a
-    later launch starts."""
+    later launch starts. The detail carries the same `fallback`."""
     wid = client.post(
         "/api/work-items", json={"autostart": True, "title": "t", "repo": str(tmp_path)}
     ).json()["id"]
     _set_status(wid, "paused")  # keep the executor off this item
 
     def card():
-        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+        listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+        assert client.get(f"/api/work-items/{wid}").json()["fallback"] == listed["fallback"]
+        return listed
 
     assert card()["fallback"] is None
     switch = {

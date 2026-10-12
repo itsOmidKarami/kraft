@@ -412,6 +412,21 @@ def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
     return switch if started.get("session_id") == switch.get("session_id") else None
 
 
+def _detail_fallback(st, wid: str) -> dict | None:
+    """`_ran_on_fallback` for one item: the detail's `fallback`, read the way
+    the list's grouped query reads it, so a row the extension refreshes from
+    the detail keeps its "on <model>" tail."""
+    rows = st.db.read(
+        lambda c: c.execute(
+            "SELECT type, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events WHERE work_item_id = ? AND type IN (?, ?)"
+            "  GROUP BY type)",
+            (wid, LimitEvent.LAUNCH_FALLBACK, SessionEvent.WORKER_SESSION_STARTED),
+        ).fetchall()
+    )
+    return _ran_on_fallback({(wid, r["type"]): json.loads(r["payload"]) for r in rows}, wid)
+
+
 def _board_progress(st, row) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
     p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"])
@@ -1178,6 +1193,16 @@ async def get_work_item(wid: str, request: Request):
         # the frozen chain's total, how many were gates, and the current
         # node's step when it declares more than one.
         "summary": _summary(st, wid, row, chain, sessions),
+        # The list row's `step` and `fallback`, so a client that replaces a row
+        # with this detail on every event keeps "2 of 3 · build › t1" and the
+        # "on <model>" tail (the VS Code board does).
+        "step": _step_of(
+            row,
+            chain,
+            _stop_task_and_attempt(sessions, row["current_node_id"])[0],
+            with_task=True,
+        ),
+        "fallback": _detail_fallback(st, wid),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),
