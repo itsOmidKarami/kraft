@@ -140,6 +140,8 @@ it.each([
   { id: "at a gate, before `actions`", it: stopped("gate", { pending_gate: "spec", actions: undefined }), want: true },
   // Gateless, a review is Request changes: a resume or retry carries it, so its drafts may wait there.
   { id: "paused", it: item({ display_status: "paused", actions: ["resume", "steer", "cancel"] }), want: true },
+  // Filed paused (`kraft item create`'s default) and never started: no diff to have drafts on, and a backlog of them would cost a GET each.
+  { id: "never started", it: item({ display_status: "paused", current_node_id: null, actions: ["resume", "cancel"] }), want: false },
   { id: "stopped, retry only", it: stopped("cap", { actions: ["retry", "cancel"] }), want: true },
   { id: "running: no door that stops on you", it: item({ actions: ["pause", "steer", "cancel"] }), want: false },
   { id: "done", it: item({ status: "completed", display_status: "done", actions: ["archive"] }), want: false },

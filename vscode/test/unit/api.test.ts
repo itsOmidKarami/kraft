@@ -201,7 +201,7 @@ describe("Api", () => {
   it.each([
     ["a refusal's detail", fakeFetch(401, { detail: "bad token" }), 401, "bad token"],
     ["a plain-text 500, as its text", raw(500, "Internal Server Error"), 500, "Internal Server Error"],
-    ["a proxy's HTML 502, as its text", raw(502, "<html>Bad Gateway</html>"), 502, "<html>Bad Gateway</html>"],
+    ["a proxy's HTML 502, as its first 200 characters", raw(502, `<html>${"x".repeat(300)}</html>`), 502, `<html>${"x".repeat(194)}`],
     ["an empty 503, as its status text", raw(503, "", "Service Unavailable"), 503, "Service Unavailable"],
     ["a 2xx that is not JSON, as unreadable", raw(200, "<html>login</html>"), 200, "Kraft's answer is not JSON: <html>login</html>"],
   ])("reports %s to onError", async (_, f, status, detail) => {

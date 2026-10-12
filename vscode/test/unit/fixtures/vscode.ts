@@ -1,5 +1,5 @@
 /** The few parts of the `vscode` module that the glue unit tests drive (`src/board.ts`,
- *  `src/gates.ts`, `src/preview.ts`, `registerComments`) touch, for unit
+ *  `src/gates.ts`, `src/preview.ts`, `registerComments`, the restart terminal) touch, for unit
  *  tests: vitest.config.ts aliases `vscode` here. A test replaces what it
  *  watches (`window.createTreeView`) with `vi.spyOn`. */
 
@@ -51,6 +51,7 @@ export const window = {
   showTextDocument: async (..._a: unknown[]) => undefined,
   onDidChangeActiveTextEditor: (_cb: unknown) => ({ dispose() {} }),
   onDidChangeWindowState: (_cb: unknown) => ({ dispose() {} }),
+  onDidCloseTerminal: (_cb: unknown) => ({ dispose() {} }),
   activeTextEditor: undefined as unknown,
   tabGroups: {
     all: [] as unknown[],

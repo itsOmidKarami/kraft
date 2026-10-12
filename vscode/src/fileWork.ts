@@ -87,7 +87,7 @@ async function chainOf(api: Api, repo: Repo): Promise<{ chain?: string; label: s
   return { chain: picked.chain, label: picked.chain ?? `repo default (${fallback})` };
 }
 
-async function offerWarnings(deps: FileWorkDeps, id: string, warnings: string[], actions: ("Open item" | "Abandon")[]): Promise<void> {
+export async function offerWarnings(deps: FileWorkDeps, id: string, warnings: string[], actions: ("Open item" | "Abandon")[]): Promise<void> {
   const { api, store } = deps;
   const picked = await vscode.window.showWarningMessage(warnings.join(" "), ...actions);
   if (picked === "Open item") {
@@ -101,7 +101,7 @@ async function offerWarnings(deps: FileWorkDeps, id: string, warnings: string[],
     // The server has the last word: a 409 shows its detail.
     try {
       await api.abandon(id);
-      await store.refresh(id);
+      await store.refresh(id).catch(() => {}); // abandoned: a failed re-read is not a failed abandon
     } catch (e) {
       await reportError(e, store, id);
     }

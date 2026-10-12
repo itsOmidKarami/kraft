@@ -1,20 +1,48 @@
 import { afterEach, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import { runAction } from "../../src/actions";
+import { restartInTerminal } from "../../src/config/check";
+import { RESTART_FAILED } from "../../src/core/start";
 import type { Store } from "../../src/core/store";
+import { offerWarnings } from "../../src/fileWork";
 import { item } from "./fixtures/item";
 
 afterEach(() => vi.restoreAllMocks());
 
-it.each([
-  ["re-read", async () => true, []],
-  // A second Skip would skip the next node: the one that went through is not reported as failed.
-  ["re-read failed", async () => { throw new Error("socket hang up"); }, []],
-])("a Skip that went through, then its %s: reports no failure", async (_, refresh, errors) => {
-  const api = { skip: vi.fn(async () => {}) };
-  const store = { refresh: vi.fn(refresh) } as unknown as Store;
-  vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue("Skip" as never);
+const failed = async () => { throw new Error("socket hang up"); };
+
+// A second Skip would skip the next node: an action that went through is not reported as failed.
+it.each<[string, () => Promise<boolean>, (api: never, store: Store) => Promise<void>, string]>([
+  ["a Skip, then its re-read", async () => true, (api, store) => runAction(api, store, item({ id: "S-1" }), "skip"), "Skip"],
+  ["a Skip, then its re-read failed", failed, (api, store) => runAction(api, store, item({ id: "S-1" }), "skip"), "Skip"],
+  ["an Abandon from the filing warning, then its re-read failed", failed,
+    (api, store) => offerWarnings({ api, store } as never, "S-1", ["Same title as S-0."], ["Abandon"]), "Abandon"],
+])("%s: reports no failure", async (_, refresh, run, answer) => {
+  const api = { skip: vi.fn(async () => {}), abandon: vi.fn(async () => {}) };
+  const store = { refresh: vi.fn(refresh), item: () => item({ id: "S-1", display_status: "paused", current_node_id: null, actions: ["abandon"] }) } as unknown as Store;
+  vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(answer as never);
   const error = vi.spyOn(vscode.window, "showErrorMessage");
-  await runAction(api as never, store, item({ id: "S-1" }), "skip");
-  expect([api.skip.mock.calls, vi.mocked(store.refresh).mock.calls, error.mock.calls]).toEqual([[["S-1"]], [["S-1"]], errors]);
+  await run(api as never, store);
+  expect([[...api.skip.mock.calls, ...api.abandon.mock.calls], vi.mocked(store.refresh).mock.calls, error.mock.calls]).toEqual([[["S-1"]], [["S-1"]], []]);
+});
+
+// `kraft admin restart` on a Kraft attached to a terminal stops it and exits 1; the
+// terminal running it closes with its message, so the extension says what happened.
+it.each<[string, { code: number | undefined } | undefined, boolean, string | undefined, unknown[][], unknown[][]]>([
+  ["exited 1: says Kraft may be stopped, offers Start", { code: 1 }, true, undefined, [[RESTART_FAILED(1), "Start Kraft"]], []],
+  ["exited 1, Start picked: starts Kraft", { code: 1 }, true, "Start Kraft", [[RESTART_FAILED(1), "Start Kraft"]], [["kraft.startDaemon"]]],
+  ["exited 0: nothing to say", { code: 0 }, true, undefined, [], []],
+  ["closed by hand: nothing to say", { code: undefined }, true, undefined, [], []],
+  ["another terminal closing", { code: 1 }, false, undefined, [], []],
+])("the restart terminal %s", async (_, exitStatus, ours, pick, said, ran) => {
+  const closes: ((t: unknown) => void)[] = [];
+  const term = { sendText() {}, show() {}, exitStatus: undefined as unknown };
+  vi.spyOn(vscode.window, "createTerminal").mockReturnValue(term as never);
+  vi.spyOn(vscode.window, "onDidCloseTerminal").mockImplementation(((cb: (t: unknown) => void) => (closes.push(cb), { dispose() {} })) as never);
+  const warn = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(pick as never);
+  const exec = vi.spyOn(vscode.commands, "executeCommand");
+  restartInTerminal();
+  const closed = ours ? Object.assign(term, { exitStatus }) : { exitStatus };
+  for (const cb of closes) await cb(closed);
+  expect([warn.mock.calls, exec.mock.calls]).toEqual([said, ran]);
 });
