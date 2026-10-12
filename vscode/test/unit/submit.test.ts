@@ -11,6 +11,14 @@ describe("outcomeChoices", () => {
     { id: "paused, no gate", detail: item({ status: "paused", display_status: "paused" }), want: ["request_changes"] },
     { id: "running, no gate", detail: item(), want: ["request_changes"] },
   ])("$id", ({ detail, want }) => expect(outcomeChoices(detail)).toEqual(want));
+
+  const fix = (round: { n: number; max: number } | null) => ({ gate: "review", node: "impl", then: [], round });
+  it.each<{ id: string; detail: WorkItemDetail; fix: Parameters<typeof outcomeChoices>[1]; want: ReturnType<typeof outcomeChoices> }>([
+    { id: "a gate out of fix rounds", detail: item({ pending_gate: "review" }), fix: fix({ n: 4, max: 3 }), want: ["comment", "approve"] },
+    { id: "a gate on its last round", detail: item({ pending_gate: "review" }), fix: fix({ n: 3, max: 3 }), want: ["request_changes", "comment", "approve"] },
+    { id: "no gate, out of fix rounds", detail: item(), fix: fix({ n: 4, max: 3 }), want: { refused: "No fix rounds left." } },
+    { id: "no gate, no target known", detail: item(), fix: null, want: { refused: "Kraft could not say where the work would restart." } },
+  ])("$id", ({ detail, fix: f, want }) => expect(outcomeChoices(detail, f)).toEqual(want));
 });
 
 it.each<[Outcome, number, string | undefined, boolean]>([

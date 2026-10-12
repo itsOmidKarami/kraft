@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import { drafts, outcomes } from "../../../frontend/src/ng/review/finish";
 import { reportError } from "../actions";
-import type { Api, Artifact, ReviewResult } from "../core/api";
+import { ApiError, type Api, type Artifact, type FixTarget, type ReviewResult } from "../core/api";
 import { approveOrRead, isStaleRevision } from "../core/approve";
 import { mutating } from "../core/guard";
 import { commandItemId } from "../core/review";
+import { nodeToSend, restartChoices } from "../core/restart";
 import type { ShownRenders } from "../core/shown";
 import type { Store } from "../core/store";
 import { canSend, OUTCOME_LABEL, outcomeChoices, submitMessage, type Outcome } from "../core/submit";
@@ -26,7 +27,7 @@ export function registerReviewSubmit(
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
 
   /** True once a review was sent. With `choice`, no picker or input box opens. */
-  const submit = async (id: string, choice?: { outcome: Outcome; summary?: string }): Promise<boolean> => {
+  const submit = async (id: string, choice?: { outcome: Outcome; summary?: string; node?: string }): Promise<boolean> => {
     const no = refusal();
     if (no) return warn(no), false;
     let threads;
@@ -38,12 +39,23 @@ export function registerReviewSubmit(
       return false;
     }
     const detail = store.detail(id);
-    const choices = outcomeChoices(detail);
+    const gate = detail?.pending_gate ?? null;
+    // Where Request changes would restart: the detail's at a gate, the server's reckoning without one.
+    let fix: FixTarget | null = detail?.fix_target ?? null;
+    let unknown: string | undefined;
+    if (detail && !gate) {
+      try {
+        fix = await api.fixTarget(id);
+      } catch (e) {
+        unknown = e instanceof ApiError ? e.detail : String(e);
+      }
+    }
+    const choices = outcomeChoices(detail, fix, unknown);
     if ("refused" in choices) return warn(choices.refused), false;
-    const gate = detail!.pending_gate ?? null;
+    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${id} now.`), false;
     let { outcome, summary } = choice ?? {};
     if (!outcome) {
-      const rows = outcomes(detail!, gate, threads, detail!.fix_target ?? null);
+      const rows = outcomes(detail!, gate, threads, fix);
       const picked = await vscode.window.showQuickPick(
         choices.map((o) => ({ label: OUTCOME_LABEL[o], detail: rows.find((r) => r.key === o)?.parts.map((p) => p.t).join(""), o })),
         { placeHolder: `Submit your review of ${id}` },
@@ -56,6 +68,17 @@ export function registerReviewSubmit(
     summary = summary?.trim() || undefined;
     const n = drafts(threads).length;
     if (!canSend(outcome, n, summary)) return info("No review comments to send."), false;
+    let node = choice?.node;
+    let fixNode = fix?.node;
+    if (outcome === "request_changes" && !choice) {
+      const at = gate ? { gate } : { current: detail!.current_node_id ?? "" };
+      const restart = restartChoices(detail!.chain_definition?.nodes ?? [], at, fix!);
+      if ("refused" in restart) return warn(restart.refused), false;
+      const picked = await vscode.window.showQuickPick(restart, { title: `Request changes on ${id}: restart at` });
+      if (!picked) return false;
+      node = nodeToSend(picked);
+      fixNode = picked.node;
+    } else if (node) fixNode = node;
     try {
       if (outcome === "approve") {
         const g = gate!;
@@ -68,10 +91,10 @@ export function registerReviewSubmit(
         if (r === "cancelled" || !sent) return false;
         info(submitMessage("approve", sent, { id, n, gate: g, fixNode: null, paused: false }));
       } else {
-        const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }) });
+        const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }), ...(outcome === "request_changes" && node && { node }) });
         // The gate's document will be revised: the render shown so far no longer binds an approve.
         if (gate && outcome === "request_changes") shown.forget(id);
-        info(submitMessage(outcome, r, { id, n, gate, fixNode: detail!.fix_target?.node, paused: detail!.status === "paused" }));
+        info(submitMessage(outcome, r, { id, n, gate, fixNode, paused: detail!.status === "paused" }));
       }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.

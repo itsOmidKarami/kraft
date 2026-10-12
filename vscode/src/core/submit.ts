@@ -1,15 +1,23 @@
-import type { GatelessChanges, ReviewResult, WorkItemDetail } from "./api";
+import type { FixTarget, GatelessChanges, ReviewResult, WorkItemDetail } from "./api";
+import { NO_ROUNDS, outOfRounds } from "./restart";
 
 export type Outcome = "request_changes" | "comment" | "approve";
 export const OUTCOME_LABEL: Record<Outcome, string> = { request_changes: "Request changes", comment: "Comment", approve: "Approve" };
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
-/** What Submit Review offers: all three at a gate; with none, only Request changes. */
-export function outcomeChoices(detail: WorkItemDetail | undefined): Outcome[] | { refused: string } {
+/**
+ * What Submit Review offers: all three at a gate; with none, only Request
+ * changes. `fix` is where Request changes would restart: out of fix rounds, or
+ * `null` (Kraft could not say, `unknown` saying why), it is not offered.
+ */
+export function outcomeChoices(detail: WorkItemDetail | undefined, fix?: FixTarget | null, unknown = "Kraft could not say where the work would restart."): Outcome[] | { refused: string } {
   if (!detail) return { refused: "Kraft has not loaded this item yet." };
   if (ENDED.has(detail.display_status ?? "")) return { refused: "This item has ended; its review is closed." };
-  return detail.pending_gate ? ["request_changes", "comment", "approve"] : ["request_changes"];
+  const all: Outcome[] = detail.pending_gate ? ["request_changes", "comment", "approve"] : ["request_changes"];
+  const why = fix === null ? unknown : fix && outOfRounds(fix) ? NO_ROUNDS : null;
+  const left = why ? all.filter((o) => o !== "request_changes") : all;
+  return left.length ? left : { refused: why! };
 }
 
 /** Approve sends with nothing to say; the others need a draft or a note. */
