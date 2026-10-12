@@ -95,6 +95,45 @@ describe("Api", () => {
     expect((f.mock.calls[0][1] as RequestInit).method).toBe("POST");
   });
 
+  it.each([
+    { id: "list", call: (a: Api) => a.listThreads("K 1"), method: "GET", url: "/work-items/K%201/threads", body: undefined },
+    {
+      id: "create", call: (a: Api) => a.createThread("K-1", { body: "b", file_path: "a.py", side: "old", start_line: 2, end_line: 3, label: "must_fix" }),
+      method: "POST", url: "/work-items/K-1/threads", body: { body: "b", file_path: "a.py", side: "old", start_line: 2, end_line: 3, label: "must_fix" },
+    },
+    { id: "relabel only", call: (a: Api) => a.patchThread("t1", { label: null }), method: "PATCH", url: "/threads/t1", body: { label: null } },
+    { id: "reply", call: (a: Api) => a.addComment("t1", "r"), method: "POST", url: "/threads/t1/comments", body: { body: "r" } },
+    {
+      id: "edit reply keeps suggestion", call: (a: Api) => a.patchComment("c1", { body: "x", suggestion: { start_line: 1, end_line: 1, replacement: "y" } }),
+      method: "PATCH", url: "/comments/c1", body: { body: "x", suggestion: { start_line: 1, end_line: 1, replacement: "y" } },
+    },
+    { id: "delete thread", call: (a: Api) => a.deleteThread("t1"), method: "DELETE", url: "/threads/t1", body: undefined },
+    { id: "delete reply", call: (a: Api) => a.deleteComment("c1"), method: "DELETE", url: "/comments/c1", body: undefined },
+    { id: "resolve", call: (a: Api) => a.resolveThread("t1"), method: "POST", url: "/threads/t1/resolve", body: undefined },
+    { id: "reopen", call: (a: Api) => a.reopenThread("t1"), method: "POST", url: "/threads/t1/reopen", body: undefined },
+    {
+      id: "at a gate", call: (a: Api) => a.submitReview("K-1", "spec/x", { outcome: "approve", digest: "d" }),
+      method: "POST", url: "/work-items/K-1/gates/spec%2Fx/review", body: { outcome: "approve", digest: "d" },
+    },
+    {
+      id: "gateless", call: (a: Api) => a.submitReview("K-1", null, { outcome: "request_changes", summary: "s" }),
+      method: "POST", url: "/work-items/K-1/review", body: { outcome: "request_changes", summary: "s" },
+    },
+  ])("threads and reviews: $id", async ({ call, method, url, body }) => {
+    const f = fakeFetch(200, {});
+    await call(new Api("http://h:1", undefined, f as any));
+    const [u, init] = f.mock.calls[0];
+    expect(u).toBe(`http://h:1/api${url}`);
+    expect((init as RequestInit).method).toBe(method);
+    const sent = (init as RequestInit).body;
+    expect(sent === undefined ? undefined : JSON.parse(sent as string)).toEqual(body);
+  });
+
+  it("resolves a 204 with no body to undefined", async () => {
+    const f = vi.fn(async () => new Response(null, { status: 204 }));
+    expect(await new Api("http://h:1", undefined, f as any).deleteThread("t1")).toBeUndefined();
+  });
+
   it("reports a refused call to onError", async () => {
     const api = new Api("http://h:1", undefined, fakeFetch(401, { detail: "bad token" }) as any);
     const seen: ApiFailure[] = [];

@@ -90,3 +90,25 @@ it.each([
   { id: "422 same words", e: new ApiError(422, "the revision changed since you viewed it"), stale: false },
   { id: "not an ApiError", e: new Error("the revision changed since you viewed it"), stale: false },
 ])("isStaleRevision: $id", ({ e, stale }) => expect(isStaleRevision(e)).toBe(stale));
+
+it("uses the given send with the remembered digest", async () => {
+  const send = vi.fn(async (_d: string | undefined) => true);
+  shown.record("A", "revise", "d1");
+  expect(await approveOrRead(api, shown, "A", "revise", show, undefined, undefined, send)).toBe("approved");
+  expect(send).toHaveBeenCalledWith("d1");
+  expect(api.approve).not.toHaveBeenCalled();
+});
+
+it("returns cancelled when send declines, and runs no approved", async () => {
+  const approved = vi.fn(async () => {});
+  shown.record("A", "revise", "d1");
+  expect(await approveOrRead(api, shown, "A", "revise", show, undefined, approved, async () => false)).toBe("cancelled");
+  expect(approved).not.toHaveBeenCalled();
+});
+
+it("read-first still opens the document before any send", async () => {
+  const send = vi.fn(async (_d: string | undefined) => true);
+  expect(await approveOrRead(api, shown, "A", "revise", show, undefined, undefined, send)).toBe("read-first");
+  expect(show).toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
