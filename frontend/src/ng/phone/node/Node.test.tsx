@@ -91,6 +91,10 @@ describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () 
     ["a gate not reached", item("running"), "plan_approval", [null, null]],
     ["any node of a done item", item("done"), "plan", [null, null]],
     ["any node of a cancelled item", item("cancelled"), "verification", [null, null]],
+    // The server's `actions` (F4): a refused door is dropped, the pair collapsing to its one button.
+    ["running node, the server refusing skip", item("running", null, { actions: ["pause", "steer", "complete", "cancel"] }), "verification", [null, "pause"]],
+    ["failed node, the server refusing retry", item("failed", stop("failed"), { actions: ["skip", "escalate", "complete", "cancel"] }), "verification", [null, "skip"]],
+    ["paused node, the server admitting both", item("paused", null, { actions: ["resume", "skip", "cancel"] }), "verification", ["skip", "resume"]],
   ] as const)("%s", (_n, it, id, want) => expect(bar(it, id)).toEqual(want));
 
   it("never offers Retry on a running node", () => {

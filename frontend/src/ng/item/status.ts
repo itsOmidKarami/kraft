@@ -1,4 +1,4 @@
-import type { DisplayStatus, WorkItem } from "../../types";
+import type { DisplayStatus, ItemAction, WorkItem } from "../../types";
 import { elapsed, usd } from "../../format";
 
 /** What the header shows for an item. Read from the server's `display_status`
@@ -10,7 +10,9 @@ export type PanelItem = "escalate" | "complete" | "archive" | "cancel";
 export interface HeaderState {
   badge: string;
   tone: Tone;
-  main: Main;
+  /** Null when the server admits none of the status's ways on (`admits`):
+   *  no main button, and the panel's doors go to the ⋮ instead. */
+  main: Main | null;
   /** The hover panel's items; empty means no panel and no ▾ toggle. */
   panel: PanelItem[];
 }
@@ -31,6 +33,17 @@ const TONE: Record<DisplayStatus, Tone> = {
   archived: "muted",
 };
 
+/** What `admits` reads: the server's `actions` when it sends them. */
+type Doors = { actions?: readonly ItemAction[] | null };
+
+/** Whether a surface offers the door `verb`: the server's `actions` when it
+ *  sends them (`vocab.work_item.open_doors`, every route's own guard), else
+ *  `rule`, the UI's own reading of the item, kept for a server older than
+ *  them. Which door is the main one, its label and its tone stay the UI's. */
+export function admits(item: Doors, verb: ItemAction, rule: boolean): boolean {
+  return item.actions ? item.actions.includes(verb) : rule;
+}
+
 /** How the cap behind a budget stop is raised, or null when the item cannot
  *  raise it, so neither layout offers a raise the server would refuse (409):
  *  - `limit`: the stop names an item-wide policy `budget_usd`, raised in the
@@ -44,6 +57,11 @@ export function budgetRaise(item: Pick<WorkItem, "stop">): "limit" | "item" | nu
   if (item.stop.limit) return "limit";
   return item.stop.scope === "work_item" ? "item" : null;
 }
+
+/** Whether a budget stop's Raise is offered: the item can raise the cap
+ *  (`budgetRaise`, which also picks the editor) and the server admits
+ *  `raise_budget`. Otherwise the way on is Retry. */
+export const offersRaise = (item: Pick<WorkItem, "stop"> & Doors) => budgetRaise(item) !== null && admits(item, "raise_budget", true);
 
 /** What a budget stop the item cannot raise says instead of offering a raise. */
 export const NOT_RAISABLE = "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap.";
@@ -59,7 +77,7 @@ export const RELEASED = { where: "nothing left to wait for", text: "Kraft queues
 export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
 /** What `escalatable` reads: the detail's sessions and pending gate are optional, a board row has neither. */
-type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate" | "stop">> & { worker_sessions?: { status: string; hook_point: string }[] };
+type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate" | "stop">> & Doors & { worker_sessions?: { status: string; hook_point: string }[] };
 
 const live = (s: { status: string }) => s.status === "running" || s.status === "pending";
 
@@ -74,19 +92,19 @@ const reviewingGate = (item: Omit<EscalateFields, "display_status" | "current_no
  *  one, so no surface offers Retry there (R10b-01): a paused item has Resume.
  *  Nor a gate an agent is reviewing (`reviewingGate`, #504 review P2-1). */
 export const retryable = (item: Pick<WorkItem, "display_status"> & Omit<EscalateFields, "display_status" | "current_node_id">) =>
-  (item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated") && !reviewingGate(item);
+  admits(item, "retry", (item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated") && !reviewingGate(item));
 
 /** Whether `/pause` would take this item: it claims only a running or waiting
  *  one (`active`, `waiting`, `rate_limited`) and answers every stopped item 409
  *  "work item is needs_human, not running" (R11b-01): a gate, a question, a stuck
  *  loop or a live escalation is never paused. */
-export const pausable = (item: Pick<WorkItem, "display_status">) => item.display_status === "running" || item.display_status === "waiting";
+export const pausable = (item: Pick<WorkItem, "display_status"> & Doors) => admits(item, "pause", item.display_status === "running" || item.display_status === "waiting");
 
 /** Whether `/skip` would take this item: it refuses a rate-limited one (Kraft
  *  relaunches it at its `retry_at`; pause it first, which `/pause` takes, then
  *  Skip or Resume), and one whose escalation turn is running (R11b-01). */
-export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">>) =>
-  item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated";
+export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">> & Doors) =>
+  admits(item, "skip", item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated");
 
 /** Whether `/escalate` would take this item: a stopped one (failed or needs
  *  you) or a paused one that has started, and not while an escalation turn
@@ -97,24 +115,41 @@ export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick
  *  (#504 review P2-1). Nor a spend cap's stop: the escalation's agent would
  *  hit the same cap, so the server refuses it until the cap is raised (R12E-05). */
 export const escalatable = (item: EscalateFields) =>
-  (item.display_status === "failed" || item.display_status === "needs_you" || (item.display_status === "paused" && !!item.current_node_id))
-  && !(item.pending_gate && item.worker_sessions?.some(live))
-  && !(item.display_status !== "paused" && item.stop?.kind === "budget");
+  admits(item, "escalate",
+    (item.display_status === "failed" || item.display_status === "needs_you" || (item.display_status === "paused" && !!item.current_node_id))
+    && !(item.pending_gate && item.worker_sessions?.some(live))
+    && !(item.display_status !== "paused" && item.stop?.kind === "budget"));
 
-/** The way on from a `needs_you` stop, by its kind: the same table as the
- *  phone's bottom bar (`phone/item/model`'s `pairOf`), so the two layouts offer
- *  the same door (R11b-01). Never Pause: `/pause` refuses every stopped item. */
-function needsYouMain(item: Pick<WorkItem, "stop">): Main {
+/** The ways on from a `needs_you` stop, by its kind, first choice first: the
+ *  same table as the phone's bottom bar (`phone/item/model`'s `pairOf`), so the
+ *  two layouts offer the same door (R11b-01). Never Pause: `/pause` refuses
+ *  every stopped item. A budget stop's Raise falls back to Retry. */
+function needsYouMain(item: Pick<WorkItem, "stop"> & Doors): Main[] {
   switch (item.stop?.kind) {
-    case "gate": return "gate";
-    case "question": return "answer";
-    case "budget": return budgetRaise(item) ? "raise" : "retry";
-    case "cap": return "raise";
-    case "conflict": return "conflicts";
-    case "mr_closed": return "reopen";
+    case "gate": return ["gate"];
+    case "question": return ["answer"];
+    case "budget": return budgetRaise(item) ? ["raise", "retry"] : ["retry"];
+    case "cap": return ["raise"];
+    case "conflict": return ["conflicts"];
+    case "mr_closed": return ["reopen"];
     // stuck, and any stop a later server adds: /retry claims every needs_human item.
-    default: return "retry";
+    default: return ["retry"];
   }
+}
+
+/** The door each main button goes through, or null for one that opens a view
+ *  with its own decisions (a gate, the conflicts): always offered. Raise on a
+ *  budget stop is `offersRaise`'s; a cap's limit editor patches, then retries. */
+export const MAIN_DOOR: Record<Main, ItemAction | null> = {
+  pause: "pause", resume: "resume", start: "resume", answer: "resume", raise: "retry", retry: "retry",
+  archive: "archive", restore: "restore", reopen: "reopen_mr", gate: null, conflicts: null,
+};
+
+/** Whether the server admits `main`'s door; true for every door on a server that sends no `actions`. */
+function mainAdmitted(item: Pick<WorkItem, "stop"> & Doors, main: Main): boolean {
+  if (main === "raise" && item.stop?.kind === "budget") return offersRaise(item);
+  const door = MAIN_DOOR[main];
+  return door === null || admits(item, door, true);
 }
 
 /** GAP §1.4a, Decisions §1 and §14. `raise` opens the budget or limit editor
@@ -124,18 +159,24 @@ function needsYouMain(item: Pick<WorkItem, "stop">): Main {
  *  takes it (`pausable`); an escalated item has Retry, which outranks its turn. */
 export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
-  if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] };
-  const main: Main =
-    status === "paused" ? "resume"
+  const first = (ways: Main[]) => ways.find((m) => mainAdmitted(item, m)) ?? null;
+  if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: first(["start"]), panel: admits(item, "cancel", true) ? ["cancel"] : [] };
+  const main = first(
+    status === "paused" ? ["resume"]
     : status === "needs_you" ? needsYouMain(item)
-    : status === "failed" || status === "escalated" ? "retry"
-    : status === "done" || status === "cancelled" ? "archive"
-    : status === "archived" ? "restore"
-    : "pause";
+    : status === "failed" || status === "escalated" ? ["retry"]
+    : status === "done" || status === "cancelled" ? ["archive"]
+    : status === "archived" ? ["restore"]
+    : ["pause"],
+  );
   const panel: PanelItem[] =
     status === "done" || status === "archived" ? []
     : status === "cancelled" ? ["archive"]
-    : FULL.filter((p) => p !== "escalate" || escalatable({ ...item, display_status: status }));
+    : FULL.filter((p) =>
+      p === "escalate" ? escalatable({ ...item, display_status: status })
+      : p === "complete" || p === "cancel" ? admits(item, p, true)
+      // Archive stays in the panel as a disabled hint until `archivable`.
+      : true);
   return { badge: status.replace("_", " ").toUpperCase(), tone: TONE[status], main, panel };
 }
 
@@ -159,8 +200,8 @@ export function menuDoors(item: Pick<WorkItem, "display_status">): "duplicate"[]
   return ["done", "cancelled", "archived"].includes(item.display_status ?? "") ? ["duplicate"] : [];
 }
 
-/** Archive in the panel is live only once there is nothing left to stop. */
-export const archivable = (status: DisplayStatus | undefined) => status === "done" || status === "cancelled";
+/** Archive in the panel is live only once there is nothing left to stop, and the server admits it. */
+export const archivable = (item: Pick<WorkItem, "display_status"> & Doors) => admits(item, "archive", item.display_status === "done" || item.display_status === "cancelled");
 
 /** "$2.41 of $5.00 · 1h 12m of 8h": the spend, and the running time beside it when the item has a time cap (WI-7). */
 export function spentLine(item: Pick<WorkItem, "budget_cap" | "running_time">): string {

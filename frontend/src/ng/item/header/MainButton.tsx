@@ -12,6 +12,9 @@ const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string
   cancel: { label: "Cancel…", icon: X, tone: "bad" },
 };
 
+/** A panel item's words, for the ⋮ that carries them when there is no main button. */
+export const PANEL_LABEL: Record<PanelItem, string> = { escalate: ITEM.escalate.label, complete: ITEM.complete.label, archive: ITEM.archive.label, cancel: ITEM.cancel.label };
+
 type Props = {
   main: Main;
   panel: PanelItem[];

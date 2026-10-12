@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DiffFile, WorkerSession } from "../../types";
+import type { DiffFile, ItemAction, WorkerSession } from "../../types";
 import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
@@ -49,8 +49,10 @@ describe("ComesAfterCard", () => {
     ["paused", "paused", "Comes after", true],
     // `/unblock` takes a blocked or paused item only.
     ["needs_you", "needs_human", "Comes after", false],
-  ] as const)("a %s item lists what it comes after, each a link, and offers Unblock only where the server takes it", (display_status, status, title, offered) => {
-    after({ display_status, status });
+    // The server's `actions` (F4) refusing unblock.
+    ["blocked", "blocked", "Blocked", false, ["pause", "cancel"]],
+  ] as const)("a %s item lists what it comes after, each a link, and offers Unblock only where the server takes it", (display_status, status, title, offered, actions?: readonly ItemAction[]) => {
+    after({ display_status, status, ...(actions && { actions: [...actions] }) });
     const card = screen.getByRole("region", { name: title });
     expect(card).toHaveTextContent("waiting on 1 item");
     expect(within(card).getByRole("link", { name: "Schema first" })).toHaveAttribute("href", "/work-items/a1");
@@ -233,6 +235,18 @@ describe("StateCard", () => {
     expect(h.onDuplicate).toHaveBeenCalled();
   });
 
+  // The server's `actions` (F4): a door it does not list is no button; links and Open node stay.
+  it.each<[string, Parameters<typeof detail>[0], string, string[]]>([
+    ["a failed infra stop, the server refusing retry", { display_status: "failed", stop: stop("infra"), actions: ["escalate", "cancel"] }, "Failed", ["Check the repo settings", "Escalate…", "Open merge_request →"]],
+    ["a stuck stop, the server refusing escalate", { display_status: "needs_you", stop: stop("stuck"), actions: ["retry", "cancel"] }, "Stuck", ["Retry from open_draft", "Open merge_request →"]],
+    ["a conflict, the server refusing escalate", { display_status: "needs_you", stop: stop("conflict"), actions: ["cancel"] }, "Rebase needs you", ["Review the conflicts", "Open merge_request →"]],
+    ["cancelled, the server refusing archive", { display_status: "cancelled", stop: null, current_node_id: null, actions: [] }, "Cancelled", ["Duplicate as new item"]],
+  ])("%s", (_name, over, title, labels) => {
+    stubFetch();
+    show(over);
+    expect(within(screen.getByRole("region", { name: title })).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
+  });
+
   it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["done", null], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
     stubFetch();
     // A question with its text has the question card (Banner's QuestionCard); without it, the card below.
@@ -253,6 +267,11 @@ describe("PausedCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(2));
     expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }, { steer: null }]);
+  });
+
+  it("offers no Resume when the server's actions refuse it (F4)", () => {
+    render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")], actions: ["steer", "cancel"] })} reload={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
   });
 
   it("resumes with the steer on ⌘↵, and not with an empty one", async () => {

@@ -43,6 +43,15 @@ describe("Banner", () => {
     expect(screen.getByRole("status")).toHaveTextContent("The item can't raise this cap: the policy or the chain sets it.");
   });
 
+  // The server's `actions` (F4): a raise it would refuse is no button; the header's Retry is the way on.
+  it.each([
+    ["a budget stop on the item's own cap, raise_budget not listed", stop("budget", { scope: "work_item" }), ["retry", "cancel"]],
+    ["a cap stop naming its limit, retry not listed", stop("cap", { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }), ["cancel"]],
+  ] as const)("offers no raise for %s", (_name, s, actions) => {
+    render(<Banner item={detail({ display_status: "needs_you", stop: s, actions: [...actions] })} onRaise={() => {}} reload={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Raise cap" })).toBeNull();
+  });
+
   it("opens Config, labelled so, for a cap stop that names no limit to raise", async () => {
     const onRaise = vi.fn();
     render(<Banner item={detail({ display_status: "needs_you", stop: stop("cap", { reason: "gate review waited past its timeout" }) })} onRaise={onRaise} reload={() => {}} />);
@@ -230,6 +239,15 @@ describe("QuestionCard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send & resume" }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: "Accept the finding." } }]);
+  });
+
+  it("offers no Send & resume, and sends nothing on ⌘↵, when the server's actions refuse resume (F4)", async () => {
+    const calls = stubFetch(WRITES);
+    render(<QuestionCard item={{ ...asked, actions: ["steer", "cancel"] }} compact={false} reload={() => {}} onOpenThread={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Send & resume" })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Your answer"), "Accept the finding.");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
   });
 
   it("sends the answer on ⌘↵", async () => {

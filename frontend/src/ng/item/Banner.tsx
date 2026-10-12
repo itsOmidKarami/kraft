@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
-import { budgetRaise, NOT_RAISABLE } from "./status";
+import { admits, budgetRaise, NOT_RAISABLE, offersRaise } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -43,10 +43,11 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
         </span>
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,
             and a budget stop on the item's own cap that Config's budget editor. A budget the item cannot raise says so, and the header's Retry is the way on. */}
+        {/* Each Raise only where the server admits its door: a budget's `raise_budget` (`offersRaise`), a cap's limit editor `retry`. */}
         {stop.limit
-          ? <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
+          ? (stop.kind === "budget" ? offersRaise(item) : admits(item, "retry", true)) && <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
           : stop.kind === "cap" ? <Button variant="primary" onClick={onRaise}>Open config</Button>
-          : budgetRaise(item) && <Button variant="primary" onClick={onRaise}>Raise cap</Button>}
+          : offersRaise(item) && <Button variant="primary" onClick={onRaise}>Raise cap</Button>}
         {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} override={item.policy_override} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
       </div>
     );
@@ -69,6 +70,8 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
     reload();
   };
   if (item.display_status !== "needs_you" || item.stop?.kind !== "question" || !q) return null;
+  // An answer resumes the item: only where the server admits `resume`.
+  const resumes = admits(item, "resume", true);
   const where = item.stop.node;
   if (compact)
     return (
@@ -87,10 +90,10 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
         <span className="item-card-where">asked by {item.stop.task ? taskName(item.stop.task) : "the agent"}{where && ` · on ${where}`}</span>
       </h2>
       <blockquote className="item-quote">“{q}”</blockquote>
-      <textarea aria-label="Your answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={sendOnModEnter(send, !busy && !!answer.trim())} />
+      <textarea aria-label="Your answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={sendOnModEnter(send, resumes && !busy && !!answer.trim())} />
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
-        <Button variant="primary" disabled={busy || !answer.trim()} onClick={send}>Send &amp; resume</Button>
+        {resumes && <Button variant="primary" disabled={busy || !answer.trim()} onClick={send}>Send &amp; resume</Button>}
         <Button onClick={onOpenThread}>Open thread</Button>
       </div>
     </section>

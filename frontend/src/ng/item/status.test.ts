@@ -8,7 +8,8 @@ import { nodeBar, type NodeActId } from "../phone/node/model";
 import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
-import { archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
+import { ITEM_ACTIONS, type ItemAction } from "../../types/vocab.generated";
+import { admits, archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
@@ -52,8 +53,42 @@ describe("headerState: every display status, from the server's fields only", () 
   });
 
   it("Archive in the panel is live only for done and cancelled", () => {
-    expect((["done", "cancelled"] as const).every(archivable)).toBe(true);
-    expect((["running", "paused", "failed", "needs_you", "archived"] as const).some(archivable)).toBe(false);
+    expect((["done", "cancelled"] as const).every((display_status) => archivable({ display_status }))).toBe(true);
+    expect((["running", "paused", "failed", "needs_you", "archived"] as const).some((display_status) => archivable({ display_status }))).toBe(false);
+  });
+});
+
+describe("the server's actions decide which doors the header offers (F4)", () => {
+  it.each<[string, readonly ItemAction[] | null | undefined, boolean, boolean]>([
+    ["an older server: the UI's own reading", undefined, true, true],
+    ["an older server: the UI's own reading, refused", undefined, false, false],
+    ["listed", ["pause"], false, true],
+    ["not listed, whatever the UI reads", ["steer"], true, false],
+    ["an empty list admits nothing", [], true, false],
+  ])("admits: %s", (_name, actions, rule, want) => expect(admits({ actions }, "pause", rule)).toBe(want));
+
+  const ALL = [...ITEM_ACTIONS];
+  const but = (...gone: ItemAction[]) => ALL.filter((a) => !gone.includes(a));
+  const ownBudget = { kind: "budget", node: "n", resume_at: null, reason: null, scope: "work_item" } as WorkItemStop;
+  it.each<[string, Parameters<typeof headerState>[0], Main | null, string[]]>([
+    ["running, the doors the server lists for it: today's", { display_status: "running", current_node_id: "n", stop: null, actions: ["pause", "steer", "skip", "complete", "cancel", "abandon"] }, "pause", NO_ESC],
+    ["running, the server refusing pause: no main", { display_status: "running", current_node_id: "n", stop: null, actions: ["steer", "skip", "complete", "cancel"] }, null, NO_ESC],
+    // A raise the item could make, which the server will not: Retry, the next way on.
+    ["a budget stop on the item's own cap, the server refusing raise_budget", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: ["retry", "complete", "cancel"] }, "retry", NO_ESC],
+    ["a budget stop, the server refusing both", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: ["complete", "cancel"] }, null, NO_ESC],
+    ["failed, the server refusing escalate: no Escalate… in the panel", { display_status: "failed", current_node_id: "n", stop: null, actions: but("escalate") }, "retry", NO_ESC],
+    ["failed, the server refusing complete and cancel", { display_status: "failed", current_node_id: "n", stop: null, actions: but("complete", "cancel") }, "retry", ["escalate", "archive"]],
+    // A gate is a view with its own decisions: Open gate stays.
+    ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
+    ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: but("resume", "cancel") }, null, []],
+    ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
+  ])("%s", (_name, item, main, panel) => {
+    expect(headerState(item)).toMatchObject({ main, panel });
+  });
+
+  it("archivable: an ended item the server will not archive is not", () => {
+    expect(archivable({ display_status: "done", actions: ["restore"] })).toBe(false);
+    expect(archivable({ display_status: "done", actions: ["archive"] })).toBe(true);
   });
 });
 
@@ -135,8 +170,8 @@ function offered(item: ItemDetail): [string, Door][] {
   const p = pairOf(item);
   const phone = PHONE_DOOR(item);
   return [
-    [`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]],
-    ...hs.panel.filter((x) => x !== "archive" || archivable(item.display_status)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
+    ...(hs.main ? [[`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]] as [string, Door]] : []),
+    ...hs.panel.filter((x) => x !== "archive" || archivable(item)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
     ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, "navigate"]),
     ...footerActs(item, footerState(item, item.worker_sessions)).map((x): [string, Door] => [`path footer ${x}`, x]),
     ...[p.secondary, p.primary].flatMap((x): [string, Door][] => (x ? [[`phone bar ${x.id}`, phone[x.id]]] : [])),
@@ -155,12 +190,19 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
     expect(refused).toEqual([]);
   });
 
+  // With nothing admitted, a surface keeps only its links and the views that make their own decisions (F4).
+  const VIEWS = /^(header main (gate|conflicts)|phone bar (review|conflicts|board)|phone node \S+ review)$/;
+  it.each(CASES)("%s, the server admitting nothing: links and views only", (_name, over) => {
+    const left = offered(detail({ ...over, actions: [] })).filter(([where, door]) => door !== "navigate" && !VIEWS.test(where)).map(([where]) => where);
+    expect(left).toEqual([]);
+  });
+
   // The two layouts agree on the way on from a stop: the header's main and the phone bar's primary.
   // A cap stop is the one they word apart: the phone's raise is its card's link, beside Retry.
   const WAY: Partial<Record<Main | ActId, string>> = { gate: "gate", review: "gate", answer: "answer", raise: "raise", retry: "retry", conflicts: "conflicts", reopen: "reopen-mr", "reopen-mr": "reopen-mr" };
   it.each(CASES.filter(([name, over]) => (over.display_status === "needs_you" || over.display_status === "escalated") && name !== "cap"))("%s: the desktop header and the phone bar offer the same way on", (_name, over) => {
     const item = detail(over);
-    expect(WAY[headerState(item).main]).toBe(WAY[pairOf(item).primary!.id]);
+    expect(WAY[headerState(item).main!]).toBe(WAY[pairOf(item).primary!.id]);
   });
 });
 

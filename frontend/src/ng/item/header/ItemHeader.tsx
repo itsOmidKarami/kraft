@@ -15,7 +15,7 @@ import { archivable, headerState, menuDoors, neverStarted, type PanelItem } from
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
-import { MainButton } from "./MainButton";
+import { MainButton, PANEL_LABEL } from "./MainButton";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -156,6 +156,8 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
     ...menuDoors(item).map((): MenuItem => ({ label: "Duplicate as new item", onSelect: duplicate })),
+    // No main button (the server admits none of its ways on): the panel's doors, which would be under it, stay reachable here.
+    ...(hs.main ? [] : hs.panel.filter((it) => it !== "archive" || archivable(item)).map((it): MenuItem => ({ label: PANEL_LABEL[it], onSelect: () => onItem(it) }))),
   ];
 
   const endedAt = ended ? item.updated_at : null;
@@ -173,8 +175,9 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
       <span className={`item-badge is-${hs.tone}`}>{hs.badge}</span>
-      <div className="item-main-group">
-        <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item.display_status)} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />
+      {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
+      <div className="item-main-group" ref={hs.main ? undefined : group}>
+        {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />}
         <Menu label="Item menu" trigger={<EllipsisVertical size={15} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}

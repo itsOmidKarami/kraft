@@ -4,7 +4,7 @@ import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { holdsText, isEscape, sendOnModEnter } from "../../keys";
-import { pausable, retryable, skippable } from "../status";
+import { admits, pausable, retryable, skippable } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -14,12 +14,13 @@ export type FooterAct = "pause" | "resume" | "skip" | "retry";
  *  Pause where `/pause` would (`pausable`: never on a stopped item, R11b-01),
  *  Resume on a paused one, Skip where `/skip` would (not past a live walk), and Retry only on an item
  *  `/retry` claims (`retryable`): a paused one has Resume, and a running or
- *  waiting one nothing (R10b-01). An ended item runs nothing again (R8b-06). */
+ *  waiting one nothing (R10b-01). An ended item runs nothing again (R8b-06).
+ *  Each also only where the server's `actions` admit it (`admits`). */
 export function footerActs(item: ItemDetail, shown: FooterState): FooterAct[] {
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
   return [
     ...(state === "running" && pausable(item) ? ["pause" as const] : []),
-    ...(state === "paused" ? ["resume" as const] : []),
+    ...(state === "paused" && admits(item, "resume", true) ? ["resume" as const] : []),
     // Skip on a live footer only while the item runs: a stopped one with a live session (a gate's auto-review) has a walk /skip refuses.
     ...(((state === "running" && pausable(item)) || state === "paused") && skippable(item) ? ["skip" as const] : []),
     ...((state === "paused" || state === "stopped") && retryable(item) ? ["retry" as const] : []),

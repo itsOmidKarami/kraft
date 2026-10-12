@@ -20,6 +20,17 @@ describe("PathFooter", () => {
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(names);
   });
 
+  // The server's `actions` (F4): a door it does not list is no button, whatever the footer's state.
+  it.each([
+    ["paused", "paused", ["skip", "cancel"], ["Skip task"]],
+    ["running", "running", ["pause", "cancel"], ["Pause"]],
+    ["stopped", "failed", ["escalate", "cancel"], []],
+    ["paused", "paused", ["resume", "skip"], ["Resume", "Skip task"]],
+  ] as const)("a %s footer while the item is %s, the server listing %j, shows %j", (state, status, actions, names) => {
+    render(<PathFooter item={detail({ display_status: status, actions: [...actions] })} path="v.r.code_review" what="task" state={state} reload={() => {}} />);
+    expect(screen.queryAllByRole("button").map((b) => b.textContent)).toEqual(names);
+  });
+
   // R10b-01: /retry claims only a stopped item and answers 409 to any other, so
   // a paused task offers Resume, and a done task of a running or waiting item nothing.
   it.each([

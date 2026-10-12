@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail } from "../item/testkit";
-import { glyphOf, reasonTail, rowAction, ticksOf } from "./rowText";
+import { admittedRowAction, glyphOf, reasonTail, rowAction, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -74,6 +74,26 @@ describe("rowAction", () => {
     for (const s of ["running", "waiting", "escalated", "done", "cancelled"] as DisplayStatus[]) expect(a(row(s)), s).toBeNull();
     expect(a(row("paused", { current_node_id: null }))).toBeNull();
   });
+});
+
+describe("admittedRowAction: rowAction, only through a door the server's actions list (F4)", () => {
+  const raise = { label: "Raise budget", kind: "peek", tab: "config", budget: true } as const;
+  it.each<[string, WorkItem, ReturnType<typeof rowAction>]>([
+    ["an older server: rowAction as it is", row("paused"), { label: "Resume", kind: "resume" }],
+    ["paused, resume listed", row("paused", { actions: ["resume", "steer"] }), { label: "Resume", kind: "resume" }],
+    ["paused, the server refusing resume", row("paused", { actions: ["steer", "cancel"] }), null],
+    ["failed, the server refusing retry", row("failed", { stop: stop("failed"), actions: ["escalate", "cancel"] }), null],
+    ["stuck, the server refusing retry", row("needs_you", { stop: stop("stuck"), actions: ["escalate"] }), null],
+    ["a question, the server refusing resume", row("needs_you", { stop: stop("question"), actions: ["steer"] }), null],
+    ["a cap, the server refusing retry", row("needs_you", { stop: stop("cap"), actions: ["cancel"] }), null],
+    // The peek offers Retry when it can't raise: the row still goes there.
+    ["a budget, retry without raise_budget", row("needs_you", { stop: stop("budget"), actions: ["retry"] }), raise],
+    ["a budget, neither", row("needs_you", { stop: stop("budget"), actions: ["cancel"] }), null],
+    ["a gate, reject alone", row("needs_you", { stop: stop("gate"), pending_gate: "final_review", actions: ["reject"] }), { label: "Review to approve", kind: "gate", gate: "final_review" }],
+    ["a gate, the server refusing both", row("needs_you", { stop: stop("gate"), pending_gate: "final_review", actions: ["cancel"] }), null],
+    // Open goes to the peek, which decides its own doors.
+    ["any other stop, nothing listed", row("needs_you", { stop: stop("mr_closed"), actions: [] }), { label: "Open", kind: "peek", tab: "overview" }],
+  ])("%s", (_name, item, want) => expect(admittedRowAction(item)).toEqual(want));
 });
 
 describe("glyphOf and ticksOf", () => {

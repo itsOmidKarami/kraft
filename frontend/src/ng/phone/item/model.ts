@@ -1,6 +1,7 @@
 import { ago, elapsed, plural, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
-import { budgetRaise, headerState, archivable, NOT_RAISABLE, RELEASED } from "../../item/status";
+import type { ItemAction } from "../../../types";
+import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RELEASED } from "../../item/status";
 import { gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
@@ -157,11 +158,30 @@ export interface Act {
 }
 const a = (id: ActId, label: string, danger = false): Act => ({ id, label, ...(danger && { danger }) });
 
-/** The bottom bar: `secondary · primary` (or one button), by status and stop kind. A status the table does not list has no bar. An item no agent task can read a note on (`steerable: false`) has no Steer, as on the desktop's paused card (#387). */
+/** The door each bar button goes through, or null for one that opens a view with its own decisions. A raise is
+ *  `raise_budget` on a budget stop and `retry` on a cap's, whose limit editor patches, then retries. */
+const actDoor = (item: ItemDetail, id: ActId): ItemAction | null => {
+  switch (id) {
+    case "pause": case "unblock": case "steer": case "resume": case "retry": case "escalate": case "cancel": case "restore": case "reject": return id;
+    case "start": case "answer": return "resume";
+    case "reopen-mr": return "reopen_mr";
+    case "raise": return item.stop?.kind === "budget" ? "raise_budget" : "retry";
+    default: return null;
+  }
+};
+
+/** The bottom bar: `secondary · primary` (or one button), by status and stop kind. A status the table does not list has no bar. An item no agent task can read a note on (`steerable: false`) has no Steer, as on the desktop's paused card (#387). Nor a door the server's `actions` refuse (`admits`). */
 export function pairOf(item: ItemDetail): { secondary: Act | null; primary: Act | null } {
   const p = pairTable(item);
-  if (item.steerable !== false) return p;
-  const rest = [p.secondary, p.primary].filter((a): a is Act => !!a && a.id !== "steer");
+  const kept = (a: Act | null): a is Act => {
+    if (!a) return false;
+    if (a.id === "steer" && item.steerable === false) return false;
+    const door = actDoor(item, a.id);
+    return door === null || admits(item, door, true);
+  };
+  // Nothing dropped: the table's own layout, a lone secondary (a waiting item's Pause) included.
+  if (kept(p.secondary) === !!p.secondary && kept(p.primary) === !!p.primary) return p;
+  const rest = [p.secondary, p.primary].filter(kept);
   return rest.length === 2 ? { secondary: rest[0], primary: rest[1] } : { secondary: null, primary: rest[0] ?? null };
 }
 
@@ -184,7 +204,7 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
       switch (stop?.kind) {
         case "gate": return { secondary: a("reject", "Reject…"), primary: a("review", "Review and decide") };
         // No Steer: a retry with one would only stop at the same cap again.
-        case "budget": return { secondary: null, primary: budgetRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
+        case "budget": return { secondary: null, primary: offersRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
         // Retry with no raise would only stop at the same cap again, so with the stop's limit the way on is the raise.
         case "cap": return { secondary: a("steer", "Steer"), primary: stopLimitOf(item) ? a("raise", "Raise cap") : a("retry", "Retry") };
         case "question": return { secondary: a("escalate", "Escalate"), primary: a("answer", "Answer") };
@@ -212,7 +232,7 @@ export function kebabOf(item: ItemDetail): Act[] {
   if (item.current_node_id) out.push(a("settings", "Item settings"));
   if (item.mr_ref) out.push(a("open-mr", `Open MR !${item.mr_ref.number}`));
   out.push(a("duplicate", "Duplicate"));
-  if (hs.panel.includes("archive") && archivable(status)) out.push(a("archive", "Archive"));
+  if (hs.panel.includes("archive") && archivable(item)) out.push(a("archive", "Archive"));
   if (hs.panel.includes("complete")) out.push(a("complete", "Mark complete…"));
   if (hs.panel.includes("cancel") && !inBar.has("cancel")) out.push(a("cancel", "Cancel item…", true));
   return out;

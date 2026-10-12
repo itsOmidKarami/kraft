@@ -42,6 +42,15 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["done", mk("done"), [null, "board"]],
     ["cancelled", mk("cancelled"), [null, "board"]],
     ["archived", mk("archived"), [null, "restore"]],
+    // The server's `actions` (F4): a door it does not list is dropped, the pair collapsing to its one button.
+    ["running, the server refusing pause", mk("running", null, { actions: ["steer", "complete", "cancel"] }), [null, "steer"]],
+    ["running, the server admitting both", mk("running", null, { actions: ["pause", "steer", "complete", "cancel"] }), ["pause", "steer"]],
+    ["failed, the server refusing escalate", mk("failed", stop("failed"), { actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    ["gate, the server refusing reject", mk("needs_you", stop("gate", { node: "plan_approval" }), { actions: ["approve"] }), [null, "review"]],
+    // A budget the item could raise, which the server will not: Retry, as on a cap it cannot raise.
+    ["budget, the item's own cap, the server refusing raise_budget", mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    ["mr closed, the server refusing reopen_mr", mk("needs_you", stop("mr_closed"), { actions: ["cancel"] }), [null, "cancel"]],
+    ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 
   it("hides Steer when no agent task can read a note, and keeps the rest (#387)", () => {
@@ -75,6 +84,12 @@ describe("kebabOf", () => {
     expect(kebabOf(mk("failed", stop("failed"))).map((a) => a.id)).not.toContain("escalate");
     expect(kebabOf(mk("running", null)).map((a) => a.id)).not.toContain("archive");
     expect(kebabOf(mk("cancelled")).map((a) => a.id)).toContain("archive");
+  });
+  it.each([
+    ["a cancelled item the server will not archive", mk("cancelled", null, { actions: ["abandon"] }), "archive"],
+    ["a failed item the server will not cancel", mk("failed", stop("failed"), { actions: ["retry", "escalate", "complete"] }), "cancel"],
+  ] as const)("drops a door the server's actions refuse: %s", (_name, item, gone) => {
+    expect(kebabOf(item).map((a) => a.id)).not.toContain(gone);
   });
 });
 
