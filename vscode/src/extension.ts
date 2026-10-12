@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { deriveState } from "../../frontend/src/deriveState";
 import { registerBoard } from "./board";
 import { Api } from "./core/api";
 import type { Announcer } from "./core/announcer";
+import { needsYou } from "./core/board";
 import { baseUrl, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { registerConfigChecks } from "./config/check";
@@ -75,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.
   store.onChange((ids) => {
     if (ids !== "all") return;
-    for (const i of store.items()) if (deriveState(i).needsYou) void store.refresh(i.id).catch(() => {});
+    for (const i of store.items()) if (needsYou(i)) void store.refresh(i.id).catch(() => {});
   });
   void registerSchemas(context, loc.templatesDir);
   const config = registerConfigChecks(context, api, loc.templatesDir, () => readOnly);
