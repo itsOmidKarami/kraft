@@ -328,6 +328,9 @@ describe("applyEvent", () => {
     ["work_item_completed", "w1", "work_item_completed", {}],
     ["work_item_cancelled", "w1", "work_item_cancelled", { reason: "r" }],
     ["work_item_queued", "w1", "work_item_queued", {}],
+    // A must-fix thread resolved elsewhere moves the approve door in `actions`.
+    ["thread_updated", "w1", "thread_updated", { thread_id: "t1", state: "resolved" }],
+    ["review_submitted", "w1", "review_submitted", { review_id: "r1", gate: "spec_approval", outcome: "comment" }],
   ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
     useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));

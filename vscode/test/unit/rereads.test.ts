@@ -15,6 +15,9 @@ describe("shouldReread", () => {
     ["mr_reopened", true, true],
     ["chain_loaded", true, true],
     ["work_item_created", true, true],
+    // A must-fix resolved, reopened or sent elsewhere moves the approve door (`must_fix_open`).
+    ["thread_updated", true, true],
+    ["review_submitted", true, true],
     // Labels on the merge request: nothing the tree shows.
     ["mr_labels_set", true, false],
     ["node_completed", true, false],

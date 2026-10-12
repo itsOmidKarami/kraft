@@ -200,6 +200,31 @@ describe("WorkspaceScope runs git once per folder", () => {
     await scope.update(["/s/sub", "/t"], "/k2", counted, [{ path: "/s" }]);
     expect([afterRepeat, calls.length, scope.includes({ id: "x", repo: "/s" }, () => undefined)]).toEqual([2, 4, true]);
   });
+
+  // `/r` asked of git across three updates; `fails` makes its first git call throw.
+  it.each<[string, string[][], boolean, number]>([
+    ["a failed git call is not kept: the next update asks again", [["/r"], ["/r"]], true, 4],
+    ["a folder no longer open is forgotten: reopened, it asks again", [["/r"], ["/t"], ["/r"]], false, 6],
+    ["a folder still open asks once", [["/r"], ["/r", "/t"], ["/r"]], false, 4],
+  ])("%s", async (_, updates, fails, gitCalls) => {
+    const calls: string[] = [];
+    const base = deps({ [`/r|${TOP}`]: "/r", [`/r|${COMMON}`]: "/r/.git", [`/t|${TOP}`]: "/t", [`/t|${COMMON}`]: "/t/.git" });
+    let broken = fails;
+    const counted: ScopeDeps = {
+      ...base,
+      git: async (args, cwd) => {
+        calls.push(cwd);
+        if (broken && cwd === "/r") throw new Error("spawn git EAGAIN");
+        return base.git(args, cwd);
+      },
+    };
+    const scope = new WorkspaceScope("linux");
+    for (const folders of updates) {
+      await scope.update(folders, "/k", counted);
+      broken = false;
+    }
+    expect([calls.length, scope.unconnected([])]).toEqual([gitCalls, ["/r"]]);
+  });
 });
 
 describe("FolderScope root and git", () => {

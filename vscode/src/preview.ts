@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { previewOf, previewTarget, type ShownPreview, type TabLike } from "./core/preview";
+import { PREVIEW_UNRESOLVED, previewOf, previewTarget, previewUnresolved, type ShownPreview, type TabLike } from "./core/preview";
 
 /** Which gate document's markdown preview is the active tab, if Kraft opened
  *  it: sets `kraft.artifactPreview` for the title bar, and `target(arg)` is the
@@ -22,9 +22,13 @@ export function registerArtifactPreview(context: vscode.ExtensionContext) {
   return {
     /** Kraft is about to preview this item's gate document under this basename. */
     opening: (id: string, basename: string) => void opened.set(basename, id),
-    /** The preview a command's argument points at: see previewTarget. */
-    target: (arg: unknown) =>
-      previewTarget(arg, vscode.window.tabGroups.all.map((g) => ({ isActive: g.isActive, activeTab: tabLike(g.activeTab) })), opened),
+    /** The preview a command's argument points at: see previewTarget. A title
+     *  bar's click it cannot pin to one preview says so, as the command then does nothing. */
+    target: (arg: unknown) => {
+      const found = previewTarget(arg, vscode.window.tabGroups.all.map((g) => ({ isActive: g.isActive, activeTab: tabLike(g.activeTab) })), opened);
+      if (previewUnresolved(arg, found)) void vscode.window.showInformationMessage(PREVIEW_UNRESOLVED);
+      return found;
+    },
   };
 }
 
