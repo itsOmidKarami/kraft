@@ -1,45 +1,102 @@
-import { deriveState, type ItemDisplayState } from "../../../frontend/src/deriveState";
-import { STATUS_GROUPS } from "../../../frontend/src/statusGroups";
+import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/board/model";
+import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem } from "./api";
+
+/** The board reads the server's `display_status` and `stop`, as the web board
+ *  does (`groupOf`, `reasonTail`); nothing here derives state from `status`. */
 
 export type Action = "pause" | "resume" | "retry" | "cancel" | "skip" | "escalate" | "archive";
 
-const ACTIONS: Record<ItemDisplayState, Action[]> = {
+/** What a row is, for its icon and its actions: the `display_status`, with a
+ *  `needs_you` split by the stop kinds that look different and a paused item
+ *  that never started apart from one paused mid-chain. */
+export type ItemState =
+  | "gate" | "question" | "budget" | "cap" | "needs_you" | "failed" | "paused" | "not_started"
+  | "running" | "waiting" | "queued" | "blocked" | "escalated" | "done" | "cancelled" | "archived" | "unknown";
+
+const ACTIONS: Record<ItemState, Action[]> = {
   running: ["pause", "cancel"],
-  rate_limited: ["pause", "cancel"],
   waiting: ["pause", "cancel"],
-  escalating: ["cancel"],
+  queued: ["pause", "cancel"],
+  blocked: ["pause", "cancel"],
+  escalated: ["cancel"],
   paused: ["resume", "cancel"],
   not_started: ["resume", "cancel"],
-  blocked: ["pause", "cancel"],
   gate: ["skip", "cancel"],
-  capped: ["retry", "skip", "escalate", "cancel"],
   question: ["retry", "skip", "escalate", "cancel"],
-  budget: ["retry", "skip", "escalate", "cancel"],
-  escalated: ["retry", "skip", "escalate", "cancel"],
+  cap: ["retry", "skip", "escalate", "cancel"],
+  needs_you: ["retry", "skip", "escalate", "cancel"],
+  failed: ["retry", "skip", "escalate", "cancel"],
+  // The server refuses escalate on every budget stop.
+  budget: ["retry", "skip", "cancel"],
   done: ["archive"],
-  abandoned: ["archive"],
+  cancelled: ["archive"],
   archived: [],
+  unknown: [],
 };
 
-export function groupItems(items: WorkItem[], repos: string[] | "all") {
-  const shown = items.filter((i) => !i.archived_at && (repos === "all" || repos.includes(i.repo)));
+const ICONS: Record<ItemState, string> = {
+  gate: "pass",
+  question: "question",
+  budget: "credit-card",
+  cap: "error",
+  needs_you: "warning",
+  failed: "error",
+  paused: "debug-pause",
+  not_started: "debug-pause",
+  running: "sync~spin",
+  waiting: "watch",
+  queued: "watch",
+  blocked: "watch",
+  escalated: "comment-discussion",
+  done: "check",
+  cancelled: "circle-slash",
+  archived: "archive",
+  unknown: "circle-filled",
+};
+
+const SPLIT_STOPS = new Set(["gate", "question", "budget", "cap"]);
+const AS_IS = new Set<string>(["failed", "running", "waiting", "queued", "blocked", "escalated", "done", "cancelled", "archived"]);
+
+export function stateOf(item: WorkItem): ItemState {
+  const d = item.display_status;
+  if (item.archived_at) return "archived";
+  if (d === "needs_you") return item.stop && SPLIT_STOPS.has(item.stop.kind) ? (item.stop.kind as ItemState) : "needs_you";
+  if (d === "paused") return item.current_node_id ? "paused" : "not_started";
+  return d && AS_IS.has(d) ? (d as ItemState) : "unknown";
+}
+
+const shown = (i: WorkItem) => !i.archived_at && i.display_status !== "archived";
+
+export function groupItems(items: WorkItem[], repos: string[] | "all"): { id: GroupKey; label: string; items: WorkItem[] }[] {
+  const listed = items.filter((i) => shown(i) && (repos === "all" || repos.includes(i.repo)));
   return STATUS_GROUPS.map((g) => ({
-    id: g.id,
+    id: g.key,
     label: g.label,
-    items: shown.filter((i) => g.test(deriveState(i))),
+    items: listed.filter((i) => groupOf(i) === g.key),
   })).filter((g) => g.items.length > 0);
 }
 
-export const actionsFor = (item: WorkItem): Action[] => ACTIONS[deriveState(item).state] ?? [];
+export const actionsFor = (item: WorkItem): Action[] => ACTIONS[stateOf(item)];
 
-export const needsYouCount = (items: WorkItem[]) =>
-  items.filter((i) => !i.archived_at && deriveState(i).needsYou).length;
+export const needsYou = (item: WorkItem) => shown(item) && groupOf(item) === "needs";
 
+export const needsYouCount = (items: WorkItem[]) => items.filter(needsYou).length;
+
+export const iconOf = (item: WorkItem) => ICONS[stateOf(item)];
+
+/** The row's description: the id, then why it is where it is. */
 export function describe(item: WorkItem): string {
-  const parts = [item.id];
-  if (item.current_node_id) parts.push(item.current_node_id);
-  const p = (item as { progress?: { current?: number; total?: number } | null }).progress;
-  if (p?.current && p?.total) parts.push(`Task ${p.current} of ${p.total}`);
-  return parts.join(" · ");
+  const tail = reasonTail(item);
+  return tail ? `${item.id} · ${tail}` : item.id;
+}
+
+/** A question's text without the worker's `needs_context:` marker. */
+export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
+
+/** The hover: the stop's whole reason when there is one (the row keeps only its first sentence). */
+export function tooltipOf(item: WorkItem): string {
+  const reason = item.stop?.reason;
+  if (reason) return item.stop?.kind === "question" ? questionText(reason) : reason;
+  return `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
 }

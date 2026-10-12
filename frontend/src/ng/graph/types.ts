@@ -1,4 +1,6 @@
-import type { TaskKind } from "../icons";
+/** A task's kind, as the prototype draws it (`icons.ts` maps each to its icon).
+ *  Kept here, not in `icons.ts`, so the board's pure modules stay React-free. */
+export type TaskKind = "agent" | "builtin" | "subprocess" | "forge";
 
 export type GlyphState = "plain" | "done" | "current" | "todo" | "failed" | "esc" | "ghost" | "amber";
 export type GlyphKind = "exec" | "gate" | "slot";

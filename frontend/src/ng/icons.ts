@@ -1,6 +1,7 @@
 import { Ban, Bell, Bot, Box, ChartColumn, Check, CircleAlert as CircleAlertIcon, CircleDot, Clock as ClockIcon, Cog, Download, FileText, Flag, GitBranch, GitCompare, GitPullRequest, HardDrive, Inbox, Info, Kanban, Layers, LibraryBig, Lock, MessageSquare as MessageSquareIcon, Palette, Pause as PauseIcon, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { createElement, type ReactElement } from "react";
 import { useIconSet } from "./iconSet";
+import type { TaskKind } from "./graph/types";
 
 export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
 // The item page's (ux2-W5).
@@ -11,8 +12,8 @@ export { ExternalLink, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
 export { ChevronsDownUp, ChevronsUpDown, File, FileCode, FileCog, FileTerminal, List, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 /** A task's kind, as the prototype draws it. */
-export const KIND_ICON = { agent: Sparkles, builtin: Cog, subprocess: Terminal, forge: GitPullRequest } as const;
-export type TaskKind = keyof typeof KIND_ICON;
+export const KIND_ICON = { agent: Sparkles, builtin: Cog, subprocess: Terminal, forge: GitPullRequest } as const satisfies Record<TaskKind, LucideIcon>;
+export type { TaskKind };
 
 // ponytail: a static map, not lucide-react/dynamic: dynamic put ~1,860 files and
 // ~7.5 MB into the wheel's dist (W3 brief A.6). No shipped chain sets `icon:` yet,
