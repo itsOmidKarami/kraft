@@ -2103,9 +2103,10 @@ async def reopen_mr(wid: str, request: Request):
     worktree = st.run_dirs.worktrees / wid
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="closed")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
-    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
-    forge = forge_mod.resolve(backend)
     try:
+        # A repo with no forge recorded fails here, a forge failure too.
+        backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+        forge = forge_mod.resolve(backend)
         await forge.reopen_mr(repo=worktree, mr=mr_ref)
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from None

@@ -143,7 +143,7 @@ def test_raisable_is_the_caps_budget_raise_takes(budget, want):
     assert board.raisable({"reason": "r", "budget": budget} if budget else None) is want
 
 
-@pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
+@pytest.mark.parametrize("state", ["paused_agent", "not_started", "question", "failed", "gate"])
 def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
     """The detail renders with no restart target, even at a pending gate."""
     wid = _legacy(client, repo, state)
@@ -193,11 +193,16 @@ def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
         "raise-budget",
     ],
 )
-def test_a_legacy_rows_walking_doors_refuse(client, repo, state, method, path, body):
+def test_a_legacy_rows_walking_doors_refuse(client, repo, monkeypatch, state, method, path, body):
     """A legacy row has no chain to find a gate in, restart from, skip along
     or resume: every door that walks it, or leaves a steer for a walk, answers
     409, not a 500 or a walk that stops the item `needs_human`, and changes
     nothing first (a reopened merge request, a raised cap)."""
+    from kraft.adapters import forge as forge_mod
+
+    # A forge that would reopen: only the refusal keeps `mr_reopened` off.
+    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: forge_mod.FakeForge())
     wid = _legacy(client, repo, state)
     kw = {"json": body} if body is not None else {}
     before = client.get(f"/api/work-items/{wid}/events").json()

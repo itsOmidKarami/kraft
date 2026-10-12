@@ -95,6 +95,9 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
     ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: without("not_started", "resume", "cancel") }, null, []],
     ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
+    ["a closed merge request, the server's own list: Reopen", { display_status: "needs_you", current_node_id: "n", stop: { kind: "mr_closed", node: "n", resume_at: null, reason: null }, actions: serverActions("mr_closed") }, "reopen", FULL],
+    // No merge request on file to reopen: Retry, the next way on.
+    ["a closed merge request with none on file, the server's own list: Retry", { display_status: "needs_you", current_node_id: "n", stop: { kind: "mr_closed", node: "n", resume_at: null, reason: null }, actions: serverActions("mr_closed_no_ref") }, "retry", FULL],
   ])("%s", (_name, item, main, panel) => {
     expect(headerState(item)).toMatchObject({ main, panel });
   });

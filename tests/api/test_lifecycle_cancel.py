@@ -8,6 +8,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
 from support.api import _force_node, _set_status
 from support.harness import commit_all, git, write
 
@@ -312,23 +313,33 @@ def test_reopen_mr_on_any_other_stop_answers_409(client, repo, monkeypatch):
     assert fake.reopened == []
 
 
+@pytest.mark.parametrize(
+    ("failure", "said"),
+    [("reopen", "rate limited"), ("no_forge", "no forge is recorded")],
+    ids=["reopen-refused", "no-forge-recorded"],
+)
 def test_reopen_mr_with_a_forge_failure_answers_502_and_the_item_stays_stopped(
-    client, repo, monkeypatch
+    client, repo, monkeypatch, failure, said
 ):
     from kraft.adapters import forge as forge_mod
 
+    real_backend_for = forge_mod.backend_for
     fake = _fake_forge_cancel(monkeypatch)
     wid = _stopped_item_with_closed_mr(client, repo, fake)
 
     async def _boom(*, repo, mr):
         raise forge_mod.ForgeError("gh: rate limited")
 
-    monkeypatch.setattr(fake, "reopen_mr", _boom)
+    if failure == "reopen":
+        monkeypatch.setattr(fake, "reopen_mr", _boom)
+    else:
+        # The repo records no `forge:`, so `auto` names no backend.
+        monkeypatch.setattr("kraft.adapters.forge.backend_for", real_backend_for)
 
     r = client.post(f"/api/work-items/{wid}/reopen-mr")
 
     assert r.status_code == 502, r.text
-    assert "rate limited" in r.json()["detail"]
+    assert said in r.json()["detail"]
     detail = client.get(f"/api/work-items/{wid}").json()
     assert detail["status"] == "needs_human"
     assert detail["stop"]["kind"] == "mr_closed"
