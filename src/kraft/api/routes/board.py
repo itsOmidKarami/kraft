@@ -262,7 +262,8 @@ def item_actions(
     status = WorkItemStatus(row["status"])
     reason = (stop_payload or {}).get("reason") or ""
     # Read once, and only for a door that walks it. A legacy row has none:
-    # retry, skip and a gate's doors all answer it with a failure.
+    # resume, steer, retry, skip and a gate's doors all answer it with a failure.
+    # Resume and steer admit no status these two do not.
     asks = pending_gate is not None or status in (*admitting(Verb.RETRY), *admitting(Verb.SKIP))
     if chain is store.UNREAD:
         chain = store.materialized_chain_of(row) if asks else None
@@ -285,6 +286,7 @@ def item_actions(
         unmet_dependency=unmet_dependency,
         dead_dependency=dead_dependency,
         must_fix_open=must_fix_open,
+        chainless=asks and chain is None,
     )
     return [str(a) for a in open_doors(facts)]
 
@@ -453,8 +455,8 @@ async def list_work_items(request: Request):
 
     def _list_actions(r, mr_ref: dict | None, chain) -> list[str]:
         wid, status = r["id"], r["status"]
-        latest = doors["latest"].get(wid, []) if status == WorkItemStatus.PAUSED else []
-        paused = {s["hook_point"] for s in latest if s["status"] == SessionStatus.PAUSED}
+        sessions = doors["latest"].get(wid, []) if status == WorkItemStatus.PAUSED else []
+        paused = {s["hook_point"] for s in sessions if s["status"] == SessionStatus.PAUSED}
         statuses = (doors["dependency"].get(d) for d in json.loads(r["depends_on"] or "[]"))
         unmet = [s for s in statuses if s not in (None, WorkItemStatus.COMPLETED)]
         return item_actions(

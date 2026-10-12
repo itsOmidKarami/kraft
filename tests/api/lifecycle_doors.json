@@ -134,6 +134,12 @@
       "reason": "merge request closed",
       "mr": true
     },
+    "mr_closed_no_ref": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "mr_closed",
+      "reason": "merge request closed"
+    },
     "escalated": {
       "status": "needs_human",
       "node": "implementation",
@@ -211,6 +217,7 @@
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
+        "mr_closed_no_ref",
         "escalated"
       ]
     },
@@ -234,7 +241,8 @@
         "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
-        "mr_closed"
+        "mr_closed",
+        "mr_closed_no_ref"
       ]
     },
     "escalate": {
@@ -255,7 +263,8 @@
         "failed",
         "infra",
         "failed_after_abandoned",
-        "mr_closed"
+        "mr_closed",
+        "mr_closed_no_ref"
       ]
     },
     "budget_raise": {
@@ -302,6 +311,7 @@
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
+        "mr_closed_no_ref",
         "escalated",
         "queued",
         "queued_at_gate",
@@ -336,6 +346,7 @@
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
+        "mr_closed_no_ref",
         "escalated",
         "queued",
         "queued_at_gate",
@@ -415,6 +426,7 @@
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
+        "mr_closed_no_ref",
         "escalated",
         "completed",
         "abandoned",

@@ -114,16 +114,17 @@ def _legacy(client, repo, state: str) -> str:
     return wid
 
 
-@pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
+@pytest.mark.parametrize("state", ["paused_agent", "not_started", "question", "failed", "gate"])
 def test_a_legacy_row_still_lists(client, repo, state):
     """A row the legacy loader filed has no materialized chain: nothing walks
-    it, so no door that walks it (retry, skip, a gate's) is offered, no agent
-    task is paused, and the list still answers."""
+    it, so no door that walks it (resume, retry, skip, a gate's) is offered,
+    nor steer, whose note no walk would read, and the list still answers."""
     wid = _legacy(client, repo, state)
 
     actions = _listed(client, wid, False)["actions"]
 
-    assert not {"retry", "skip", "steer", "approve", "reject", "raise_budget"} & set(actions)
+    walking = {"resume", "retry", "skip", "steer", "approve", "reject", "raise_budget"}
+    assert not walking & set(actions)
     assert "cancel" in actions
 
 
@@ -166,6 +167,13 @@ def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
         ("failed", "post", "retry", {}),
         ("gate", "post", "skip", {"path": "spec_approval"}),
         ("paused_agent", "post", "skip", {"path": "implementation"}),
+        ("paused_agent", "post", "resume", {}),
+        ("not_started", "post", "resume", {}),
+        ("question", "post", "resume", {}),
+        ("not_started", "post", "steer", {"text": "x"}),
+        ("question", "post", "steer", {"text": "x"}),
+        ("mr_closed", "post", "reopen-mr", {}),
+        ("budget_item_cap", "post", "budget/raise", {"budget_usd": 5}),
     ],
     ids=[
         "fix-target",
@@ -176,14 +184,25 @@ def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
         "retry",
         "skip-path-gate",
         "skip-path-paused",
+        "resume-paused",
+        "resume-not-started",
+        "resume-question",
+        "steer-not-started",
+        "steer-question",
+        "reopen-mr",
+        "raise-budget",
     ],
 )
 def test_a_legacy_rows_walking_doors_refuse(client, repo, state, method, path, body):
-    """A legacy row has no chain to find a gate in, restart from or skip
-    along: every door that walks it answers 409, not a 500."""
+    """A legacy row has no chain to find a gate in, restart from, skip along
+    or resume: every door that walks it, or leaves a steer for a walk, answers
+    409, not a 500 or a walk that stops the item `needs_human`, and changes
+    nothing first (a reopened merge request, a raised cap)."""
     wid = _legacy(client, repo, state)
     kw = {"json": body} if body is not None else {}
+    before = client.get(f"/api/work-items/{wid}/events").json()
 
     r = getattr(client, method)(f"/api/work-items/{wid}/{path}", **kw)
 
     assert r.status_code == 409, r.text
+    assert client.get(f"/api/work-items/{wid}/events").json() == before

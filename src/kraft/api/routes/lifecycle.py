@@ -972,6 +972,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
         row["status"] == WorkItemStatus.NEEDS_HUMAN and not board._needs_context_stop(st, wid)
     ):
         raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
+    chain_or_409(row)  # no walk would ever read the note
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
@@ -998,6 +999,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # that was never paused should hear that, not a complaint about its
         # steer text or a busy slot.
         raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
+    # Ahead of the claim: a walk spawned for a legacy row would raise in
+    # `walk.chain_of` and `claimed_or_stopped` would stop it `needs_human`.
+    chain_or_409(row)
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -1674,7 +1678,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     Refuses, before the write, any other stop: a node, step or task's
     `budget_usd`, a `token_budget` or `budget.daily_usd` would stop the
     item again right after. And refuses, before the write too, a retry that
-    could not start (a walk still running), so a 409
+    could not start (no chain, a walk still running), so a 409
     never leaves the cap raised and the item stopped. With every slot busy the
     cap is raised and the retry is queued. The retry's own claim
     is still what decides: if it refuses after all, the answer says the cap
@@ -1710,7 +1714,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
         if item_wide
         else (lambda c: store.raise_budget(c, wid, body.budget_usd))
     )
-    _refuse_a_retry_that_cannot_start(request, wid)
+    _refuse_a_retry_that_cannot_start(request, wid, row)
     await st.db.write(write)
     try:
         return await retry_work_item(wid, Retry(steer=None), request)
@@ -1758,10 +1762,12 @@ def _raise_policy_budget(wid: str, budget_usd: float | None):
     return write
 
 
-def _refuse_a_retry_that_cannot_start(request: Request, wid: str) -> None:
-    """`_retry`'s one refusal that does not depend on the cap, asked before
-    `raise_budget` writes it: a walk still running. A full board is not one:
-    the cap is raised and the retry is queued."""
+def _refuse_a_retry_that_cannot_start(request: Request, wid: str, row) -> None:
+    """`_retry`'s refusals that do not depend on the cap, asked before
+    `raise_budget` writes it: a legacy row with no chain, a walk still
+    running. A full board is not one: the cap is raised and the retry is
+    queued."""
+    chain_or_409(row)
     if deps.task_is_live(request.app, wid):
         raise HTTPException(
             409, "a walk is already running for this work item; the cap was not changed"
@@ -2092,6 +2098,8 @@ async def reopen_mr(wid: str, request: Request):
     ref = board._mr_ref(st, wid)
     if ref is None:
         raise HTTPException(409, "work item has no merge request to reopen")
+    # Before the forge: `_retry` refuses a legacy row, after the reopen.
+    chain_or_409(row)
     worktree = st.run_dirs.worktrees / wid
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="closed")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
