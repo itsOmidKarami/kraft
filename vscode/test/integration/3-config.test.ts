@@ -33,4 +33,14 @@ suite("config", () => {
     const lint = await k.api.lint();
     assert.ok(lint.chains.includes("probe"), "the daemon reports the chain valid");
   });
+
+  test("saving a file the server neither reloads nor restarts for offers nothing", async () => {
+    const k = await kraft();
+    const file = join(k.locations.templatesDir, "harnesses.yaml");
+    const doc = await vscode.workspace.openTextDocument(file);
+    const editor = await vscode.window.showTextDocument(doc);
+    await editor.edit((e) => e.insert(new vscode.Position(0, 0), "# touched by the config test\n"));
+    await doc.save();
+    await until("the no-offer verdict", () => (k.config.lastOffer === "none" ? true : undefined));
+  });
 });

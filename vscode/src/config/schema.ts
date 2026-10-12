@@ -27,12 +27,13 @@ export async function registerSchemas(context: vscode.ExtensionContext, template
     return;
   }
   const yaml = await ext.activate();
+  // Red Hat YAML finds the content handler by the URI scheme, so the scheme is the contributor name.
   const dir = join(context.extensionPath, "schemas");
   yaml.registerContributor(
     "kraft",
     (resource) => {
       const rel = configFile(vscode.Uri.parse(resource).fsPath, templatesDir);
-      return rel ? `kraft-schema://schemas/${schemaFor(rel)}` : undefined;
+      return rel ? `kraft://schemas/${schemaFor(rel)}` : undefined;
     },
     (uri) => readFileSync(join(dir, vscode.Uri.parse(uri).path.replace(/^\//, "")), "utf8"),
   );
