@@ -3,10 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { registerBoard } from "./board";
-import { Api } from "./core/api";
+import { Api, type WorkItem } from "./core/api";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
-import type { WorkItem } from "./core/api";
 import type { ConnectedRepo } from "./core/repoScope";
 import { registerRepoScope } from "./repoScope";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
@@ -79,9 +78,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
         runDir = health.run_dir;
         version = readOnlyReason(own, health);
         if (version) void vscode.window.showWarningMessage(version);
-        // Once per connect: a repo connected later shows after a reconnect.
-        connectedRepos = await api.repos().then((r) => r.repos, () => connectedRepos);
-        void repoScope.setDaemon(health.run_dir, connectedRepos);
+        // Once per connect, off the status bar's path: a repo connected later shows after a reconnect.
+        void api.repos().then((r) => r.repos, () => connectedRepos).then((list) => {
+          connectedRepos = list;
+          return repoScope.setDaemon(health.run_dir, list);
+        });
       } catch {
         version = readOnlyReason(own, null);
       }

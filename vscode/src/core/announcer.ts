@@ -38,4 +38,16 @@ export class Announcer {
     if (this.level() === "gates" || previous === key) return undefined;
     return { kind: "needs", id: item.id, text: reasonTail(item) };
   }
+
+  /** What to toast for `items`, already scoped to the window. `quiet` only
+   *  records them: turning on Show all repos widens to stops that were
+   *  waiting before, which are not news. */
+  considerAll(items: WorkItem[], quiet = false): [WorkItem, Announcement][] {
+    const out: [WorkItem, Announcement][] = [];
+    for (const item of items) {
+      const a = this.consider(item);
+      if (a && !quiet) out.push([item, a]);
+    }
+    return out;
+  }
 }

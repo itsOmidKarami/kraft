@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus } from "../../../frontend/src/types";
 import { Announcer } from "../../src/core/announcer";
+import { announceable } from "../../src/core/board";
+import { WorkspaceScope, type ScopeDeps } from "../../src/core/repoScope";
 import { item, stopped } from "./fixtures/item";
 
 const gate = (g: string) => stopped("gate", { pending_gate: g });
@@ -65,5 +67,28 @@ describe("Announcer", () => {
     expect(new Announcer(() => "gates").consider(question)).toBeUndefined();
     expect(new Announcer(() => "gates").consider(gate("g"))).toBeDefined();
     expect(new Announcer(() => "off").consider(gate("g"))).toBeUndefined();
+  });
+});
+
+describe("toasts follow the window's scope", () => {
+  // No git: each folder scopes to itself.
+  const noGit: ScopeDeps = { git: async () => undefined, realpath: async (p) => p, platform: "linux" };
+
+  it("a gate already open toasts once when the scope is ready; widening adds no toasts but a new gate does", async () => {
+    const scope = new WorkspaceScope("linux");
+    const a = new Announcer(() => "all");
+    const here = gate("spec");
+    const there = stopped("gate", { id: "K-2", repo: "/other", pending_gate: "spec" });
+    let items = [here, there];
+    const pass = (quiet = false) => a.considerAll(announceable(items, (i) => scope.includes(i, () => undefined)), quiet).map(([i]) => i.id);
+
+    const toasts = [pass()];
+    await scope.update(["/r"], "/k", noGit);
+    toasts.push(pass(), pass());
+    scope.toggleAll();
+    toasts.push(pass(true), pass());
+    items = [...items, stopped("gate", { id: "K-3", repo: "/other", pending_gate: "plan" })];
+    toasts.push(pass());
+    expect(toasts).toEqual([[], ["K-1"], [], [], [], ["K-3"]]);
   });
 });

@@ -76,11 +76,9 @@ export function registerGates(
     }
   });
 
-  const announce = (ids: string[] | "all") => {
+  const announce = (ids: string[] | "all", quiet = false) => {
     const items = announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
-    for (const item of items) {
-      const a = announcer.consider(item);
-      if (!a) continue;
+    for (const [item, a] of announcer.considerAll(items, quiet)) {
       if (a.kind === "gate") {
         const buttons = ["Open", "Approve", "Reject"];
         void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
@@ -97,15 +95,15 @@ export function registerGates(
     }
   };
   store.onChange(announce);
-  // A scope that just became ready announces a gate already open, once (the
-  // announcer dedups). Widening to every repo does not: those gates were
-  // already waiting, and another window has announced them.
+  // A scope that became ready announces what already waits in it, once (the
+  // announcer dedups). Turning on Show all repos only records what it adds:
+  // those stops were waiting before (amendment 7). Items out of scope are not
+  // considered, so a stop that changed while out of scope reads as new.
   let showAll = scope.showAll;
   scope.onChange(() => {
     const widened = scope.showAll && !showAll;
     showAll = scope.showAll;
-    if (!widened) return announce("all");
-    for (const item of announceable(store.items(), include)) announcer.consider(item);
+    announce("all", widened);
   });
 
   context.subscriptions.push(
