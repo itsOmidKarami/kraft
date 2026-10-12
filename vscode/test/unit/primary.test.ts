@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clickTarget, primaryAction, primaryToken } from "../../src/core/primary";
+import { clickTarget, primaryAction, primaryToken, rowCommand } from "../../src/core/primary";
 import { item, stopped } from "./fixtures/item";
 
 describe("primaryAction", () => {
@@ -33,4 +33,12 @@ describe("clickTarget", () => {
     ["question", stopped("question", { actions: ["resume"] }), "openInWebUi"],
     ["running", item(), "openInWebUi"],
   ])("%s", (_, it_, want) => expect(clickTarget(it_)).toBe(want));
+});
+
+describe("rowCommand", () => {
+  it.each([
+    ["a gate opens its document", stopped("gate", { pending_gate: "spec_approval" }), { command: "kraft.openArtifact" }],
+    ["a question only selects", stopped("question", { actions: ["resume"] }), undefined],
+    ["a running row only selects", item(), undefined],
+  ])("%s", (_, it_, want) => expect(rowCommand(it_)).toEqual(want));
 });

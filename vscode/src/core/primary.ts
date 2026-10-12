@@ -39,6 +39,11 @@ export function primaryAction(item: WorkItem): Primary | null {
   }
 }
 
-/** What clicking the row opens: its gate document while a gate waits, else the item in the web UI. */
+/** A row's click (D32): only a gate row has one, and it opens the gate
+ *  document. Any other row only selects; Open in Web UI stays a button. */
+export const rowCommand = (item: WorkItem): { command: string } | undefined =>
+  primaryAction(item) === "openArtifact" ? { command: PRIMARY_COMMAND.openArtifact } : undefined;
+
+/** What Open Item… opens: its gate document while a gate waits, else the item in the web UI. */
 export const clickTarget = (item: WorkItem): "openArtifact" | "openInWebUi" =>
   primaryAction(item) === "openArtifact" ? "openArtifact" : "openInWebUi";

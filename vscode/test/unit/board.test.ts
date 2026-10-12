@@ -249,10 +249,11 @@ describe("Board, an item's row", () => {
 
   it.each([
     ["a gate opens its document", stopped("gate", { pending_gate: "spec_approval" }), "kraft.openArtifact"],
-    ["anything else opens the web UI", item(), "kraft.openInWebUi"],
-  ])("on click, %s, for the clicked row", (_, current, command) => {
+    ["anything else only selects", item(), undefined],
+  ])("on click, %s", (_, current, want) => {
     const at = { kind: "item", item: current } as never;
-    expect(boardOn(() => undefined, vi.fn(), current).board.getTreeItem(at).command).toEqual({ command, title: "Open", arguments: [{ item: current }] });
+    const command = want && { command: want, title: "Open", arguments: [{ item: current }] };
+    expect(boardOn(() => undefined, vi.fn(), current).board.getTreeItem(at).command).toEqual(command);
   });
 
   it("falls back to the row's own line when the read fails", async () => {
@@ -321,8 +322,8 @@ describe("Answer", () => {
     expect(api.resume.mock.calls).toEqual(resumed);
     expect(api.retry).not.toHaveBeenCalled();
     if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "Q-1 asks: Which API? Your answer steers it (optional)" });
-    vi.restoreAllMocks();
   });
+  afterEach(() => vi.restoreAllMocks());
 });
 
 describe("A multi-selection", () => {
