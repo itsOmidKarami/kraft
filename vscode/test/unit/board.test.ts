@@ -175,28 +175,38 @@ it.each([
 describe("Board, an item's hover", () => {
   const row = item();
   const capped = { ...row, budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null };
-  const boardOn = (detail: () => unknown, refresh: () => Promise<boolean>) => {
-    const store = { items: () => [row], item: () => row, detail, refresh,
+  const boardOn = (detail: () => unknown, loadDetail: () => Promise<unknown>, current = row) => {
+    const changed = vi.fn();
+    const store = { items: () => [current], item: () => current, detail, loadDetail,
+      refresh: async () => (changed(), true),
       onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
-    return new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    const board = new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    board.onDidChangeTreeData(changed);
+    return { board, changed };
   };
   const node = { kind: "item", item: row } as never;
 
   it("is set at once from a cached detail", () =>
-    expect(boardOn(() => capped, vi.fn()).getTreeItem(node).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00"));
+    expect(boardOn(() => capped, vi.fn()).board.getTreeItem(node).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00"));
 
-  it("is left unset without a detail, then resolved from a fresh read", async () => {
-    let cached: unknown;
-    const refresh = vi.fn(async () => ((cached = capped), true));
-    const board = boardOn(() => cached, refresh);
+  it("is left unset without a detail, then resolved from a quiet read that redraws nothing", async () => {
+    const loadDetail = vi.fn(async () => capped);
+    const { board, changed } = boardOn(() => undefined, loadDetail);
     const t = board.getTreeItem(node);
     expect(t.tooltip).toBeUndefined();
     expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00");
-    expect(refresh).toHaveBeenCalledWith("K-1");
+    expect(loadDetail).toHaveBeenCalledWith("K-1");
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("takes its first line from the store's current row", async () => {
+    const { board } = boardOn(() => undefined, async () => capped, stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }));
+    const t = board.getTreeItem(node);
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("Loop cap hit.\nSpent $1.00 of $5.00");
   });
 
   it("falls back to the row's own line when the read fails", async () => {
-    const board = boardOn(() => undefined, vi.fn().mockRejectedValue(new Error("down")));
+    const { board } = boardOn(() => undefined, vi.fn().mockRejectedValue(new Error("down")));
     const t = board.getTreeItem(node);
     expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation");
   });

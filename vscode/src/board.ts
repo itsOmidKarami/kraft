@@ -97,13 +97,13 @@ export class Board implements vscode.TreeDataProvider<Node> {
   }
 
   /** An item's hover, once it has the detail that carries spend and running
-   *  time. A failed read keeps the hover quiet: it shows the row's own line. */
+   *  time. The read is `loadDetail`, which redraws nothing; a failed one keeps
+   *  the hover quiet: it shows the row's own line. */
   async resolveTreeItem(t: vscode.TreeItem, node: Node): Promise<vscode.TreeItem> {
     if (node.kind !== "item" || t.tooltip !== undefined) return t;
-    const { item } = node;
+    const item = this.store.item(node.item.id) ?? node.item;
     try {
-      await this.store.refresh(item.id);
-      t.tooltip = tooltipOf(item, this.store.detail(item.id));
+      t.tooltip = tooltipOf(item, await this.store.loadDetail(item.id));
     } catch {
       t.tooltip = tooltipOf(item);
     }
