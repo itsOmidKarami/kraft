@@ -13,7 +13,7 @@ const keyed = board.filter((e) => token(e) !== undefined);
 
 describe("the board's item menu", () => {
   it("keys every entry off `gate`, `worktree` or one of the server's actions", () => {
-    const known = new Set<string>(["gate", "worktree", ...ITEM_ACTIONS]);
+    const known = new Set<string>(["gate", "worktree", "drafts", ...ITEM_ACTIONS]);
     expect(keyed.map(token).filter((t) => !known.has(t!))).toEqual([]);
   });
 
@@ -28,5 +28,19 @@ describe("the board's item menu", () => {
       const want = ["kraft.approve", "kraft.reject"].includes(command) ? "resourceScheme == kraft-artifact" : "false";
       expect(palette).toContainEqual({ command, when: want });
     }
+  });
+});
+
+describe("Submit Review and Discard Review Comments", () => {
+  it.each(["kraft.review.submit", "kraft.review.discard"])("%s shows on a board row only with drafts, and never read-only", (command) => {
+    const e = board.find((m) => m.command === command)!;
+    expect(token(e)).toBe("drafts");
+    expect(e.when).toContain("!kraft.readOnly");
+  });
+
+  it("Submit shows in a review document's title bar only when its item has drafts", () => {
+    const e = (pkg.contributes.menus["editor/title"] as Entry[]).find((m) => m.command === "kraft.review.submit")!;
+    expect(e.when).toContain("kraft.review.activeHasDrafts");
+    expect(e.when).toContain("!kraft.readOnly");
   });
 });

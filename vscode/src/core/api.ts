@@ -1,12 +1,12 @@
 import type {
-  ChainNode, CommentReview, Finding, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  ChainNode, CommentReview, Finding, FixTarget, GatelessChanges, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
   WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
 export type {
-  CommentReview, Finding, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
+  CommentReview, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary, ThreadLabel,
   WorkItemDiff,
 };
 /** A board row, with the doors the server would admit now (absent from a server before `actions`). */
@@ -164,6 +164,8 @@ export class Api {
   deleteComment = (cid: string) => this.req<void>("DELETE", `/comments/${encodeURIComponent(cid)}`);
   resolveThread = (tid: string) => this.req<ReviewThread>("POST", `/threads/${encodeURIComponent(tid)}/resolve`);
   reopenThread = (tid: string) => this.req<ReviewThread>("POST", `/threads/${encodeURIComponent(tid)}/reopen`);
+  /** Where Request changes would restart now; gateless it reads git per thread, so it may take a while. */
+  fixTarget = (id: string) => this.req<FixTarget>("GET", this.item(id, "/fix-target"), undefined, SLOW);
   /** At a gate, the gate's review route (409 when that gate moved on); with none, the item's. */
   submitReview = (id: string, gate: string | null, r: ReviewIn) =>
     this.req<ReviewResult>("POST", this.item(id, gate ? `/gates/${encodeURIComponent(gate)}/review` : "/review"), r);

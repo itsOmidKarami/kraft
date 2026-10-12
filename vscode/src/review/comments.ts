@@ -1,17 +1,18 @@
 import * as vscode from "vscode";
 import { reportError } from "../actions";
-import type { Api, ReviewComment, ReviewThread, ThreadLabel } from "../core/api";
+import type { Api, ReviewComment, ReviewThread, ThreadLabel, WorkItem } from "../core/api";
 import { mutating } from "../core/guard";
 import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review";
 import type { Store } from "../core/store";
 import { reviewGone, type ThreadCache } from "../core/threadCache";
 import {
-  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread, quoteOf,
+  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread, quoteOf, hasDrafts,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type Side,
 } from "../core/threads";
 import type { registerDiff } from "./diff";
 
 const OTHER = "kraft-threads";
+const REVIEW_SCHEMES = ["kraft-wt", "kraft-git", "kraft-artifact", OTHER];
 const lineSource = (doc: vscode.TextDocument) => ({ lineCount: doc.lineCount, lineAt: (n: number) => doc.lineAt(n).text });
 const otherUri = (id: string) => vscode.Uri.parse(`${OTHER}:/${id}/Other threads.md`);
 
@@ -34,6 +35,8 @@ export function registerComments(
   refusal: () => string | null,
   diff: ReturnType<typeof registerDiff>,
   cache: ThreadCache,
+  include: (item: WorkItem) => boolean = () => true,
+  onScopeChange: (cb: () => void) => unknown = () => {},
 ) {
   const controller = vscode.comments.createCommentController("kraft.review", "Kraft review");
   controller.commentingRangeProvider = {
@@ -158,10 +161,39 @@ export function registerComments(
     others.delete(id);
     noticed.delete(id);
     drawing.delete(id);
+    setActiveHasDrafts();
   };
   const sweep = (ids: string[] | "all") => {
     const seen = ids === "all" ? new Set([...cache.loaded(), ...drawn.keys()]) : ids;
     for (const id of seen) if (reviewGone(store.item(id))) forgetItem(id);
+  };
+
+  // A gate row's Submit and Discard need its drafts known before its review is opened.
+  const preloading = new Set<string>();
+  const failed = new Set<string>(); // not asked again until the next reconnect
+  const load = (id: string) => {
+    if (cache.get(id) !== undefined || preloading.has(id) || failed.has(id)) return;
+    preloading.add(id);
+    void cache.load(id).catch(() => void failed.add(id)).finally(() => preloading.delete(id));
+  };
+  const preload = (ids: string[] | "all") => {
+    if (ids === "all") failed.clear();
+    const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
+    for (const i of items) if (i.pending_gate && include(i) && !reviewGone(i)) load(i.id);
+  };
+
+  // Gate items that come into scope (Show All, another folder) need their drafts known too.
+  onScopeChange(() => preload(store.items().map((i) => i.id)));
+
+  /** The active document's item, when it is one of a review's documents. */
+  const activeItem = () => {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    return uri && REVIEW_SCHEMES.includes(uri.scheme) ? parseReviewUri(uri.path).id || undefined : undefined;
+  };
+  const setActiveHasDrafts = () => {
+    const id = activeItem();
+    if (id && !refusal()) load(id);
+    void vscode.commands.executeCommand("setContext", "kraft.review.activeHasDrafts", !!id && hasDrafts(cache.get(id)));
   };
 
   /** Reload an item's threads; draws follow from the cache's change. */
@@ -178,6 +210,9 @@ export function registerComments(
     { dispose: cache.onChange((id) => void redraw(id)) },
     { dispose: store.onEvent((ev) => cache.onEvent(ev)) },
     { dispose: store.onChange(sweep) },
+    { dispose: store.onChange(preload) },
+    { dispose: cache.onChange(setActiveHasDrafts) },
+    vscode.window.onDidChangeActiveTextEditor(setActiveHasDrafts),
     vscode.window.onDidChangeWindowState((s) => s.focused && cache.loaded().forEach((id) => cache.poke(id))),
   );
 
@@ -306,16 +341,19 @@ export function registerComments(
     }),
   );
 
-  /** Shows a drawn thread; false when it is not drawn. */
-  const reveal = async (tid: string): Promise<boolean> => {
-    for (const m of drawn.values()) {
-      const d = m.get(tid);
-      if (!d) continue;
-      await vscode.window.showTextDocument(d.vt.uri, { selection: d.vt.range, preview: false });
-      d.vt.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-      return true;
-    }
-    return false;
+  /**
+   * Shows a thread, opening its item's review first if need be: false when it
+   * is gone after a reload, undefined when the review did not open (it has said why).
+   */
+  const reveal = async (id: string, tid: string): Promise<boolean | undefined> => {
+    if (!diff.opened.has(id)) await vscode.commands.executeCommand("kraft.reviewChanges", id);
+    if (!diff.opened.has(id)) return undefined;
+    await reload(id).catch(() => {});
+    const d = drawn.get(id)?.get(tid);
+    if (!d) return false;
+    await vscode.window.showTextDocument(d.vt.uri, { selection: d.vt.range, preview: false });
+    d.vt.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    return true;
   };
 
   return {

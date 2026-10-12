@@ -22,8 +22,19 @@ export class Board implements vscode.TreeDataProvider<Node> {
   readonly onDidChangeTreeData = this.changed.event;
 
   private welcome: Welcome | undefined;
+  private draftsTimer?: ReturnType<typeof setTimeout>;
 
-  constructor(private store: Store, private include: Include, private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">) {
+  constructor(
+    private store: Store,
+    private include: Include,
+    private scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
+    private drafts?: Drafts,
+  ) {
+    // Coalesced: a reconnect preloads every gate item, one answer at a time.
+    drafts?.onChange(() => {
+      clearTimeout(this.draftsTimer);
+      this.draftsTimer = setTimeout(() => this.changed.fire(), 100);
+    });
     store.onChange(() => this.changed.fire());
     store.onConnection(() => this.changed.fire());
     store.onError(() => this.changed.fire());
@@ -88,7 +99,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.id = item.id;
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(iconOf(item));
-    t.contextValue = contextValueOf(item);
+    t.contextValue = contextValueOf(item, { drafts: this.drafts?.has(item.id) ?? false });
     t.tooltip = tooltipOf(item);
     return t;
   }
@@ -99,6 +110,9 @@ export class Board implements vscode.TreeDataProvider<Node> {
   }
 }
 
+/** Which items have draft review comments, as far as their loaded threads say. */
+export interface Drafts { has(id: string): boolean; onChange(cb: (id: string) => void): unknown }
+
 export function registerBoard(
   context: vscode.ExtensionContext,
   store: Store,
@@ -106,8 +120,9 @@ export function registerBoard(
   refusal: () => string | null,
   include: Include,
   scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
+  drafts?: Drafts,
 ) {
-  const board = new Board(store, include, scope);
+  const board = new Board(store, include, scope, drafts);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board });
   const updateBadge = () => (view.badge = board.badge());
   store.onChange(updateBadge);

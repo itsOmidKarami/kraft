@@ -126,6 +126,9 @@ export function toThreadIn(
   return { body, file_path: path, side, start_line: lines.start + 1, end_line: lines.end + 1, ...(label && { label }), ...(quote !== undefined && { quote }) };
 }
 
+/** Whether the next review would send anything: a draft thread or a draft reply of yours. */
+export const hasDrafts = (threads: ReviewThread[] | undefined): boolean => !!threads && drafts(threads).length > 0;
+
 export const LABEL_TEXT: Record<ThreadLabel, string> = { must_fix: "Must fix", question: "Question", nit: "Nit" };
 
 /** The thread's title: "Draft", its label, and a submitted thread's state past open. */
