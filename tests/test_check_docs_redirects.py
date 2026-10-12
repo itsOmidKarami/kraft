@@ -305,9 +305,7 @@ def test_check_reads_the_map_and_the_links_of_one_repository(cr, content, tmp_pa
     # A dead anchor on a live page, in a file outside any source folder and
     # with the host in another case; the tests' and the docs' own URLs are not
     # Kraft's links.
-    write(
-        tmp_path, "SECURITY.md", "https://kraft-sdlc.dev/next/guides/vscode#nope\n"
-    )
+    write(tmp_path, "SECURITY.md", "https://kraft-sdlc.dev/next/guides/vscode#nope\n")
     write(tmp_path, "src/kraft/cli.py", "# https://kraft-sdlc.dev/guides/vscode\n")
     write(tmp_path, "tests/test_x.py", "# https://kraft-sdlc.dev/a/fixture\n")
     write(content, "index.md", "https://kraft-sdlc.dev/lychee/checks/this\n")

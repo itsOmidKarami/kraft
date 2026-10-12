@@ -82,9 +82,7 @@ def spa_shell(request: Request, dist, headers: dict[str, str] | None = None):
     return FileResponse(dist / "index.html", headers=headers)
 
 
-ROLLBACK_DOCS = (
-    "https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version"
-)
+ROLLBACK_DOCS = "https://kraft-sdlc.dev/get-started/install#pin-or-roll-back-a-version"
 
 
 def _restart_page(running: str, installed: str) -> str:
