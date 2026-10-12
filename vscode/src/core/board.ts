@@ -2,6 +2,7 @@ import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
 import { linkTokens } from "./links";
+import { primaryAction, primaryToken } from "./primary";
 import { spendLine, timeLine } from "./spend";
 
 /** The board reads the server's `display_status` and `stop`, as the web board
@@ -78,10 +79,16 @@ export function welcomeState(connected: boolean, ready: boolean, showAll: boolea
   return unconnected ? "connect" : "here";
 }
 
+const primaryTokens = (item: WorkItem) => {
+  const p = primaryAction(item);
+  return p ? [primaryToken(p)] : [];
+};
+
 /** The row's `contextValue`, which its menus match: `gate` while a gate is
  *  pending, then the server's `actions`, the doors it would admit now, then
  *  `drafts` while it has draft review comments (so Submit and Discard apply),
- *  then what it links to (`linkTokens`), then `worktree` while its worktree is
+ *  then what it links to (`linkTokens`), then its inline button's token
+ *  (`primaryToken`) when it has one, then `worktree` while its worktree is
  *  on disk. A server that sends no `actions` gets no action entries, only the
  *  ones every row has. */
 export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: boolean } = {}): string =>
@@ -90,6 +97,7 @@ export const contextValueOf = (item: WorkItem, { drafts = false }: { drafts?: bo
     ...(item.actions ?? []),
     ...(drafts ? ["drafts"] : []),
     ...linkTokens(item),
+    ...primaryTokens(item),
     ...(item.worktree_exists ? ["worktree"] : []),
   ].join(",")}`;
 

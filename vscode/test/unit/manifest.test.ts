@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { MUTATING_PRIMARY, PRIMARY_COMMAND, primaryToken, type Primary } from "../../src/core/primary";
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8"));
 
@@ -32,4 +33,20 @@ it("offers Show Log in the palette and keeps the status menu out of it", () => {
   expect(commands).toEqual(expect.arrayContaining(["kraft.showLog", "kraft.statusMenu"]));
   expect(pkg.contributes.commands).toContainEqual({ command: "kraft.showLog", title: "Show Log", category: "Kraft" });
   expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.statusMenu", when: "false" });
+});
+
+describe("a row's primary action", () => {
+  const commands = pkg.contributes.commands as { command: string; icon?: string }[];
+  const board = pkg.contributes.menus["view/item/context"] as { command: string; when?: string; group?: string }[];
+  it.each(Object.keys(PRIMARY_COMMAND) as Primary[])("%s is an inline button with an icon", (p) => {
+    const command = PRIMARY_COMMAND[p];
+    expect(commands.find((c) => c.command === command)?.icon).toMatch(/^\$\([\w-]+\)$/);
+    const when = `view == kraft.board && viewItem =~ /\\b${primaryToken(p)}\\b/${MUTATING_PRIMARY.has(p) ? " && !kraft.readOnly" : ""}`;
+    expect(board.filter((e) => e.group === "inline" && e.command === command)).toEqual([{ command, when, group: "inline" }]);
+  });
+
+  it("Answer is a command hidden from the palette", () => {
+    expect(pkg.contributes.commands).toContainEqual({ command: "kraft.answer", title: "Answer…", category: "Kraft", icon: "$(comment)" });
+    expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.answer", when: "false" });
+  });
 });

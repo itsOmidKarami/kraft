@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ITEM_ACTIONS } from "../../../frontend/src/types/vocab.generated";
+import { PRIMARY_COMMAND, primaryToken, type Primary } from "../../src/core/primary";
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8"));
 type Entry = { command: string; when?: string };
@@ -12,8 +13,9 @@ const token = (e: Entry) => e.when?.match(/viewItem =~ \/\\b(\w+)\\b\//)?.[1];
 const keyed = board.filter((e) => token(e) !== undefined);
 
 describe("the board's item menu", () => {
-  it("keys every entry off `gate`, `worktree`, `drafts`, a link token or one of the server's actions", () => {
-    const known = new Set<string>(["gate", "worktree", "drafts", "mr", "attSpec", "attPlan", ...ITEM_ACTIONS]);
+  it("keys every entry off `gate`, `worktree`, `drafts`, a link token, a primary token or one of the server's actions", () => {
+    const primary = (Object.keys(PRIMARY_COMMAND) as Primary[]).map(primaryToken);
+    const known = new Set<string>(["gate", "worktree", "drafts", "mr", "attSpec", "attPlan", ...primary, ...ITEM_ACTIONS]);
     expect(keyed.map(token).filter((t) => !known.has(t!))).toEqual([]);
   });
 

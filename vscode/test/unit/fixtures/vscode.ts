@@ -34,6 +34,7 @@ export const window = {
   showInformationMessage: async (..._a: unknown[]) => undefined,
   showWarningMessage: async (..._a: unknown[]) => undefined,
   showErrorMessage: async (..._a: unknown[]) => undefined,
+  showInputBox: async (..._a: unknown[]): Promise<string | undefined> => undefined,
   createTerminal: () => ({ sendText() {}, show() {} }),
   createQuickPick: (): unknown => ({}),
 };

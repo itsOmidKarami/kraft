@@ -107,12 +107,20 @@
       {
         "command": "kraft.resume",
         "title": "Resume\u2026",
-        "category": "Kraft"
+        "category": "Kraft",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "kraft.answer",
+        "title": "Answer\u2026",
+        "category": "Kraft",
+        "icon": "$(comment)"
       },
       {
         "command": "kraft.retry",
         "title": "Retry\u2026",
-        "category": "Kraft"
+        "category": "Kraft",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "kraft.cancel",
@@ -137,7 +145,8 @@
       {
         "command": "kraft.raiseBudget",
         "title": "Raise Budget\u2026",
-        "category": "Kraft"
+        "category": "Kraft",
+        "icon": "$(credit-card)"
       },
       {
         "command": "kraft.unblock",
@@ -162,7 +171,8 @@
       {
         "command": "kraft.openInWebUi",
         "title": "Open in Web UI",
-        "category": "Kraft"
+        "category": "Kraft",
+        "icon": "$(link-external)"
       },
       {
         "command": "kraft.showWorkerLog",
@@ -218,7 +228,8 @@
       {
         "command": "kraft.openArtifact",
         "title": "Open Gate Document",
-        "category": "Kraft"
+        "category": "Kraft",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "kraft.approve",
@@ -355,6 +366,36 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "kraft.openArtifact",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryOpenArtifact\\b/",
+          "group": "inline"
+        },
+        {
+          "command": "kraft.answer",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryAnswer\\b/ && !kraft.readOnly",
+          "group": "inline"
+        },
+        {
+          "command": "kraft.retry",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryRetry\\b/ && !kraft.readOnly",
+          "group": "inline"
+        },
+        {
+          "command": "kraft.raiseBudget",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryRaiseBudget\\b/ && !kraft.readOnly",
+          "group": "inline"
+        },
+        {
+          "command": "kraft.resume",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryResume\\b/ && !kraft.readOnly",
+          "group": "inline"
+        },
+        {
+          "command": "kraft.openInWebUi",
+          "when": "view == kraft.board && viewItem =~ /\\bprimaryOpenInWebUi\\b/",
+          "group": "inline"
+        },
         {
           "command": "kraft.openArtifact",
           "when": "view == kraft.board && viewItem =~ /\\bgate\\b/",
@@ -501,6 +542,10 @@
         },
         {
           "command": "kraft.resume",
+          "when": "false"
+        },
+        {
+          "command": "kraft.answer",
           "when": "false"
         },
         {

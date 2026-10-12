@@ -77,16 +77,17 @@ describe("groupHolding", () => {
 describe("contextValueOf", () => {
   it.each([
     ["the server's actions, in its order", item({ actions: ["pause", "cancel"] }), "item:pause,cancel"],
-    ["gate first while one is pending", stopped("gate", { pending_gate: "spec", actions: ["reject", "retry"] }), "item:gate,reject,retry"],
+    ["gate first while one is pending", stopped("gate", { pending_gate: "spec", actions: ["reject", "retry"] }), "item:gate,reject,retry,primaryOpenArtifact"],
     ["no actions from an older server", item(), "item:"],
     ["worktree last while it is on disk", item({ actions: ["pause", "cancel"], worktree_exists: true }), "item:pause,cancel,worktree"],
     ["no worktree once it was reclaimed", item({ actions: ["pause", "cancel"], worktree_exists: false }), "item:pause,cancel"],
-    ["a gate with its worktree", stopped("gate", { pending_gate: "spec", actions: ["reject"], worktree_exists: true }), "item:gate,reject,worktree"],
+    ["a gate with its worktree", stopped("gate", { pending_gate: "spec", actions: ["reject"], worktree_exists: true }), "item:gate,reject,primaryOpenArtifact,worktree"],
     [
       "links after the actions",
       stopped("gate", { pending_gate: "spec", actions: ["approve"], mr_ref: { number: 7, url: "https://g/7" }, attachments: [{ kind: "spec", path: "s.md" }] }),
-      "item:gate,approve,mr,attSpec",
+      "item:gate,approve,mr,attSpec,primaryOpenArtifact",
     ],
+    ["the primary token after the drafts and links, before the worktree", stopped("question", { actions: ["resume"], attachments: [{ kind: "plan", path: "p.md" }], worktree_exists: true }), "item:resume,attPlan,primaryAnswer,worktree"],
     ["links before the worktree", item({ actions: ["pause"], attachments: [{ kind: "plan", path: "p.md" }], worktree_exists: true }), "item:pause,attPlan,worktree"],
   ])("%s", (_, it_, want) => {
     expect(contextValueOf(it_)).toBe(want);
@@ -200,7 +201,7 @@ it.each([
   ["done", item({ status: "completed", display_status: "done" }), true],
 ])("hover from a cached detail: %s", (_, it_, want) => expect(hoverFromCache(it_)).toBe(want));
 
-describe("Board, an item's hover", () => {
+describe("Board, an item's row", () => {
   const row = item();
   const capped = { ...row, budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null };
   const boardOn = (detail: () => unknown, loadDetail: () => Promise<unknown>, current = row) => {
@@ -243,6 +244,14 @@ describe("Board, an item's hover", () => {
     const { board } = boardOn(() => undefined, async () => capped, stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }));
     const t = board.getTreeItem(node);
     expect((await board.resolveTreeItem(t, node)).tooltip).toBe("Loop cap hit.\nSpent $1.00 of $5.00");
+  });
+
+  it.each([
+    ["a gate opens its document", stopped("gate", { pending_gate: "spec_approval" }), "kraft.openArtifact"],
+    ["anything else opens the web UI", item(), "kraft.openInWebUi"],
+  ])("on click, %s, for the clicked row", (_, current, command) => {
+    const at = { kind: "item", item: current } as never;
+    expect(boardOn(() => undefined, vi.fn(), current).board.getTreeItem(at).command).toEqual({ command, title: "Open", arguments: [{ item: current }] });
   });
 
   it("falls back to the row's own line when the read fails", async () => {
@@ -289,5 +298,26 @@ describe("Board, revealing an item", () => {
     vi.spyOn(vscode.window, "createTreeView").mockReturnValue({ reveal: vi.fn().mockRejectedValue(new Error("not resolved yet")), dispose() {} } as never);
     const { reveal } = registerBoard({ subscriptions: [] } as never, s, {} as never, () => null, here, scope);
     expect(await reveal(id)).toBe(want);
+  });
+});
+
+describe("Answer", () => {
+  it.each([
+    ["resumes the clicked row with the answer as its steer", () => null, [["Q-1", "use v2"]]],
+    ["does nothing while read-only", () => "Kraft is read-only.", []],
+  ])("%s", async (_, refusal, resumed) => {
+    const asked = stopped("question", { id: "Q-1", actions: ["resume", "retry"], stop: { kind: "question", node: "implementation", reason: "Which API?", resume_at: null } });
+    const store = { items: () => [asked], item: () => asked, detail: () => undefined, refresh: async () => true,
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+    const api = { resume: vi.fn(async () => {}), retry: vi.fn(async () => {}) };
+    const handlers = new Map<string, (...a: unknown[]) => unknown>();
+    vi.spyOn(vscode.commands, "registerCommand").mockImplementation(((id: string, cb: (...a: unknown[]) => unknown) => (handlers.set(id, cb), { dispose() {} })) as never);
+    const input = vi.spyOn(vscode.window, "showInputBox").mockResolvedValue("use v2");
+    registerBoard({ subscriptions: [] } as never, store, api as never, refusal, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+    await handlers.get("kraft.answer")!({ item: asked });
+    expect(api.resume.mock.calls).toEqual(resumed);
+    expect(api.retry).not.toHaveBeenCalled();
+    if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "Q-1 asks: Which API? Your answer steers it (optional)" });
+    vi.restoreAllMocks();
   });
 });

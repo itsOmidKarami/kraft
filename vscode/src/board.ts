@@ -6,6 +6,7 @@ import { contextValueOf, hoverFromCache, describe, groupHolding, groupItems, ico
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
+import { clickTarget } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
@@ -102,6 +103,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(iconOf(item));
     t.contextValue = contextValueOf(item, { drafts: this.drafts?.has(item.id) ?? false });
+    // A click opens the gate document while a gate waits, else the item in the web UI.
+    t.command = { command: `kraft.${clickTarget(item)}`, title: "Open", arguments: [{ item }] };
     // VS Code asks resolveTreeItem only for what is left unset here: without a
     // cached detail the hover is filled in there, on first hover.
     const detail = this.store.detail(item.id);
@@ -167,6 +170,9 @@ export function registerBoard(
   }
   context.subscriptions.push(
     view,
+    // A row's Answer button: a resume whose input box shows the question. The
+    // clicked row only, never the selection.
+    vscode.commands.registerCommand("kraft.answer", mutating("kraft.answer", refusal, warn, act("resume"))),
     // The detail, refreshed now: the row's worktree_exists may predate a reclaim.
     vscode.commands.registerCommand("kraft.openWorktree", async (node?: { item?: WorkItem }) => {
       const id = itemOf(node)?.id;
