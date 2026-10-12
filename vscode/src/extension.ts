@@ -90,8 +90,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Each connect bumps it: a health reply that a newer connect or a drop overtook changes nothing.
   let healthSeq = 0;
   let migrate: (() => Promise<void>) | undefined; // set once the review is registered
+  let healthSettled = false; // this connection's read-only state is known
   store.onConnection(async (connected) => {
     const mine = ++healthSeq;
+    healthSettled = false;
     if (connected) {
       try {
         const health = await api.health();
@@ -109,7 +111,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     }
     applyReadOnly(store.connected);
     // Only once this connection's read-only state is known: a read-only window posts nothing.
-    if (connected && store.connected) void migrate?.();
+    if (connected && store.connected && mine === healthSeq) {
+      healthSettled = true;
+      void migrate?.();
+    }
   });
   store.onError(() => setStatus(store.connected));
   // Before the first connect: a restored gate tab must not offer Approve in Restricted Mode.
@@ -136,7 +141,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     }),
   );
   const diff = registerDiff(context, store, api, () => runDir);
-  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include);
+  const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include, (cb) => scope.onChange(cb));
   migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal);
   const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal);
@@ -155,7 +160,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     config = registerConfigChecks(context, api, loc.templatesDir, () => refusal(state()) !== null);
     registerResolved(context, api, loc.templatesDir);
     applyReadOnly();
-    if (store.connected) void migrate?.();
+    if (store.connected && healthSettled) void migrate?.();
   });
   if (grant) context.subscriptions.push(grant);
   void store.start();

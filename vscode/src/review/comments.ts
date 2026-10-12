@@ -36,6 +36,7 @@ export function registerComments(
   diff: ReturnType<typeof registerDiff>,
   cache: ThreadCache,
   include: (item: WorkItem) => boolean = () => true,
+  onScopeChange: (cb: () => void) => unknown = () => {},
 ) {
   const controller = vscode.comments.createCommentController("kraft.review", "Kraft review");
   controller.commentingRangeProvider = {
@@ -160,6 +161,7 @@ export function registerComments(
     others.delete(id);
     noticed.delete(id);
     drawing.delete(id);
+    setActiveHasDrafts();
   };
   const sweep = (ids: string[] | "all") => {
     const seen = ids === "all" ? new Set([...cache.loaded(), ...drawn.keys()]) : ids;
@@ -168,15 +170,20 @@ export function registerComments(
 
   // A gate row's Submit and Discard need its drafts known before its review is opened.
   const preloading = new Set<string>();
+  const failed = new Set<string>(); // not asked again until the next reconnect
   const load = (id: string) => {
-    if (cache.get(id) !== undefined || preloading.has(id)) return;
+    if (cache.get(id) !== undefined || preloading.has(id) || failed.has(id)) return;
     preloading.add(id);
-    void cache.load(id).catch(() => {}).finally(() => preloading.delete(id));
+    void cache.load(id).catch(() => void failed.add(id)).finally(() => preloading.delete(id));
   };
   const preload = (ids: string[] | "all") => {
+    if (ids === "all") failed.clear();
     const items = ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined);
     for (const i of items) if (i.pending_gate && include(i) && !reviewGone(i)) load(i.id);
   };
+
+  // Gate items that come into scope (Show All, another folder) need their drafts known too.
+  onScopeChange(() => preload(store.items().map((i) => i.id)));
 
   /** The active document's item, when it is one of a review's documents. */
   const activeItem = () => {

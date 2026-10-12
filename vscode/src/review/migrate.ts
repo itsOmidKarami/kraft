@@ -20,7 +20,12 @@ export function registerMigration(context: vscode.ExtensionContext, api: Api, re
         if (e instanceof ApiError && e.status === 404) return false;
         throw e;
       }
-      return !!(await api.getDiff(id)).base_ref;
+      try {
+        return !!(await api.getDiff(id)).base_ref;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return false; // its worktree is gone
+        throw e;
+      }
     },
     existing: async (id) => (await api.listThreads(id)).map((t) => t.comments[0]?.body ?? ""),
     post: async (id, t) => void (await api.createThread(id, t)),
@@ -42,7 +47,7 @@ export function registerMigration(context: vscode.ExtensionContext, api: Api, re
             .then((pick) => pick && vscode.commands.executeCommand("kraft.reviewChanges", r.id));
         }
         if (r.dropped) {
-          const text = dropMessage(r.id, r.dropped);
+          const text = dropMessage(r.id, r.dropped, r.why);
           void vscode.window.showWarningMessage(text, "Copy").then((pick) => pick && vscode.env.clipboard.writeText(text.split("\n").slice(1).join("\n")));
         }
       }

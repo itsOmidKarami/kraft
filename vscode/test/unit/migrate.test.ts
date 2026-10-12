@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type ThreadIn } from "../../src/core/api";
-import { dropMessage, migrateAll, migrateItem, toThreadIns, type LegacyDraft, type MigrateDeps } from "../../src/core/migrate";
+import { dropMessage, migrateAll, migrateItem, toThreadIns, type DropReason, type LegacyDraft, type MigrateDeps } from "../../src/core/migrate";
 
 const draft: LegacyDraft = { comments: [{ file: "a.py", line: 3, body: "x", side: "base" }, { file: "b.py", line: 1, body: "y" }], summary: "s" };
 const five: LegacyDraft = { comments: [1, 2, 3, 4, 5].map((n) => ({ file: "f.py", line: n, body: `c${n}` })) };
@@ -54,7 +54,7 @@ describe("migrateItem", () => {
 
   it("drops everything when the item has nothing to review", async () => {
     const { d, posted, stored } = deps({ reviewable: async () => false });
-    expect(await migrateItem("K-1", draft, d)).toEqual({ posted: 0, dropped: draft, kept: null });
+    expect(await migrateItem("K-1", draft, d)).toEqual({ posted: 0, dropped: draft, kept: null, why: "unreviewable" });
     expect(posted).toEqual([]);
     expect(stored.has("K-1") && stored.get("K-1")).toBeUndefined();
   });
@@ -73,7 +73,7 @@ describe("migrateItem", () => {
   ])("a %i on a draft drops it: %s", async (status, drops) => {
     const { d } = deps({ post: async (_id, t) => { if (t.body.startsWith("a.py")) throw new ApiError(status, "no"); } });
     const r = await migrateItem("K-1", draft, d);
-    if (drops) expect(r).toEqual({ posted: 2, dropped: { comments: [draft.comments[0]] }, kept: null });
+    if (drops) expect(r).toEqual({ posted: 2, dropped: { comments: [draft.comments[0]] }, kept: null, why: "refused" });
     else expect(r).toEqual({ posted: 0, dropped: null, kept: draft });
   });
 });
@@ -104,3 +104,8 @@ it("dropMessage lists every comment line for line", () =>
     "b.py:1: y",
     "(summary): s",
   ]));
+
+it.each<[DropReason, LegacyDraft, string]>([
+  ["refused", { comments: [{ file: "a.py", line: 3, body: "x" }] }, "Kraft dropped 1 local review comment on K-1: Kraft refused them. Their text:"],
+  ["unreviewable", { comments: [], summary: "s" }, "Kraft dropped 1 local review comment on K-1: it has nothing to review any more. Their text:"],
+])("dropMessage says why: %s", (why, d, first) => expect(dropMessage("K-1", d, why).split("\n")[0]).toBe(first));

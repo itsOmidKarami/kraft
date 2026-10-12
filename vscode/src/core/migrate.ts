@@ -17,11 +17,14 @@ export function toThreadIns(d: LegacyDraft): ThreadIn[] {
   return [...d.comments.map((c) => ({ body: legacyBody(c) })), ...(d.summary?.trim() ? [{ body: d.summary.trim() }] : [])];
 }
 
-/** What is said, and offered to copy, when a draft cannot go anywhere. */
-export function dropMessage(id: string, d: LegacyDraft): string {
-  const n = d.comments.length;
+export type DropReason = "unreviewable" | "refused";
+const WHY: Record<DropReason, string> = { unreviewable: "it has nothing to review any more", refused: "Kraft refused them" };
+
+/** What is said, and offered to copy, when drafts cannot go anywhere. */
+export function dropMessage(id: string, d: LegacyDraft, why: DropReason = "unreviewable"): string {
+  const n = d.comments.length || 1; // a summary alone is one comment
   return [
-    `Kraft dropped ${n} local review comment${n === 1 ? "" : "s"} on ${id}: it has nothing to review any more. Their text:`,
+    `Kraft dropped ${n} local review comment${n === 1 ? "" : "s"} on ${id}: ${WHY[why]}. Their text:`,
     ...d.comments.map((c) => `${c.file}:${c.line}${c.side === "base" ? " (base)" : ""}: ${c.body}`),
     ...(d.summary?.trim() ? [`(summary): ${d.summary.trim()}`] : []),
   ].join("\n");
@@ -37,9 +40,10 @@ export interface MigrateDeps {
   save(id: string, d: LegacyDraft | undefined): Promise<void>;
 }
 
-export interface Migrated { posted: number; dropped: LegacyDraft | null; kept: LegacyDraft | null }
+export interface Migrated { posted: number; dropped: LegacyDraft | null; kept: LegacyDraft | null; why?: DropReason }
 
 const isEmpty = (d: LegacyDraft) => !d.comments.length && !d.summary?.trim();
+const droppedOf = (d: LegacyDraft) => (isEmpty(d) ? { dropped: null } : { dropped: d, why: "refused" as const });
 
 /** A refusal about this draft itself; a timeout or rate limit is worth another try. */
 const refused = (e: unknown) => e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
@@ -58,7 +62,7 @@ export async function migrateItem(id: string, d: LegacyDraft, deps: MigrateDeps)
   try {
     if (!(await deps.reviewable(id))) {
       await deps.save(id, undefined);
-      return { posted: 0, dropped: d, kept: null };
+      return { posted: 0, dropped: d, kept: null, why: "unreviewable" };
     }
     existing = new Set(await deps.existing(id));
   } catch {
@@ -79,7 +83,7 @@ export async function migrateItem(id: string, d: LegacyDraft, deps: MigrateDeps)
         await deps.post(id, t);
         posted++;
       } catch (e) {
-        if (!refused(e)) return { posted, dropped: isEmpty(dropped) ? null : dropped, kept: rest };
+        if (!refused(e)) return { posted, ...droppedOf(dropped), kept: rest };
         if ("comment" in u) dropped.comments.push(u.comment);
         else dropped.summary = u.summary;
       }
@@ -87,7 +91,7 @@ export async function migrateItem(id: string, d: LegacyDraft, deps: MigrateDeps)
     done();
     await deps.save(id, isEmpty(rest) ? undefined : rest);
   }
-  return { posted, dropped: isEmpty(dropped) ? null : dropped, kept: null };
+  return { posted, ...droppedOf(dropped), kept: null };
 }
 
 /** Every item's local drafts, one item at a time; nothing while read-only. */
