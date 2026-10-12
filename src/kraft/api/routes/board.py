@@ -1110,8 +1110,7 @@ async def get_fix_target(
 
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
-    if store.materialized_chain_of(row) is None:
-        raise HTTPException(409, "this work item has no materialized chain to restart")
+    nodes = gate_routes.gate_nodes(st, row)  # 409 for a legacy row, before `fix_target`
     pending = _pending_gate(st, wid)
     if gate is not None and gate != pending:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -1120,7 +1119,6 @@ async def get_fix_target(
             return {**fix_target(st, row, pending, node), "reason": "requested" if node else "gate"}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-    nodes = gate_routes.gate_nodes(st, row)
     current = next((i for i, n in enumerate(nodes) if n.id == row["current_node_id"]), None)
     if current is None:
         raise HTTPException(409, "this work item has no current node")

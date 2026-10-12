@@ -144,15 +144,33 @@ def test_raisable_is_the_caps_budget_raise_takes(budget, want):
 
 @pytest.mark.parametrize("state", ["paused_agent", "failed", "gate"])
 def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
-    """The detail renders with no restart target, even at a pending gate, and
-    `/fix-target` refuses with 409: there is no chain to restart from."""
+    """The detail renders with no restart target, even at a pending gate."""
     wid = _legacy(client, repo, state)
 
     detail = client.get(f"/api/work-items/{wid}")
-    target = client.get(f"/api/work-items/{wid}/fix-target")
 
     assert detail.status_code == 200, detail.text
     assert bool(detail.json()["pending_gate"]) == (state == "gate")
     assert detail.json()["actions"] == _listed(client, wid, False)["actions"]
     assert (detail.json()["fix_target"], detail.json()["reject_default"]) == (None, None)
-    assert target.status_code == 409, target.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("get", "fix-target", None),
+        ("post", "gates/spec_approval/approve", {}),
+        ("post", "gates/spec_approval/reject", {"note": "no"}),
+        ("post", "gates/spec_approval/review", {"outcome": "request_changes"}),
+    ],
+    ids=["fix-target", "approve", "reject", "review"],
+)
+def test_a_legacy_rows_gate_doors_refuse(client, repo, method, path, body):
+    """A legacy row at a pending gate has no chain to find the gate in or
+    restart from: every gate door answers 409, not a 500."""
+    wid = _legacy(client, repo, "gate")
+    kw = {"json": body} if body is not None else {}
+
+    r = getattr(client, method)(f"/api/work-items/{wid}/{path}", **kw)
+
+    assert r.status_code == 409, r.text

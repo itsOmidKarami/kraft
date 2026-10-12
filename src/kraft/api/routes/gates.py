@@ -19,6 +19,10 @@ def gate_nodes(st, row) -> tuple:
     (`store.effective_nodes`). One reader for every gate route, so the
     approve door, the reject door and the walk cannot disagree about where a
     gate sits."""
+    if store.materialized_chain_of(row) is None:
+        # A legacy row: no V1 walk runs it, so there is no gate to act on.
+        # `executor.chain_of` would raise, and the route would 500.
+        raise HTTPException(409, "this work item has no materialized chain to act on")
     return store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
 
 
