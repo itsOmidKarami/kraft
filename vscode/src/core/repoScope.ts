@@ -3,6 +3,8 @@
  *  subfolder, symlink, linked worktree or submodule window finds its items.
  *  Pure: git and realpath are injected, paths are strings (win32 too). */
 
+import type { WorkItem } from "./api";
+
 /** Trimmed stdout, `undefined` when git fails or is absent. */
 export type Git = (args: string[], cwd: string) => Promise<string | undefined>;
 export interface ScopeDeps { git: Git; realpath: (p: string) => Promise<string>; platform: NodeJS.Platform }
@@ -86,4 +88,54 @@ export async function folderScope(folder: string, runDir: string, deps: ScopeDep
   }
   const worktreeItem = worktreeItemId(real, realRun, deps.platform) ?? worktreeItemId(folder, runDir, deps.platform);
   return worktreeItem === undefined ? { roots } : { roots, worktreeItem };
+}
+
+/** The one scope the board, the badge and the toasts share. */
+export class WorkspaceScope {
+  private scopes: FolderScope[] = [];
+  private _ready = false;
+  private _showAll = false;
+  private gen = 0;
+  private listeners = new Set<() => void>();
+
+  constructor(private platform: NodeJS.Platform) {}
+
+  /** False until the first update() settles: nothing is in scope before. */
+  get ready(): boolean { return this._ready; }
+  get showAll(): boolean { return this._showAll; }
+
+  toggleAll(): void {
+    this._showAll = !this._showAll;
+    this.fire();
+  }
+
+  /** git is slow and folders change under it: the last call started wins. */
+  async update(folders: string[], runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = []): Promise<void> {
+    const gen = ++this.gen;
+    const scopes = await Promise.all(
+      folders.map((f) => folderScope(f, runDir, deps, connected).catch((): FolderScope => ({ roots: [f] }))),
+    );
+    if (gen !== this.gen) return;
+    this.scopes = scopes;
+    this._ready = true;
+    this.fire();
+  }
+
+  includes(item: Pick<WorkItem, "id" | "repo">, repoOf: (id: string) => string | undefined): boolean {
+    if (this._showAll) return true;
+    if (!this._ready) return false;
+    const same = (p: string | undefined) => p !== undefined && samePath(item.repo, p, this.platform);
+    return this.scopes.some(
+      (s) => s.roots.some(same) || (s.worktreeItem !== undefined && (s.worktreeItem === item.id || same(repoOf(s.worktreeItem)))),
+    );
+  }
+
+  onChange(cb: () => void): () => void {
+    this.listeners.add(cb);
+    return () => this.listeners.delete(cb);
+  }
+
+  private fire(): void {
+    for (const cb of this.listeners) cb();
+  }
 }

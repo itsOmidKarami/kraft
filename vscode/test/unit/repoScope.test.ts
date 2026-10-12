@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderScope, repoRoot, samePath, worktreeItemId, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
+import { folderScope, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
 
 const TOP = "rev-parse --show-toplevel";
 const COMMON = "rev-parse --path-format=absolute --git-common-dir";
@@ -96,5 +96,66 @@ describe("folderScope", () => {
     ["not a worktree", "/r", "/k", {}, undefined],
   ])("%s", async (_, folder, runDir, links, want) => {
     expect((await folderScope(folder, runDir, deps({}, links))).worktreeItem).toBe(want);
+  });
+});
+
+describe("WorkspaceScope", () => {
+  const none = () => undefined;
+
+  it("includes nothing before the first update settles", () => {
+    expect(new WorkspaceScope("linux").includes({ id: "x", repo: "/r" }, () => "/r")).toBe(false);
+  });
+
+  it.each<[string, string, Record<string, string>, { id: string; repo: string }, (id: string) => string | undefined, boolean]>([
+    ["subfolder window: its repo", "/r/src", { [`/r/src|${TOP}`]: "/r", [`/r/src|${COMMON}`]: "/r/.git" }, { id: "x", repo: "/r" }, none, true],
+    ["subfolder window: another repo", "/r/src", { [`/r/src|${TOP}`]: "/r", [`/r/src|${COMMON}`]: "/r/.git" }, { id: "x", repo: "/q" }, none, false],
+    ["worktree window: its item's repo", "/k/worktrees/A", {}, { id: "B", repo: "/r" }, (id) => (id === "A" ? "/r" : undefined), true],
+    ["worktree window: another repo", "/k/worktrees/A", {}, { id: "C", repo: "/q" }, (id) => (id === "A" ? "/r" : undefined), false],
+    ["worktree window: its own item, repo unknown", "/k/worktrees/A", {}, { id: "A", repo: "/q" }, none, true],
+  ])("%s", async (_, folder, git, item, repoOf, want) => {
+    const scope = new WorkspaceScope("linux");
+    await scope.update([folder], "/k", deps(git));
+    expect(scope.ready).toBe(true);
+    expect(scope.includes(item, repoOf)).toBe(want);
+  });
+
+  it("toggleAll widens to every repo and fires onChange once", async () => {
+    const scope = new WorkspaceScope("linux");
+    await scope.update(["/r"], "/k", deps({}));
+    let fired = 0;
+    scope.onChange(() => fired++);
+    scope.toggleAll();
+    expect([scope.showAll, fired, scope.includes({ id: "x", repo: "/q" }, none)]).toEqual([true, 1, true]);
+  });
+
+  it("fires onChange when an update applies, until unsubscribed", async () => {
+    const scope = new WorkspaceScope("linux");
+    let fired = 0;
+    const off = scope.onChange(() => fired++);
+    await scope.update(["/r"], "/k", deps({}));
+    off();
+    await scope.update(["/r"], "/k", deps({}));
+    expect(fired).toBe(1);
+  });
+
+  it("the last update started wins when an earlier one resolves later", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const slow: ScopeDeps = { ...deps({}), realpath: async (p) => { await held; return p; } };
+    const scope = new WorkspaceScope("linux");
+    let fired = 0;
+    scope.onChange(() => fired++);
+    const first = scope.update(["/a"], "/k", slow);
+    await scope.update(["/b"], "/k", deps({}));
+    release();
+    await first;
+    expect([scope.includes({ id: "x", repo: "/b" }, none), scope.includes({ id: "x", repo: "/a" }, none), fired]).toEqual([true, false, 1]);
+  });
+
+  it("a folder whose scope throws still scopes to the folder", async () => {
+    const scope = new WorkspaceScope("linux");
+    const broken: ScopeDeps = { ...deps({}), git: async () => { throw new Error("spawn git ENOENT"); } };
+    await scope.update(["/r"], "/k", broken);
+    expect([scope.ready, scope.includes({ id: "x", repo: "/r" }, none)]).toEqual([true, true]);
   });
 });
