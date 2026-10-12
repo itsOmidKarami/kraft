@@ -508,6 +508,9 @@ async def list_work_items(request: Request):
             "mr_ref": mr_ref,
             # The doors a request would be admitted through now (`open_doors`).
             "actions": _list_actions(r, mr_ref, parsed[r["id"]]),
+            # One `is_dir` per row: the VS Code board offers Open Worktree only
+            # while the directory is there, without a detail fetch per row.
+            "worktree_exists": (st.run_dirs.worktrees / r["id"]).is_dir(),
         }
 
     # Each row's chain parsed once, for the stage bar and `actions` both.

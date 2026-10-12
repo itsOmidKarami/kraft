@@ -2,6 +2,7 @@ import type {
   CommentReview, Finding, GatelessChanges, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, ThreadLabel, WorkItem as BoardItem,
 } from "../../../frontend/src/types";
 import type { WorkItemDiff } from "../../../frontend/src/types/documents";
+import type { ConnectedRepo } from "./repoScope";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 
 export type { CommentReview, Finding, GatelessChanges, ItemAction, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, ThreadLabel, WorkItemDiff };
@@ -71,6 +72,7 @@ export class Api {
   }
 
   health = () => this.req<Health>("GET", "/health");
+  repos = () => this.req<{ repos: ConnectedRepo[] }>("GET", "/repos");
   // Cancelled items stay listed: the board shows them under Done.
   listItems = () => this.req<{ items: WorkItem[]; cursor: number }>("GET", "/work-items?include_abandoned=true");
   getItem = (id: string) => this.req<WorkItemDetail>("GET", this.item(id));

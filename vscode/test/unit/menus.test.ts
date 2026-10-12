@@ -12,8 +12,8 @@ const token = (e: Entry) => e.when?.match(/viewItem =~ \/\\b(\w+)\\b\//)?.[1];
 const keyed = board.filter((e) => token(e) !== undefined);
 
 describe("the board's item menu", () => {
-  it("keys every entry off `gate` or one of the server's actions", () => {
-    const known = new Set<string>(["gate", ...ITEM_ACTIONS]);
+  it("keys every entry off `gate`, `worktree` or one of the server's actions", () => {
+    const known = new Set<string>(["gate", "worktree", ...ITEM_ACTIONS]);
     expect(keyed.map(token).filter((t) => !known.has(t!))).toEqual([]);
   });
 

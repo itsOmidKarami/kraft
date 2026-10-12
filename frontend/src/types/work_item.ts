@@ -277,7 +277,7 @@ export interface WorkItem {
   escalation_threads?: EscalationThread[];
   worktree_path?: string;
   /** Whether `worktree_path` is on disk: false once it was reclaimed or
-   *  deleted (and before the item first ran). Only on the detail endpoint. */
+   *  deleted (and before the item first ran). On the list rows and the detail. */
   worktree_exists?: boolean;
   /** The branch the item's worktree lives on (detail only): `kraft/<slug>-<id>`, or `kraft/<id>` on an older row. */
   branch?: string | null;
