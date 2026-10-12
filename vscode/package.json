@@ -276,6 +276,27 @@
         "command": "kraft.showResolved",
         "title": "Show Resolved Chain",
         "category": "Kraft"
+      },
+      {
+        "command": "kraft.fileWork",
+        "title": "File Work Item\u2026",
+        "category": "Kraft",
+        "icon": "$(add)"
+      },
+      {
+        "command": "kraft.fileAsSpec",
+        "title": "File as Kraft Spec\u2026",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.fileAsPlan",
+        "title": "File as Kraft Plan\u2026",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.fileSelection",
+        "title": "File Selection as Kraft Work\u2026",
+        "category": "Kraft"
       }
     ],
     "viewsWelcome": [
@@ -287,6 +308,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "kraft.fileWork",
+          "when": "view == kraft.board && !kraft.readOnly",
+          "group": "navigation"
+        },
         {
           "command": "kraft.toggleAllRepos",
           "when": "view == kraft.board",
@@ -388,6 +414,25 @@
           "command": "kraft.review.discard",
           "when": "view == kraft.board && viewItem =~ /\\bdrafts\\b/ && !kraft.readOnly",
           "group": "4_review"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "kraft.fileAsSpec",
+          "when": "resourceExtname == .md && !explorerResourceIsFolder && !kraft.readOnly",
+          "group": "7_kraft"
+        },
+        {
+          "command": "kraft.fileAsPlan",
+          "when": "resourceExtname == .md && !explorerResourceIsFolder && !kraft.readOnly",
+          "group": "7_kraft"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kraft.fileSelection",
+          "when": "editorHasSelection && !kraft.readOnly",
+          "group": "7_kraft"
         }
       ],
       "commandPalette": [
@@ -514,6 +559,22 @@
         {
           "command": "kraft.showResolved",
           "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "kraft.fileWork",
+          "when": "!kraft.readOnly"
+        },
+        {
+          "command": "kraft.fileAsSpec",
+          "when": "false"
+        },
+        {
+          "command": "kraft.fileAsPlan",
+          "when": "false"
+        },
+        {
+          "command": "kraft.fileSelection",
+          "when": "false"
         }
       ],
       "editor/title": [

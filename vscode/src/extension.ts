@@ -6,7 +6,9 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { Announcer } from "./core/announcer";
 import { needsYou } from "./core/board";
-import { registerRepoScope } from "./repoScope";
+import { registerRepoScope, scopeDeps } from "./repoScope";
+import { registerFileWork } from "./fileWork";
+import { fileRefusal } from "./core/fileWork";
 import { connectionFor, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
@@ -121,10 +123,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   applyReadOnly();
 
   const cache = new ThreadCache(api);
-  registerBoard(context, store, api, () => refusal(state()), include, scope, {
+  const { reveal } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
   });
+  registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,
     { dispose: () => store.stop() },

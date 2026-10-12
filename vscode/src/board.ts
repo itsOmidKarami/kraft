@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction } from "./actions";
 import type { Api, ItemAction, WorkItem } from "./core/api";
-import { contextValueOf, describe, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { contextValueOf, describe, groupHolding, groupItems, iconOf, needsYouCount, tooltipOf, welcomeState, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
 import { mutating } from "./core/guard";
@@ -55,6 +55,13 @@ export class Board implements vscode.TreeDataProvider<Node> {
     return groups.map((g) => ({ kind: "group", ...g }));
   }
 
+  /** Only an item has a parent here, the group holding it: `reveal` needs no more. */
+  getParent(node: Node): Node | undefined {
+    if (node.kind !== "item") return undefined;
+    const g = groupHolding(this.store.items(), this.include, node.item.id);
+    return g && { kind: "group", ...g };
+  }
+
   private setWelcome(w: Welcome) {
     if (w === this.welcome) return;
     this.welcome = w;
@@ -71,6 +78,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === "group") {
       const t = new vscode.TreeItem(`${node.label} (${node.items.length})`, vscode.TreeItemCollapsibleState.Expanded);
+      // Its key, not its label: the count in the label changes as items move.
+      t.id = `group:${node.id}`;
       t.contextValue = "group";
       return t;
     }
@@ -158,5 +167,15 @@ export function registerBoard(
       t.show();
     })),
   );
-  return board;
+  /** Selects an item on the board, without taking focus; one not shown is no error. */
+  const reveal = async (id: string): Promise<void> => {
+    const item = store.item(id);
+    if (!item || !groupHolding(store.items(), include, id)) return;
+    try {
+      await view.reveal({ kind: "item", item }, { select: true, focus: false });
+    } catch {
+      // The view may not be resolved yet; the item is on the board either way.
+    }
+  };
+  return { board, reveal };
 }
