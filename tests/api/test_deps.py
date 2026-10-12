@@ -425,7 +425,9 @@ def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
 
     def exists():
         row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
-        return client.get(f"/api/work-items/{wid}").json()["worktree_exists"], row["worktree_exists"]
+        return client.get(f"/api/work-items/{wid}").json()["worktree_exists"], row[
+            "worktree_exists"
+        ]
 
     assert exists() == (False, False)
     assert refusals() == {"this work item has not started, so it has no worktree yet"}
