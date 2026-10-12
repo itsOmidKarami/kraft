@@ -133,6 +133,17 @@ it.each([
 });
 
 it.each([
+  ["no detail", item(), undefined, "K-1 — implementation"],
+  ["a capped spend, no running time", item(), { budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null }, "K-1 — implementation\nSpent $1.00 of $5.00"],
+  ["spend and time", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "Loop cap hit.", resume_at: null } }), { budget_cap: { cap_usd: null, spent_usd: 0.12, source: "policy" as const }, running_time: { running_s: 240, cap_minutes: null } }, "Loop cap hit.\nSpent $0.120 (no cap)\nRan 4m (no cap)"],
+  ["a detail with neither", item(), {}, "K-1 — implementation"],
+])("tooltip with detail: %s", (_, it_, detail, want) => {
+  expect(tooltipOf(it_, detail)).toBe(want);
+});
+
+it("tooltip: a row alone has no spend line", () => expect(tooltipOf(item())).not.toContain("Spent"));
+
+it.each([
   ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 asks: Keep the header? Your answer steers it (optional)"],
   ["a question with no reason", stopped("question"), "Steer for K-1 (optional)"],
   ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
@@ -159,6 +170,36 @@ it.each([
   ["no detail", undefined, undefined],
 ])("worktree target: %s", (_, detail, want) => {
   expect(worktreeTarget(detail)).toBe(want);
+});
+
+describe("Board, an item's hover", () => {
+  const row = item();
+  const capped = { ...row, budget_cap: { cap_usd: 5, spent_usd: 1, source: "item" as const }, running_time: null };
+  const boardOn = (detail: () => unknown, refresh: () => Promise<boolean>) => {
+    const store = { items: () => [row], item: () => row, detail, refresh,
+      onChange: () => () => {}, onConnection: () => () => {}, onError: () => () => {}, connected: true } as unknown as Store;
+    return new Board(store, () => true, { onChange: () => () => {}, ready: true, showAll: false });
+  };
+  const node = { kind: "item", item: row } as never;
+
+  it("is set at once from a cached detail", () =>
+    expect(boardOn(() => capped, vi.fn()).getTreeItem(node).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00"));
+
+  it("is left unset without a detail, then resolved from a fresh read", async () => {
+    let cached: unknown;
+    const refresh = vi.fn(async () => ((cached = capped), true));
+    const board = boardOn(() => cached, refresh);
+    const t = board.getTreeItem(node);
+    expect(t.tooltip).toBeUndefined();
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation\nSpent $1.00 of $5.00");
+    expect(refresh).toHaveBeenCalledWith("K-1");
+  });
+
+  it("falls back to the row's own line when the read fails", async () => {
+    const board = boardOn(() => undefined, vi.fn().mockRejectedValue(new Error("down")));
+    const t = board.getTreeItem(node);
+    expect((await board.resolveTreeItem(t, node)).tooltip).toBe("K-1 — implementation");
+  });
 });
 
 describe("Board, revealing an item", () => {

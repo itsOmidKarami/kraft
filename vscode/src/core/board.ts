@@ -2,6 +2,7 @@ import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
 import { linkTokens } from "./links";
+import { spendLine, timeLine } from "./spend";
 
 /** The board reads the server's `display_status` and `stop`, as the web board
  *  does (`groupOf`, `reasonTail`); nothing here derives state from `status`. */
@@ -111,11 +112,15 @@ export function describe(item: WorkItem): string {
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 
-/** The hover: the stop's whole reason when there is one (the row keeps only its first sentence). */
-export function tooltipOf(item: WorkItem): string {
+/** The hover: the stop's whole reason when there is one (the row keeps only its first sentence),
+ *  then, with the item's detail, what it has spent and how long it has run against their caps. */
+export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_cap" | "running_time">): string {
   const reason = item.stop?.reason;
-  if (reason) return item.stop?.kind === "question" ? questionText(reason) : reason;
-  return `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  const first = reason
+    ? item.stop?.kind === "question" ? questionText(reason) : reason
+    : `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  if (!detail) return first;
+  return [first, spendLine(detail.budget_cap), timeLine(detail.running_time)].filter((l) => l !== null).join("\n");
 }
 
 /** The Resume/Retry input box's prompt: a question stop shows the question, so the steer answers it. */
