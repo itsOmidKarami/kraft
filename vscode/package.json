@@ -232,6 +232,13 @@
         "category": "Kraft"
       }
     ],
+    "viewsWelcome": [
+      {
+        "view": "kraft.board",
+        "contents": "No Kraft work in this repo. [Show all repos](command:kraft.toggleAllRepos)",
+        "when": "kraft.welcome == here"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -313,7 +320,7 @@
         },
         {
           "command": "kraft.openWorktree",
-          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/",
           "group": "3_open"
         },
         {

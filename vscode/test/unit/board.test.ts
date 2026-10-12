@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf } from "../../src/core/board";
+import { announceable, contextValueOf, describe as describeItem, groupItems, iconOf, needsYouCount, steerPrompt, tooltipOf, welcomeState, worktreeTarget } from "../../src/core/board";
 import { item, stopped } from "./fixtures/item";
 
 const archivedNeedsYou = stopped("cap", { id: "arch-needs", archived_at: "x" });
@@ -24,7 +24,7 @@ it.each([
   ["pre-2.0 server", item({ display_status: undefined }), "circle-filled", "running"],
 ])("%s: icon and group", (_, it_, icon, group) => {
   expect(iconOf(it_)).toBe(icon);
-  expect(groupItems([it_], "all").map((g) => g.id)).toEqual([group]);
+  expect(groupItems([it_], () => true).map((g) => g.id)).toEqual([group]);
 });
 
 describe("groupItems", () => {
@@ -40,7 +40,7 @@ describe("groupItems", () => {
   ];
 
   it("groups in the web board's order and hides archived items", () => {
-    const groups = groupItems(items, "all");
+    const groups = groupItems(items, () => true);
     expect(groups.map((g) => [g.id, g.label])).toEqual([["needs", "Needs you"], ["running", "Running"], ["not_started", "Not started"], ["done", "Done"]]);
     expect(groups.flatMap((g) => g.items.map((i) => i.id))).not.toContain("arch");
     expect(groups.flatMap((g) => g.items.map((i) => i.id))).not.toContain("arch-needs");
@@ -48,13 +48,13 @@ describe("groupItems", () => {
   });
 
   it("scopes to the workspace's repos", () => {
-    const ids = groupItems(items, ["/r"]).flatMap((g) => g.items.map((i) => i.id));
+    const ids = groupItems(items, (i) => i.repo === "/r").flatMap((g) => g.items.map((i) => i.id));
     expect(ids).not.toContain("other");
     expect(ids).toContain("run");
   });
 
   it("omits empty groups", () => {
-    expect(groupItems([item()], "all").map((g) => g.id)).toEqual(["running"]);
+    expect(groupItems([item()], () => true).map((g) => g.id)).toEqual(["running"]);
   });
 });
 
@@ -63,6 +63,9 @@ describe("contextValueOf", () => {
     ["the server's actions, in its order", item({ actions: ["pause", "cancel"] }), "item:pause,cancel"],
     ["gate first while one is pending", stopped("gate", { pending_gate: "spec", actions: ["reject", "retry"] }), "item:gate,reject,retry"],
     ["no actions from an older server", item(), "item:"],
+    ["worktree last while it is on disk", item({ actions: ["pause", "cancel"], worktree_exists: true }), "item:pause,cancel,worktree"],
+    ["no worktree once it was reclaimed", item({ actions: ["pause", "cancel"], worktree_exists: false }), "item:pause,cancel"],
+    ["a gate with its worktree", stopped("gate", { pending_gate: "spec", actions: ["reject"], worktree_exists: true }), "item:gate,reject,worktree"],
   ])("%s", (_, it_, want) => {
     expect(contextValueOf(it_)).toBe(want);
   });
@@ -74,8 +77,18 @@ describe("contextValueOf", () => {
   });
 });
 
-it("counts what needs you", () => {
-  expect(needsYouCount([item(), item({ display_status: "paused" }), stopped("gate", { pending_gate: "g" }), stopped("cap", { display_status: "archived", archived_at: "x" }), archivedNeedsYou])).toBe(2);
+const counted = [item(), item({ display_status: "paused" }), stopped("gate", { pending_gate: "g" }), stopped("cap", { display_status: "archived", archived_at: "x" }), archivedNeedsYou, stopped("cap", { id: "away", repo: "/elsewhere" })];
+
+it.each([
+  ["everything in scope", () => true, 3],
+  ["only what is in scope", (i: { repo: string }) => i.repo === "/r", 2],
+])("counts what needs you: %s", (_, include, want) => {
+  expect(needsYouCount(counted, include)).toBe(want);
+});
+
+it("announces only what is in scope", () => {
+  const items = [stopped("gate", { id: "here", pending_gate: "g" }), stopped("gate", { id: "away", repo: "/elsewhere", pending_gate: "g" })];
+  expect(announceable(items, (i) => i.repo === "/r").map((i) => i.id)).toEqual(["here"]);
 });
 
 it.each([
@@ -103,4 +116,25 @@ it.each([
   ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
 ])("steer prompt for %s", (_, it_, want) => {
   expect(steerPrompt(it_)).toBe(want);
+});
+
+it.each([
+  ["not connected", false, true, false, 0, "none"],
+  ["connected, scope not ready yet", true, false, false, 0, "none"],
+  ["something visible", true, true, false, 2, "none"],
+  ["connected, ready, nothing in this repo", true, true, false, 0, "here"],
+  ["showing every repo, nothing anywhere", true, true, true, 0, "none"],
+])("welcome: %s", (_, connected, ready, showAll, visible, want) => {
+  expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
+});
+
+
+it.each([
+  ["exists, with a path", item({ worktree_exists: true, worktree_path: "/k/run/worktrees/K-1" }), "/k/run/worktrees/K-1"],
+  ["reclaimed", item({ worktree_exists: false, worktree_path: "/k/run/worktrees/K-1" }), undefined],
+  ["exists, no path", item({ worktree_exists: true }), undefined],
+  ["exists, empty path", item({ worktree_exists: true, worktree_path: "" }), undefined],
+  ["no detail", undefined, undefined],
+])("worktree target: %s", (_, detail, want) => {
+  expect(worktreeTarget(detail)).toBe(want);
 });
