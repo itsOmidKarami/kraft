@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
-import type { EventType } from "./types/vocab.generated";
+import { REREAD_EVENTS } from "./rereadEvents";
 
 type Connection = "connecting" | "open" | "reconnecting";
 
@@ -143,7 +143,7 @@ export const useStore = create<State>((set, get) => ({
     const p = ev.payload as Record<string, any>;
     // The list's display_status and stop are the server's (B1); an event that
     // moves the status re-reads the row so the item header's "others need you" stays true.
-    if (REREAD.has(ev.type) && get().workItems[id]) queueMicrotask(() => { get().hydrateItem(id).catch(() => {}); });
+    if (REREAD_EVENTS.has(ev.type) && get().workItems[id]) queueMicrotask(() => { get().hydrateItem(id).catch(() => {}); });
     set((s) => {
       const prevEvents = s.eventsByItem[id] ?? [];
       const base: Partial<State> = {
@@ -393,37 +393,6 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 }));
-
-/** Status-moving events after which display_status and stop are re-read. */
-const REREAD = new Set<EventType>([
-  "work_item_needs_human",
-  "work_item_resumed",
-  "work_item_retried",
-  "pause_requested",
-  "work_item_waiting",
-  "work_item_rate_limited",
-  "work_item_completed",
-  "work_item_cancelled",
-  "node_skipped",
-  "work_item_queued",
-  "work_item_dequeued",
-  "work_item_abandoned",
-  "gate_approved",
-  "gate_rejected",
-  "work_item_blocked_by_dependency",
-  "paused_by_broken_base",
-  "work_item_archived",
-  "work_item_restored",
-  // store.mark_reentered flips waiting/rate_limited to active and clears retry_at with no event of its own; the reducer leaves status alone here.
-  "node_started",
-  // An escalation turn going live or ending flips escalated, which the reducer never patches.
-  "escalation_message",
-  "worker_session_paused",
-  "session_unknown",
-  "worker_session_exited",
-  "work_item_blocked",
-  "work_item_unblocked",
-]);
 
 /**
  * The question inside a `work_item_needs_human` reason, or null for a stop of

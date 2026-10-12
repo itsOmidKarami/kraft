@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError } from "../../src/core/api";
+import { Api, ApiError, REQUEST_TIMEOUT, SLOW_TIMEOUT, type ApiFailure } from "../../src/core/api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -107,5 +107,56 @@ describe("Api", () => {
     else await expect(call).rejects.toMatchObject({ status, detail: (body as { detail: string }).detail });
     expect(f.mock.calls[0][0]).toBe("http://h:1/api/apply/restart");
     expect((f.mock.calls[0][1] as RequestInit).method).toBe("POST");
+  });
+
+  it("reports a refused call to onError", async () => {
+    const api = new Api("http://h:1", undefined, fakeFetch(401, { detail: "bad token" }) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await expect(api.listItems()).rejects.toBeInstanceOf(ApiError);
+    expect(seen).toEqual([{ method: "GET", path: "/work-items?include_abandoned=true", status: 401, detail: "bad token" }]);
+  });
+
+  it("reports an unreachable server as status 0", async () => {
+    const api = new Api("http://h:1", undefined, vi.fn(async () => { throw new Error("ECONNREFUSED"); }) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await expect(api.pause("W-1")).rejects.toMatchObject({ status: 0 });
+    expect(seen).toEqual([{ method: "POST", path: "/work-items/W-1/pause", status: 0, detail: "Kraft is not reachable at http://h:1: ECONNREFUSED" }]);
+  });
+
+  it("reports nothing for a call that succeeds", async () => {
+    const api = new Api("http://h:1", undefined, fakeFetch(200, {}) as any);
+    const seen: ApiFailure[] = [];
+    api.onError = (f) => seen.push(f);
+    await api.health();
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("Api timeout", () => {
+  it("gives up on a daemon that never answers, as status 0", async () => {
+    // The fetch rejects only when the request's own signal aborts, as fetch does.
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
+    const api = new Api("http://h:1", undefined, f as any, { fast: 1_000, slow: 60_000 });
+    const seen: ApiFailure[] = [];
+    api.onError = (e) => seen.push(e);
+    const t0 = Date.now();
+    await expect(api.health()).rejects.toMatchObject({ status: 0, detail: "Kraft did not answer within 1s" });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+    expect(seen).toEqual([{ method: "GET", path: "/health", status: 0, detail: "Kraft did not answer within 1s" }]);
+  });
+
+  it("waits 10s by default, 60s for a slow call", () => expect([REQUEST_TIMEOUT, SLOW_TIMEOUT]).toEqual([10_000, 60_000]));
+
+  it("gives a diff the slow limit", async () => {
+    const f = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason))));
+    const api = new Api("http://h:1", undefined, f as any, { fast: 50, slow: 500 });
+    const t0 = Date.now();
+    await expect(api.getDiff("W-1")).rejects.toMatchObject({ status: 0, detail: "Kraft did not answer within 0.5s" });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(450);
+    await expect(api.getItem("W-1")).rejects.toMatchObject({ detail: "Kraft did not answer within 0.05s" });
   });
 });

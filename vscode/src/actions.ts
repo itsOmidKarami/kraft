@@ -3,14 +3,19 @@ import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
 import { steerPrompt } from "./core/board";
 import { parseUsd } from "./core/budget";
 import type { Store } from "./core/store";
+import { log } from "./log";
 
 export async function reportError(e: unknown, store: Store, id: string): Promise<void> {
+  const detail = e instanceof ApiError ? e.detail : String(e);
+  // A 409 is the item having moved on: worth a line, not an error.
+  if (e instanceof ApiError && e.status === 409) log.info(`${id}: ${detail}`);
+  else log.error(`${id}: ${detail}`);
   if (e instanceof ApiError && e.status === 409) {
     await store.refresh(id).catch(() => {});
     void vscode.window.showInformationMessage(e.detail);
     return;
   }
-  void vscode.window.showErrorMessage(e instanceof ApiError ? e.detail : String(e));
+  void vscode.window.showErrorMessage(detail);
 }
 
 export async function runAction(api: Api, store: Store, item: WorkItem, action: ItemAction): Promise<void> {
