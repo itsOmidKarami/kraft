@@ -57,7 +57,12 @@ def test_a_pidfile_naming_another_program_fails_the_pidfile_row(tmp_path, monkey
         # Until `exec` lands the child's cmdline reads empty (or as pytest's),
         # and the row would name "another program" instead of sleep.
         deadline = time.monotonic() + 10
-        while psutil.Process(decoy.pid).cmdline()[:1] != ["sleep"]:
+        while True:
+            try:
+                if psutil.Process(decoy.pid).cmdline()[:1] == ["sleep"]:
+                    break
+            except psutil.NoSuchProcess:
+                raise AssertionError("the decoy never exec'd sleep") from None
             assert time.monotonic() < deadline, "the decoy never exec'd sleep"
             time.sleep(0.01)
         pid_path = RunDirs(tmp_path / "run").pid

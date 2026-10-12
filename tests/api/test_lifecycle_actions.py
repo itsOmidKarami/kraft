@@ -156,19 +156,32 @@ def test_a_legacy_rows_detail_carries_the_lists_actions(client, repo, state):
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "body"),
+    ("state", "method", "path", "body"),
     [
-        ("get", "fix-target", None),
-        ("post", "gates/spec_approval/approve", {}),
-        ("post", "gates/spec_approval/reject", {"note": "no"}),
-        ("post", "gates/spec_approval/review", {"outcome": "request_changes"}),
+        ("gate", "get", "fix-target", None),
+        ("gate", "post", "gates/spec_approval/approve", {}),
+        ("gate", "post", "gates/spec_approval/reject", {"note": "no"}),
+        ("gate", "post", "gates/spec_approval/review", {"outcome": "request_changes"}),
+        ("gate", "post", "review", {"outcome": "request_changes"}),
+        ("failed", "post", "retry", {}),
+        ("gate", "post", "skip", {"path": "spec_approval"}),
+        ("paused_agent", "post", "skip", {"path": "implementation"}),
     ],
-    ids=["fix-target", "approve", "reject", "review"],
+    ids=[
+        "fix-target",
+        "approve",
+        "reject",
+        "gate-review",
+        "item-review",
+        "retry",
+        "skip-path-gate",
+        "skip-path-paused",
+    ],
 )
-def test_a_legacy_rows_gate_doors_refuse(client, repo, method, path, body):
-    """A legacy row at a pending gate has no chain to find the gate in or
-    restart from: every gate door answers 409, not a 500."""
-    wid = _legacy(client, repo, "gate")
+def test_a_legacy_rows_walking_doors_refuse(client, repo, state, method, path, body):
+    """A legacy row has no chain to find a gate in, restart from or skip
+    along: every door that walks it answers 409, not a 500."""
+    wid = _legacy(client, repo, state)
     kw = {"json": body} if body is not None else {}
 
     r = getattr(client, method)(f"/api/work-items/{wid}/{path}", **kw)
