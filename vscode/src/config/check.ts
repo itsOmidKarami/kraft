@@ -4,7 +4,7 @@ import type { Api } from "../core/api";
 import { reloadProblems, resolveOffer, restartRoute, restartViaTerminal } from "../core/apply";
 import { fromCheck, fromLint, mergeLint, type Diag } from "../core/configDiagnostics";
 import { configFile, isLibraryFile } from "../core/scope";
-import { restartLine } from "../core/start";
+import { RESTART_ARGS, startInvocation } from "../core/start";
 import { log } from "../log";
 
 const SOURCE = "Kraft · config";
@@ -68,10 +68,11 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
     }
   };
 
-  // The binary Start Kraft runs, from the home folder as Start Kraft runs it: not the workspace's.
+  // The binary Start Kraft runs, from the home folder as Start Kraft runs it, not the workspace's.
+  // The terminal's process is kraft itself: no shell, so no quoting for bash, cmd or PowerShell.
   const restartInTerminal = () => {
-    const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir() });
-    t.sendText(restartLine(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir(), process.platform));
+    const { file } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
+    const t = vscode.window.createTerminal({ name: "Kraft", cwd: homedir(), shellPath: file, shellArgs: [...RESTART_ARGS] });
     t.show();
   };
 

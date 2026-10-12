@@ -117,7 +117,8 @@ export class Api {
     try { data = text ? JSON.parse(text) : undefined; } catch { json = false; }
     const detail = (data as { detail?: unknown } | undefined)?.detail;
     if (!res.ok) throw this.fail(method, path, res.status, typeof detail === "string" ? detail : text || res.statusText);
-    if (!json) throw this.fail(method, path, 0, `Kraft's answer is not JSON: ${text.slice(0, 200)}`);
+    // Not 0: something answered, so the board says "Kraft error", not "isn't running".
+    if (!json) throw this.fail(method, path, res.status, `Kraft's answer is not JSON: ${text.slice(0, 200)}`);
     return data as T;
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ALREADY_STARTING, alreadyRunning, oneAtATime, restartLine, startFailure, startInvocation } from "../../src/core/start";
+import { ALREADY_STARTING, alreadyRunning, oneAtATime, startFailure, startInvocation } from "../../src/core/start";
 
 const ARGS = ["admin", "start", "--detach"];
 
@@ -14,18 +14,6 @@ describe("startInvocation", () => {
     ["spaces kept", "/opt/my tools/kraft", "/opt/my tools/kraft"],
     ["another user's home kept", "~bob/kraft", "~bob/kraft"],
   ])("%s", (_, setting, file) => expect(startInvocation(setting, "/home/u")).toEqual({ file, args: ARGS }));
-});
-
-describe("restartLine", () => {
-  it.each<[string, string | undefined, NodeJS.Platform, string]>([
-    ["unset: kraft on PATH", undefined, "linux", "kraft admin restart"],
-    ["a plain path, bare", "~/bin/kraft", "darwin", "/home/u/bin/kraft admin restart"],
-    ["spaces quoted", "/opt/my tools/kraft", "linux", "'/opt/my tools/kraft' admin restart"],
-    ["a quote escaped", "/opt/it's/kraft", "linux", "'/opt/it'\\''s/kraft' admin restart"],
-    ["windows: PowerShell's call operator", "C:\\Program Files\\kraft.exe", "win32", "& 'C:\\Program Files\\kraft.exe' admin restart"],
-    ["windows: a quote doubled", "C:\\it's\\kraft.exe", "win32", "& 'C:\\it''s\\kraft.exe' admin restart"],
-    ["windows: a plain path, bare", "C:\\kraft\\kraft.exe", "win32", "C:\\kraft\\kraft.exe admin restart"],
-  ])("%s", (_, setting, platform, line) => expect(restartLine(setting, "/home/u", platform)).toBe(line));
 });
 
 describe("startFailure", () => {

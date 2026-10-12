@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as vscode from "vscode";
 import { artifactBasename } from "../../src/core/docs";
-import { gateCall, previewIsStale, previewOf, previewTarget, previewUnresolved, type GroupLike, type ShownPreview, type TabLike } from "../../src/core/preview";
+import { registerArtifactPreview } from "../../src/preview";
+import { gateCall, PREVIEW_UNRESOLVED, previewIsStale, previewOf, previewTarget, previewUnresolved, type GroupLike, type ShownPreview, type TabLike } from "../../src/core/preview";
 
 const MD = "mainThreadWebview-markdown.preview";
 const SPEC = "Spec (K-1).md";
@@ -78,5 +80,22 @@ describe("gateCall", () => {
     ["no item anywhere", undefined, undefined, undefined, undefined, { id: undefined, gate: undefined, note: undefined, stale: false }],
   ])("%s", (_, direct, target, gate, note, want) => {
     expect(gateCall(direct, target, latest, gate, note)).toEqual(want);
+  });
+});
+
+describe("registerArtifactPreview's target", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const tab = (label: string, viewType: string) => ({ activeTab: { label, input: new vscode.TabInputWebview(viewType) } });
+  const TITLE = { scheme: "webview-panel", path: "webview-panel/webview-x" };
+  it.each([
+    ["one webview group: its preview, nothing said", [tab(`[Preview] ${SPEC}`, MD)], { id: "K-1", basename: SPEC }, []],
+    ["another group's webview: none, and says so", [tab(`[Preview] ${SPEC}`, MD), tab("Release Notes", "mainThreadWebview-other")], undefined, [[PREVIEW_UNRESOLVED]]],
+  ])("%s", (_, groups, want, said) => {
+    vi.spyOn(vscode.window.tabGroups, "all", "get").mockReturnValue(groups.map((g) => ({ isActive: false, ...g })) as never);
+    const info = vi.spyOn(vscode.window, "showInformationMessage");
+    const preview = registerArtifactPreview({ subscriptions: [] } as never);
+    preview.opening("K-1", SPEC);
+    expect(preview.target(TITLE)).toEqual(want);
+    expect(info.mock.calls).toEqual(said);
   });
 });

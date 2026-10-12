@@ -1,4 +1,5 @@
-/** The few parts of the `vscode` module that `src/board.ts` and `src/gates.ts` touch, for unit
+/** The few parts of the `vscode` module that the glue unit tests drive (`src/board.ts`,
+ *  `src/gates.ts`, `src/preview.ts`, `registerComments`) touch, for unit
  *  tests: vitest.config.ts aliases `vscode` here. A test replaces what it
  *  watches (`window.createTreeView`) with `vi.spyOn`. */
 
@@ -18,6 +19,14 @@ export class TreeItem {
   tooltip?: string;
   command?: unknown;
   constructor(public label: string, public collapsibleState = TreeItemCollapsibleState.None) {}
+}
+
+export class Range {
+  constructor(public startLine: number, public startCharacter: number, public endLine: number, public endCharacter: number) {}
+}
+
+export class TabInputWebview {
+  constructor(public viewType: string) {}
 }
 
 export class ThemeIcon {
@@ -40,6 +49,19 @@ export const window = {
   createQuickPick: (): unknown => ({}),
   showQuickPick: async (..._a: unknown[]): Promise<unknown> => undefined,
   showTextDocument: async (..._a: unknown[]) => undefined,
+  onDidChangeActiveTextEditor: (_cb: unknown) => ({ dispose() {} }),
+  onDidChangeWindowState: (_cb: unknown) => ({ dispose() {} }),
+  activeTextEditor: undefined as unknown,
+  tabGroups: {
+    all: [] as unknown[],
+    activeTabGroup: { activeTab: undefined as unknown },
+    onDidChangeTabs: (_cb: unknown) => ({ dispose() {} }),
+    onDidChangeTabGroups: (_cb: unknown) => ({ dispose() {} }),
+  },
+};
+
+export const comments = {
+  createCommentController: (_id: string, _label: string): unknown => ({ dispose() {} }),
 };
 
 export const workspace = {

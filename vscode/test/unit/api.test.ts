@@ -203,7 +203,7 @@ describe("Api", () => {
     ["a plain-text 500, as its text", raw(500, "Internal Server Error"), 500, "Internal Server Error"],
     ["a proxy's HTML 502, as its text", raw(502, "<html>Bad Gateway</html>"), 502, "<html>Bad Gateway</html>"],
     ["an empty 503, as its status text", raw(503, "", "Service Unavailable"), 503, "Service Unavailable"],
-    ["a 2xx that is not JSON, as unreadable", raw(200, "<html>login</html>"), 0, "Kraft's answer is not JSON: <html>login</html>"],
+    ["a 2xx that is not JSON, as unreadable", raw(200, "<html>login</html>"), 200, "Kraft's answer is not JSON: <html>login</html>"],
   ])("reports %s to onError", async (_, f, status, detail) => {
     const api = new Api("http://h:1", undefined, f as any);
     const seen: ApiFailure[] = [];
