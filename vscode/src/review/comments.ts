@@ -6,7 +6,7 @@ import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review
 import type { Store } from "../core/store";
 import type { ThreadCache } from "../core/threadCache";
 import {
-  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeKey, placeThread,
+  authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type Side,
 } from "../core/threads";
 import type { registerDiff } from "./diff";
@@ -104,17 +104,22 @@ export function registerComments(
     othersChanged.fire(otherUri(id));
     for (const [tid, line] of other.lineOf) ranges.set(tid, { uri: otherUri(id), range: new vscode.Range(line, 0, line, 0) });
 
-    const keyOf = (t: ReviewThread) => {
-      const p = places.get(t.id)!;
-      return p.kind === "file" ? placeKey(p) : `${OTHER}|${other.lineOf.get(t.id)}`;
-    };
+    // A thread is redrawn only when it moves to another document; on the same one its range moves,
+    // so an edit or a half-typed reply survives a shift in lines.
+    const keyOf = (t: ReviewThread) => ranges.get(t.id)!.uri.toString();
     const mine = drawnOf(id);
     const plan = syncPlan(new Map([...mine].map(([tid, d]) => [tid, d.key])), threads, keyOf);
     for (const tid of plan.remove) {
       mine.get(tid)?.vt.dispose();
       mine.delete(tid);
     }
-    for (const t of plan.update) mine.set(t.id, { ...mine.get(t.id)!, thread: t }), fill(mine.get(t.id)!.vt, t);
+    for (const t of plan.update) {
+      const d = mine.get(t.id)!;
+      const at = ranges.get(t.id)!.range;
+      if (!d.vt.range.isEqual(at)) d.vt.range = at;
+      mine.set(t.id, { ...d, thread: t });
+      fill(d.vt, t);
+    }
     for (const t of plan.create) {
       const at = ranges.get(t.id)!;
       adopt(id, controller.createCommentThread(at.uri, at.range, []), t, keyOf(t));
@@ -130,11 +135,12 @@ export function registerComments(
 
   // One draw at a time per item: each reads the cache as it is when it starts.
   const drawing = new Map<string, Promise<void>>();
-  const redraw = (id: string) => {
-    const next = (drawing.get(id) ?? Promise.resolve()).then(() => draw(id)).catch(() => {});
+  const queue = (id: string, run: () => unknown) => {
+    const next = (drawing.get(id) ?? Promise.resolve()).then(run).then(() => {}, () => {});
     drawing.set(id, next);
     return next;
   };
+  const redraw = (id: string) => queue(id, () => draw(id));
 
   const showOthers = async (id: string) => {
     if (!cache.get(id)) await cache.load(id).catch(() => {});
@@ -196,8 +202,8 @@ export function registerComments(
     const lines = selectionLines(reply.thread.range.start, reply.thread.range.end);
     try {
       const t = await api.createThread(id, toThreadIn(reply.thread.uri.scheme, file, lines, reply.text, pick, diff.opened.get(id)?.renames)!);
-      // The thread VS Code drew for the reply becomes this one; the reload moves it if the server placed it elsewhere.
-      adopt(id, reply.thread, t, placeKey({ kind: "file", file, side, lines }));
+      // The thread VS Code drew for the reply becomes this one, unless a draw already drew it; the reload moves it if need be.
+      await queue(id, () => (drawnOf(id).has(t.id) ? reply.thread.dispose() : adopt(id, reply.thread, t, reply.thread.uri.toString())));
     } catch (e) {
       await reportError(e, store, id);
       return;

@@ -73,7 +73,7 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
       state.worktrees.set(id, diff.worktree_path!);
       const files = reviewFiles(diff);
       if (files.length === 0) return void vscode.window.showInformationMessage(`${id} has no changes.`);
-      const renames = await renamesOf(diff.worktree_path!, diff.base_ref);
+      const renames = diff.worktree_path ? await renamesOf(diff.worktree_path, diff.base_ref) : new Map<string, string>();
       state.lastOpened = { id, files };
       state.opened.set(id, { files, baseRef: diff.base_ref, renames });
       // A renamed file's base side is its old path.
