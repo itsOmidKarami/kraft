@@ -1,6 +1,7 @@
 import { until } from "../../format";
-import type { ChainNode, TaskProgress, WorkItem } from "../../types";
+import type { ChainNode, ItemAction, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
+import { admits } from "../item/status";
 import { groupOf } from "./model";
 
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
@@ -88,6 +89,26 @@ export function rowAction(i: Row): RowAction | null {
     case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
   }
+}
+
+/** `rowAction`, or null when the server's `actions` refuse its door: Resume and
+ *  Answer go through `resume`; Retry… (failed, stuck) and a cap's Raise (its
+ *  limit editor patches, then retries) through `retry`; a budget's Raise
+ *  through `raise_budget` or `retry`, since the peek offers Retry when it
+ *  can't raise; a gate's review through `approve` or `reject`. Open goes to
+ *  the peek, which decides its own doors. On a server that sends no
+ *  `actions`, `rowAction` as it is. `rowAction` stays as it is for the
+ *  VS Code extension, which applies `actions` itself. */
+export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction | null {
+  const a = rowAction(i);
+  if (!a) return null;
+  const any = (...verbs: ItemAction[]) => verbs.some((v) => admits(i, v, true));
+  if (a.kind === "resume") return any("resume") ? a : null;
+  if (a.kind === "gate") return any("approve", "reject") ? a : null;
+  if (i.display_status === "failed" || i.stop?.kind === "stuck" || i.stop?.kind === "cap") return any("retry") ? a : null;
+  if (i.stop?.kind === "question") return any("resume") ? a : null;
+  if (i.stop?.kind === "budget") return any("raise_budget", "retry") ? a : null;
+  return a;
 }
 
 /** The row's NodeGlyph: the current node's kind and icon, its state from the status. */

@@ -7,7 +7,7 @@ import type { ChainNode, DiffFile, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { neverStarted, RELEASED, spentLine } from "./status";
+import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
@@ -21,7 +21,11 @@ type Handlers = {
   onDuplicate: () => void;
   onOpenNode: (node: string) => void;
 };
-type Card = { tone: "bad" | "info" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: { label: string; run: () => unknown; primary?: boolean }[]; node?: string | null; body?: ReactNode };
+type Action = { label: string; run: () => unknown; primary?: boolean };
+type Card = { tone: "bad" | "info" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: Action[]; node?: string | null; body?: ReactNode };
+
+/** `action` where `ok`, the server admitting its door (`admits`), else nothing. */
+const when = (ok: boolean, action: Action): Action[] => (ok ? [action] : []);
 
 const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : null);
 const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
@@ -86,7 +90,8 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
  *  (`FORGE_LOGIN_HINT`; the repo's settings hold no token), a stranded claim just a retry, and any other
  *  infrastructure stop, or one naming no cause, a way to the repo's settings. */
 function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
-  return failedFix(item) === "repo" ? [retry, { label: "Check the repo settings", run: h.onRepos }] : [retry];
+  const retries = when(admits(item, "retry", true), retry);
+  return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
 }
 
 function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
@@ -106,7 +111,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
       body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : undefined,
       facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
-      actions: [...failedActions(item, retryFrom(item, node, run), h), { label: "Escalate…", run: h.onEscalate }],
+      actions: [...failedActions(item, retryFrom(item, node, run), h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
     };
   }
   if (status === "waiting" && stop?.kind === "rate_limit") {
@@ -144,7 +149,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       actions: [
         // Decisions §14: the review page on that node.
         { label: "Review the conflicts", primary: true, run: () => h.onReview(stop.node ?? undefined) },
-        { label: "Send back with guidance", run: h.onEscalate },
+        ...when(admits(item, "escalate", true), { label: "Send back with guidance", run: h.onEscalate }),
       ],
     };
   }
@@ -160,9 +165,9 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.",
       facts: [],
       actions: [
-        { label: `Reopen !${ref}`, primary: true, run: () => run(act.reopenMr(item.id)) },
-        ...(opened?.node_id ? [{ label: "Open a new MR", run: () => run(act.retry(item.id, { path: opened.node_id! })) }] : []),
-        { label: "Cancel item…", run: h.onCancel },
+        ...when(admits(item, "reopen_mr", true), { label: `Reopen !${ref}`, primary: true, run: () => run(act.reopenMr(item.id)) }),
+        ...when(!!opened?.node_id && admits(item, "retry", true), { label: "Open a new MR", run: () => run(act.retry(item.id, { path: opened!.node_id! })) }),
+        ...when(admits(item, "cancel", true), { label: "Cancel item…", run: h.onCancel }),
       ],
     };
   }
@@ -173,8 +178,8 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, node: stop.node,
       facts: spent ? [spent] : [],
       actions: [
-        retryFrom(item, node, run),
-        { label: "Escalate…", run: h.onEscalate },
+        ...when(admits(item, "retry", true), retryFrom(item, node, run)),
+        ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate }),
       ],
     };
   }
@@ -199,7 +204,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       ],
       actions: [
         { label: "Duplicate as new item", primary: true, run: h.onDuplicate },
-        { label: "Archive", run: () => run(act.archive(item.id)) },
+        ...when(admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
       ],
     };
   }
@@ -250,7 +255,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
         ))}
       </dl>
       {error && <p className="item-error" role="alert">{error}</p>}
-      {waits > 0 && (blocked || item.display_status === "paused") && (
+      {waits > 0 && (blocked || item.display_status === "paused") && admits(item, "unblock", true) && (
         <div className="item-actions">
           <Button disabled={busy} onClick={unblock}>Unblock</Button>
         </div>
@@ -271,6 +276,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const [busy, setBusy] = useState(false);
   if (item.display_status !== "paused") return null;
   if (neverStarted(item)) return <NotStartedCard item={item} />;
+  const resumes = admits(item, "resume", true);
   // No agent task paused at this node: the server refuses a steer, so offer plain Resume only.
   const steerable = item.steerable !== false;
   const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
@@ -298,8 +304,8 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       )}
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
-        {steerable && <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>}
-        <Button variant={steerable ? "secondary" : "primary"} disabled={busy} onClick={() => resume(false)}>Resume</Button>
+        {steerable && resumes && <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>}
+        {resumes && <Button variant={steerable ? "secondary" : "primary"} disabled={busy} onClick={() => resume(false)}>Resume</Button>}
       </div>
     </section>
   );

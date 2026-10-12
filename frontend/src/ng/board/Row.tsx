@@ -3,7 +3,7 @@ import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { chainOf, groupOf } from "./model";
-import { glyphOf, reasonTail, rowAction, ticksOf, type RowAction } from "./rowText";
+import { admittedRowAction, glyphOf, reasonTail, ticksOf, type RowAction } from "./rowText";
 import { Ticks } from "./Ticks";
 
 export interface RowProps {
@@ -26,7 +26,7 @@ export interface RowProps {
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
 export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own }: RowProps) {
   const g = glyphOf(item);
-  const act = own ? null : rowAction(item);
+  const act = own ? null : admittedRowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
   // A row's action is named by what it does ("Review to approve") and described by its item:

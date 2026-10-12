@@ -11,12 +11,8 @@ const sources = (dir: string): string[] =>
   );
 
 describe("item page contract", () => {
-  // R16, R27, R28: the badge, main button, banner and card read the server's
-  // display_status and stop; the shipped UI's client-side derivation stays out.
-  it("never imports deriveState or the shipped item states", () => {
-    const bad = sources(here).filter((f) => /from\s+["'][./]*(?:deriveState|store["'].*useItemStates)|useItemStates|deriveState/.test(readFileSync(f, "utf-8")));
-    expect(bad.map((f) => relative(here, f))).toEqual([]);
-  });
+  // R16, R27, R28, that the badge and tone read the server's display_status
+  // and not the raw status, is pinned on headerState itself in status.test.ts.
 
   // R17: cancelling keeps the branch and worktree; abandon deletes them and stays CLI-only.
   it("never calls /abandon", () => {

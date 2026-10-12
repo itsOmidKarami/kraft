@@ -1,7 +1,8 @@
 /**
  * Deterministic API fixtures for the UI contract. Shapes follow
- * frontend/src/types/*.ts. Every display state deriveState() can produce is
- * reachable here in milliseconds — no orchestrator, no fake agent.
+ * frontend/src/types/*.ts. Every case in `STATES` is reachable here in
+ * milliseconds, each carrying the server's display_status and stop — no
+ * orchestrator, no fake agent.
  *
  * Variants:
  *   default — realistic data, one item per state, medium titles
@@ -315,10 +316,9 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
     attachments: long ? [{ kind: "spec", path: ".engineering/specs/2026-09-12-reuse-what-we-measured.md" }] : [],
     mr_ref: null, progress: null, rate_limit: null,
     // Kraft UI v2 · B1, hand-derived per case below (`board.display_status`'s
-    // rules): data only, the shipped UI still derives its own via
-    // `deriveState` and never reads these.
+    // rules): the UI's board groups, badges and buttons read these two.
     display_status: "running", stop: null,
-    // Kraft UI v2 · B13: data only, unread by the shipped UI.
+    // Kraft UI v2 · B13: the item page's chain pane reads these.
     summary: {
       nodes_done: Math.max(cur, 0),
       nodes_total: nodes.length,

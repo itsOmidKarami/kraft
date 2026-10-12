@@ -29,6 +29,15 @@ describe("groupOf", () => {
     expect(groupOf({ display_status: "blocked", current_node_id: null })).toBe("not_started");
     expect(groupOf({ display_status: "blocked", current_node_id: "implement" })).toBe("running");
   });
+
+  // R16: the group is the server's display_status, never the raw status beside it.
+  it.each([
+    ["active with a gate stop: Needs you", { status: "active", display_status: "needs_you", stop: { kind: "gate", node: "review", resume_at: null, reason: null } }, "needs"],
+    ["needs_human but paused before it started: Not started", { status: "needs_human", display_status: "paused", current_node_id: null }, "not_started"],
+    ["paused but running again: Running", { status: "paused", display_status: "running", current_node_id: "implement" }, "running"],
+  ] as [string, Partial<WorkItem>, string][])("%s", (_name, over, group) => {
+    expect(groupOf(item("w", over.display_status!, over))).toBe(group);
+  });
 });
 
 describe("groupsOf", () => {

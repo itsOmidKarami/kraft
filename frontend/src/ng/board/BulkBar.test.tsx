@@ -42,6 +42,16 @@ describe("BulkBar", () => {
     expect(screen.getByRole("button", { name: "Archive 1" })).toBeEnabled();
   });
 
+  // F4: each item counts only where the server's `actions` admit the door; the old reading is a server's that sends none.
+  it.each([
+    ["Cancel, the server refusing it on one", [RUN, { ...NEED, actions: ["retry", "escalate"] }], "Cancel 1…"],
+    ["Archive, the server refusing it on one", [DONE, { ...item("d6", "done", "completed"), actions: ["abandon"] }], "Archive 1"],
+    ["Pause, a queued one the server takes", [RUN, { ...item("q7", "queued", "queued"), actions: ["pause", "cancel"] }], "‖ Pause 2"],
+  ] as const)("counts %s", (_name, checked, label) => {
+    mount([...checked] as WorkItem[]);
+    expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+  });
+
   it("greys Archive when nothing checked has ended, and says why", () => {
     mount([NEED]);
     const archive = screen.getByRole("button", { name: "Archive" });

@@ -8,9 +8,24 @@ import { nodeBar, type NodeActId } from "../phone/node/model";
 import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
-import { archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
+import { ITEM_ACTIONS, type ItemAction } from "../../types/vocab.generated";
+import { admits, archivable, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
+
+/** Which lifecycle door takes which item state: `tests/api/lifecycle_doors.json`, the table the
+ *  backend's `test_a_door_takes_only_the_states_this_table_lists` drives every route against, so
+ *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
+ *  surface's link to another page: it calls nothing. */
+const LIFECYCLE: { states: Record<string, { depends_on?: string }>; doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
+
+/** The `actions` the server sends an item in `state`: the doors the table says take it, in `ItemAction` order, less the
+ *  two that answer 200 and change nothing (`tests/api/test_lifecycle_actions.py` holds the server to the same rule). */
+const serverActions = (state: string): ItemAction[] =>
+  ITEM_ACTIONS.filter((a) => Object.entries(LIFECYCLE.doors).some(([door, spec]) =>
+    (door === "budget_raise" ? "raise_budget" : door) === a && spec.takes.includes(state)
+    && !(state === "archived" && door === "archive") && !(door === "unblock" && !LIFECYCLE.states[state].depends_on)));
+const without = (state: string, ...gone: ItemAction[]) => serverActions(state).filter((a) => !gone.includes(a));
 
 type Scope = WorkItemStop["scope"];
 /** A budget stop is on the item's own cap unless a row says otherwise: the one `/budget/raise` takes. */
@@ -52,8 +67,64 @@ describe("headerState: every display status, from the server's fields only", () 
   });
 
   it("Archive in the panel is live only for done and cancelled", () => {
-    expect((["done", "cancelled"] as const).every(archivable)).toBe(true);
-    expect((["running", "paused", "failed", "needs_you", "archived"] as const).some(archivable)).toBe(false);
+    expect((["done", "cancelled"] as const).every((display_status) => archivable({ display_status }))).toBe(true);
+    expect((["running", "paused", "failed", "needs_you", "archived"] as const).some((display_status) => archivable({ display_status }))).toBe(false);
+  });
+});
+
+describe("the server's actions decide which doors the header offers (F4)", () => {
+  it.each<[string, readonly ItemAction[] | null | undefined, boolean, boolean]>([
+    ["an older server: the UI's own reading", undefined, true, true],
+    ["an older server: the UI's own reading, refused", undefined, false, false],
+    ["listed", ["pause"], false, true],
+    ["not listed, whatever the UI reads", ["steer"], true, false],
+    ["an empty list admits nothing", [], true, false],
+  ])("admits: %s", (_name, actions, rule, want) => expect(admits({ actions }, "pause", rule)).toBe(want));
+
+  const ownBudget = { kind: "budget", node: "n", resume_at: null, reason: null, scope: "work_item" } as WorkItemStop;
+  it.each<[string, Parameters<typeof headerState>[0], Main | null, string[]]>([
+    ["running, the server's own list: today's", { display_status: "running", current_node_id: "n", stop: null, actions: serverActions("running") }, "pause", NO_ESC],
+    ["running, the server refusing pause: no main", { display_status: "running", current_node_id: "n", stop: null, actions: without("running", "pause") }, null, NO_ESC],
+    ["a budget stop on the item's own cap, the server's own list: Raise", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: serverActions("budget_item_cap") }, "raise", NO_ESC],
+    // A raise the item could make, which the server will not: Retry, the next way on.
+    ["a budget stop on the item's own cap, the server refusing raise_budget", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: without("budget_item_cap", "raise_budget") }, "retry", NO_ESC],
+    ["a budget stop, the server refusing both", { display_status: "needs_you", current_node_id: "n", stop: ownBudget, actions: without("budget_item_cap", "raise_budget", "retry") }, null, NO_ESC],
+    ["failed, the server refusing escalate: no Escalate… in the panel", { display_status: "failed", current_node_id: "n", stop: null, actions: without("failed", "escalate") }, "retry", NO_ESC],
+    ["failed, the server refusing complete and cancel", { display_status: "failed", current_node_id: "n", stop: null, actions: without("failed", "complete", "cancel") }, "retry", ["escalate", "archive"]],
+    // A gate is a view with its own decisions: Open gate stays.
+    ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
+    ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: without("not_started", "resume", "cancel") }, null, []],
+    ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
+  ])("%s", (_name, item, main, panel) => {
+    expect(headerState(item)).toMatchObject({ main, panel });
+  });
+
+  // The phone's bar on the server's own lists: Steer is the composer's pause-then-resume or retry, never `steer`.
+  const capStop = { kind: "cap", node: "verification", resume_at: null, reason: null } as WorkItemStop;
+  it.each<[string, Partial<ItemDetail>, (string | null)[]]>([
+    ["a running item keeps Pause · Steer", { display_status: "running", status: "active", actions: serverActions("running") }, ["pause", "steer"]],
+    ["a cap stop keeps Steer · Retry", { display_status: "needs_you", status: "needs_human", stop: capStop, actions: serverActions("cap") }, ["steer", "retry"]],
+    // A cap's Raise is its limit editor's PATCH, then /retry.
+    ["a cap stop showing its limit, retry refused: no Raise", { display_status: "needs_you", status: "needs_human", stop: { ...capStop, limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }, actions: without("cap", "retry") }, [null, null]],
+  ])("pairOf: %s", (_name, over, want) => {
+    const p = pairOf(detail(over));
+    expect([p.secondary?.id ?? null, p.primary?.id ?? null]).toEqual(want);
+  });
+
+  // The editor's own door: `/budget/raise` for the item's cap, a PATCH and `/retry` for a policy limit.
+  const policyBudget = { ...ownBudget, scope: "usd", limit: { path: "", key: "budget_usd", value: 0.01, maximum: null } } as WorkItemStop;
+  it.each<[string, WorkItemStop, ItemAction[] | undefined, boolean]>([
+    ["the item's own cap, an older server", ownBudget, undefined, true],
+    ["the item's own cap, raise_budget listed", ownBudget, ["raise_budget"], true],
+    ["the item's own cap, retry alone", ownBudget, ["retry"], false],
+    ["a policy limit, retry listed", policyBudget, ["retry"], true],
+    ["a policy limit, raise_budget alone", policyBudget, ["raise_budget"], false],
+    ["the daily cap, everything listed", { ...ownBudget, scope: "daily" }, [...ITEM_ACTIONS], false],
+  ])("offersRaise: %s", (_name, stop, actions, want) => expect(offersRaise({ stop, actions })).toBe(want));
+
+  it("archivable: an ended item the server will not archive is not", () => {
+    expect(archivable({ display_status: "done", actions: ["restore"] })).toBe(false);
+    expect(archivable({ display_status: "done", actions: ["archive"] })).toBe(true);
   });
 });
 
@@ -76,11 +147,6 @@ describe("budgetRaise: only a budget stop the server would raise offers a raise"
   });
 });
 
-/** Which lifecycle door takes which item state: `tests/api/lifecycle_doors.json`, the table the
- *  backend's `test_a_door_takes_only_the_states_this_table_lists` drives every route against, so
- *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
- *  surface's link to another page: it calls nothing. */
-const LIFECYCLE: { doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
 type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "unblock" | "approve" | "navigate";
 const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.doors[door].takes.includes(state);
 
@@ -135,8 +201,8 @@ function offered(item: ItemDetail): [string, Door][] {
   const p = pairOf(item);
   const phone = PHONE_DOOR(item);
   return [
-    [`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]],
-    ...hs.panel.filter((x) => x !== "archive" || archivable(item.display_status)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
+    ...(hs.main ? [[`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]] as [string, Door]] : []),
+    ...hs.panel.filter((x) => x !== "archive" || archivable(item)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
     ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, "navigate"]),
     ...footerActs(item, footerState(item, item.worker_sessions)).map((x): [string, Door] => [`path footer ${x}`, x]),
     ...[p.secondary, p.primary].flatMap((x): [string, Door][] => (x ? [[`phone bar ${x.id}`, phone[x.id]]] : [])),
@@ -155,12 +221,27 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
     expect(refused).toEqual([]);
   });
 
+  // With nothing admitted, a surface keeps only its links and the views that make their own decisions (F4).
+  const VIEWS = /^(header main (gate|conflicts)|phone bar (review|conflicts|board)|phone node \S+ review)$/;
+  it.each(CASES)("%s, the server admitting nothing: links and views only", (_name, over) => {
+    const left = offered(detail({ ...over, actions: [] })).filter(([where, door]) => door !== "navigate" && !VIEWS.test(where)).map(([where]) => where);
+    expect(left).toEqual([]);
+  });
+
+  // The server's own list for each state (F4) takes nothing away that the UI's reading offered: every way on,
+  // Steer included, which goes through the composer's door and never through `steer` (paused agent and question only).
+  it.each(CASES)("%s, the server's own list: every surface as on an older server", (_name, over, state) => {
+    const was = offered(detail(over)).map(([where]) => where);
+    const now = offered(detail({ ...over, actions: serverActions(state) })).map(([where]) => where);
+    expect({ lost: was.filter((w) => !now.includes(w)), gained: now.filter((w) => !was.includes(w)) }).toEqual({ lost: [], gained: [] });
+  });
+
   // The two layouts agree on the way on from a stop: the header's main and the phone bar's primary.
   // A cap stop is the one they word apart: the phone's raise is its card's link, beside Retry.
   const WAY: Partial<Record<Main | ActId, string>> = { gate: "gate", review: "gate", answer: "answer", raise: "raise", retry: "retry", conflicts: "conflicts", reopen: "reopen-mr", "reopen-mr": "reopen-mr" };
   it.each(CASES.filter(([name, over]) => (over.display_status === "needs_you" || over.display_status === "escalated") && name !== "cap"))("%s: the desktop header and the phone bar offer the same way on", (_name, over) => {
     const item = detail(over);
-    expect(WAY[headerState(item).main]).toBe(WAY[pairOf(item).primary!.id]);
+    expect(WAY[headerState(item).main!]).toBe(WAY[pairOf(item).primary!.id]);
   });
 });
 
@@ -171,4 +252,15 @@ describe("spentLine", () => {
     ["no time cap: dollars alone", { budget_cap: cap, running_time: { running_s: 72 * 60, cap_minutes: null } }, "$2.41 of $5.00"],
     ["an older server: dollars alone", { budget_cap: cap }, "$2.41 of $5.00"],
   ] as [string, Pick<WorkItem, "budget_cap" | "running_time">, string][])("%s", (_, item, line) => expect(spentLine(item)).toBe(line));
+});
+
+// R16, R27, R28: the badge and its tone are the server's display_status, never the raw status beside it.
+describe("headerState reads display_status, not the raw status", () => {
+  it.each([
+    ["active with a gate stop", { status: "active", display_status: "needs_you", stop: { kind: "gate", node: "n", resume_at: null, reason: null } }, "NEEDS YOU", "warn", "gate"],
+    ["needs_human but paused mid-chain", { status: "needs_human", display_status: "paused", current_node_id: "n" }, "PAUSED", "muted", "resume"],
+    ["completed but archived", { status: "completed", display_status: "archived" }, "ARCHIVED", "muted", "restore"],
+  ] as [string, Partial<ItemDetail>, string, string, string][])("%s", (_name, over, badge, tone, main) => {
+    expect(headerState(detail(over))).toMatchObject({ badge, tone, main });
+  });
 });

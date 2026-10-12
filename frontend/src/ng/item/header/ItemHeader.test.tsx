@@ -227,6 +227,18 @@ describe("ItemHeader", () => {
     expect(await screen.findByText("continues thread 1 (turn 3), so it remembers the earlier turns")).toBeInTheDocument();
   });
 
+  // F4: the server's `actions` refuse every way on: no main button, and its panel's doors are on the ⋮ instead.
+  it("with no main button the server admits, puts the panel's doors on the ⋮, and they act", async () => {
+    stubFetch(WRITES);
+    show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null }, actions: ["escalate", "complete", "cancel"], escalation_threads: [{ thread: 1, session_id: "s", turns: 2, started_at: "t", ended_at: null, status: "done" }] });
+    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent).slice(-3)).toEqual(["Escalate…", "Mark complete…", "Cancel…"]);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Escalate…" }));
+    expect(await screen.findByText("continues thread 1 (turn 3), so it remembers the earlier turns")).toBeInTheDocument();
+  });
+
   // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main button is its way on, never Pause.
   it.each([
     ["cap", /Raise cap/, { handler: "onRaise" as const }],

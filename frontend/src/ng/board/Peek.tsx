@@ -18,7 +18,7 @@ import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
-import { budgetRaise, headerState, MAIN_LABEL, neverStarted } from "../item/status";
+import { budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
@@ -50,13 +50,15 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
   const navigate = useNavigate();
   // Asked for the budget editor (a row's Raise budget) on a stop it does not raise: the stop's own
   // limit editor, or Overview, whose banner says why the item can't raise it.
+  // A raise the server refuses (`offersRaise`) is Overview's too, with its Retry.
   const stop = loaded.state === "ready" ? loaded.item.stop : null;
+  const canRaise = loaded.state === "ready" && offersRaise(loaded.item);
   useEffect(() => {
-    if (!budget || !stop || stop.kind !== "budget" || budgetRaise({ stop }) === "item") return;
+    if (!budget || !stop || stop.kind !== "budget" || (canRaise && budgetRaise({ stop }) === "item")) return;
     onBudget(false);
     onTab("overview");
-    if (stop.limit) openLimitEditor(id);
-  }, [budget, stop, id, onBudget, onTab]);
+    if (stop.limit && canRaise) openLimitEditor(id);
+  }, [budget, stop, canRaise, id, onBudget, onTab]);
   const open = () => navigate(`/work-items/${encodeURIComponent(id)}`);
   const common = { id: "board-peek", open: true, size, onCollapse: onClose, onExpand: () => {} };
   if (loaded.state !== "ready")
@@ -224,9 +226,12 @@ function Footer({ item, reload, offline, onOpen, onRaise, onAnswer }: { item: It
   };
   return (
     <>
-      <button ref={btn} type="button" className={`btn ${hs.main === "pause" ? "btn-secondary" : "btn-primary"}`} disabled={offline || busy} onClick={main}>
-        {hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
-      </button>
+      {/* No main when the server admits none of the item's ways on: Open item alone. */}
+      {hs.main && (
+        <button ref={btn} type="button" className={`btn ${hs.main === "pause" ? "btn-secondary" : "btn-primary"}`} disabled={offline || busy} onClick={main}>
+          {hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
+        </button>
+      )}
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}
       <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">

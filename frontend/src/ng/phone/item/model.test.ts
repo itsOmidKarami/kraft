@@ -42,10 +42,24 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["done", mk("done"), [null, "board"]],
     ["cancelled", mk("cancelled"), [null, "board"]],
     ["archived", mk("archived"), [null, "restore"]],
+    // The server's `actions` (F4): a door it does not list is dropped, the pair collapsing to its one button.
+    // A running item's Steer is a pause, then a resume: with no pause, neither.
+    ["running, the server refusing pause", mk("running", null, { actions: ["steer", "complete", "cancel"] }), [null, null]],
+    ["running, the server admitting pause", mk("running", null, { actions: ["pause", "complete", "cancel"] }), ["pause", "steer"]],
+    // A paused item's Steer is a resume with the note.
+    ["paused, the server refusing resume", mk("paused", null, { actions: ["steer", "skip", "cancel"] }), [null, null]],
+    ["failed, the server refusing escalate", mk("failed", stop("failed"), { actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    ["gate, the server refusing reject", mk("needs_you", stop("gate", { node: "plan_approval" }), { actions: ["approve"] }), [null, "review"]],
+    // A budget the item could raise, which the server will not: Retry, as on a cap it cannot raise.
+    ["budget, the item's own cap, the server refusing raise_budget", mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    ["mr closed, the server refusing reopen_mr", mk("needs_you", stop("mr_closed"), { actions: ["cancel"] }), [null, "cancel"]],
+    ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 
   it("hides Steer when no agent task can read a note, and keeps the rest (#387)", () => {
     expect(ids(mk("paused", null, { steerable: false }))).toEqual([null, "resume"]);
+    // A lone Pause moves to the primary as it always has, Steer or none.
+    expect(ids(mk("waiting", stop("wait"), { steerable: false }))).toEqual([null, "pause"]);
     expect(ids(mk("running", null, { steerable: false }))).toEqual([null, "pause"]);
     expect(ids(mk("needs_you", own(), { steerable: false, ...OWN_CAP }))).toEqual([null, "raise"]);
     expect(ids(mk("paused", null, { steerable: true }))).toEqual(["steer", "resume"]);
@@ -76,6 +90,12 @@ describe("kebabOf", () => {
     expect(kebabOf(mk("running", null)).map((a) => a.id)).not.toContain("archive");
     expect(kebabOf(mk("cancelled")).map((a) => a.id)).toContain("archive");
   });
+  it.each([
+    ["a cancelled item the server will not archive", mk("cancelled", null, { actions: ["abandon"] }), "archive"],
+    ["a failed item the server will not cancel", mk("failed", stop("failed"), { actions: ["retry", "escalate", "complete"] }), "cancel"],
+  ] as const)("drops a door the server's actions refuse: %s", (_name, item, gone) => {
+    expect(kebabOf(item).map((a) => a.id)).not.toContain(gone);
+  });
 });
 
 describe("cardOf: a gate's message (PH-14)", () => {
@@ -93,6 +113,8 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval" }))).toMatchObject({ title: "Waiting for your approval", where: "at plan_approval" });
     expect(cardOf(mk("needs_you", stop("budget", { reason: "The budget ran out." })))).toMatchObject({ tone: "bad", title: "The budget ran out", where: "at verification" });
     expect(cardOf(mk("needs_you", own(), OWN_CAP))?.text).toBe("Raising the budget resumes the item at once.");
+    // F4: a cap the item could raise, which the server takes no raise for now: the bar offers Retry, and the card says so.
+    expect(cardOf(mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "cancel"] }))?.text).toBe("Kraft takes no raise for it right now.");
     expect(cardOf(mk("needs_you", stop("budget", { scope: "daily" }), OWN_CAP))?.text).toMatch(/^The item can't raise this cap: the policy or the chain sets it\. Retry/);
     expect(cardOf(mk("needs_you", stop("cap", { reason: "Running time hit its 8h cap" })))?.text).toMatch(/Retry runs the node again/);
     expect(cardOf(mk("needs_you", stop("question", { task: "verification.review.code_review" }), { needs_context_question: "Allow it?" }))).toMatchObject({ title: "Needs you", text: "“Allow it?”", where: "asked by code_review · on verification" });

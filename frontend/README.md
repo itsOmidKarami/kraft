@@ -56,8 +56,6 @@ main.tsx          entry: fixes an old address, then loads ng/boot
 api.ts            the typed REST client (every call under /api)
 store.ts          zustand: work items, sessions and events, kept current by ws.ts
 ws.ts             the event websocket, with reconnect backoff
-deriveState.ts    leftovers of the previous UI's client-side state derivation;
-statusGroups.ts   ng/ must not import either (its board and item contract tests)
 types/            the API's payload shapes, written by hand to match the server
 ng/               the UI itself; everything below is in here
 testFixtures.ts   older shared test factories (see Testing)
@@ -110,10 +108,10 @@ either direction swaps the shape and keeps the URL.
 The two share data hooks, pure models and `ui/` primitives, never a pane. That
 is enforced by `ng/phone/contract.test.ts`: it reads every non-test file under
 `ng/phone/` and fails on a relative import that leaves `phone/` for anything
-not on its `ALLOWED` list, or that reaches `deriveState`. A
-module the phone genuinely should share gets a line in `ALLOWED` with the
-reason, in the same change that imports it. The same file pins that the restart call is made only from the phone's More and
-Access screens, each behind its own confirm.
+not on its `ALLOWED` list. A module the phone genuinely should share gets a
+line in `ALLOWED` with the reason, in the same change that imports it. The same
+file pins that the restart call is made only from the phone's More and Access
+screens, each behind its own confirm.
 
 Two more rules keep the phone's CSS apart (`ng/phone/css.test.ts`):
 

@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { DisplayStatus, EventType, SessionStatus, StopKind, WorkItemStatus } from "./vocab.generated";
+import type { DisplayStatus, EventType, ItemAction, SessionStatus, StopKind, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -121,7 +121,7 @@ export interface WorkItemAttachment {
  *  exactly one of these, so a pending gate, a plain failure and a
  *  stuck-but-not-yet-escalated stop -- all `needs_human` in `status` -- read
  *  apart with no client-side derivation. */
-export type { DisplayStatus };
+export type { DisplayStatus, ItemAction };
 
 /** The kinds the server sends: the generated vocabulary, nothing added by hand. */
 export type { StopKind };
@@ -359,6 +359,11 @@ export interface WorkItem {
   dependencies?: { id: string; title: string; status: WorkItemStatus; met: boolean }[];
   /** The board's status badge (Kraft UI v2 · B1). */
   display_status?: DisplayStatus;
+  /** The item actions the server admits now (`vocab.work_item.open_doors`),
+   *  list and detail. A surface offers a door only when its verb is here;
+   *  absent from a server older than it, where the UI keeps its own reading
+   *  (`ng/item/status`'s `admits`). */
+  actions?: ItemAction[];
   /** The stop `display_status` is reporting on; `null` off `needs_human`,
    *  `waiting` and `rate_limited`. Additive, unread by the shipped UI. */
   stop?: WorkItemStop | null;

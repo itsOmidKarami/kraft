@@ -1,9 +1,9 @@
-import type { ChainNode as ApiNode, KraftEvent } from "../../../types";
+import type { ChainNode as ApiNode, ItemAction, KraftEvent } from "../../../types";
 import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
 import { gateSkipped } from "../../item/events";
 import type { ItemDetail } from "../../item/useItem";
-import { retryable, skippable } from "../../item/status";
+import { admits, retryable, skippable } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
 import { passOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
@@ -25,6 +25,18 @@ const a = (id: NodeActId, label: string): NodeAct => ({ id, label });
  *  Retry only on an item the server would retry (`retryable`): a paused one
  *  has Skip · Resume, and a waiting one Pause · Skip, a rate-limited one Pause alone (R10b-01). */
 export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { secondary: NodeAct | null; primary: NodeAct | null } {
+  const p = nodeTable(item, node, graph);
+  // A door the server's `actions` refuse is dropped, the pair collapsing to its one button (`admits`).
+  const kept = (x: NodeAct | null): x is NodeAct => !!x && (NODE_DOOR[x.id] === null || admits(item, NODE_DOOR[x.id]!, true));
+  if (kept(p.secondary) === !!p.secondary && kept(p.primary) === !!p.primary) return p;
+  const rest = [p.secondary, p.primary].filter(kept);
+  return rest.length === 2 ? { secondary: rest[0], primary: rest[1] } : { secondary: null, primary: rest[0] ?? null };
+}
+
+/** The door each node act goes through; a gate's review is a view with its own decisions. */
+const NODE_DOOR: Record<NodeActId, ItemAction | null> = { pause: "pause", resume: "resume", skip: "skip", "retry-node": "retry", "retry-from": "retry", review: null };
+
+function nodeTable(item: ItemDetail, node: ApiNode, graph: ChainNode): { secondary: NodeAct | null; primary: NodeAct | null } {
   const none = { secondary: null, primary: null };
   const status = item.display_status ?? "running";
   if (status === "done" || status === "cancelled" || status === "archived") return none;

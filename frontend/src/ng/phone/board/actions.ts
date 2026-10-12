@@ -1,8 +1,9 @@
 import type { WorkItem } from "../../../types";
-import { rowAction } from "../../board/rowText";
+import { admittedRowAction } from "../../board/rowText";
+import { admits } from "../../item/status";
 
 /** What a card's buttons are (W17 brief B.4): the pair the prototype draws,
- *  chosen from the same `rowAction` the desktop row uses, so the two cannot
+ *  chosen from the same `admittedRowAction` the desktop row uses, so the two cannot
  *  disagree about which items have a button. */
 export type CardButton =
   | { kind: "approve"; label: string; gate: string; primary: true }
@@ -13,9 +14,14 @@ export type CardButton =
   | { kind: "resume"; label: string };
 
 export function cardButtons(item: WorkItem): CardButton[] {
-  const a = rowAction(item);
+  const a = admittedRowAction(item);
   if (!a) return [];
-  if (a.kind === "gate") return [{ kind: "approve", label: "Approve", gate: a.gate, primary: true }, { kind: "reject", label: "Reject…", gate: a.gate }];
+  // Each of the pair only where the server's `actions` admit it (an open must-fix refuses Approve, not Reject).
+  if (a.kind === "gate")
+    return [
+      ...(admits(item, "approve", true) ? [{ kind: "approve", label: "Approve", gate: a.gate, primary: true } as const] : []),
+      ...(admits(item, "reject", true) ? [{ kind: "reject", label: "Reject…", gate: a.gate } as const] : []),
+    ];
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {
