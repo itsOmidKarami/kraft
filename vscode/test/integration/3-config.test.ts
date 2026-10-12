@@ -41,6 +41,6 @@ suite("config", () => {
     const editor = await vscode.window.showTextDocument(doc);
     await editor.edit((e) => e.insert(new vscode.Position(0, 0), "# touched by the config test\n"));
     await doc.save();
-    await until("the no-offer verdict", () => (k.config.lastOffer === "none" ? true : undefined));
+    await until("the no-offer verdict", () => (k.config!.lastOffer === "none" ? true : undefined));
   });
 });
