@@ -50,6 +50,15 @@
     "onStartupFinished",
     "onLanguage:yaml"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode Kraft shows the board and gates read-only and does not check config files in the workspace.",
+      "restrictedConfigurations": [
+        "kraft.url"
+      ]
+    }
+  },
   "contributes": {
     "configuration": {
       "title": "Kraft",
@@ -57,7 +66,8 @@
         "kraft.url": {
           "type": "string",
           "default": "",
-          "description": "Kraft daemon URL. Empty: read KRAFT_HOST and KRAFT_PORT, then bind and port from $KRAFT_HOME/config/access.yaml."
+          "scope": "machine",
+          "description": "Kraft daemon URL, set in user or Remote settings only. Empty: read KRAFT_HOST and KRAFT_PORT, then bind and port from $KRAFT_HOME/config/access.yaml."
         },
         "kraft.notifications": {
           "type": "string",
@@ -341,6 +351,14 @@
         {
           "command": "kraft.review.discard",
           "when": "false"
+        },
+        {
+          "command": "kraft.lintLibrary",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "kraft.showResolved",
+          "when": "isWorkspaceTrusted"
         }
       ],
       "editor/title": [

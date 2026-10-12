@@ -2,10 +2,11 @@ import * as vscode from "vscode";
 import { reportError } from "../actions";
 import { ApiError, type Api } from "../core/api";
 import { composeNote, destinationOf, type Draft, type DraftComment } from "../core/note";
+import { mutating } from "../core/guard";
 import { commandItemId, parseReviewUri } from "../core/review";
 import type { Store } from "../core/store";
 
-export function registerComments(context: vscode.ExtensionContext, store: Store, api: Api, readOnly: () => boolean) {
+export function registerComments(context: vscode.ExtensionContext, store: Store, api: Api, refusal: () => string | null) {
   const key = (id: string) => `kraft.draft.${id}`;
   const drafts = (id: string): Draft => context.workspaceState.get<Draft>(key(id)) ?? { comments: [] };
   const save = (id: string, d: Draft) => context.workspaceState.update(key(id), d.comments.length || d.summary ? d : undefined);
@@ -41,7 +42,11 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
   const clear = (id: string) => save(id, { comments: [] });
 
   const submit = async (id: string, summary?: string): Promise<boolean> => {
-    if (readOnly()) return false;
+    const no = refusal();
+    if (no) {
+      void vscode.window.showWarningMessage(no);
+      return false;
+    }
     const d = drafts(id);
     if (!d.comments.length && !summary?.trim()) {
       void vscode.window.showInformationMessage("No review comments to send.");
@@ -77,18 +82,20 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
   };
 
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact"]);
+  const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
   context.subscriptions.push(
-    vscode.commands.registerCommand("kraft.review.submit", async (arg?: unknown) => {
+    // Refused before the summary box opens.
+    vscode.commands.registerCommand("kraft.review.submit", mutating("kraft.review.submit", refusal, warn, async (arg?: unknown) => {
       const id = idOf(arg);
       if (!id) return;
       const summary = await vscode.window.showInputBox({ prompt: "Overall comment (optional)" });
       if (summary === undefined) return;
       await submit(id, summary);
-    }),
-    vscode.commands.registerCommand("kraft.review.discard", async (arg?: unknown) => {
+    })),
+    vscode.commands.registerCommand("kraft.review.discard", mutating("kraft.review.discard", refusal, warn, async (arg?: unknown) => {
       const id = idOf(arg);
       if (id) await clear(id);
-    }),
+    })),
   );
 
   return { drafts, addDraft, submit, confirmApprove };
