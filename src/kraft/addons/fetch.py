@@ -356,6 +356,99 @@ def digest(files: Mapping[str, tuple[str, bytes]]) -> str:
     return "sha256:" + hashlib.sha256(digest_manifest(files)).hexdigest()
 
 
+#: How every refusal of a store file ends: the store was written once, read-only.
+CHANGED = "the store was changed after it was installed"
+
+
+class StoreMismatch(AddonRefused):
+    """A file in a store that does not match the digest the store was written
+    with. The message names the store-relative file and ends with `CHANGED`."""
+
+
+@dataclass(frozen=True)
+class StoreFiles:
+    """A store's `.kraft-digest`, checked against the store's name: every read
+    of a store file after the store is written goes through `read`."""
+
+    root: Path
+    #: Relative path to (git mode, SHA-256 hex), as the manifest lists it.
+    listed: Mapping[str, tuple[str, str]]
+    #: The manifest's bytes, as read.
+    raw: bytes
+
+    def read(self, rel: str, *, optional: bool = False) -> bytes | None:
+        """`rel`'s bytes, only if they hash to its manifest line; the bytes
+        returned are the bytes hashed. A listed file that is gone, a file at a
+        path the manifest does not list, and a symlink or other non-regular
+        file are `StoreMismatch`. With `optional`, a path neither listed nor
+        present is None."""
+        path = self.root / rel
+        if rel not in self.listed:
+            if optional and not os.path.lexists(path):
+                return None
+            raise StoreMismatch(f"{rel} is not in its digest; {CHANGED}")
+        if not os.path.lexists(path):
+            raise StoreMismatch(f"{rel} is missing; {CHANGED}")
+        try:
+            data = read_regular(path, _cap(rel))
+        except FetchError as exc:
+            raise StoreMismatch(f"{rel} does not match its digest; {CHANGED}") from exc
+        if hashlib.sha256(data).hexdigest() != self.listed[rel][1]:
+            raise StoreMismatch(f"{rel} does not match its digest; {CHANGED}")
+        return data
+
+    def paths(self, prefix: str) -> list[str]:
+        """The listed paths that start with `prefix`, sorted."""
+        return sorted(rel for rel in self.listed if rel.startswith(prefix))
+
+
+def open_store(root: Path) -> StoreFiles:
+    """The store at `root`, its `.kraft-digest` read (bounded, no symlink) and
+    checked to hash to the store's name: the digest the lock or an item's pin
+    recorded. `StoreMismatch` when it does not, or cannot be read."""
+    try:
+        raw = read_regular(root / DIGEST_FILE, MAX_FILES * 512)
+    except FetchError as exc:
+        raise StoreMismatch(f"{DIGEST_FILE} cannot be read; {CHANGED}") from exc
+    if hashlib.sha256(raw).hexdigest() != root.name:
+        raise StoreMismatch(f"{DIGEST_FILE} does not hash to the store's name; {CHANGED}")
+    listed: dict[str, tuple[str, str]] = {}
+    for line in raw.decode("utf-8", "replace").splitlines():
+        fields = line.split("\0")
+        if len(fields) != 3 or not fields[0] or len(fields[2]) != 64:
+            raise StoreMismatch(f"{DIGEST_FILE} is malformed; {CHANGED}")
+        listed[fields[0]] = (fields[1], fields[2])
+    return StoreFiles(root, listed, raw)
+
+
+def verify_store(root: Path) -> Extracted:
+    """The whole store at `root`, checked: its manifest hashes to its name, and
+    its files, as they stand, give that manifest. Returns them."""
+    store = open_store(root)
+    extracted = extract_dir(root)
+    if digest_manifest(extracted.files) != store.raw:
+        raise StoreMismatch(f"its files do not match its digest; {CHANGED}")
+    return extracted
+
+
+def _lay_out(root: Path, files: Mapping[str, tuple[str, bytes]]) -> None:
+    for rel, (_mode, data) in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    (root / DIGEST_FILE).write_bytes(digest_manifest(files))
+
+
+def write_scratch(parent: Path, extracted: Extracted) -> Path:
+    """`extracted` laid out as a store would be, at `parent/<digest>/`, with
+    its `.kraft-digest`, but writable: a candidate not yet installed, read
+    through the same `open_store` as an installed one. Returns the root."""
+    root = parent / digest(extracted.files).removeprefix("sha256:")
+    root.mkdir(parents=True, exist_ok=True)
+    _lay_out(root, extracted.files)
+    return root
+
+
 def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     """`extracted` as `store/<digest>/`, addressed by its content alone, so two
     installs of the same content share it. Written in `staging/` and renamed

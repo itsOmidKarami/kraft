@@ -214,6 +214,28 @@ def drop_store(store: Path) -> None:
     shutil.rmtree(store)
 
 
+def edit_store(store: Path, rel: str, text: str) -> None:
+    """Hand-edit `rel` in a read-only store: its folders and the file are made
+    writable, and `text` is written. The `.kraft-digest` is left as it was."""
+    path = store / rel
+    for folder in Path(rel).parents:
+        if (store / folder).is_dir():
+            (store / folder).chmod(0o755)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.chmod(0o644)
+    path.write_text(text)
+
+
+def forge_digest(store: Path) -> None:
+    """Rewrite a store's `.kraft-digest` to match its files as they stand, so
+    the manifest agrees with an edit but no longer hashes to the store's name."""
+    manifest_path = store / fetch.DIGEST_FILE
+    store.chmod(0o755)
+    manifest_path.chmod(0o644)
+    manifest_path.write_bytes(fetch.digest_manifest(fetch.extract_dir(store).files))
+
+
 def edit_addons_yaml(config_dir: Path, change) -> None:
     """A hand edit: `change(parsed addons.yaml)`, written back."""
     written = read_yaml(config_dir / "addons.yaml")
