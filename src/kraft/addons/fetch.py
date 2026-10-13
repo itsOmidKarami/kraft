@@ -484,7 +484,8 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     since it was written, or a symlink, is replaced by these files, which hash
     to its name by construction."""
     final = addons_dir / "store" / digest(extracted.files).removeprefix("sha256:")
-    stale = final.is_symlink()
+    # A link, or a plain file where the store goes, is never reused or entered.
+    stale = final.is_symlink() or (os.path.lexists(final) and not final.is_dir())
     if not stale and final.is_dir():
         try:
             verify_store(final)
@@ -503,8 +504,8 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     aside = staging / f"{tmp.name}.stale"
     if stale:
         try:
-            if final.is_symlink():
-                final.unlink()  # never chmod or move what it points at
+            if final.is_symlink() or not final.is_dir():
+                final.unlink()  # never chmod or move what a link points at
             else:
                 # macOS will not move a read-only directory to another parent.
                 final.chmod(0o755)

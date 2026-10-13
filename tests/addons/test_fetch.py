@@ -279,6 +279,11 @@ def _symlinked(store, monkeypatch):
     return outside
 
 
+def _a_plain_file(store, monkeypatch):
+    drop_store(store)
+    store.write_text("not a store")
+
+
 def _unremovable_leftover(store, monkeypatch):
     """The moved-aside copy cannot be deleted: the write still succeeds."""
     _edit_library(store, monkeypatch)
@@ -299,6 +304,7 @@ def _unremovable_leftover(store, monkeypatch):
         (_edit_library, 0),
         (_edit_library_and_forge, 0),
         (_symlinked, 0),
+        (_a_plain_file, 0),
         (_unremovable_leftover, 1),
     ],
     ids=[
@@ -306,6 +312,7 @@ def _unremovable_leftover(store, monkeypatch):
         "edited-store-is-rewritten",
         "edited-digest-manifest-is-rewritten",
         "symlinked-store-is-rewritten",
+        "a-file-where-the-store-goes-is-replaced",
         "unremovable-leftover-is-left-in-staging",
     ],
 )
