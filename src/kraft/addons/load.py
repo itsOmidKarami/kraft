@@ -553,17 +553,24 @@ def for_item(
             left_out=f"repository {rid!r} has no accepted repo library",
             quiet=True,
         )
-        for rid in connected_ids(config_dir)
+        for rid in connected_ids(config_dir, addons_root=addons_root)
         if rid not in taken
     ]
     return (*loading, *reserved)
 
 
-def connected_ids(config_dir: Path | None, repos: Mapping | None = None) -> list[str]:
+def connected_ids(
+    config_dir: Path | None, repos: Mapping | None = None, *, addons_root: Path | None = None
+) -> list[str]:
     """Every connected repository's id in `config_dir`'s `repos.yaml` (or in
-    `repos`, one not saved yet); none when it cannot be read (its own check
-    says why). Each is a namespace reserved for that repository's library."""
+    `repos`, one not saved yet) that is a repo library's namespace: each is
+    reserved for that repository's library. Not `kraft`, and not a namespace
+    an add-on holds: such an id (set by hand, or minted before ids skipped
+    them) never names a repo library. None when the file cannot be read (its
+    own check says why)."""
     from kraft import paths
+    from kraft.addons.config import RESERVED_NAMESPACE
+    from kraft.addons.repo_library import held_namespaces
     from kraft.config import ConfigError, read_yaml
 
     config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
@@ -573,7 +580,9 @@ def connected_ids(config_dir: Path | None, repos: Mapping | None = None) -> list
     except ConfigError:
         return []
     found = (e.get("id") for e in entries or () if isinstance(e, dict))
-    return [i for i in found if isinstance(i, str) and i]
+    root = Path(addons_root) if addons_root is not None else addons_dir()
+    held = {RESERVED_NAMESPACE, *held_namespaces(config_dir, root)}
+    return [i for i in found if isinstance(i, str) and i and i not in held]
 
 
 def _launch_problem(addon: InstalledAddon) -> str | None:

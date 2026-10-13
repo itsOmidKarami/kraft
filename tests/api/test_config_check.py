@@ -11,6 +11,7 @@ import yaml
 
 from kraft.addons import update as addon_update
 from kraft.api import config_check, deps
+from kraft.config import write_yaml
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -390,7 +391,7 @@ def two_repos(client, tmp_path):
     repos["repos"].append({"path": str(web), "id": "web"})
     (st.templates_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
     deps._reload_templates(st)
-    return st.templates_dir, {"app": str(app), "web": str(web)}
+    return st.templates_dir, {"app": str(app), "web": str(web), "templates": st.templates_dir}
 
 
 def _chain_with(task):
@@ -428,6 +429,15 @@ def _fallback(data, paths):
     }
 
 
+def _addon_namespace_as_repo_id(data, paths):
+    """`release` is an add-on's namespace (a pending `addons.yaml` entry holds
+    it) and also a repo id set by hand: that id names no repo library."""
+    addons = {"collections": {"acme": {"git": "https://example.com/acme.git"}}}
+    write_yaml(paths["templates"] / "addons.yaml", {**addons, "addons": {"release@acme": True}})
+    data["repos"].append({"path": "/release", "id": "release"})
+    _entry("web", default_chain="release:ship")(data, paths)
+
+
 def _library_extends(data, paths):
     data.setdefault("tasks", {})["mine"] = {"extends": "app:base"}
 
@@ -462,6 +472,9 @@ def _library_extends(data, paths):
         ),
         pytest.param("repos.yaml", _entry("app", steering=["app:tone"]), False, id="own-steering"),
         pytest.param("intake.yaml", _schedule("app"), False, id="own-schedule"),
+        pytest.param(
+            "repos.yaml", _addon_namespace_as_repo_id, False, id="addon-namespace-repo-id"
+        ),
         pytest.param(
             "chains/mine.yaml",
             _chain_with(

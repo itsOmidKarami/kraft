@@ -718,10 +718,13 @@ async def v1_walk(
     start_index: int = 0,
     start_step: int = 0,
     after_item=None,
+    item_repo_id: str | None = None,
     **item_kwargs,
 ):
     """File `chain` as one work item and walk it once, `after_item` (if given) awaited
-    with `database` first. Returns `(status, events, sessions, row)`, database closed.
+    with `database` first. `item_repo_id` is the launch's repository id, whose
+    repo library the item reads. Returns `(status, events, sessions, row)`,
+    database closed.
     """
     from kraft import db as _db
     from kraft import events as _events
@@ -747,6 +750,7 @@ async def v1_walk(
             # a repo entry without one refuses to cut a worktree at all.
             launch=LaunchContext(
                 repo_entry=entry_of({"setup_command": ""}) if repo_entry is None else repo_entry,
+                item_repo_id=item_repo_id,
             ),
         )
         evts = [dict(e) for e in database.read(lambda c: _events.read_after(c, 0, wid))]

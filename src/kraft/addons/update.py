@@ -461,7 +461,7 @@ def scope_problems(
         source = source if source is not None else read_yaml(config_dir / "repos.yaml")
     except ConfigError:
         return []  # that file's own check says why
-    ids = {e.id for e in _repo_entries(source) if isinstance(e.id, str)}
+    ids = set(load.connected_ids(config_dir, source if isinstance(source, Mapping) else {}))
     return [
         (where.split(":", 1)[0], f"{where}: {key} {why}")
         for where, key, _kind, value, owner in scoped_references(

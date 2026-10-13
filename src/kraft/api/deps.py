@@ -1022,7 +1022,12 @@ def repository_steering(
         by_id = {r.id: r for r in repos if r.id}
         entries += [by_id.get(rid) for rid in target.repositories()]
     # Each entry may name its own repo library's steering, and no other's.
-    ids = {r.id for r in repos if r.id}
+    run_dirs = getattr(st, "run_dirs", None)
+    ids = set(
+        addons_load.connected_ids(
+            st.templates_dir, addons_root=run_dirs.addons if run_dirs is not None else None
+        )
+    )
     for e in entries:
         for name in e.steering if e is not None else ():
             if why := addons_load.out_of_scope(name, e.id, ids):

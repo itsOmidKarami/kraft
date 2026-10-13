@@ -5,8 +5,19 @@ the add-on is not there until its store is (`dispatch.restore_pins`)."""
 import json
 import time
 
-from support.addons import drop_store, install_release, pinned_chain
+import pytest
+from support.addons import (
+    AGENT,
+    accept_repo_library,
+    drop_store,
+    install_release,
+    pinned_chain,
+    repo_with_library,
+)
 from support.harness import v1_walk
+
+from kraft import paths
+from kraft.addons import load
 
 
 async def test_the_fallback_table_is_read_after_the_pins_are_restored(
@@ -36,3 +47,33 @@ async def test_the_fallback_table_is_read_after_the_pins_are_restored(
     assert status == "completed"
     assert store.is_dir()
     assert "the 1.0.0 method" in json.dumps(fake_agent.argv()[0])
+
+
+@pytest.mark.parametrize(
+    "item_repo_id, launched",
+    [
+        pytest.param("app", True, id="own-repo-item"),
+        pytest.param("web", False, id="another-repos-item"),
+    ],
+)
+async def test_a_launch_reads_its_own_repos_library_unpinned(
+    tmp_path, repo, fake_agent, item_repo_id, launched
+):
+    """Dispatch hands the item's repository id to the launch: an item in
+    `app` reads app's library from the lock, one in `web` is stopped."""
+    library = {"tasks": {"base": {**AGENT, "harness": "claude"}}}
+    app = repo_with_library(tmp_path, library=library, skills={"notes": "the app method"})
+    accept_repo_library(paths.config_dir(), load.addons_dir(), app, "app")
+    task = {
+        "id": "t",
+        "kind": "agent",
+        "harness": "claude",
+        "prompt": "Do it.",
+        "skill": "app:notes",
+    }
+    chain = pinned_chain([{"id": "build", "kind": "exec", "tasks": [task]}], {}, repo=repo)
+
+    status, *_ = await v1_walk(tmp_path, chain, repo=repo, item_repo_id=item_repo_id)
+
+    assert ("the app method" in json.dumps(fake_agent.argv())) is launched
+    assert (status == "completed") is launched

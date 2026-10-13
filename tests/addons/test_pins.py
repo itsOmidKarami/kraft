@@ -478,7 +478,7 @@ def two_repos(home, tmp_path):
     repos["repos"].append({"path": "/web", "id": "web"})
     (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
     (library,) = [p for p in load.installed(config_dir, addons_dir) if p.repo_id == "app"]
-    return {"app": library.pin}, store
+    return {"app": library.pin}, store, config_dir
 
 
 _SCOPED = "visible only to items in app"
@@ -526,16 +526,39 @@ _SCOPED = "visible only to items in app"
             "profiles.yaml does not match its digest",
             id="own-repo-edited-store",
         ),
+        pytest.param(
+            {"skill": "kraft:spec"}, False, "app", "name: spec", None, id="kraft-id-is-not-reserved"
+        ),
+        pytest.param(
+            {"profile": "fast"}, False, "web", None, _SCOPED, id="fallback-into-another-repo"
+        ),
+        pytest.param({}, False, "web", "", None, id="unrelated-task-beside-that-fallback"),
+        pytest.param({}, False, None, "", None, id="instance-table-beside-that-fallback"),
     ],
 )
-def test_a_launch_reads_only_its_own_repos_library(two_repos, fields, pinned, repo_id, read, stops):
+def test_a_launch_reads_only_its_own_repos_library(
+    request, two_repos, fields, pinned, repo_id, read, stops
+):
     """Another repository's library, and a connected id with none, stop the
     launch with that library's own reason, never delegated as another tool's
     plugin. An own-repo store edited after it was accepted stops with the
-    digest's reason, never the scope's (D13)."""
-    pins, store = two_repos
+    digest's reason, never the scope's (D13). `kraft` or an add-on's namespace
+    as a repo id (set by hand, or minted before ids skipped them) reserves
+    nothing, and a `harnesses.yaml` fallback into another repository's library
+    stops only the launch that walks into it."""
+    pins, store, config_dir = two_repos
+    case = request.node.callspec.id
     if stops and "digest" in stops:
         edit_store(store, "profiles.yaml", "profiles: {deep: {model: {codex: evil}}}\n")
+    if case == "kraft-id-is-not-reserved":
+        repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+        repos["repos"].append({"path": "/kraft", "id": "kraft"})
+        (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    if "fallback" in case:
+        fast = {"model": {"codex": "gpt-5"}, "fallback": [{"profile": "app:deep"}]}
+        harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text()) or {}
+        harnesses["profiles"] = {**(harnesses.get("profiles") or {}), "fast": fast}
+        (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
     task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
 
     def launch():
@@ -544,7 +567,7 @@ def test_a_launch_reads_only_its_own_repos_library(two_repos, fields, pinned, re
         )
 
     if read is not None:
-        assert read in launch().method_text
+        assert read in (launch().method_text or "")
         return
     with pytest.raises((SkillError, agent.HarnessUnavailable)) as stop:
         launch()
