@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
+from support import permissions
 from support.api import _hold_storage, _paused, _poll_events, _post_default, _set_status
 from support.harness import git
 
@@ -144,6 +145,21 @@ def test_preview_refuses_what_archive_would_and_counts_the_rest_once(client, rep
         100,
         "over_quota",
     )
+
+
+def test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one(client, repo):
+    wid = _paused(client, repo)
+    first, second = "abcd1111" + "0" * 24, "abcd1122" + "0" * 24
+    for sid, w in (("s-a", first), ("s-b", second)):
+        permissions.seed_session(sid=sid, wid=w)
+
+    r = client.post("/api/storage/preview", json={"ids": [wid[:8], "abcd11"]})
+
+    assert r.status_code == 200, r.text
+    assert [(i["id"], i["archivable"], i["refusal"]) for i in r.json()["items"]] == [
+        (wid, False, "only a completed or abandoned item can be archived"),
+        ("abcd11", False, f"'abcd11' is the start of 2 work items: {first}, {second}"),
+    ]
 
 
 def test_preview_needs_at_least_one_id(client):

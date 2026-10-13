@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
+from support import permissions
 
 from kraft import auth
 
@@ -541,12 +542,16 @@ def test_a_forged_navigation_header_cannot_write(dist, client):
     a way past the session check into a real handler — every route it could
     forge its way into lives under /api/, which the shell-diversion branches
     exclude outright, so a forged header there just hits the real 401."""
+    for sid, wid in (("s-a", "abcd1111" + "0" * 24), ("s-b", "abcd1122" + "0" * 24)):
+        permissions.seed_session(sid=sid, wid=wid)
     client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
     client.cookies.clear()
     forged = {"sec-fetch-dest": "document"}
 
     # a POST is never a navigation
     assert client.post("/api/work-items/x/pause", json={}, headers=forged).status_code == 401
+    # nor is the start of an id resolved first: a 409 would say both ids exist
+    assert client.post("/api/work-items/abcd11/pause", json={}, headers=forged).status_code == 401
     assert client.put("/api/access", json={"bind": "0.0.0.0"}, headers=forged).status_code == 401
     assert client.delete("/api/sessions/abc", headers=forged).status_code == 401
 

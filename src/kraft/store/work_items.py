@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Iterable
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
@@ -477,6 +478,47 @@ def dependency_problem(conn: sqlite3.Connection, ids: list[str]) -> str | None:
                 f"work item {dep} was abandoned and will never complete: nothing can come after it"
             )
     return None
+
+
+#: Below this many characters a value names a work item only by being its
+#: whole id, so a one- or two-character typo cannot land on an arbitrary item.
+MIN_PREFIX = 4
+#: What a start of an id may be made of: every id Kraft mints is lowercase
+#: hex or lowercase base32. Anything else is matched only whole.
+_PREFIX_CHARS = re.compile(r"[0-9a-z]+")
+
+
+def _may_be_a_prefix(given: str) -> bool:
+    return len(given) >= MIN_PREFIX and _PREFIX_CHARS.fullmatch(given) is not None
+
+
+def match_ids(candidates: Iterable[str], given: str) -> list[str]:
+    """`match_work_item_ids` over ids already in hand (an item's own
+    dependencies)."""
+    ids = list(candidates)
+    if given in ids:
+        return [given]
+    if not _may_be_a_prefix(given):
+        return []
+    return sorted(i for i in ids if i.startswith(given))
+
+
+def match_work_item_ids(conn: sqlite3.Connection, given: str) -> list[str]:
+    """The ids `given` names: its own when an item has exactly that id, else
+    every id it is the start of, when it may be a prefix (`MIN_PREFIX`
+    characters or more, from `[0-9a-z]`). An exact id wins over a longer id it
+    is also the start of. `substr` rather than `LIKE`: case-sensitive, and no
+    character in `given` is a wildcard."""
+    exact = conn.execute("SELECT id FROM work_items WHERE id = ?", (given,)).fetchone()
+    if exact is not None:
+        return [exact["id"]]
+    if not _may_be_a_prefix(given):
+        return []
+    rows = conn.execute(
+        "SELECT id FROM work_items WHERE substr(id, 1, ?) = ? ORDER BY id",
+        (len(given), given),
+    ).fetchall()
+    return [r["id"] for r in rows]
 
 
 def any_unfinished(conn: sqlite3.Connection, ids: list[str]) -> bool:

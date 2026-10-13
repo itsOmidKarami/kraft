@@ -18,7 +18,7 @@ from kraft import escalate, events, executor, node_runs, start_queue, storage, s
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
-from kraft.api import api_router, deps
+from kraft.api import api_router, deps, item_ids
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
@@ -603,10 +603,21 @@ async def bulk_work_items(body: Bulk, request: Request):
     siblings. `cancel`'s reason is checked once, up front, so a request that
     cannot possibly succeed touches nothing (`EndWorkItem.reason` would
     otherwise answer the same 422 for the first id and silently skip it for
-    the rest)."""
+    the rest).
+
+    An id may be the start of one (`store.match_work_item_ids`): its result
+    names the whole id, and a start of several is its own failed result."""
     if body.action == "cancel" and not (body.reason or "").strip():
         raise HTTPException(422, "reason: cancel needs a non-blank reason")
-    results = [await _bulk_one(request, wid, body.action, body.reason) for wid in body.ids]
+    st = request.app.state
+    results = []
+    for given in body.ids:
+        ids = st.db.read(lambda c, g=given: store.match_work_item_ids(c, g))
+        if len(ids) > 1:
+            results.append({"id": given, "ok": False, "error": item_ids.ambiguous(given, ids)})
+            continue
+        wid = ids[0] if ids else given
+        results.append(await _bulk_one(request, wid, body.action, body.reason))
     return {"results": results}
 
 
@@ -708,6 +719,14 @@ async def unblock_work_item(wid: str, request: Request, body: Unblock | None = N
             "dependencies can be dropped",
         )
     only = body.dependency if body else None
+    if only:
+        # Named by the start of an id too, matched against this item's own
+        # dependencies rather than every item.
+        waits_on = st.db.read(lambda c: [d["id"] for d in store.dependencies_of(c, wid)])
+        matched = store.match_ids(waits_on, only)
+        if len(matched) > 1:
+            raise HTTPException(409, item_ids.ambiguous(only, matched))
+        only = matched[0] if matched else only
     dropped = await st.db.write(lambda c: store.drop_dependencies(c, wid, only))
     if only and not dropped:
         raise HTTPException(409, f"{only} is not one of this work item's dependencies")

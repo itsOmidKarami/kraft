@@ -100,6 +100,25 @@ ReDoc's "Redocly" logo is not fetched.
 On a machine without internet access,
 load `/openapi.json` into your own OpenAPI viewer.
 
+## Work item IDs in a path
+
+The `{id}` segment of a route under `/api/work-items/` may be the start of a
+work item ID instead of all of it. A start is 4 characters or more, from `0-9`
+and `a-z`. Kraft makes it the whole ID before the route runs, so the answer
+and everything the route does name the whole ID.
+
+| What the segment is | Answer |
+|---|---|
+| An item's whole ID | That item, even when it is also the start of a longer ID. |
+| The start of exactly one item's ID | That item. |
+| The start of more than one | `409`, naming every ID it starts. |
+| Anything else, a value under 4 characters or one with another character included | `404 unknown work item`, as for an ID that does not exist. |
+
+A caller the [refusals](#refusals) above turn away gets that refusal first, so
+it learns nothing about which IDs exist. A worker inside a network sandbox
+reaches Kraft through its own channel, which still takes only its own item's
+whole ID.
+
 ## Routes the pages document
 
 The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They do not document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
