@@ -192,9 +192,20 @@ def test_a_local_profiles_fallback_pins_the_addon_it_names(home):
     assert list(resolved.addons) == ["release"]
 
 
-def test_a_chain_that_reads_no_addon_stores_no_pins(home):
+@pytest.mark.parametrize(
+    "task",
+    [
+        pytest.param({}, id="plain"),
+        pytest.param(
+            {"prompt": "release: write the notes", "model": "release:x"},
+            id="prose-names-a-namespace",
+        ),
+    ],
+)
+def test_a_chain_that_reads_no_addon_stores_no_pins(home, task):
     repo, config_dir, addons_dir = home
-    (config_dir / "chains" / "plain.yaml").write_text(json.dumps(chain("base")))
+    body = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **AGENT, **task}]}]}
+    (config_dir / "chains" / "plain.yaml").write_text(json.dumps(body))
     resolved = _resolved(config_dir, addons_dir, "plain")
     assert resolved.addons == {}
     stored = _stored(resolved)
