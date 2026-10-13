@@ -270,6 +270,12 @@ WHILE a work item is not terminal, the system SHALL read its add-on skills and a
 enforced-by: tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[local-chain], tests/addons/test_pins.py::test_a_resolved_chain_pins_the_addons_it_reads[addon-chain], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[retry-override], tests/addons/test_pins.py::test_a_rebuilt_snapshot_keeps_the_items_pins[chain-revision], tests/addons/test_pins.py::test_a_launch_reads_the_version_the_item_started_with, tests/addons/test_pins.py::test_a_pinned_version_that_is_gone_is_refused_not_delegated, tests/addons/test_pins.py::test_every_launch_is_handed_the_items_pins, tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-a-pinned-addon], tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[through-an-addon-not-touched-yet], tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored
 origin: src/kraft/adapters/agent.py §resolve_agent_task
 
+## REQ a-revision-can-add-an-addon-component
+
+WHEN a chain revision or an item draft adds a node, the system SHALL accept `<namespace>:<name>` in the node's and its tasks' `extends`, SHALL resolve it against the add-on versions the item pinned, pinning an add-on it had not read at the lock's version, and SHALL refuse a component of an add-on that is not loaded.
+enforced-by: tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[added-node-extends-an-addon], tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[added-task-extends-an-addon], tests/addons/test_pins.py::test_a_revision_resolves_against_pinned_addons[added-task-extends-an-addon-not-touched-yet], tests/addons/test_pins.py::test_a_revision_cannot_add_from_an_addon_that_is_not_loaded[disabled], tests/addons/test_pins.py::test_a_revision_cannot_add_from_an_addon_that_is_not_loaded[pinned-version-gone], tests/api/test_addon_content.py::test_an_item_draft_adds_an_addons_node, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[added-node-with-a-qualified-id]
+origin: src/kraft/templates/revision.py §AddedNode
+
 ## REQ a-missing-store-is-restored-from-its-commit
 
 WHEN a store that the lock or a work item's pin names is missing, the system SHALL restore it from the recorded commit, SHALL load it only if its tree and digest match, and SHALL restore a work item's pinned store before a launch reads it.
@@ -381,11 +387,11 @@ origin: src/kraft/addons/update.py §_catalogue
 ## REQ a-minted-repository-id-skips-addon-namespaces
 
 WHEN Kraft writes a repository id for an entry that has none, the system SHALL NOT choose `kraft`, the namespace of an add-on `addons.yaml` or `addons.lock` names, or a namespace an `as:` in `addons.yaml` would take.
-enforced-by: tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[addon-namespace], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[addon-namespace], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[reserved]
+enforced-by: tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[addon-namespace], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[addon-namespace], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[a-pending-alias], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[a-disabled-addon]
 origin: src/kraft/api/routes/repos.py §_repository_id
 
 ## REQ a-workspace-never-names-an-addon-namespace-id
 
 IF connecting a repository would declare a workspace naming an entry whose `id` is `kraft` or an add-on's namespace, THEN the system SHALL refuse the connect, name the add-on, and write nothing.
-enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect
+enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[addon-namespace], tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[reserved]
 origin: src/kraft/api/routes/repos.py §_declare_workspace

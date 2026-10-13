@@ -6,6 +6,8 @@ import pytest
 import yaml
 from support.addons import AGENT, load_release
 
+from kraft.templates.models import MaterializedChain
+
 READ_ONLY = "comes from add-on release@acme; extend it or copy it to your library"
 
 
@@ -258,3 +260,23 @@ def test_an_addons_components_are_extended_from_a_local_chain(client, tmp_path):
     assert part.status_code == 200 and "extends: release:base" in part.json()["text"]
     assert client.post("/api/drafts/chains/mine/publish").status_code == 200
     assert not client.get("/api/health").json()["invalid_templates"]
+
+
+def test_an_item_draft_adds_an_addons_node(client, repo, tmp_path):
+    """The item draft's add-node menu lists an add-on's nodes by their
+    qualified name; picking one adds it, and the item then pins the add-on."""
+    library = {"tasks": {"base": {**AGENT, "skill": "notes"}}, "nodes": {"build": BUILD}}
+    load_release(client, tmp_path, library=library)
+    body = {"title": "draft me", "repo": str(repo), "chain_template": "default"}
+    wid = client.post("/api/work-items", json=body).json()["id"]
+    node = {"id": "release_build", "extends": "release:build"}
+    op = {"op": "add_node", "after": "verification", "node": node}
+
+    put = client.put(f"/api/work-items/{wid}/draft", json={"ops": [op]})
+
+    assert put.status_code == 200, put.text
+    assert put.json()["problems"] == []
+    assert "release_build" in [n["id"] for n in put.json()["nodes"]]
+    assert client.post(f"/api/work-items/{wid}/draft/apply").status_code == 200
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert "release" in MaterializedChain.from_json(item["materialized_chain"]).chain.addons

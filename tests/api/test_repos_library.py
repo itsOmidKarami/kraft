@@ -4,7 +4,7 @@ forgotten at disconnect."""
 from __future__ import annotations
 
 import pytest
-from support.addons import AGENT, load_release, repo_with_library
+from support.addons import AGENT, edit_addons_yaml, load_release, repo_with_library
 from support.harness import git, make_repo
 
 from kraft.addons.config import RepoLibrariesLock
@@ -23,16 +23,21 @@ def _with_library(tmp_path, client, name="app"):
 @pytest.mark.parametrize(
     "name, addon, minted",
     [
-        pytest.param("app", False, "app", id="own-name"),
+        pytest.param("app", None, "app", id="own-name"),
         pytest.param("release", True, "release-2", id="addon-namespace"),
-        pytest.param("kraft", False, "kraft-2", id="reserved"),
+        pytest.param("kraft", None, "kraft-2", id="reserved"),
+        pytest.param("rel", {"as": "rel"}, "rel-2", id="a-pending-alias"),
+        pytest.param("release", False, "release-2", id="a-disabled-addon"),
     ],
 )
 def test_a_repo_library_is_reviewed_then_accepted(
     tmp_path, client, templates_dir, name, addon, minted
 ):
-    if addon:
+    """`addon` is release@acme's entry in addons.yaml, None when not installed:
+    a hand edit after the install, which no update has applied."""
+    if addon is not None:
         load_release(client, tmp_path)
+        edit_addons_yaml(templates_dir, lambda c: c["addons"].update({"release@acme": addon}))
     repo = _with_library(tmp_path, client, name)
 
     seen = client.get("/api/repos/library", params={"path": str(repo)}).json()

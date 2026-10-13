@@ -209,14 +209,14 @@ def test_a_repo_library_is_refused_outside_its_repo(client, tmp_path, caplog, do
 
 _ADD = {
     "op": "add_node",
-    "after": "verification",
+    "after": "n",
     "node": {"id": "x", "tasks": [{"id": "t", "extends": "app:base"}]},
 }
 
 
 @pytest.mark.parametrize(
     "case",
-    ["create-own", "default-own", "switch-own", "workspace-roots-library"],
+    ["create-own", "default-own", "switch-own", "workspace-roots-library", "draft-adds-own"],
 )
 def test_a_repo_library_is_used_by_its_own_repo(client, tmp_path, case):
     if case == "workspace-roots-library":
@@ -231,13 +231,17 @@ def test_a_repo_library_is_used_by_its_own_repo(client, tmp_path, case):
         accept_repo_library(st.templates_dir, st.run_dirs.addons, app, "app")
         deps._reload_templates(st)
         r, stored = _file(client, app), "app:default"
+    elif case == "draft-adds-own":
+        wid = _file(client, app, chain_template="app:ship").json()["id"]
+        r = client.put(f"/api/work-items/{wid}/draft", json={"ops": [_ADD]})
+        assert (r.status_code, r.json().get("problems")) == (200, []), r.text
     elif case == "switch-own":
         wid = _file(client, app).json()["id"]
         r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "app:ship"})
         assert r.status_code == 200, r.text
     else:
         r, stored = _file(client, app, chain_template="app:ship"), "app:ship"
-    if case != "switch-own":
+    if case not in ("switch-own", "draft-adds-own"):
         assert r.status_code == 201, r.text
         item = client.get(f"/api/work-items/{r.json()['id']}").json()
         assert item["chain_template"] == stored
