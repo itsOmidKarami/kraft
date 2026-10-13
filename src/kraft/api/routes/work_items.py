@@ -14,7 +14,7 @@ from kraft import config as config_mod
 from kraft import executor, storage, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
-from kraft.api import SENTENCE_ERROR, api_router, deps
+from kraft.api import SENTENCE_ERROR, api_router, deps, item_ids
 from kraft.api.routes import board, gates, lifecycle
 from kraft.executor import entry
 from kraft.overrides import (
@@ -108,7 +108,8 @@ class NewWorkItem(_OneChain):
     implements_beads: list[str] = []
     #: Work item ids this one comes after. Started while one is unfinished it
     #: is `blocked`, and Kraft starts it when they complete. Set here only:
-    #: afterwards they can be dropped (`/unblock`), never added.
+    #: afterwards they can be dropped (`/unblock`), never added. Each may be
+    #: the unique start of an id; the whole id is what is stored.
     depends_on: list[str] = []
     #: Node ids to drop from the materialized chain at intake (UI v2 · 04
     #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
@@ -399,7 +400,11 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.
-    depends_on = list(dict.fromkeys(body.depends_on))
+    matched = st.db.read(lambda c: [(d, store.match_work_item_ids(c, d)) for d in body.depends_on])
+    if bad := next(((d, ids) for d, ids in matched if len(ids) > 1), None):
+        raise HTTPException(422, item_ids.ambiguous(*bad))
+    # Whole ids are what `depends_on` stores and every later reader compares.
+    depends_on = list(dict.fromkeys(ids[0] if len(ids) == 1 else d for d, ids in matched))
     if problem := st.db.read(lambda c: store.dependency_problem(c, depends_on)):
         raise HTTPException(422, problem)
     # An autostart behind an unfinished item is filed and then blocked: it

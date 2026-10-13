@@ -12,7 +12,7 @@ from fastapi import Request
 from pydantic import BaseModel, Field
 
 from kraft import storage, store
-from kraft.api import api_router
+from kraft.api import api_router, item_ids
 from kraft.api.routes import lifecycle
 from kraft.config import git_read
 
@@ -78,11 +78,17 @@ async def preview_storage_cleanup(body: StoragePreview, request: Request):
     the bytes freed and the usage and state they would leave. An id that is
     unknown, not completed or abandoned, or already archived is answered with
     `archivable: false` and the reason, and frees nothing. An id given twice
-    counts once. The bytes freed assume each worktree goes: an archive whose
-    detached-HEAD rescue fails keeps it and frees nothing."""
+    counts once. An id may be the start of one: it is answered under the
+    whole id, and a start of several is refused by name. The bytes freed
+    assume each worktree goes: an archive whose detached-HEAD rescue fails
+    keeps it and frees nothing."""
     st = request.app.state
     used = await _measured(request)
-    ids = list(dict.fromkeys(body.ids))
+    matched = st.db.read(lambda c: [(w, store.match_work_item_ids(c, w)) for w in body.ids])
+    # A unique start of an id is the item; an ambiguous one is refused by
+    # name; anything else is answered as the unknown id it is, as before.
+    refused = {w: item_ids.ambiguous(w, m) for w, m in matched if len(m) > 1}
+    ids = list(dict.fromkeys(m[0] if len(m) == 1 else w for w, m in matched))
     rows = st.db.read(
         lambda c: {
             wid: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -97,7 +103,9 @@ async def preview_storage_cleanup(body: StoragePreview, request: Request):
     }
     items = await asyncio.to_thread(
         lambda: [
-            _preview_one(st, wid, rows[wid], used.items.get(wid, 0), members.get(wid, []))
+            {**_preview_one(st, wid, None, 0, []), "refusal": refused[wid]}
+            if wid in refused
+            else _preview_one(st, wid, rows[wid], used.items.get(wid, 0), members.get(wid, []))
             for wid in ids
         ]
     )

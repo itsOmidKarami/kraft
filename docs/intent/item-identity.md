@@ -6,7 +6,7 @@ more, names it when it is the start of no other.
 
 ## REQ an-id-prefix-names-its-item
 WHEN a work item id given to the API equals no item's id and is a start of 4 or more characters of exactly one, the system SHALL act on that item.
-enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[unique-start], tests/api/test_item_ids.py::test_an_action_on_the_start_of_an_id_acts_on_the_whole_item
+enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[unique-start], tests/api/test_item_ids.py::test_an_action_on_the_start_of_an_id_acts_on_the_whole_item, tests/api/test_lifecycle_bulk.py::test_bulk_archive_takes_only_ended_items[start], tests/api/test_storage.py::test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one, tests/api/test_work_items_after.py::test_what_an_item_may_be_filed_after[completed-by-its-start], tests/api/test_lifecycle_blocked.py::test_unblock_drops_what_the_item_waits_on_and_it_is_released[by-its-start], tests/cli/test_item.py::test_archive_needs_a_yes_and_then_archives[start]
 origin: src/kraft/api/item_ids.py §whole_work_item_id
 
 ## REQ an-exact-id-wins-over-a-prefix
@@ -16,7 +16,7 @@ origin: src/kraft/store/work_items.py §match_work_item_ids
 
 ## REQ an-ambiguous-prefix-is-refused
 IF a work item id given to the API equals no item's id and is a start of 4 or more characters of more than one, THEN the system SHALL refuse it and name every match.
-enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[ambiguous]
+enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[ambiguous], tests/api/test_lifecycle_bulk.py::test_bulk_reports_an_ambiguous_start_and_goes_on, tests/api/test_storage.py::test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one, tests/api/test_work_items_after.py::test_an_item_cannot_be_filed_after_an_ambiguous_start, tests/api/test_lifecycle_blocked.py::test_unblock_refuses_an_id_that_is_not_a_dependency[ambiguous-start]
 origin: src/kraft/api/item_ids.py §whole_work_item_id
 
 ## REQ a-short-value-is-not-a-prefix

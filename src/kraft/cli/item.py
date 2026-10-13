@@ -219,6 +219,9 @@ def _cmd_archive(ns: argparse.Namespace) -> None:
         common.emit({"results": []}, lambda _: "nothing to archive", ns.json)
         return
     preview = asyncio.run(client.storage_preview(ids))
+    # The preview answers each id whole and once, in order: from here on the
+    # results are matched to those, not to what was typed (a start of an id).
+    ids = [i["id"] for i in preview["items"]]
     # With --json --yes stdout is the one bulk payload, nothing else.
     if not (ns.json and ns.yes):
         common.emit(preview, render.storage_preview, ns.json)

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from support import permissions
 from support.api import (
     _blocked_after,
     _come_after,
@@ -15,6 +16,9 @@ from support.api import (
     _set_status,
     _status_of,
 )
+
+# Two ids sharing their first six characters, for an ambiguous start.
+_FIRST, _SECOND = "abcd1111" + "0" * 24, "abcd1122" + "0" * 24
 
 DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 
@@ -86,7 +90,10 @@ def test_pausing_a_blocked_item_puts_it_back_and_keeps_what_it_comes_after(clien
     assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
 
 
-def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo):
+@pytest.mark.parametrize(
+    "body", [lambda dep: {}, lambda dep: {"dependency": dep[:8]}], ids=["every", "by-its-start"]
+)
+def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo, body):
     from functools import partial
 
     from kraft import start_queue
@@ -94,7 +101,7 @@ def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo):
     client.portal.call(client.app.state.queue_task.cancel)
     dep, wid = _blocked_after(client, repo)
 
-    r = client.post(f"/api/work-items/{wid}/unblock", json={})
+    r = client.post(f"/api/work-items/{wid}/unblock", json=body(dep))
 
     assert r.status_code == 200, r.text
     assert r.json() == {"id": wid, "dropped": [dep], "waiting_on": []}
@@ -104,11 +111,23 @@ def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo):
     assert _status_of(client, dep) == "paused"
 
 
-def test_unblock_refuses_an_id_that_is_not_a_dependency(client, repo):
+@pytest.mark.parametrize(
+    ("given", "detail"),
+    [
+        ("f" * 32, "is not one of this work item's dependencies"),
+        ("abcd11", f"'abcd11' is the start of 2 work items: {_FIRST}, {_SECOND}"),
+    ],
+    ids=["not-a-dependency", "ambiguous-start"],
+)
+def test_unblock_refuses_an_id_that_is_not_a_dependency(client, repo, given, detail):
     dep, wid = _blocked_after(client, repo)
+    for sid, w in (("s-a", _FIRST), ("s-b", _SECOND)):
+        permissions.seed_session(sid=sid, wid=w)
+    _come_after(wid, [dep, _FIRST, _SECOND])
 
-    r = client.post(f"/api/work-items/{wid}/unblock", json={"dependency": "f" * 32})
+    r = client.post(f"/api/work-items/{wid}/unblock", json={"dependency": given})
 
     assert r.status_code == 409, r.text
-    assert "not one of" in r.json()["detail"]
-    assert [d["id"] for d in client.get(f"/api/work-items/{wid}").json()["dependencies"]] == [dep]
+    assert detail in r.json()["detail"]
+    got = client.get(f"/api/work-items/{wid}").json()["dependencies"]
+    assert [d["id"] for d in got] == [dep, _FIRST, _SECOND]
