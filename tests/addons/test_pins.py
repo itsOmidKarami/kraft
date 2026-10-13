@@ -375,6 +375,10 @@ _VIA = {
 }
 
 
+def _store_of(config_dir, addons_dir, namespace):
+    return next(a.root for a in load.installed(config_dir, addons_dir) if a.namespace == namespace)
+
+
 def _task(extends):
     return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}
 
@@ -388,6 +392,7 @@ def _task(extends):
         (_task("release:base"), ["release"], False),
         (_task("tools:base"), ["release", "tools"], False),
         ({"id": "x", "extends": "release:stage"}, ["release"], True),
+        ({"id": "x", "extends": "release:stage"}, ["release"], "edited"),
     ],
     ids=[
         "through-a-pinned-addon",
@@ -396,13 +401,16 @@ def _task(extends):
         "added-task-extends-an-addon",
         "added-task-extends-an-addon-not-touched-yet",
         "pinned-addon-disabled-since",
+        "another-addons-store-edited-since",
     ],
 )
 def test_a_revision_resolves_against_pinned_addons(home, added, pinned, disable):
     """A node a revision adds runs on the versions the item runs on, whether it
     names an add-on's component or a local one that does; an add-on the item
     had not read from yet joins its pins at the lock's version. An add-on the
-    item pinned stays loaded for it after it is disabled, as at launch."""
+    item pinned stays loaded for it after it is disabled, as at launch, and
+    another add-on's store edited since the library loaded is left out, not
+    the revision."""
     repo, config_dir, addons_dir = home
     (config_dir / "library.yaml").write_text(json.dumps(_VIA))
     snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
@@ -410,9 +418,11 @@ def test_a_revision_resolves_against_pinned_addons(home, added, pinned, disable)
     newer["library"]["tasks"]["base"]["prompt"] = "the 1.1.0 prompt"
     publish(repo, "release", **newer)
     _update(config_dir, addons_dir, [ID])
-    if disable:
+    if disable is True:
         edit_addons_yaml(config_dir, lambda w: w["addons"].update({ID: False}))
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    if disable == "edited":
+        edit_store(_store_of(config_dir, addons_dir, "tools"), "library.yaml", "tasks: {}\n")
     add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
 
     revised = revise(snapshot, ChangeSet(rationale="r", add=[add]), at=None, library=live)
@@ -423,21 +433,25 @@ def test_a_revision_resolves_against_pinned_addons(home, added, pinned, disable)
     assert revised.chain.addons["release"]["version"] == "1.0.0"
 
 
-@pytest.mark.parametrize("gone", ["disabled", "pinned-version-gone"])
+@pytest.mark.parametrize("gone", ["disabled", "pinned-version-gone", "store-edited-since"])
 def test_a_revision_cannot_add_from_an_addon_that_is_not_loaded(home, gone):
-    """Refused with the resolver's message, never resolved against another version."""
+    """Refused with the resolver's message, never resolved against another
+    version, and never a library error (a 500) for a store edited since."""
     repo, config_dir, addons_dir = home
     snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
     if gone == "disabled":
         edit_addons_yaml(config_dir, lambda w: w["addons"].update({"tools@acme": False}))
         added = _task("tools:base")
-    else:
+    elif gone == "pinned-version-gone":
         old = load.installed(config_dir, addons_dir)[0].root
         publish(repo, "release", **_release("1.1.0", "o3"))
         _update(config_dir, addons_dir, [ID])
         drop_store(old)
         added = {"id": "x", "extends": "release:stage"}
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    if gone == "store-edited-since":
+        edit_store(_store_of(config_dir, addons_dir, "tools"), "library.yaml", "tasks: {}\n")
+        added = _task("tools:base")
     add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
 
     with pytest.raises(RevisionError, match=r"extends no (node|task) named"):

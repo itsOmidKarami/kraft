@@ -456,7 +456,8 @@ class TemplateLibrary:
         """This library's own components and chains with `addons` in place of
         the add-ons it was built with: what a work item that pinned other
         versions resolves against (`addons.load.for_item`). `self` is not
-        changed."""
+        changed. An add-on whose store no longer reads (edited since it was
+        loaded) is left out with why, not the whole library."""
         built = TemplateLibrary(
             {
                 ns: {name: raw for name, raw in entries.items() if ":" not in name}
@@ -468,9 +469,14 @@ class TemplateLibrary:
             addons,
             self.library_path,
         )
-        for addon in addons:
+        for i, addon in enumerate(addons):
             if addon.left_out is None:
-                built._add_addon(addon)
+                try:
+                    built._add_addon(addon)
+                except TemplateLibraryError as exc:
+                    # Half added: build again with it left out (one more each time).
+                    left = replace(addon, left_out=str(exc))
+                    return self.with_addons([*addons[:i], left, *addons[i + 1 :]])
         return built
 
     def with_chain(
