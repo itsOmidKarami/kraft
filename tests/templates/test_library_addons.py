@@ -145,9 +145,7 @@ _BOMB = "a: &a [x,x,x,x,x,x,x,x,x,x]\n" + "".join(
     ids=["qualified-key", "yaml-bomb", "qualified-chain-id", "not-a-mapping"],
 )
 def test_an_addon_error_names_the_store_file(tmp_path, file, text, why):
-    addon = installed(tmp_path, "release")
-    (addon.root / file).parent.mkdir(exist_ok=True)
-    (addon.root / file).write_text(text)
+    addon = installed(tmp_path, "release", files={file: text})
     with pytest.raises(TemplateLibraryError, match=why) as exc:
         TemplateLibrary.from_yaml_dir(home(tmp_path), addons=[addon])
     assert str(addon.root / file) in str(exc.value)

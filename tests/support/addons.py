@@ -46,23 +46,35 @@ def installed(
     chains: dict | None = None,
     skills: dict | None = None,
     profiles: dict | None = None,
+    files: dict | None = None,
 ) -> InstalledAddon:
-    """One add-on's store directory at `tmp_path/store/<name>`, in the fixed
-    layout, and the `InstalledAddon` that names it. `skills` is name to
-    `SKILL.md` text; `profiles` is the `profiles:` section of `profiles.yaml`."""
-    root = tmp_path / "store" / name
-    root.mkdir(parents=True)
-    if library is not None:
-        write(root, "library.yaml", yaml.safe_dump(library))
-    for chain_name, body in (chains or {}).items():
-        write(root, f"chains/{chain_name}.yaml", yaml.safe_dump(body))
-    for skill_name, text in (skills or {}).items():
-        write(root, f"skills/{skill_name}/SKILL.md", text)
-    if profiles is not None:
-        write(root, "profiles.yaml", yaml.safe_dump({"profiles": profiles}))
+    """One add-on's store directory at `tmp_path/store/<digest>/`, in the fixed
+    layout with its `.kraft-digest` (writable, unlike a real store), and the
+    `InstalledAddon` that names it. `skills` is name to `SKILL.md` text;
+    `profiles` is the `profiles:` section of `profiles.yaml`; `files` is
+    relative path to raw text, for anything else (a malformed file inside the
+    digest). Two calls with the same content share one root."""
+    laid_out = _layout(library, chains, skills, profiles, files)
+    root = fetch.write_scratch(tmp_path / "store", fetch.Extracted(laid_out))
     return InstalledAddon(
         id=f"{name}@acme", name=name, namespace=alias or name, version="1.0.0", root=root
     )
+
+
+def _layout(library, chains, skills, profiles, files) -> dict[str, tuple[str, bytes]]:
+    """An add-on's files as extraction hands them on: path to (mode, bytes)."""
+    laid_out: dict[str, tuple[str, bytes]] = {}
+    if library is not None:
+        laid_out["library.yaml"] = ("100644", yaml.safe_dump(library).encode())
+    for chain_name, body in (chains or {}).items():
+        laid_out[f"chains/{chain_name}.yaml"] = ("100644", yaml.safe_dump(body).encode())
+    for skill_name, text in (skills or {}).items():
+        laid_out[f"skills/{skill_name}/SKILL.md"] = ("100644", text.encode())
+    if profiles is not None:
+        laid_out["profiles.yaml"] = ("100644", yaml.safe_dump({"profiles": profiles}).encode())
+    for rel, text in (files or {}).items():
+        laid_out[rel] = ("100644", text.encode())
+    return laid_out
 
 
 def addon_json(name: str, **over) -> dict:
@@ -195,15 +207,7 @@ def extracted(
     what `update.check` and `review.review` take."""
     declared = addon_json("release", **(manifest_fields or {}))
     files = {manifest.ADDON_JSON: ("100644", json.dumps(declared).encode())}
-    if library is not None:
-        files["library.yaml"] = ("100644", yaml.safe_dump(library).encode())
-    for chain_name, body in (chains or {}).items():
-        files[f"chains/{chain_name}.yaml"] = ("100644", yaml.safe_dump(body).encode())
-    for skill_name, text in (skills or {}).items():
-        files[f"skills/{skill_name}/SKILL.md"] = ("100644", text.encode())
-    if profiles is not None:
-        files["profiles.yaml"] = ("100644", yaml.safe_dump({"profiles": profiles}).encode())
-    return fetch.Extracted(files)
+    return fetch.Extracted({**files, **_layout(library, chains, skills, profiles, None)})
 
 
 def drop_store(store: Path) -> None:
