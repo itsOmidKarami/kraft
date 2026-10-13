@@ -447,6 +447,15 @@ def diff(before: ResolvedChain, after: ResolvedChain) -> list[str]:
 _REJECT = "Approving it is refused; reject it back to the node that wrote it, with this reason."
 
 
+def _sources(node: AddedNode) -> list[str]:
+    """The library components an added node is built from, as authored: its
+    `extends`, or each of its tasks', in order and without repeats."""
+    if node.extends is not None:
+        return [node.extends]
+    tasks = node.tasks or [t for step in node.steps or [] for t in step.tasks]
+    return list(dict.fromkeys(t.extends for t in tasks))
+
+
 def render(
     text: str, chain: MaterializedChain, gate: str, library: TemplateLibrary | None
 ) -> tuple[str, MaterializedChain | None]:
@@ -461,7 +470,11 @@ def render(
         return f"# Chain revision\n\n## Cannot be read\n\n**{exc}**\n\n{_REJECT}\n", None
     lines = ["# Chain revision", "", changes.rationale, "", "## Changes", ""]
     lines += [f"- skip `{s.node}` -- {s.evidence}" for s in changes.skip]
-    lines += [f"- add `{a.node.id}` after `{a.after}` -- {a.evidence}" for a in changes.add]
+    lines += [
+        f"- add `{a.node.id}` after `{a.after}`, from "
+        f"{', '.join(f'`{name}`' for name in _sources(a.node))} -- {a.evidence}"
+        for a in changes.add
+    ]
     lines += [
         f"- set {', '.join(f'{k}={v}' for k, v in {**o.task_config(), **o.policy()}.items())} "
         f"on `{path}` -- {o.evidence}"
