@@ -88,6 +88,20 @@ def filed_dirs(run_dirs, wid: str) -> tuple[Path, Path]:
     return filed_dir(run_dirs, wid), run_dirs.attachments / _component(wid, "work item id")
 
 
+def filed_copy(run_dirs, wid: str, source: str | None) -> tuple[Path, str] | None:
+    """The folder and file name of an attachment copy intake stored, by the
+    `source` its row records, when that is directly inside one of the item's
+    `filed_dirs`; None for anything else, so a reader never opens a path a
+    row names outside Kraft's own copies. The caller reads the name inside
+    the folder with no symlink followed."""
+    if not source:
+        return None
+    path = Path(source)
+    if path.parent in filed_dirs(run_dirs, wid):
+        return path.parent, path.name
+    return None
+
+
 def document_name(wid: str, kind: str) -> str:
     """Where a task producing `kind` writes, relative to the run folder."""
     return f"{ITEMS}/{_component(wid, 'work item id')}/docs/{_component(kind, 'kind')}.md"

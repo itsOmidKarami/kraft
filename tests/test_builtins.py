@@ -107,7 +107,7 @@ async def test_a_missing_attachment_source_fails_loudly(tmp_path, database, run_
     names is one the started item can take: put the copy back and retry, not
     abandon and re-file (Kraft-s7c04.29)."""
     await wtree.make_item(database, repo)
-    stored = tmp_path / "run" / "attachments" / "w1" / "spec.md"
+    stored = tmp_path / "run" / "items" / "w1" / "filed" / "spec.md"
     with pytest.raises(FileNotFoundError, match="missing from Kraft's storage") as raised:
         await wtree.ensure(
             database,

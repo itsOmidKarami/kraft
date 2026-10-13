@@ -431,7 +431,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
             "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
         },
     ).json()["id"]
-    stored = client.app.state.run_dirs.attachments / wid
+    stored = client.app.state.run_dirs.items / wid / "filed"
     assert stored.is_dir()
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")

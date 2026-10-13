@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from kraft import events, store
+from kraft import events, item_paths, store
 from kraft.adapters import beads
 from kraft.config import git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -269,10 +269,14 @@ def _store_attachments(
     `tag` names a re-snapshot apart from the copy it supersedes
     (`replace_attachments`), so the old one stays intact until the row stops
     naming it.
+
+    The copy goes to the item's `filed/` (`item_paths.filed_dir`), which no
+    sandbox mounts and no harness is granted, so a worker cannot rewrite
+    what a person filed.
     """
     if not attachments:
         return attachments or []
-    dest_dir = run_dirs.attachments / work_item_id
+    dest_dir = item_paths.filed_dir(run_dirs, work_item_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
     stored = []
     for a in attachments:
@@ -304,12 +308,12 @@ def replace_attachments(
 
 def discard_attachments(run_dirs, work_item_id: str, drop: list[dict], keep: list[dict]) -> None:
     """Delete the stored copies `drop` names and `keep` does not: only this
-    item's own, and only the ones the caller made or superseded."""
-    stored = run_dirs.attachments / work_item_id
+    item's own, and only the ones the caller made or superseded: in its
+    `filed/`, or in `attachments/<id>/` for an item filed before it had one."""
     kept = {a.get("source") for a in keep}
     for a in drop:
         source = a.get("source")
-        if source and source not in kept and Path(source).parent == stored:
+        if source and source not in kept and item_paths.filed_copy(run_dirs, work_item_id, source):
             Path(source).unlink(missing_ok=True)
 
 

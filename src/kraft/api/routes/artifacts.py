@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import HTTPException, Query, Request
 
@@ -345,7 +344,8 @@ async def get_work_item_attachment(wid: str, kind: str, request: Request):
 
     Before the item starts there is no worktree and nothing indexed, so this is
     the only way to read what was attached. It is the snapshot under
-    `run/attachments/<wid>/`, the one the worktree will get, read with the same
+    `run/items/<wid>/filed/` (`run/attachments/<wid>/` for an item filed
+    before that folder), the one the worktree will get, read with the same
     containment walk as a gate's artifact."""
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
@@ -355,12 +355,8 @@ async def get_work_item_attachment(wid: str, kind: str, request: Request):
     a = next((a for a in entry.attachments_of(row) if a.get("kind") == kind), None)
     if a is None:
         raise HTTPException(404, f"this work item has no {kind} attached")
-    source = a.get("source")
-    result = (
-        read_worktree_file(st.run_dirs.attachments / wid, Path(source).name, DIFF_MAX_BYTES)[0]
-        if source
-        else None
-    )
+    stored = item_paths.filed_copy(st.run_dirs, wid, a.get("source"))
+    result = read_worktree_file(*stored, DIFF_MAX_BYTES)[0] if stored else None
     if result is None:
         raise HTTPException(404, f"Kraft no longer has the copy of this work item's {kind}")
     fm, body = ingest_mod.split_front_matter(result.text)

@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from kraft import config as config_mod
-from kraft import events
+from kraft import events, item_paths
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
@@ -488,7 +488,8 @@ class Indexer:
     def _read_attachment(self, work_item_id: str, attachment: dict) -> str | None:
         """An unindexed attachment's text: from the item's own worktree while
         it has one, else from the copy Kraft stored at intake under
-        `run/attachments/<id>/`: before the item starts (the copy the
+        `run/items/<id>/filed/` (or `run/attachments/<id>/`, filed before
+        that folder): before the item starts (the copy the
         worktree will get), and after its worktree is removed (what it was
         filed with). Never the main checkout, which holds files no one
         attached (R11F-02). While the worktree exists it is the only source,
@@ -497,10 +498,8 @@ class Indexer:
             return None
         if (self._run_dirs.worktrees / work_item_id).exists():
             return self._read_worktree_file(attachment["path"], work_item_id)
-        source = attachment.get("source")
-        if not source:
-            return None
-        return ingest.read_inside(self._run_dirs.attachments / work_item_id, Path(source).name)
+        stored = item_paths.filed_copy(self._run_dirs, work_item_id, attachment.get("source"))
+        return ingest.read_inside(*stored) if stored else None
 
     def _synthesize_attachment_doc(
         self, work_item_id: str, repo: str, attachment: dict

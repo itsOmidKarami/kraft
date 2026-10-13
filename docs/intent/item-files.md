@@ -24,7 +24,8 @@ origin: src/kraft/adapters/subprocess.py §run_task -- a session's log, exit cod
 
 WHEN intake copies an attachment, the system SHALL copy it into
 `run/items/<id>/filed/`.
-enforced-by:
+enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[filed], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[older-attachments]
+origin: src/kraft/executor/entry.py §_store_attachments -- outside `docs/`, which a sandbox mounts read-write, so a worker cannot rewrite what a person filed; an older item's copy stays in `attachments/<id>/` and is read there.
 
 ## REQ a-document-is-read-from-the-new-place-first
 

@@ -296,11 +296,18 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         (None, "# Attached plan\nbody\n", "Attached plan"),
         ("# Attached plan\nbody\n", "# As filed\nbody\n", "Attached plan"),
         ("", "# As filed\nbody\n", None),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
     ],
-    ids=["worktree", "stored-before-start", "worktree-over-stored", "gone-from-worktree"],
+    ids=[
+        "worktree",
+        "stored-before-start",
+        "worktree-over-stored",
+        "gone-from-worktree",
+        "stored-before-the-upgrade",
+    ],
 )
 async def test_documents_for_work_item_shows_an_unindexed_attachment(
-    tmp_path, database, conn, repo, in_worktree, stored, title
+    request, tmp_path, database, conn, repo, in_worktree, stored, title
 ):
     """The attachment is committed only on the item's own branch/worktree, not
     on the registered main checkout — `rescan_repo` never sees it, but the
@@ -315,9 +322,12 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
     rd = RunDirs(tmp_path / "run").ensure()
     attachment = {"kind": "plan", "path": ".engineering/plans/p.md"}
     if stored is not None:
-        (rd.attachments / "w1").mkdir(parents=True)
-        (rd.attachments / "w1" / "plan.md").write_text(stored)
-        attachment["source"] = str(rd.attachments / "w1" / "plan.md")
+        # An item filed before the upgrade keeps its copy in `attachments/`.
+        older = request.node.callspec.id == "stored-before-the-upgrade"
+        folder = rd.attachments / "w1" if older else rd.items / "w1" / "filed"
+        folder.mkdir(parents=True)
+        (folder / "plan.md").write_text(stored)
+        attachment["source"] = str(folder / "plan.md")
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "

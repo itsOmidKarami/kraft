@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, node_runs, start_queue, storage, store
+from kraft import escalate, events, executor, item_paths, node_runs, start_queue, storage, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -487,7 +487,11 @@ async def abandon_work_item(wid: str, request: Request):
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
+    # `rmtree` opens each folder relative to its parent without following a
+    # link (its fd-based walk), so a link a worker planted in `docs/` or the
+    # sandbox home is removed, never what it points at.
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
+    shutil.rmtree(item_paths.item_dir(st.run_dirs, wid), ignore_errors=True)
     return {"id": wid, "status": "abandoned", **removed}
 
 

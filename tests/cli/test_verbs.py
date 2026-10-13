@@ -412,7 +412,7 @@ def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch, repo):
     assert [{k: v for k, v in a.items() if k != "source"} for a in item["attachments"]] == [
         {"kind": "plan", "path": ".engineering/plans/p.md"}
     ]
-    stored_dir = tmp_path / "run" / "attachments" / created["id"]
+    stored_dir = tmp_path / "run" / "items" / created["id"] / "filed"
     assert pathlib.Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
 
 
