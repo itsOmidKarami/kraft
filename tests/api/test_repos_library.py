@@ -4,7 +4,7 @@ forgotten at disconnect."""
 from __future__ import annotations
 
 import pytest
-from support.addons import AGENT, repo_with_library
+from support.addons import AGENT, load_release, repo_with_library
 from support.harness import git, make_repo
 
 from kraft.addons.config import RepoLibrariesLock
@@ -14,18 +14,30 @@ from kraft.config import read_yaml, write_yaml
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
-def _with_library(tmp_path, client):
-    repo = repo_with_library(tmp_path)
+def _with_library(tmp_path, client, name="app"):
+    repo = repo_with_library(tmp_path, name)
     assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
     return repo
 
 
-def test_a_repo_library_is_reviewed_then_accepted(tmp_path, client, templates_dir):
-    repo = _with_library(tmp_path, client)
+@pytest.mark.parametrize(
+    "name, addon, minted",
+    [
+        pytest.param("app", False, "app", id="own-name"),
+        pytest.param("release", True, "release-2", id="addon-namespace"),
+        pytest.param("kraft", False, "kraft-2", id="reserved"),
+    ],
+)
+def test_a_repo_library_is_reviewed_then_accepted(
+    tmp_path, client, templates_dir, name, addon, minted
+):
+    if addon:
+        load_release(client, tmp_path)
+    repo = _with_library(tmp_path, client, name)
 
     seen = client.get("/api/repos/library", params={"path": str(repo)}).json()
 
-    assert (seen["outcome"], seen["id"]) == ("waiting", "app")
+    assert (seen["outcome"], seen["id"]) == ("waiting", minted)
     assert "Content:" in seen["review"]["text"]
     assert not (templates_dir / "repo-libraries.lock").exists()
 
@@ -35,10 +47,11 @@ def test_a_repo_library_is_reviewed_then_accepted(tmp_path, client, templates_di
 
     assert took.status_code == 200
     assert took.json()["outcome"] == "accepted"
-    assert "app" in RepoLibrariesLock.load(templates_dir / "repo-libraries.lock").repos
-    assert client.get("/api/repos").json()["repos"][0]["id"] == "app"
+    assert minted in RepoLibrariesLock.load(templates_dir / "repo-libraries.lock").repos
+    assert client.get("/api/repos").json()["repos"][0]["id"] == minted
     health = client.get("/api/health").json()
-    assert "repo library app" not in health.get("invalid_templates", {})
+    assert f"repo library {minted}" not in health.get("invalid_templates", {})
+    assert "add-on release@acme" not in health.get("invalid_templates", {})
     again = client.get("/api/repos/library", params={"path": str(repo)}).json()
     assert again["outcome"] == "current"
 

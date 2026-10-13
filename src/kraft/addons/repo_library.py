@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING
 import yaml
 
 from kraft.addons import fetch, load, manifest, update
-from kraft.addons.config import RESERVED_NAMESPACE, RepoLibrariesLock, RepoLockEntry
+from kraft.addons.config import (
+    RESERVED_NAMESPACE,
+    AddonsConfig,
+    RepoLibrariesLock,
+    RepoLockEntry,
+)
 from kraft.config import GIT_READ_ENV, ConfigError, bounded_yaml, load_repos, write_text
 from kraft.templates.library import TemplateLibraryError
 from kraft.worker.sandbox import harden_host_git_env
@@ -203,16 +208,39 @@ def _short(digest: str) -> str:
     return digest.removeprefix("sha256:")[:12]
 
 
-def _id_problem(repo_id: str, addons: list[load.InstalledAddon]) -> str | None:
-    """Why `repo_id` cannot be a repo library's namespace, with the fix."""
-    fix = "set another `id` on the repository's entry in repos.yaml"
+def held_namespaces(config_dir: Path, addons_root: Path) -> dict[str, str]:
+    """Every namespace an add-on holds, to the add-on holding it: the lock's,
+    disabled and not-yet-installed add-ons included, then the one each pending
+    `as:` in addons.yaml would take."""
+    held = {p.namespace: p.id for p in load.installed(config_dir, addons_root) if p.repo_id is None}
+    try:
+        config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
+    except ConfigError:
+        return held  # `config_problem` says why
+    for addon_id in config.addons:
+        held.setdefault(config.namespace(addon_id), addon_id)
+    return held
+
+
+_FIX = "set another `id` on the repository's entry in repos.yaml"
+
+
+def namespace_problem(repo_id: str, held: Mapping[str, str]) -> str | None:
+    """Why `repo_id` is a namespace Kraft or an add-on already holds, with the
+    fix. `held` is `held_namespaces`."""
     if repo_id == RESERVED_NAMESPACE:
-        return f"repository id {repo_id!r} is Kraft's own namespace; {fix}"
+        return f"repository id {repo_id!r} is Kraft's own namespace; {_FIX}"
+    if repo_id in held:
+        return f"repository id {repo_id!r} is the namespace of add-on {held[repo_id]}; {_FIX}"
+    return None
+
+
+def _id_problem(repo_id: str, held: Mapping[str, str]) -> str | None:
+    """Why `repo_id` cannot be a repo library's namespace, with the fix."""
+    if why := namespace_problem(repo_id, held):
+        return why
     if len(repo_id) > 64:
-        return f"repository id {repo_id[:20]!r}... is longer than 64 characters; {fix}"
-    for addon in addons:
-        if addon.repo_id is None and addon.namespace == repo_id:
-            return f"repository id {repo_id!r} is the namespace of add-on {addon.id}; {fix}"
+        return f"repository id {repo_id[:20]!r}... is longer than 64 characters; {_FIX}"
     return None
 
 
@@ -356,7 +384,7 @@ def check(
         return replace(base, outcome="refused", problems=problems)
 
     loaded = list(load.installed(config_dir, addons_root))
-    if why := _id_problem(repo_id, loaded):
+    if why := _id_problem(repo_id, held_namespaces(config_dir, addons_root)):
         return refused(why)
     try:
         declared = manifest.addon(

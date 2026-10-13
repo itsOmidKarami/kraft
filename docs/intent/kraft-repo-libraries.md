@@ -32,8 +32,8 @@ origin: src/kraft/addons/repo_library.py §check
 
 ## REQ a-repo-id-must-be-free-to-be-a-namespace
 
-IF a repository's id is `kraft`, an installed add-on's namespace, or longer than 64 characters, THEN the system SHALL refuse to accept its library.
-enforced-by: tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[reserved], tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[an-addons-namespace], tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[too-long]
+IF a repository's id is `kraft`, an add-on's namespace or one a pending `as:` in `addons.yaml` would take, or longer than 64 characters, THEN the system SHALL refuse to accept its library.
+enforced-by: tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[reserved], tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[an-addons-namespace], tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[too-long], tests/addons/test_repo_library.py::test_an_id_that_cannot_be_a_namespace_is_refused[a-pending-alias]
 origin: src/kraft/addons/repo_library.py §_id_problem
 
 ## REQ only-the-reviewed-candidate-is-accepted
