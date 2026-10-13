@@ -132,8 +132,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md).
 ### Specs and plans are not committed
 
 Design docs and implementation plans do not go into git. `.engineering/` and
-`docs/superpowers/` are both gitignored (Kraft writes its own specs, plans,
-review briefs and session notes there).
+`docs/superpowers/` are both gitignored. Kraft writes its own specs, plans,
+review briefs and session summaries outside the repository, under
+`~/.kraft/run/items/<work-item-id>/` (`docs/` and `sessions/`). `.engineering/`
+stays ignored for a person's own specs and for worktrees made before that,
+where Kraft wrote them.
 
 When a brainstorm produces a spec and a plan for Kraft, hand them over as work
 item attachments instead:
@@ -143,7 +146,8 @@ kraft item create "title" --spec PATH --plan PATH
 ```
 
 **An attachment is snapshotted at intake.** Intake copies the file into
-`~/.kraft/run/attachments/<work-item-id>/`, and that copy, not the path you
+`~/.kraft/run/items/<work-item-id>/filed/` (`run/attachments/<work-item-id>/`
+for an item filed before that folder), and that copy, not the path you
 passed, is what `builtins.ensure_worktree` copies into the worker's worktree
 when the item runs. A stored copy that has gone missing fails the item before
 its worktree is made, so it never runs with its gates trimmed and no document.
