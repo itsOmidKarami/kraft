@@ -615,7 +615,9 @@ def connected_entry[E](repos: Iterable[E], path: object) -> E | None:
     entry = next((r for r in repos if getattr(r, "path", None) == path), None)
     if entry is not None:
         return entry
-    resolved = str(Path(path).expanduser().resolve())
+    # `realpath` is `Path.resolve()` as a string; the path is only compared,
+    # never opened.
+    resolved = os.path.realpath(os.path.expanduser(path))
     return next((r for r in repos if getattr(r, "path", None) == resolved), None)
 
 
