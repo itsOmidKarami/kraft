@@ -34,7 +34,7 @@ from pydantic import (
 )
 
 from kraft.policy import FROZEN, PolicyError
-from kraft.templates.environment import Identifier
+from kraft.templates.environment import Identifier, QualifiedIdentifier
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import (
     PATH_SEPARATOR,
@@ -69,13 +69,14 @@ class _Change(BaseModel):
 
 
 class AddedTask(BaseModel):
-    """A task of an added node: a library task by name, and nothing else, so a
-    revision can only run work an administrator already wrote."""
+    """A task of an added node: a library task by name, local or an add-on's
+    (`<namespace>:<name>`), and nothing else, so a revision can only run work
+    an administrator wrote or accepted."""
 
     model_config = _STRICT
 
     id: Identifier
-    extends: Identifier
+    extends: QualifiedIdentifier
 
 
 class AddedStep(BaseModel):
@@ -86,13 +87,14 @@ class AddedStep(BaseModel):
 
 
 class AddedNode(BaseModel):
-    """An execution node built from library components only: a library node
-    (`extends`), or `tasks`/`steps` of library tasks."""
+    """An execution node built from library components only, local or an
+    add-on's (`<namespace>:<name>`): a library node (`extends`), or
+    `tasks`/`steps` of library tasks. Its own ids stay bare."""
 
     model_config = _STRICT
 
     id: Identifier
-    extends: Identifier | None = None
+    extends: QualifiedIdentifier | None = None
     tasks: list[AddedTask] | None = None
     steps: list[AddedStep] | None = None
 
