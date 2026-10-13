@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -69,6 +69,66 @@ class InstalledAddon:
         """The repository this is the repo library of; None for an add-on."""
         collection = self.id.partition("@")[2]
         return collection.removeprefix(_REPO) if collection.startswith(_REPO) else None
+
+
+def scope_message(name: str, repo_id: str) -> str:
+    """Why `name` cannot be read here: it is in `repo_id`'s repo library. The
+    one wording every door that refuses a repo library from outside uses."""
+    return f"{name} is in {repo_id}'s repo library, {_visible_only(repo_id)}"
+
+
+def _visible_only(repo_id: str) -> str:
+    return f"visible only to items in {repo_id}"
+
+
+def _library_out_of_scope(repo_id: str) -> str:
+    return f"{repo_id}'s repo library is {_visible_only(repo_id)}"
+
+
+def out_of_scope(name: object, owner: str | None, repo_ids: Collection[str]) -> str | None:
+    """`name` (`<q>:<x>`) names a connected repository's library (`q` in
+    `repo_ids`) from outside it (`q` is not `owner`): the reason, else None."""
+    if not isinstance(name, str):
+        return None
+    qualifier, colon, _ = name.partition(":")
+    if not colon or qualifier not in repo_ids or qualifier == owner:
+        return None
+    return scope_message(name, qualifier)
+
+
+def _pin_repo(pin: Mapping[str, str | None]) -> str | None:
+    """The repository a pin's `library@repo:<id>` names; None for an add-on."""
+    collection = str(pin.get("id") or "").partition("@")[2]
+    return collection.removeprefix(_REPO) if collection.startswith(_REPO) else None
+
+
+def scope_problem(
+    pins: Mapping[str, Mapping[str, str | None]] | None, repo_id: str | None
+) -> str | None:
+    """Why a chain pinned as `pins` cannot run for `repo_id`'s items: the
+    first repo library it reads that is not `repo_id`'s. None when every pin
+    is in scope. `repo_id` None (no repository, or an entry with no `id`)
+    refuses every repo library; an add-on is never scoped."""
+    for pin in (pins or {}).values():
+        owner = _pin_repo(pin)
+        if owner is not None and owner != repo_id:
+            return f"it reads {owner}'s repo library, {_visible_only(owner)}"
+    return None
+
+
+def scoped(
+    addons: Iterable[InstalledAddon], repo_id: str | None, keep: Collection[str] = ()
+) -> tuple[InstalledAddon, ...]:
+    """`addons` as `repo_id`'s items see them: each repo library that is not
+    `repo_id`'s, and whose namespace is not in `keep` (pinned by the item
+    already), left out, quietly. Never dropped: a namespace missing from a
+    launch's add-ons is read as another tool's plugin."""
+    return tuple(
+        replace(a, left_out=_library_out_of_scope(a.namespace), quiet=True)
+        if a.repo_id is not None and a.repo_id != repo_id and a.namespace not in keep
+        else a
+        for a in addons
+    )
 
 
 def _reference(value: str, addon: InstalledAddon, *, bare_is_own: bool) -> str:
