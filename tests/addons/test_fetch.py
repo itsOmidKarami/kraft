@@ -4,7 +4,7 @@ as raw blobs, under the limits; the digest; the store."""
 import json
 
 import pytest
-from support.addons import AGENT, chain, edit_store, forge_digest, make_collection
+from support.addons import AGENT, chain, edit_and_forge, edit_store, forge_digest, make_collection
 from support.harness import commit_all, git, write
 
 from kraft.addons import fetch, manifest
@@ -303,11 +303,6 @@ def _gone(store, rel, _text):
     (store / rel).unlink()
 
 
-def _edit_and_forge(store, rel, text):
-    edit_store(store, rel, text)
-    forge_digest(store)
-
-
 SKILL = "skills/x/SKILL.md"
 
 
@@ -316,7 +311,7 @@ SKILL = "skills/x/SKILL.md"
     [
         (None, SKILL, False, b"the method"),
         (edit_store, SKILL, False, "does not match its digest"),
-        (_edit_and_forge, SKILL, False, "does not hash to the store's name"),
+        (edit_and_forge, SKILL, False, "does not hash to the store's name"),
         (edit_store, "chains/extra.yaml", False, "is not in its digest"),
         (_gone, "chains/ship.yaml", False, "is missing"),
         (None, "profiles.yaml", True, None),

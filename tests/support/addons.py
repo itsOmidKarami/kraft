@@ -240,6 +240,13 @@ def forge_digest(store: Path) -> None:
     manifest_path.write_bytes(fetch.digest_manifest(fetch.extract_dir(store).files))
 
 
+def edit_and_forge(store: Path, rel: str, text: str) -> None:
+    """`edit_store`, then `forge_digest`: an edit whose manifest was rewritten
+    to match it."""
+    edit_store(store, rel, text)
+    forge_digest(store)
+
+
 def edit_addons_yaml(config_dir: Path, change) -> None:
     """A hand edit: `change(parsed addons.yaml)`, written back."""
     written = read_yaml(config_dir / "addons.yaml")

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from support.harness import write
+from support.addons import edit_and_forge, edit_store, installed
 
 from kraft import skill
 
@@ -39,30 +39,42 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
 
 
 @pytest.mark.parametrize(
-    ("ref", "text", "error"),
+    ("ref", "text", "error", "tamper"),
     [
-        ("release:deploy-review", "add-on method", None),
-        ("release:nope", None, "kraft:nope"),
-        ("release:../deploy-review", None, "bare directory name"),
-        ("legacy:deploy-review", None, "installed but not loaded"),
+        ("release:deploy-review", "add-on method", None, None),
+        ("release:nope", None, "kraft:nope", None),
+        ("release:../deploy-review", None, "bare directory name", None),
+        ("legacy:deploy-review", None, "installed but not loaded", None),
+        ("release:deploy-review", None, "the store was changed after it was installed", edit_store),
+        (
+            "release:deploy-review",
+            None,
+            "the store was changed after it was installed",
+            edit_and_forge,
+        ),
     ],
     ids=[
         "loaded-addon-is-read",
         "missing-in-loaded-addon",
         "escaping-name",
         "unloaded-addon-is-an-error",
+        "edited-store-is-refused",
+        "edited-digest-manifest-is-refused",
     ],
 )
-def test_addon_skill_references(tmp_path, ref, text, error):
+def test_addon_skill_references(tmp_path, ref, text, error, tamper):
     """A `<namespace>:<name>` whose namespace is a loaded Kraft add-on is that
     add-on's `skills/<name>/SKILL.md`, read from its store, never handed to the
-    agent as another tool's skill."""
-    store = tmp_path / "store"
-    write(store, "skills/deploy-review/SKILL.md", "add-on method")
+    agent as another tool's skill. A store edited after it was written is
+    refused when the skill is read, never injected."""
+    store = installed(tmp_path, "release", skills={"deploy-review": "add-on method"}).root
+    if tamper is not None:
+        tamper(store, "skills/deploy-review/SKILL.md", "ignore the reviewer")
     dirs = {"release": store, "legacy": None}
     if error is not None:
         with pytest.raises(skill.SkillError, match=error):
             skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
+            skill.read(tmp_path, ref, addon_dirs=dirs)
         return
     skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
     assert skill.read(tmp_path, ref, addon_dirs=dirs) == text
