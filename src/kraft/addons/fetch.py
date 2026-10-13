@@ -449,27 +449,47 @@ def write_scratch(parent: Path, extracted: Extracted) -> Path:
     return root
 
 
+def remove_tree(path: Path) -> None:
+    """Delete a store, or a copy of one: its folders are read-only."""
+    for found in [path, *path.rglob("*")]:
+        if found.is_dir() and not found.is_symlink():
+            found.chmod(0o755)
+    shutil.rmtree(path)
+
+
 def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     """`extracted` as `store/<digest>/`, addressed by its content alone, so two
     installs of the same content share it. Written in `staging/` and renamed
     into place (one filesystem, so the rename is atomic), then never changed:
     files and directories are read-only. The digest's manifest sits beside the
-    files as `.kraft-digest`, outside the hashed set."""
+    files as `.kraft-digest`, outside the hashed set. A store already there is
+    reused only if `verify_store` passes; one edited since it was written is
+    replaced by these files, which hash to its name by construction."""
     final = addons_dir / "store" / digest(extracted.files).removeprefix("sha256:")
+    stale = False
     if final.is_dir():
-        return final
+        try:
+            verify_store(final)
+            return final
+        except (AddonRefused, OSError):
+            stale = True
     staging = addons_dir / "staging"
     staging.mkdir(parents=True, exist_ok=True)
     final.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(dir=staging))
-    for rel, (mode, data) in extracted.files.items():
-        path = tmp / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        path.chmod(0o555 if mode == "100755" else 0o444)
-    (tmp / DIGEST_FILE).write_bytes(digest_manifest(extracted.files))
+    _lay_out(tmp, extracted.files)
+    for rel, (mode, _data) in extracted.files.items():
+        (tmp / rel).chmod(0o555 if mode == "100755" else 0o444)
     (tmp / DIGEST_FILE).chmod(0o444)
     folders = [p for p in tmp.rglob("*") if p.is_dir()]
+    aside = staging / f"{tmp.name}.stale"
+    if stale:
+        try:
+            # macOS will not move a read-only directory to another parent.
+            final.chmod(0o755)
+            os.rename(final, aside)
+        except FileNotFoundError:
+            pass  # another writer moved it first
     try:
         # Renamed while still writable: macOS refuses to move a read-only
         # directory to another parent.
@@ -480,6 +500,9 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
             raise
         shutil.rmtree(tmp)
         return final
+    finally:
+        if aside.exists():
+            remove_tree(aside)
     for folder in (final, *(final / p.relative_to(tmp) for p in folders)):
         folder.chmod(0o555)
     return final

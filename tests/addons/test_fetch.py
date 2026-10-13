@@ -250,16 +250,43 @@ def test_the_digest_is_the_same_whatever_the_git_config(
     assert git(collection, "hash-object", "--no-filters", str(probe)) == committed
 
 
-def test_a_store_is_addressed_by_its_content(collection, addons_dir):
+def _edit_library(store):
+    edit_store(store, "library.yaml", "tasks: {}\n")
+
+
+def _edit_library_and_forge(store):
+    _edit_library(store)
+    forge_digest(store)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [None, _edit_library, _edit_library_and_forge],
+    ids=[
+        "unchanged-store-is-reused",
+        "edited-store-is-rewritten",
+        "edited-digest-manifest-is-rewritten",
+    ],
+)
+def test_a_store_is_addressed_by_its_content(collection, addons_dir, damage):
+    """Two writes of the same content share one store; a store whose files no
+    longer match its name is replaced by the second write, never reused."""
     extracted = _extract(collection, addons_dir)
     store = fetch.write_store(addons_dir, extracted)
     assert store == addons_dir / "store" / fetch.digest(extracted.files).removeprefix("sha256:")
     assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
     assert (store / fetch.DIGEST_FILE).read_bytes() == fetch.digest_manifest(extracted.files)
     assert not (store / "library.yaml").stat().st_mode & 0o222
+    inode = store.stat().st_ino
+    if damage is not None:
+        damage(store)
     # The same content from a directory collection is the same store.
     again = fetch.write_store(addons_dir, fetch.extract_dir(collection / "addons/release"))
     assert again == store
+    assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
+    fetch.verify_store(store)
+    assert not (store / "library.yaml").stat().st_mode & 0o222
+    assert (store.stat().st_ino == inode) == (damage is None)
     assert list((addons_dir / "staging").iterdir()) == []
 
 

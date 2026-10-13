@@ -326,12 +326,14 @@ def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str 
         recorded = (root / fetch.DIGEST_FILE).read_bytes()
         if hashlib.sha256(recorded).hexdigest() != root.name:
             return mismatch
-        if verify and fetch.digest_manifest(fetch.extract_dir(root).files) != recorded:
-            return mismatch
+        if verify:
+            fetch.verify_store(root)
         declared = manifest.addon(
             manifest.parse((root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
             manifest.ADDON_JSON,
         )
+    except fetch.StoreMismatch:
+        return mismatch
     except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
         return f"its store cannot be read: {exc}"
     running = update.installed()
@@ -615,7 +617,7 @@ def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> 
     it alone knows what its loaded library and its unfinished work items read."""
     import shutil
 
-    from kraft.addons import update
+    from kraft.addons import fetch, update
 
     root = Path(addons_root) if addons_root is not None else addons_dir()
     removed: list[str] = []
@@ -626,10 +628,7 @@ def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> 
         for store in stores:
             if store.name in kept:
                 continue
-            for path in [store, *store.rglob("*")]:
-                if path.is_dir():
-                    path.chmod(0o755)  # a store is read-only
-            shutil.rmtree(store)
+            fetch.remove_tree(store)
             removed.append(store.name)
     return removed
 
