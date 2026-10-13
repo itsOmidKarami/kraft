@@ -187,7 +187,8 @@ def _path_problem(entry: RepoEntry) -> dict | None:
 def _changes(before: object, after: object) -> list[dict]:
     def by_path(data):
         items = data.get("repos") if isinstance(data, dict) else None
-        return {e["path"]: e for e in items or () if isinstance(e, dict) and "path" in e}
+        items = items if isinstance(items, list) else ()
+        return {e["path"]: e for e in items if isinstance(e, dict) and "path" in e}
 
     was, now = by_path(before), by_path(after)
     out = []

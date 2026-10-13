@@ -236,3 +236,10 @@ def test_remove_repo_with_no_running_item_publishes(client, connected, templates
     assert resolved(client, {"op": "remove_repo", "path": connected})["problems"] == []
     assert client.post(f"{URL}/publish").status_code == 200
     assert yaml.safe_load((templates_dir / "repos.yaml").read_text())["repos"] == []
+
+
+@pytest.mark.parametrize("text", ["repos: 5\n", "repos: true\n"], ids=["int", "bool"])
+def test_a_repos_draft_that_is_not_a_list_is_a_problem_not_a_crash(client, text):
+    r = client.put(f"{URL}/files/repos.yaml", json={"text": text})
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["problems"]

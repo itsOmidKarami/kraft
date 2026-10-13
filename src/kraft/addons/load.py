@@ -579,7 +579,10 @@ def connected_ids(
         entries = repos.get("repos")
     except ConfigError:
         return []
-    found = (e.get("id") for e in entries or () if isinstance(e, dict))
+    # A draft's `repos:` may be anything; its own check says what is wrong.
+    found = (
+        (e.get("id") for e in entries if isinstance(e, dict)) if isinstance(entries, list) else ()
+    )
     root = Path(addons_root) if addons_root is not None else addons_dir()
     held = {RESERVED_NAMESPACE, *held_namespaces(config_dir, root)}
     return [i for i in found if isinstance(i, str) and i and i not in held]
