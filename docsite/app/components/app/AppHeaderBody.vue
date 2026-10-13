@@ -4,7 +4,7 @@
 // docs/DocsAsideLeftBody.vue.
 // package.json pins docus to exactly 5.13.0 for this copy: on a bump, copy the
 // new release's file again and reapply the exactNavigation() wrap, the
-// default-open, the key and the reveal.
+// default-open and the reveal.
 import type { ContentNavigationItem } from '@nuxt/content'
 import { getFirstPagePath } from 'docus/app/composables/useSubNavigation'
 
@@ -23,15 +23,15 @@ const items = computed<ContentNavigationItem[]>(() => {
   })))
 })
 
-const route = useRoute()
+// The menu is built when it opens, so the list is always fresh; only the scroll
+// to the current link is needed.
 const root = useTemplateRef<HTMLElement>('root')
-useRevealCurrentLink(root)
+useFoldedNavigation(root)
 </script>
 
 <template>
   <div ref="root">
     <UContentNavigation
-      :key="route.path"
       default-open
       :highlight="contentNavVariants.highlight ?? true"
       :highlight-color="contentNavVariants.highlightColor"

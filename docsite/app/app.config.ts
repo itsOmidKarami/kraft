@@ -27,7 +27,9 @@ export default defineAppConfig({
     // lines. ms-2.5 makes it 16px a level.
     // The sidebar's groups fold (DocsAsideLeftBody.vue), so each shows its
     // chevron: Docus hides it (`linkTrailing: 'hidden'`) because its own
-    // groups never fold.
+    // groups never fold. A slot string here replaces Docus's, it does not
+    // merge, and that is what brings the chevron back: ms-auto is the theme's
+    // own value for the slot.
     contentNavigation: {
       slots: {
         linkTitle: 'whitespace-normal!',

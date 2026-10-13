@@ -12,18 +12,17 @@ const contentNavVariants = useUIConfig('contentNavigation')
 
 const navigation = computed(() => exactNavigation(sidebarNavigation.value))
 
-const route = useRoute()
 const root = useTemplateRef<HTMLElement>('root')
-useRevealCurrentLink(root)
+const listKey = useFoldedNavigation(root)
 </script>
 
 <template>
   <div ref="root">
     <!-- default-open opens only the groups on the way to the current page.
-         Nuxt UI reads it once, when the list mounts, so the key makes a
-         navigation (a search hit, a link in a page) open its own path too. -->
+         Nuxt UI reads it once, when the list mounts: see useFoldedNavigation()
+         for when the key gives it a fresh start. -->
     <UContentNavigation
-      :key="route.path"
+      :key="listKey"
       default-open
       :highlight="contentNavVariants.highlight ?? true"
       :highlight-color="contentNavVariants.highlightColor"
