@@ -49,7 +49,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `path` | string | *(required)* | Absolute path to the repo. |
 | `name` | string | `null` | Display name, set at connect time and not otherwise validated. Unset, the path is shown. |
-| `id` | string, `[a-z][a-z0-9_-]*` | `null` | The repository id a workspace names this entry by, unique. Connecting a repo with submodules writes one for its root and members, never `kraft` or an add-on's namespace: `release` becomes `release-2`. |
+| `id` | string, `[a-z][a-z0-9_-]*` | `null` | The repository id a workspace names this entry by, unique. Only a workspace's root and members need one. Connecting a repo with submodules, or accepting a repo library, writes it, never `kraft` or an add-on's namespace: `release` becomes `release-2`. |
 | `enabled` | boolean | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. See [`enabled`](#enabled). |
 | `managed` | boolean | `true` | Keeps a repo you connected out of Settings › Repos' "Detected · not connected" section. Auto-connected submodules are written with `managed: false`. |
 | `forge` | string | `null` | `github` or `gitlab`: which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |

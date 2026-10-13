@@ -387,11 +387,11 @@ origin: src/kraft/addons/update.py §_catalogue
 ## REQ a-minted-repository-id-skips-addon-namespaces
 
 WHEN Kraft writes a repository id for an entry that has none, the system SHALL NOT choose `kraft`, the namespace of an add-on `addons.yaml` or `addons.lock` names, or a namespace an `as:` in `addons.yaml` would take.
-enforced-by: tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[addon-namespace], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[addon-namespace], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[reserved]
+enforced-by: tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[addon-namespace], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[addon-namespace], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[reserved], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[a-pending-alias], tests/api/test_repos_library.py::test_a_repo_library_is_reviewed_then_accepted[a-disabled-addon]
 origin: src/kraft/api/routes/repos.py §_repository_id
 
 ## REQ a-workspace-never-names-an-addon-namespace-id
 
 IF connecting a repository would declare a workspace naming an entry whose `id` is `kraft` or an add-on's namespace, THEN the system SHALL refuse the connect, name the add-on, and write nothing.
-enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect
+enforced-by: tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[addon-namespace], tests/api/test_repos_workspaces.py::test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect[reserved]
 origin: src/kraft/api/routes/repos.py §_declare_workspace
