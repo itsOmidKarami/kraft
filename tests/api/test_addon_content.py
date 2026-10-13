@@ -184,7 +184,10 @@ def test_an_addon_chain_opens_read_only_through_the_draft_view(loaded):
     published, with its add-on, and no draft is ever made of it."""
     view = loaded.get("/api/drafts/chains/release:ship").json()
 
-    assert (view["draft"], view["addon"]) == (False, {"id": "release@acme", "version": "1.0.0", "repo": None})
+    assert (view["draft"], view["addon"]) == (
+        False,
+        {"id": "release@acme", "version": "1.0.0", "repo": None},
+    )
     assert [n["id"] for n in view["result"]["resolved"]["nodes"]] == ["n"]
     assert view["result"]["problems"] == [] and view["result"]["changes"] == []
     authored = yaml.safe_load(view["files"]["chains/release:ship.yaml"])
