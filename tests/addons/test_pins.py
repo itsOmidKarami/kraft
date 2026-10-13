@@ -264,15 +264,23 @@ def test_a_pinned_version_that_is_gone_is_refused_not_delegated(home):
     )
 
 
+_EDITED = "profiles.yaml does not match its digest"
+_FAST = {"model": {"codex": "gpt-5"}, "fallback": [{"profile": "release:deep"}]}
+
+
 @pytest.mark.parametrize(
-    ("damage", "fields", "stops"),
+    ("damage", "pinned", "fields", "stops"),
     [
-        ("gone", {"skill": "release:notes"}, "could not be read"),
-        ("gone", {"profile": "release:deep"}, "could not be read"),
-        ("gone", {"fallback": [{"profile": "release:deep"}]}, "could not be read"),
-        ("gone", {"prompt": "unrelated"}, None),
-        ("edited", {"profile": "release:deep"}, "read: profiles.yaml does not match its digest"),
-        ("edited", {"prompt": "unrelated"}, None),
+        ("gone", True, {"skill": "release:notes"}, "could not be read"),
+        ("gone", True, {"profile": "release:deep"}, "could not be read"),
+        ("gone", True, {"fallback": [{"profile": "release:deep"}]}, "could not be read"),
+        ("gone", True, {"prompt": "unrelated"}, None),
+        ("edited", True, {"profile": "release:deep"}, _EDITED),
+        ("edited", True, {"prompt": "unrelated"}, None),
+        ("edited", True, {"profile": "fast"}, _EDITED),
+        ("edited", False, {"profile": "fast"}, _EDITED),
+        ("edited", False, {"prompt": "unrelated"}, None),
+        ("disabled", False, {"prompt": "unrelated"}, "profile 'release:deep' is not defined"),
     ],
     ids=[
         "skill-from-it-stops",
@@ -281,26 +289,37 @@ def test_a_pinned_version_that_is_gone_is_refused_not_delegated(home):
         "unrelated-task-launches",
         "edited-profiles-stop-its-profile",
         "edited-profiles-spare-an-unrelated-task",
+        "a-local-fallback-into-it-stops",
+        "unpinned-local-fallback-into-it-stops",
+        "unpinned-edited-profiles-spare-an-unrelated-task",
+        "a-fallback-into-a-disabled-addon-is-the-files-mistake",
     ],
 )
-def test_a_missing_pin_the_task_does_not_read_does_not_stop_it(home, damage, fields, stops):
+def test_a_missing_pin_the_task_does_not_read_does_not_stop_it(home, damage, pinned, fields, stops):
     """An escalation or a review of an item that pinned `release` reads nothing
     from it: its store being gone, or its `profiles.yaml` edited after it was
-    written, is no reason to refuse them."""
+    written, is no reason to refuse them, even beside a `harnesses.yaml`
+    profile that falls back into it. One disabled on purpose is not damage: a
+    fallback naming it is the file's mistake, as it always was."""
     repo, config_dir, addons_dir = home
     pins = _resolved(config_dir, addons_dir, "mine").addons
     store = load.installed(config_dir, addons_dir)[0].root
+    harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text()) or {}
+    harnesses["profiles"] = {**(harnesses.get("profiles") or {}), "fast": _FAST}
+    (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
     if damage == "gone":
         drop_store(store)
         pins = {"release": {**pins["release"], "digest": "sha256:" + "0" * 64}}
-    else:
+    elif damage == "edited":
         edit_store(store, "profiles.yaml", "profiles: {deep: {model: {codex: evil}}}\n")
+    else:
+        edit_addons_yaml(config_dir, lambda w: w["addons"].update({ID: False}))
 
     if stops:
         with pytest.raises(agent.HarnessUnavailable, match=stops):
-            _launch(pins, **fields)
+            _launch(pins if pinned else None, **fields)
     else:
-        assert _launch(pins, **fields).harness
+        assert _launch(pins if pinned else None, **fields).harness
 
 
 def test_every_launch_is_handed_the_items_pins(home):

@@ -376,6 +376,12 @@ def resolve_agent_task(
             raise ProfileUnavailable(
                 f"{_profile_in(task, table, addon.namespace)}: {addon.left_out}"
             )
+        if not addon.quiet:
+            # Left out by a fault, not pinned: the table knows its namespace
+            # (a fallback into it), so stop here, never at the fallback.
+            raise HarnessUnavailable(
+                f"add-on {addon.id} {addon.version} could not be read: {addon.left_out}"
+            )
     profile = select_profile(table.profiles, task.harness, path)
     # The task's own rung: its agent profile, read live, or its own fields.
     model, effort = task.model, task.effort
