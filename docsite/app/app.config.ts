@@ -22,9 +22,18 @@ export default defineAppConfig({
     },
     // Nuxt UI cuts a long sidebar label short ("Add a security review or a
     // g…"). Wrap it instead, so the label can be the page's whole title.
+    // Each level of the sidebar also took 26px of a 230px column (ms-5, then
+    // ps-1.5 on the item), so a page three levels down wrapped to two or three
+    // lines. ms-2.5 makes it 16px a level.
+    // The sidebar's groups fold (DocsAsideLeftBody.vue), so each shows its
+    // chevron: Docus hides it (`linkTrailing: 'hidden'`) because its own
+    // groups never fold.
     contentNavigation: {
       slots: {
         linkTitle: 'whitespace-normal!',
+        listWithChildren: 'ms-2.5',
+        linkTrailing: 'ms-auto',
+        linkTrailingIcon: 'size-4',
       },
     },
     // Nuxt UI cuts a long "On this page" entry short too, and three entries
