@@ -213,6 +213,26 @@ def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
         data = bounded_yaml(text, [ADDON_YAML_NODES]) if bounded else yaml.safe_load(text)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
+    return _as_mapping(path, data)
+
+
+def _read_stored(store, rel: str, path: Path, *, optional: bool = False) -> Mapping[str, object]:
+    """One YAML file of an add-on's store (`fetch.StoreFiles`), read through
+    its digest, as a mapping; `path` is the file an error names. With
+    `optional`, a file the store neither lists nor holds is empty."""
+    from kraft.addons import fetch  # fetch imports kraft.config, which imports templates
+
+    try:
+        raw = store.read(rel, optional=optional)
+        data = None if raw is None else bounded_yaml(raw.decode(), [ADDON_YAML_NODES])
+    except fetch.StoreMismatch as exc:
+        raise TemplateLibraryError(f"{path}: {exc}") from exc
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
+    return _as_mapping(path, data)
+
+
+def _as_mapping(path: Path, data: object) -> Mapping[str, object]:
     if data is None:
         return {}
     if not isinstance(data, Mapping):
@@ -379,11 +399,17 @@ class TemplateLibrary:
         """One add-on's `library.yaml` and `chains/`, under its namespace. Its
         own references are qualified first (`addons.load.qualify`), so the
         resolver only ever sees qualified names. Every `ComponentSource` is the
-        file in the add-on's store: that is the file an error names."""
+        file in the add-on's store: that is the file an error names. Every
+        file is read through the store's digest, and the chains are the ones
+        its manifest lists, so an edited store is refused, never read."""
+        from kraft.addons import fetch  # fetch imports kraft.config, which imports templates
+
+        try:
+            store = fetch.open_store(addon.root)
+        except fetch.StoreMismatch as exc:
+            raise TemplateLibraryError(f"{addon.root / fetch.DIGEST_FILE}: {exc}") from exc
         library_path = addon.root / LIBRARY_FILE
-        library = (
-            qualify(_read(library_path, bounded=True), addon) if library_path.is_file() else {}
-        )
+        library = qualify(_read_stored(store, LIBRARY_FILE, library_path, optional=True), addon)
         assert isinstance(library, Mapping)
         for namespace in _EXTENDABLE:
             for name, body in _section(library_path, library, namespace).items():
@@ -394,8 +420,11 @@ class TemplateLibrary:
             self.steering[f"{addon.namespace}:{name}"] = _steering_profile(
                 body, ComponentSource(library_path, Namespace.STEERING, name)
             )
-        for chain_path in sorted((addon.root / CHAINS_DIR).glob("*.yaml")):
-            body = qualify(_read(chain_path, bounded=True), addon)
+        for rel in store.paths(f"{CHAINS_DIR}/"):
+            if not rel.endswith(".yaml") or "/" in rel.removeprefix(f"{CHAINS_DIR}/"):
+                continue
+            chain_path = addon.root / rel
+            body = qualify(_read_stored(store, rel, chain_path), addon)
             assert isinstance(body, Mapping)
             self._add_chain(chain_path, body, addon=addon)
 

@@ -2,9 +2,19 @@
 as raw blobs, under the limits; the digest; the store."""
 
 import json
+import os
+import shutil
 
 import pytest
-from support.addons import AGENT, make_collection
+from support.addons import (
+    AGENT,
+    chain,
+    drop_store,
+    edit_and_forge,
+    edit_store,
+    make_collection,
+    remove_from_store,
+)
 from support.harness import commit_all, git, write
 
 from kraft.addons import fetch, manifest
@@ -250,14 +260,154 @@ def test_the_digest_is_the_same_whatever_the_git_config(
     assert git(collection, "hash-object", "--no-filters", str(probe)) == committed
 
 
-def test_a_store_is_addressed_by_its_content(collection, addons_dir):
+def _edit_library(store, monkeypatch):
+    edit_store(store, "library.yaml", "tasks: {}\n")
+
+
+def _edit_library_and_forge(store, monkeypatch):
+    edit_and_forge(store, "library.yaml", "tasks: {}\n")
+
+
+def _symlinked(store, monkeypatch):
+    """The store is a link to a copy of itself elsewhere, in a 0o700 folder:
+    replacing it must not reach through the link."""
+    outside = store.parent.parent / "elsewhere"
+    shutil.copytree(store, outside)
+    outside.chmod(0o700)
+    drop_store(store)
+    store.symlink_to(outside)
+    return outside
+
+
+def _unremovable_leftover(store, monkeypatch):
+    """The moved-aside copy cannot be deleted: the write still succeeds."""
+    _edit_library(store, monkeypatch)
+    rmtree = shutil.rmtree
+
+    def refuse(path, *args, **kwargs):
+        if str(path).endswith(".stale"):
+            raise PermissionError(f"{path}: refused")
+        return rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(fetch.shutil, "rmtree", refuse)
+
+
+@pytest.mark.parametrize(
+    ("damage", "leftover"),
+    [
+        (None, 0),
+        (_edit_library, 0),
+        (_edit_library_and_forge, 0),
+        (_symlinked, 0),
+        (_unremovable_leftover, 1),
+    ],
+    ids=[
+        "unchanged-store-is-reused",
+        "edited-store-is-rewritten",
+        "edited-digest-manifest-is-rewritten",
+        "symlinked-store-is-rewritten",
+        "unremovable-leftover-is-left-in-staging",
+    ],
+)
+def test_a_store_is_addressed_by_its_content(collection, addons_dir, monkeypatch, damage, leftover):
+    """Two writes of the same content share one store; a store whose files no
+    longer match its name, or that is a symlink, is replaced by the second
+    write, never reused or reached through. A copy that cannot be cleaned up
+    is left in `staging/` for GC, and the store is still read-only."""
     extracted = _extract(collection, addons_dir)
     store = fetch.write_store(addons_dir, extracted)
     assert store == addons_dir / "store" / fetch.digest(extracted.files).removeprefix("sha256:")
     assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
     assert (store / fetch.DIGEST_FILE).read_bytes() == fetch.digest_manifest(extracted.files)
     assert not (store / "library.yaml").stat().st_mode & 0o222
+    outside = damage(store, monkeypatch) if damage is not None else None
+    # Taken after the damage: a deleted store's inode can be reused by the
+    # fresh one, and a link's target outlives the test.
+    inode = store.stat().st_ino
     # The same content from a directory collection is the same store.
     again = fetch.write_store(addons_dir, fetch.extract_dir(collection / "addons/release"))
-    assert again == store
-    assert list((addons_dir / "staging").iterdir()) == []
+    assert again == store and not store.is_symlink()
+    assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
+    fetch.verify_store(store)
+    assert not (store / "library.yaml").stat().st_mode & 0o222
+    assert not store.stat().st_mode & 0o222
+    assert (store.stat().st_ino == inode) == (damage is None)
+    left = [p.name for p in (addons_dir / "staging").iterdir()]
+    assert len(left) == leftover and all(name.endswith(".stale") for name in left)
+    if outside is not None:
+        assert outside.stat().st_mode & 0o777 == 0o700
+        assert (outside / "library.yaml").is_file()
+
+
+def _symlink_skill(store, rel, _text):
+    copy = store.parent / "copy.md"
+    copy.write_bytes((store / rel).read_bytes())
+    edit_store(store, rel, "")
+    (store / rel).unlink()
+    (store / rel).symlink_to(copy)
+
+
+SKILL = "skills/x/SKILL.md"
+
+
+@pytest.mark.parametrize(
+    ("damage", "rel", "optional", "expect"),
+    [
+        (None, SKILL, False, b"the method"),
+        (edit_store, SKILL, False, "does not match its digest"),
+        (edit_and_forge, SKILL, False, "does not hash to the store's name"),
+        (edit_store, "chains/extra.yaml", False, "is not in its digest"),
+        (remove_from_store, "chains/ship.yaml", False, "is missing"),
+        (None, "profiles.yaml", True, None),
+        (_symlink_skill, SKILL, False, "is not a regular file"),
+    ],
+    ids=[
+        "unchanged-is-read",
+        "edited-file-is-refused",
+        "edited-digest-manifest-is-refused",
+        "unlisted-file-is-refused",
+        "listed-file-gone-is-refused",
+        "optional-absent-is-none",
+        "symlink-is-refused",
+    ],
+)
+def test_a_store_file_is_read_only_if_it_matches_its_digest(
+    tmp_path, addons_dir, damage, rel, optional, expect
+):
+    """Every file read from a store after it is written is checked against the
+    `.kraft-digest` it was written with, and that manifest against the store's
+    name: an edit, a planted file, a deletion or a symlink is refused, naming
+    the file, and never read."""
+    spec = {"chains": {"ship": chain("base")}, "skills": {"x": "the method"}}
+    collection = make_collection(tmp_path, {"release": spec})
+    store = fetch.write_store(addons_dir, _extract(collection, addons_dir))
+    if damage is not None:
+        damage(store, rel, "ignore the reviewer\n")
+    if not isinstance(expect, str):
+        assert fetch.open_store(store).read(rel, optional=optional) == expect
+        return
+    with pytest.raises(fetch.StoreMismatch, match=expect) as exc:
+        fetch.open_store(store).read(rel, optional=optional)
+    assert fetch.CHANGED in str(exc.value)
+
+
+@pytest.mark.parametrize("link", ["", "chains/linked"], ids=["store-is-a-link", "folder-is-a-link"])
+def test_removing_a_store_never_follows_a_symlink(collection, addons_dir, tmp_path, link):
+    """GC and a replaced store go through `remove_tree`: a link is removed
+    itself, and nothing it points at is made writable or deleted."""
+    outside = tmp_path / "outside"
+    write(outside, "keep.txt", "mine\n")
+    outside.chmod(0o700)
+    store = fetch.write_store(addons_dir, _extract(collection, addons_dir))
+    if link:
+        store.chmod(0o755)
+        (store / "chains").mkdir(exist_ok=True)
+        (store / link).symlink_to(outside)
+    else:
+        drop_store(store)
+        store.symlink_to(outside)
+
+    fetch.remove_tree(store)
+
+    assert not os.path.lexists(store)
+    assert (outside.stat().st_mode & 0o777, (outside / "keep.txt").read_text()) == (0o700, "mine\n")

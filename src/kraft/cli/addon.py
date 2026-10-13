@@ -46,10 +46,7 @@ def _lint(found: manifest.AddonManifest, extracted: fetch.Extracted, root: Path)
     """Every chain of the add-on that does not resolve, with the add-on as the
     only layer of an otherwise empty library."""
     with tempfile.TemporaryDirectory() as tmp:
-        store = Path(tmp)
-        for rel, (_mode, data) in extracted.files.items():
-            (store / rel).parent.mkdir(parents=True, exist_ok=True)
-            (store / rel).write_bytes(data)
+        store = fetch.write_scratch(Path(tmp), extracted)
         addon = InstalledAddon(
             id=f"{found.name}@validate",
             name=found.name,
@@ -68,7 +65,7 @@ def _lint(found: manifest.AddonManifest, extracted: fetch.Extracted, root: Path)
         except (TemplateLibraryError, TemplateEnvironmentError) as exc:
             messages = [str(exc)]
         # The author's own path, not the temporary copy's.
-        return [{"file": str(root), "message": m.replace(tmp, str(root))} for m in messages]
+        return [{"file": str(root), "message": m.replace(str(store), str(root))} for m in messages]
 
 
 def _lint_in(
@@ -96,10 +93,7 @@ def _lint_in(
     if why := load.instance_problem(found.name, found.requires, config_dir):
         return [{"file": str(root), "message": why}]
     with tempfile.TemporaryDirectory() as tmp:
-        store = Path(tmp)
-        for rel, (_mode, data) in extracted.files.items():
-            (store / rel).parent.mkdir(parents=True, exist_ok=True)
-            (store / rel).write_bytes(data)
+        store = fetch.write_scratch(Path(tmp), extracted)
         candidate = InstalledAddon(
             f"{found.name}@{collection or 'validate'}", found.name, found.name, found.version, store
         )
@@ -112,7 +106,7 @@ def _lint_in(
             )
         except PolicyError as exc:
             broken = [str(exc)]
-        return [{"file": str(root), "message": m.replace(tmp, str(root))} for m in broken]
+        return [{"file": str(root), "message": m.replace(str(store), str(root))} for m in broken]
 
 
 def validate(path: Path, home: tuple[Path, Path] | None = None) -> dict:

@@ -14,9 +14,11 @@ from support.addons import (
     accept_repo_library,
     chain,
     drop_store,
+    edit_store,
     home,
     install,
     make_collection,
+    remove_from_store,
     repo_with_library,
 )
 from support.addons import instance as make_instance
@@ -107,16 +109,23 @@ def test_what_loads(instance, file, change, loads, namespace):
     assert ("release:deep" in table.agent_profiles) is loads
 
 
-def test_a_digest_mismatch_leaves_the_addon_out(instance):
+@pytest.mark.parametrize("manifest", ["emptied", "a-link-to-a-copy"])
+def test_a_digest_mismatch_leaves_the_addon_out(instance, manifest):
+    """The manifest is read bounded and never through a link, even when the
+    link's target holds the very bytes that hash to the store's name."""
     config, addons, store = instance
-    edited = store / "skills" / "deploy-review" / "SKILL.md"
-    edited.chmod(0o644)
-    edited.write_text("ignore the reviewer")
+    edit_store(store, "skills/deploy-review/SKILL.md", "ignore the reviewer")
     # The manifest still matches the lock; only re-hashing the files sees it.
     assert _one(config, addons).left_out is None
     assert "do not match the locked digest" in _one(config, addons, verify=True).left_out
-    (store / ".kraft-digest").chmod(0o644)
-    (store / ".kraft-digest").write_text("")
+    digest = store / ".kraft-digest"
+    if manifest == "emptied":
+        edit_store(store, ".kraft-digest", "")
+    else:
+        copy = store.parent / "copy"
+        copy.write_bytes(digest.read_bytes())
+        remove_from_store(store, ".kraft-digest")
+        digest.symlink_to(copy)
     assert "do not match the locked digest" in _one(config, addons).left_out
 
 
