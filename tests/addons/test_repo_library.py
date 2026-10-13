@@ -8,6 +8,7 @@ import yaml
 from support.addons import (
     AGENT,
     chain,
+    edit_addons_yaml,
     edit_store,
     install,
     instance,
@@ -234,17 +235,25 @@ def test_a_repo_library_is_refused_for_what_an_addon_is(app, home, library, chai
     assert any(why in problem for problem in found.problems), found.problems
 
 
+def _alias_pending(home):
+    """An `as:` in addons.yaml that no update has applied yet."""
+    edit_addons_yaml(home[0], lambda c: c["addons"].update({"release@acme": {"as": "rel"}}))
+
+
 @pytest.mark.parametrize(
-    "repo_id, why",
+    "repo_id, why, prepare",
     [
-        pytest.param("kraft", "Kraft's own namespace", id="reserved"),
-        pytest.param("release", "add-on release@acme", id="an-addons-namespace"),
-        pytest.param("a" * 65, "longer than 64", id="too-long"),
+        pytest.param("kraft", "Kraft's own namespace", None, id="reserved"),
+        pytest.param("release", "add-on release@acme", None, id="an-addons-namespace"),
+        pytest.param("a" * 65, "longer than 64", None, id="too-long"),
+        pytest.param("rel", "add-on release@acme", _alias_pending, id="a-pending-alias"),
     ],
 )
-def test_an_id_that_cannot_be_a_namespace_is_refused(tmp_path, app, home, repo_id, why):
+def test_an_id_that_cannot_be_a_namespace_is_refused(tmp_path, app, home, repo_id, why, prepare):
     collection = make_collection(tmp_path, {"release": {"library": {"tasks": {"base": AGENT}}}})
     install(*home, collection, "release")
+    if prepare:
+        prepare(home)
     _library(app)
     repos = {"repos": [{"path": str(app), "id": repo_id}]}
 

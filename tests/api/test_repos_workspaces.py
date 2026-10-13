@@ -5,7 +5,11 @@ tests/api/test_repos.py."""
 from __future__ import annotations
 
 import pytest
+from support.addons import load_release
 from support.harness import ALLOW_FILE, git, make_repo, make_repo_with_submodule
+
+from kraft.addons import load
+from kraft.config import read_yaml, write_yaml
 
 #: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -24,25 +28,42 @@ def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, 
     assert repos[str(root)]["managed"] is True
 
 
-def test_connecting_a_workspace_declares_it_with_its_submodules_as_members(tmp_path, client):
+@pytest.mark.parametrize(
+    "folder, addon, member",
+    [
+        pytest.param("a", False, "a", id="own-name"),
+        pytest.param("release", True, "release-2", id="addon-namespace"),
+        pytest.param("kraft", False, "kraft-2", id="reserved"),
+    ],
+)
+def test_connecting_a_workspace_declares_it_with_its_submodules_as_members(
+    tmp_path, client, templates_dir, folder, addon, member
+):
     """Typed membership replaces reading `.gitmodules` at intake: connecting a
     root declares its workspace, each submodule a member mounted at its path,
     under repository ids the declaration can name. The pointer default is the
-    shipped `ignore` (`workspace-root-pointer-update-defaults-to-ignore`)."""
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    shipped `ignore` (`workspace-root-pointer-update-defaults-to-ignore`). A
+    minted id is never `kraft` or an add-on's namespace, which it would take
+    from the add-on."""
+    if addon:
+        load_release(client, tmp_path)
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path=f"libs/{folder}")
     client.post("/api/repos", json={"path": str(root), "enabled": False})
 
     body = client.get("/api/repos").json()
     ids = {r["path"]: r.get("id") for r in body["repos"]}
-    assert ids == {str(root): "ws", str(root / "libs/a"): "a"}
+    assert ids == {str(root): "ws", str(root / f"libs/{folder}"): member}
     assert body["workspaces"] == {
         "ws": {
             "id": "ws",
             "root": "ws",
             "root_pointer_default": "ignore",
-            "members": {"a": {"repository": "a", "path": "libs/a"}},
+            "members": {member: {"repository": member, "path": f"libs/{folder}"}},
         }
     }
+    if addon:
+        addons = load.installed(templates_dir, client.app.state.run_dirs.addons, verify=True)
+        assert [p.left_out for p in addons if p.id == "release@acme"] == [None]
 
 
 @pytest.mark.parametrize("shape", ["member-is-its-origin", "both-clone-one-remote"])
@@ -74,6 +95,31 @@ def test_a_member_connected_before_its_root_is_the_workspace_member(tmp_path, cl
         }
     }
     assert entries[str(member.resolve())]["test_command"] == "make test"
+
+
+def test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect(
+    tmp_path, client, templates_dir
+):
+    """A member connected on its own and given an add-on's namespace as its id
+    by hand: the workspace would name it, so the connect is refused and writes
+    nothing. 422, not 409: `client.ensure_repo` reads a 409 as "already
+    connected" and would report success."""
+    root, member = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(member), "test_command": "make test"})
+    # Installed before the hand edit: an install refuses a namespace that is
+    # already a repository id.
+    load_release(client, tmp_path)
+    written = read_yaml(templates_dir / "repos.yaml")
+    written["repos"][0]["id"] = "release"
+    write_yaml(templates_dir / "repos.yaml", written)
+    before = (templates_dir / "repos.yaml").read_text()
+
+    answer = client.post("/api/repos", json={"path": str(root), "enabled": False})
+
+    assert answer.status_code == 422
+    assert "is the namespace of add-on release@acme" in answer.json()["detail"]
+    assert "set another `id`" in answer.json()["detail"]
+    assert (templates_dir / "repos.yaml").read_text() == before
 
 
 @pytest.mark.parametrize("shape", ["the-root-itself", "another-roots-submodule"])
