@@ -1382,7 +1382,7 @@ origin: src/kraft/config.py -- `repos.yaml` keeps the three in separate sections
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id, tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-root], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-member-repository], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/api/test_repos_workspaces.py::test_disconnecting_a_repository_a_workspace_mounts_is_refused
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id, tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-root], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-member-repository], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[own-name], tests/api/test_repos_workspaces.py::test_disconnecting_a_repository_a_workspace_mounts_is_refused
 origin: src/kraft/config.py §load_workspaces -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
 
 ## REQ workspace-members-are-not-nested
@@ -1414,7 +1414,7 @@ enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes
 
 The default workspace root-pointer policy SHALL leave the root repository
 unchanged.
-enforced-by: tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[workspace], tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[filed-before-workspaces-skip], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/adapters/forge/test_run_chain.py::test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660
+enforced-by: tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[workspace], tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[filed-before-workspaces-skip], tests/api/test_repos_workspaces.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members[own-name], tests/adapters/forge/test_run_chain.py::test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660
 
 ## REQ workspace-pointer-bump-prefers-direct-push
 

@@ -196,6 +196,17 @@ def _repository_id(entry: dict, repos: list[dict], held: Mapping[str, str]) -> s
     return entry["id"]
 
 
+def _free_id(entry: dict, repos: list[dict], held: Mapping[str, str]) -> str:
+    """`_repository_id`, refused with 422 when the id the entry already
+    carries is `kraft` or an add-on's namespace: a workspace naming it would
+    leave that add-on out. 422, as `_validate_repos` answers; a 409 reads as
+    "already connected" to `client.ensure_repo`."""
+    repo_id = _repository_id(entry, repos, held)
+    if why := repo_library.namespace_problem(repo_id, held):
+        raise HTTPException(422, why)
+    return repo_id
+
+
 def _declare_workspace(
     workspaces: dict,
     repos: list[dict],
@@ -209,12 +220,12 @@ def _declare_workspace(
     members, and the item's checkout assembles exactly the ones chosen."""
     if not children:
         return
-    root_id = _repository_id(root, repos, held)
+    root_id = _free_id(root, repos, held)
     if any(w.get("root") == root_id for w in workspaces.values()):
         return
     members = {}
     for rel, child in children.items():
-        child_id = _repository_id(child, repos, held)
+        child_id = _free_id(child, repos, held)
         members[child_id] = {"repository": child_id, "path": rel}
     ws_id = root_id if root_id not in workspaces else f"{root_id}-workspace"
     workspaces[ws_id] = {"root": root_id, "members": members}
