@@ -260,6 +260,9 @@ def _cmd_events(ns: argparse.Namespace) -> None:
         if any(row["type"] in _CHAIN_ENDED for row in rows):
             return
         after = rows[-1]["seq"] if rows else ns.after
+        # The stream is filtered by the whole id, and a person may have typed
+        # only its start: the server answers which item that is.
+        wid = (await client.get_work_item(wid))["id"]
         async for ev in client.stream_events(after):
             if ev["work_item_id"] != wid:
                 continue

@@ -6,7 +6,7 @@ more, names it when it is the start of no other.
 
 ## REQ an-id-prefix-names-its-item
 WHEN a work item id given to the API equals no item's id and is a start of 4 or more characters of exactly one, the system SHALL act on that item.
-enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[unique-start], tests/api/test_item_ids.py::test_an_action_on_the_start_of_an_id_acts_on_the_whole_item, tests/api/test_lifecycle_bulk.py::test_bulk_archive_takes_only_ended_items[start], tests/api/test_storage.py::test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one, tests/api/test_work_items_after.py::test_what_an_item_may_be_filed_after[completed-by-its-start], tests/api/test_lifecycle_blocked.py::test_unblock_drops_what_the_item_waits_on_and_it_is_released[by-its-start], tests/cli/test_item.py::test_archive_needs_a_yes_and_then_archives[start]
+enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[unique-start], tests/api/test_item_ids.py::test_an_action_on_the_start_of_an_id_acts_on_the_whole_item, tests/api/test_lifecycle_bulk.py::test_bulk_archive_takes_only_ended_items[start], tests/api/test_storage.py::test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one, tests/api/test_work_items_after.py::test_what_an_item_may_be_filed_after[completed-by-its-start], tests/api/test_lifecycle_blocked.py::test_unblock_drops_what_the_item_waits_on_and_it_is_released[by-its-start], tests/cli/test_item.py::test_archive_needs_a_yes_and_then_archives[start], tests/cli/test_watching.py::test_events_follow_filters_by_item_and_stops_on_completion[start]
 origin: src/kraft/api/item_ids.py §whole_work_item_id
 
 ## REQ an-exact-id-wins-over-a-prefix
@@ -36,5 +36,5 @@ origin: src/kraft/api/__init__.py
 
 ## REQ a-prefix-cannot-pass-the-self-action-guard
 IF a worker names its own work item by a start of its id, THEN the system SHALL refuse the action as it refuses the whole id.
-enforced-by: tests/api/test_item_ids.py::test_a_worker_naming_its_own_item_by_its_start_is_refused
-origin: src/kraft/api/item_ids.py §whole_work_item_id
+enforced-by: tests/api/test_item_ids.py::test_a_worker_naming_its_own_item_by_its_start_is_refused, tests/client/test_guard.py::test_a_worker_cannot_act_on_its_own_item[eight], tests/client/test_guard.py::test_a_worker_cannot_act_on_its_own_item[four]
+origin: src/kraft/api/item_ids.py §whole_work_item_id, src/kraft/client/context.py §_forbid_self_action
