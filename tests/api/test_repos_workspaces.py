@@ -97,8 +97,15 @@ def test_a_member_connected_before_its_root_is_the_workspace_member(tmp_path, cl
     assert entries[str(member.resolve())]["test_command"] == "make test"
 
 
+@pytest.mark.parametrize(
+    "carried, why",
+    [
+        pytest.param("release", "is the namespace of add-on release@acme", id="addon-namespace"),
+        pytest.param("kraft", "is Kraft's own namespace", id="reserved"),
+    ],
+)
 def test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect(
-    tmp_path, client, templates_dir
+    tmp_path, client, templates_dir, carried, why
 ):
     """A member connected on its own and given an add-on's namespace as its id
     by hand: the workspace would name it, so the connect is refused and writes
@@ -110,14 +117,14 @@ def test_a_member_whose_id_is_an_addon_namespace_refuses_the_connect(
     # already a repository id.
     load_release(client, tmp_path)
     written = read_yaml(templates_dir / "repos.yaml")
-    written["repos"][0]["id"] = "release"
+    written["repos"][0]["id"] = carried
     write_yaml(templates_dir / "repos.yaml", written)
     before = (templates_dir / "repos.yaml").read_text()
 
     answer = client.post("/api/repos", json={"path": str(root), "enabled": False})
 
     assert answer.status_code == 422
-    assert "is the namespace of add-on release@acme" in answer.json()["detail"]
+    assert why in answer.json()["detail"]
     assert "set another `id`" in answer.json()["detail"]
     assert (templates_dir / "repos.yaml").read_text() == before
 

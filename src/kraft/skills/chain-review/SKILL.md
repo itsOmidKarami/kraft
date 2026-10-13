@@ -63,7 +63,10 @@ the person at the gate can find it.
   any node after it). An added node is built **only from library components**:
   either `{"id": ..., "extends": "<library node>"}`, or
   `{"id": ..., "tasks": [{"id": ..., "extends": "<library task>"}]}` (or
-  `steps` of such tasks). No prompts, commands or settings of your own. If the
+  `steps` of such tasks). A component an add-on ships is named as
+  `kraft admin templates library` lists it, `<namespace>:<name>`
+  (`release:security-review`); the `id` you give the node or a task is always
+  bare. No prompts, commands or settings of your own. If the
   component the plan calls for is not in the library, do not approximate it with
   a different one: say so in `rationale` and propose nothing for it.
 - **`overrides`** at a canonical path: an agent task's `model` or `effort`, or
@@ -135,8 +138,8 @@ just:
 ## Before you write it
 
 - Does every change name a node after the revision gate, and no gate?
-- Does every added task `extend` a component `kraft admin templates library`
-  lists?
+- Does every added node and task `extend` a component `kraft admin templates
+  library` lists, by the name it lists, and give a bare `id`?
 - Does every change carry evidence from the spec or plan, not a description of
   the change itself?
 - If nothing needs to change, did you write the empty change set rather than

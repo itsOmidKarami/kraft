@@ -208,11 +208,18 @@ def _short(digest: str) -> str:
     return digest.removeprefix("sha256:")[:12]
 
 
-def held_namespaces(config_dir: Path, addons_root: Path) -> dict[str, str]:
+def held_namespaces(
+    config_dir: Path,
+    addons_root: Path,
+    installed: Sequence[load.InstalledAddon] | None = None,
+) -> dict[str, str]:
     """Every namespace an add-on holds, to the add-on holding it: the lock's,
     disabled and not-yet-installed add-ons included, then the one each pending
-    `as:` in addons.yaml would take."""
-    held = {p.namespace: p.id for p in load.installed(config_dir, addons_root) if p.repo_id is None}
+    `as:` in addons.yaml would take. `installed` is `load.installed`'s answer
+    when the caller already has it."""
+    if installed is None:
+        installed = load.installed(config_dir, addons_root)
+    held = {p.namespace: p.id for p in installed if p.repo_id is None}
     try:
         config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
     except ConfigError:
@@ -384,7 +391,7 @@ def check(
         return replace(base, outcome="refused", problems=problems)
 
     loaded = list(load.installed(config_dir, addons_root))
-    if why := _id_problem(repo_id, held_namespaces(config_dir, addons_root)):
+    if why := _id_problem(repo_id, held_namespaces(config_dir, addons_root, loaded)):
         return refused(why)
     try:
         declared = manifest.addon(
