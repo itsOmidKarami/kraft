@@ -8,7 +8,6 @@ reads add-ons, so an import the other way would be a cycle.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import threading
 from collections.abc import Callable, Collection, Mapping
@@ -323,15 +322,17 @@ def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str 
         return "its store is missing and has not been restored"
     mismatch = "its files do not match the locked digest"
     try:
-        recorded = (root / fetch.DIGEST_FILE).read_bytes()
-        if hashlib.sha256(recorded).hexdigest() != root.name:
-            return mismatch
-        if verify and fetch.digest_manifest(fetch.extract_dir(root).files) != recorded:
-            return mismatch
+        # Bounded and no-follow: the manifest must hash to the store's name.
+        if verify:
+            fetch.verify_store(root)
+        else:
+            fetch.open_store(root)
         declared = manifest.addon(
             manifest.parse((root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
             manifest.ADDON_JSON,
         )
+    except fetch.StoreMismatch:
+        return mismatch
     except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
         return f"its store cannot be read: {exc}"
     running = update.installed()
@@ -460,7 +461,31 @@ def for_item(
             )
         )
     live = [p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})]
-    return (*live, *pinned)
+    return tuple(
+        replace(addon, left_out=why)
+        if addon.left_out is None and (why := _launch_problem(addon))
+        else addon
+        for addon in (*live, *pinned)
+    )
+
+
+def _launch_problem(addon: InstalledAddon) -> str | None:
+    """Why `addon`'s store cannot be read at this launch: its manifest, and
+    its `profiles.yaml`, which every launch's profile table reads, checked
+    against the digest the store was written with. An edited store leaves
+    only this add-on out, so only a launch that reads from it stops. Skills
+    are checked where they are read (`skill.read`)."""
+    from kraft.addons import fetch
+
+    if not addon.root.is_dir():
+        return None  # the load checks say why
+    try:
+        fetch.open_store(addon.root).read("profiles.yaml", optional=True)
+    except fetch.StoreMismatch as exc:
+        return str(exc)
+    except OSError as exc:
+        return f"its store cannot be read: {exc}"
+    return None
 
 
 #: Why the last restore of a store failed, by its digest: what a launch that
@@ -613,23 +638,21 @@ def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> 
     is not waited for (raises `update.Busy`): the next collection takes what
     this one left. Returns the digests deleted. Only the daemon calls this:
     it alone knows what its loaded library and its unfinished work items read."""
-    import shutil
-
-    from kraft.addons import update
+    from kraft.addons import fetch, update
 
     root = Path(addons_root) if addons_root is not None else addons_dir()
     removed: list[str] = []
     with update.write_lock(root, wait=0):
         kept = keep()
-        shutil.rmtree(root / "staging", ignore_errors=True)
+        try:
+            fetch.remove_tree(root / "staging")  # a replaced store's copy is read-only
+        except OSError:
+            pass  # gone already, or the next collection takes it
         stores = sorted((root / "store").iterdir()) if (root / "store").is_dir() else []
         for store in stores:
             if store.name in kept:
                 continue
-            for path in [store, *store.rglob("*")]:
-                if path.is_dir():
-                    path.chmod(0o755)  # a store is read-only
-            shutil.rmtree(store)
+            fetch.remove_tree(store)
             removed.append(store.name)
     return removed
 

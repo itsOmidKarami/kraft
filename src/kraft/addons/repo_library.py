@@ -413,7 +413,7 @@ def check(
     store = addons_root / "store" / was.removeprefix("sha256:") if was else None
     if store is not None and store.is_dir():
         try:
-            old = fetch.extract_dir(store)
+            old = fetch.verify_store(store)
         except Exception:  # noqa: BLE001 -- an edited store can break in any way
             old = None
     reviewed = review_mod.review(addon_id, old, extracted)
@@ -431,10 +431,7 @@ def check(
         *reviewed.content,
     ]
     with tempfile.TemporaryDirectory() as scratch:
-        root = Path(scratch) / digest.removeprefix("sha256:")
-        for rel, (_mode, data) in extracted.files.items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_bytes(data)
+        root = fetch.write_scratch(Path(scratch), extracted)
         candidate = load.InstalledAddon(addon_id, NAME, repo_id, _short(digest), root)
         state = update.state_of(config_dir, loaded)
         after = update.state_of(config_dir, [*(p for p in loaded if p.id != addon_id), candidate])

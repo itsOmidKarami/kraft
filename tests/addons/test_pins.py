@@ -13,6 +13,7 @@ from support.addons import (
     chain,
     drop_store,
     edit_addons_yaml,
+    edit_store,
     instance,
     make_collection,
     publish,
@@ -250,33 +251,42 @@ def test_a_pinned_version_that_is_gone_is_refused_not_delegated(home):
 
 
 @pytest.mark.parametrize(
-    ("fields", "stops"),
+    ("damage", "fields", "stops"),
     [
-        ({"skill": "release:notes"}, True),
-        ({"profile": "release:deep"}, True),
-        ({"fallback": [{"profile": "release:deep"}]}, True),
-        ({"prompt": "unrelated"}, False),
+        ("gone", {"skill": "release:notes"}, "could not be read"),
+        ("gone", {"profile": "release:deep"}, "could not be read"),
+        ("gone", {"fallback": [{"profile": "release:deep"}]}, "could not be read"),
+        ("gone", {"prompt": "unrelated"}, None),
+        ("edited", {"profile": "release:deep"}, "read: profiles.yaml does not match its digest"),
+        ("edited", {"prompt": "unrelated"}, None),
     ],
     ids=[
         "skill-from-it-stops",
         "profile-from-it-stops",
         "fallback-to-it-stops",
         "unrelated-task-launches",
+        "edited-profiles-stop-its-profile",
+        "edited-profiles-spare-an-unrelated-task",
     ],
 )
-def test_a_missing_pin_the_task_does_not_read_does_not_stop_it(home, fields, stops):
+def test_a_missing_pin_the_task_does_not_read_does_not_stop_it(home, damage, fields, stops):
     """An escalation or a review of an item that pinned `release` reads nothing
-    from it: its store being gone is no reason to refuse them."""
+    from it: its store being gone, or its `profiles.yaml` edited after it was
+    written, is no reason to refuse them."""
     repo, config_dir, addons_dir = home
     pins = _resolved(config_dir, addons_dir, "mine").addons
-    drop_store(load.installed(config_dir, addons_dir)[0].root)
-    gone = {"release": {**pins["release"], "digest": "sha256:" + "0" * 64}}
+    store = load.installed(config_dir, addons_dir)[0].root
+    if damage == "gone":
+        drop_store(store)
+        pins = {"release": {**pins["release"], "digest": "sha256:" + "0" * 64}}
+    else:
+        edit_store(store, "profiles.yaml", "profiles: {deep: {model: {codex: evil}}}\n")
 
     if stops:
-        with pytest.raises(agent.HarnessUnavailable, match="could not be read"):
-            _launch(gone, **fields)
+        with pytest.raises(agent.HarnessUnavailable, match=stops):
+            _launch(pins, **fields)
     else:
-        assert _launch(gone, **fields).harness
+        assert _launch(pins, **fields).harness
 
 
 def test_every_launch_is_handed_the_items_pins(home):

@@ -291,10 +291,13 @@ def test_a_lock_that_recorded_no_url_is_not_a_moved_collection(acme):
     assert _run(home)[ID].outcome == "current"
 
 
+VALID_ADDON_JSON = json.dumps(addon_json("release"), indent=1)
+
+
 @pytest.mark.parametrize(
     ("stored", "version"),
-    [("{", "1.1.0"), ("[]", "1.1.0"), (None, "1.1.0"), ("{", "0.9.0")],
-    ids=["not-json", "not-an-object", "gone", "a-step-back"],
+    [("{", "1.1.0"), ("[]", "1.1.0"), (None, "1.1.0"), ("{", "0.9.0"), (VALID_ADDON_JSON, "1.1.0")],
+    ids=["not-json", "not-an-object", "gone", "a-step-back", "edited-but-valid"],
 )
 def test_an_installed_copy_that_does_not_read_is_said_in_the_review(acme, stored, version):
     """Everything is then shown as new: the review says the comparison is

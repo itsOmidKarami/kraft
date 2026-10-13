@@ -76,6 +76,13 @@ def _run(capsys, *argv):
             1,
             "may not carry a subprocess task",
         ),
+        (
+            {"release": {"files": {"library.yaml": "tasks: {'x:y': {kind: agent}}\n"}}},
+            "",
+            None,
+            1,
+            "addons/release/library.yaml",
+        ),
     ],
     ids=[
         "collection",
@@ -87,6 +94,7 @@ def _run(capsys, *argv):
         "ignored-look-alike",
         "not-an-addon",
         "refused-content",
+        "library-error-names-the-authors-file",
     ],
 )
 def test_validate(tmp_path, capsys, monkeypatch, addons, sub, running, code, says):

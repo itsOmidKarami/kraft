@@ -23,7 +23,7 @@ from pathlib import Path
 import yaml
 
 from kraft.addons import manifest
-from kraft.addons.fetch import Extracted
+from kraft.addons.fetch import Extracted, write_scratch
 from kraft.addons.load import InstalledAddon
 from kraft.addons.update import LIMITS
 from kraft.config import bounded_yaml
@@ -167,10 +167,7 @@ def _facts(extracted: Extracted | None) -> _Facts:
     lists: dict[str, list[str]] = {}
     order: dict[str, list[tuple[str, str]]] = {}
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        for rel, (_mode, data) in extracted.files.items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_bytes(data)
+        root = write_scratch(Path(tmp), extracted)
         addon = InstalledAddon(f"{name}@review", name, name, "", root)
         try:
             loaded = TemplateLibrary.from_mappings(

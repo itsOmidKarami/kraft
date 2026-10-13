@@ -141,8 +141,20 @@ origin: src/kraft/addons/load.py §installed
 ## REQ an-addon-whose-digest-does-not-match-is-not-loaded
 
 IF an add-on's extracted files do not match the lock's digest, THEN the system SHALL leave that add-on out and report it under `invalid_templates`.
-enforced-by: tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out, tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-edited]
+enforced-by: tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out[emptied], tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out[a-link-to-a-copy], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-edited]
 origin: src/kraft/addons/load.py §installed
+
+## REQ an-edited-store-file-is-never-read
+
+IF a file the system reads from an add-on's or a repo library's store after the store was written does not match the digest the store was written with, THEN the system SHALL refuse the file, naming it, instead of reading its text.
+enforced-by: tests/addons/test_fetch.py::test_a_store_file_is_read_only_if_it_matches_its_digest[edited-file-is-refused], tests/addons/test_fetch.py::test_a_store_file_is_read_only_if_it_matches_its_digest[edited-digest-manifest-is-refused], tests/addons/test_fetch.py::test_a_store_file_is_read_only_if_it_matches_its_digest[unlisted-file-is-refused], tests/test_skill.py::test_addon_skill_references[edited-store-is-refused], tests/test_skill.py::test_addon_skill_references[edited-digest-manifest-is-refused], tests/templates/test_environment.py::test_addon_profiles[edited-store-is-refused], tests/templates/test_library_addons.py::test_an_addon_error_names_the_store_file[edited-after-install], tests/addons/test_update.py::test_an_installed_copy_that_does_not_read_is_said_in_the_review[edited-but-valid], tests/addons/test_repo_library.py::test_a_change_is_reviewed_against_the_accepted_version[store-edited]
+origin: src/kraft/addons/fetch.py §open_store
+
+## REQ an-edited-store-is-replaced-not-reused
+
+WHEN an add-on's store is written and a store with the same digest already exists, the system SHALL reuse it only if its files match the digest, and otherwise replace it with the files being written.
+enforced-by: tests/addons/test_fetch.py::test_a_store_is_addressed_by_its_content[edited-store-is-rewritten], tests/addons/test_fetch.py::test_a_store_is_addressed_by_its_content[edited-digest-manifest-is-rewritten]
+origin: src/kraft/addons/fetch.py §write_store
 
 ## REQ an-unloaded-addon-skill-is-never-delegated
 
@@ -363,7 +375,7 @@ origin: src/kraft/api/startup.py §lifespan
 ## REQ a-launch-stops-only-for-an-addon-it-reads
 
 IF a pinned add-on's store cannot be read, THEN the system SHALL stop only a launch whose task selects that add-on's skill or profile.
-enforced-by: tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[skill-from-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[profile-from-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[fallback-to-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[unrelated-task-launches]
+enforced-by: tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[skill-from-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[profile-from-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[fallback-to-it-stops], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[unrelated-task-launches], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[edited-profiles-stop-its-profile], tests/addons/test_pins.py::test_a_missing_pin_the_task_does_not_read_does_not_stop_it[edited-profiles-spare-an-unrelated-task]
 origin: src/kraft/adapters/agent.py §resolve_agent_task
 
 ## REQ a-profile-fallback-pins-the-addon-it-names

@@ -15,6 +15,7 @@ qualifier: `kraft:spec` is the method Kraft ships as `spec`.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -112,12 +113,21 @@ def path_for(skills_dir: Path | None, name: str, *, where: str) -> Path:
     return _local_path(skills_dir, _own_name(name), where)
 
 
+def _no_skill(where: str, value: str, path: Path) -> SkillError:
+    qualifier, _, name = value.partition(":")
+    return SkillError(
+        f"{where}: add-on {qualifier!r} has no skill {name!r} at {path}; a method Kraft "
+        f"ships is written kraft:{name}"
+    )
+
+
 def _addon_path(
-    addon_dirs: Mapping[str, Path | None] | None, value: str, where: str
-) -> Path | None:
-    """The file `<namespace>:<name>` names when the namespace is a loaded Kraft
-    add-on's, read from that add-on's store; None when it is not, which leaves
-    the reference another tool's."""
+    addon_dirs: Mapping[str, Path | None] | None, value: str, where: str, *, present: bool = True
+) -> tuple[Path, str] | None:
+    """The store and the store-relative file `<namespace>:<name>` names when
+    the namespace is a loaded Kraft add-on's; None when it is not, which
+    leaves the reference another tool's. `present` also requires the file to
+    be there; `read` asks the store's manifest instead."""
     qualifier, _, name = value.partition(":")
     if qualifier not in (addon_dirs or {}):
         return None
@@ -128,13 +138,10 @@ def _addon_path(
             f"{name!r} cannot be read; `kraft admin health` says why"
         )
     _bare(name, where)
-    path = Path(root) / "skills" / name / "SKILL.md"
-    if not _is_file(path):
-        raise SkillError(
-            f"{where}: add-on {qualifier!r} has no skill {name!r} at {path}; a method Kraft "
-            f"ships is written kraft:{name}"
-        )
-    return path
+    rel = f"skills/{name}/SKILL.md"
+    if present and not _is_file(Path(root) / rel):
+        raise _no_skill(where, value, Path(root) / rel)
+    return Path(root), rel
 
 
 def validate(
@@ -163,11 +170,28 @@ def validate(
 def read(
     skills_dir: Path | None, value: str, addon_dirs: Mapping[str, Path | None] | None = None
 ) -> str:
-    """The method text to inject. Called at dispatch, after `validate`."""
-    path = _addon_path(addon_dirs, value, "skill") if is_plugin_ref(value) else None
-    if path is None and is_plugin_ref(value):
-        return PLUGIN_PROMPT.format(ref=value)
-    path = path or _local_path(skills_dir, _own_name(value), "skill")
+    """The method text to inject. Called at dispatch, after `validate`. An
+    add-on's is read through its store's digest, so a store edited after it
+    was written is refused here, before its text reaches an agent."""
+    if is_plugin_ref(value):
+        found = _addon_path(addon_dirs, value, "skill", present=False)
+        if found is None:
+            return PLUGIN_PROMPT.format(ref=value)
+        from kraft.addons import fetch  # fetch imports kraft.config, which imports this
+
+        root, rel = found
+        try:
+            store = fetch.open_store(root)
+            # A listed file that is gone is an edit of the store, not a missing skill.
+            if rel not in store.listed and not os.path.lexists(root / rel):
+                raise _no_skill("skill", value, root / rel)
+            return (store.read(rel) or b"").decode()
+        except fetch.StoreMismatch as exc:
+            qualifier = value.partition(":")[0]
+            raise SkillError(f"skill: add-on {qualifier!r} could not be read: {exc}") from exc
+        except (OSError, ValueError) as exc:
+            raise SkillError(f"skill: cannot read {value!r} at {root / rel}: {exc}") from exc
+    path = _local_path(skills_dir, _own_name(value), "skill")
     try:
         return path.read_text()
     except (OSError, ValueError) as exc:

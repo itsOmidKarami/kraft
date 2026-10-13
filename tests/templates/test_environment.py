@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
-from support.addons import installed
+from support.addons import edit_and_forge, edit_store, installed
 
 from kraft import harness
 from kraft.templates import environment as te
@@ -220,27 +221,47 @@ def test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library(tmp_path)
     assert named and named <= set(table.profiles), sorted(named - set(table.profiles))
 
 
+_EVIL = yaml.safe_dump({"profiles": {"deep": {"model": {"codex": "evil"}}}})
+
+
 @pytest.mark.parametrize(
-    "local",
+    ("local", "tamper"),
     [
-        {},
-        {"strong": {"model": {"codex": "m"}, "fallback": [{"profile": "release:deep"}]}},
+        ({}, None),
+        ({"strong": {"model": {"codex": "m"}, "fallback": [{"profile": "release:deep"}]}}, None),
+        ({}, edit_store),
+        ({}, edit_and_forge),
     ],
-    ids=["qualified", "fallback-entry"],
+    ids=[
+        "qualified",
+        "fallback-entry",
+        "edited-store-is-refused",
+        "edited-digest-manifest-is-refused",
+    ],
 )
-def test_addon_profiles(tmp_path, local):
+def test_addon_profiles(tmp_path, local, tamper):
     """An add-on's agent profiles join the table under `<namespace>:<name>`, and
-    a local profile's fallback may name one."""
+    a local profile's fallback may name one. They are read through the store's
+    digest: an edited `profiles.yaml` is refused, naming the store."""
 
     from kraft import harness
 
     addon = installed(tmp_path, "release", profiles={"deep": {"model": {"codex": "p"}}})
-    table = te.HarnessProfileTable.from_mapping(
-        {"profiles": local},
-        tmp_path / "harnesses.yaml",
-        harnesses=harness.load(None).valid,
-        addons=[addon],
-    )
+    if tamper is not None:
+        tamper(addon.root, "profiles.yaml", _EVIL)
+    try:
+        table = te.HarnessProfileTable.from_mapping(
+            {"profiles": local},
+            tmp_path / "harnesses.yaml",
+            harnesses=harness.load(None).valid,
+            addons=[addon],
+        )
+    except te.TemplateEnvironmentError as exc:
+        assert tamper is not None, exc
+        assert "the store was changed after it was installed" in str(exc)
+        assert str(addon.root) in str(exc)
+        return
+    assert tamper is None
     assert table.agent_profiles["release:deep"].model == {"codex": "p"}
     for profile in local:
         assert table.agent_profiles[profile].fallback[0].profile == "release:deep"

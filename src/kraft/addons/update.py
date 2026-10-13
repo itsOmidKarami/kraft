@@ -585,7 +585,7 @@ def update(
             old = reviewed = None
             if store is not None and store.is_dir():
                 try:
-                    old = fetch.extract_dir(store)
+                    old = fetch.verify_store(store)
                     reviewed = review_mod.review(addon_id, old, extracted)
                 except Exception:  # noqa: BLE001 -- an edited store can break in any way
                     old = None
@@ -608,10 +608,7 @@ def update(
                 moved = f"collection URL changed: {was} -> {now}"
                 reviewed = replace(reviewed, reach=(moved, *reviewed.reach))
 
-            root = Path(scratch) / digest.removeprefix("sha256:")
-            for rel, (_mode, data) in extracted.files.items():
-                (root / rel).parent.mkdir(parents=True, exist_ok=True)
-                (root / rel).write_bytes(data)
+            root = fetch.write_scratch(Path(scratch), extracted)
             candidate = load.InstalledAddon(addon_id, name, namespace, found.version, root)
             would_load = [p for p in loaded if p.id != addon_id] + [candidate]
             after = state_of(config_dir, would_load)

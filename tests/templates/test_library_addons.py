@@ -2,7 +2,7 @@
 addressed as `<namespace>:<name>`, and a bare local name stays local."""
 
 import pytest
-from support.addons import AGENT, chain, home, installed
+from support.addons import AGENT, chain, edit_store, home, installed
 
 from kraft import harness
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
@@ -135,19 +135,26 @@ _BOMB = "a: &a [x,x,x,x,x,x,x,x,x,x]\n" + "".join(
 
 
 @pytest.mark.parametrize(
-    ("file", "text", "why"),
+    ("file", "text", "after", "why"),
     [
-        ("library.yaml", "tasks: {'x:y': {kind: agent}}", "declared bare"),
-        ("library.yaml", _BOMB, "more YAML nodes"),
-        ("chains/bad.yaml", "id: 'other:ship'\nnodes: []\n", "declared bare"),
-        ("chains/bad.yaml", "- not\n- a mapping\n", "expected a mapping"),
+        ("library.yaml", "tasks: {'x:y': {kind: agent}}", None, "declared bare"),
+        ("library.yaml", _BOMB, None, "more YAML nodes"),
+        ("chains/bad.yaml", "id: 'other:ship'\nnodes: []\n", None, "declared bare"),
+        ("chains/bad.yaml", "- not\n- a mapping\n", None, "expected a mapping"),
+        ("chains/ship.yaml", "nodes: []\n", "nodes: []\n# edited\n", "the store was changed"),
     ],
-    ids=["qualified-key", "yaml-bomb", "qualified-chain-id", "not-a-mapping"],
+    ids=[
+        "qualified-key",
+        "yaml-bomb",
+        "qualified-chain-id",
+        "not-a-mapping",
+        "edited-after-install",
+    ],
 )
-def test_an_addon_error_names_the_store_file(tmp_path, file, text, why):
-    addon = installed(tmp_path, "release")
-    (addon.root / file).parent.mkdir(exist_ok=True)
-    (addon.root / file).write_text(text)
+def test_an_addon_error_names_the_store_file(tmp_path, file, text, after, why):
+    addon = installed(tmp_path, "release", files={file: text})
+    if after is not None:
+        edit_store(addon.root, file, after)
     with pytest.raises(TemplateLibraryError, match=why) as exc:
         TemplateLibrary.from_yaml_dir(home(tmp_path), addons=[addon])
     assert str(addon.root / file) in str(exc.value)
