@@ -713,13 +713,25 @@ def resolve_chain_or_422(st, chain_template: str | None):
         raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 
+def scoped_chain_or_422(st, entry: RepoEntry, chain_template: str | None):
+    """`resolve_chain_or_422`, refused (422) when the chain reads another
+    repository's repo library: one is visible only to its own repository's
+    items (a workspace's root)."""
+    chain = resolve_chain_or_422(st, chain_template)
+    if why := addons_load.scope_problem(chain.addons, entry.id):
+        raise HTTPException(422, f"chain {chain_template or 'default'!r}: {why}")
+    return chain
+
+
 def intake_chain_or_422(st, repo: str, chain_template: str | None):
     """`(stored, chain)` for an intake door: `chain_template_for`'s value, to
-    store, and the chain it resolves. The library is checked first, so a broken
-    one answers 503 before the repo lookup can answer 422."""
+    store, and the chain it resolves in the repository's scope. The library is
+    checked first, so a broken one answers 503 before the repo lookup can
+    answer 422."""
     library_or_503(st)
-    stored = chain_template_for(connected_or_422(st, repo), chain_template, st.library)
-    return stored, resolve_chain_or_422(st, stored)
+    entry = connected_or_422(st, repo)
+    stored = chain_template_for(entry, chain_template, st.library)
+    return stored, scoped_chain_or_422(st, entry, stored)
 
 
 def repos_path(st) -> Path:
@@ -1013,6 +1025,12 @@ def repository_steering(
     if target is not None and target.kind == "workspace":
         by_id = {r.id: r for r in repos if r.id}
         entries += [by_id.get(rid) for rid in target.repositories()]
+    # Each entry may name its own repo library's steering, and no other's.
+    ids = {r.id for r in repos if r.id}
+    for e in entries:
+        for name in e.steering if e is not None else ():
+            if why := addons_load.out_of_scope(name, e.id, ids):
+                raise steering_mod.SteeringError(f"repos.yaml: {e.path}: steering {why}")
     profiles = library_steering(st) or {}
     return {
         e.path: steering_mod.select(e.steering, profiles, where=f"repos.yaml: {e.path}")

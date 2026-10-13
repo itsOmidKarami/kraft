@@ -19,6 +19,7 @@ from kraft import config as config_mod
 from kraft import executor, storage, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads
+from kraft.addons.load import scope_problem
 from kraft.templates.models import GateNode
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,9 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     chain = deps.resolve_chain(st, deps.chain_template_for(repo, None, st.library))
     if chain is None:
         logger.warning("auto-intake: %s has no valid chain, skipping", repo.path)
+        return None
+    if why := scope_problem(chain.addons, repo.id):
+        logger.warning("auto-intake: %s: %s, skipping", repo.path, why)
         return None
     # Spec §5 is "an auto-started item passes no gate automatically". A template
     # with no gate at all satisfies that by having nothing to pass, which is the
