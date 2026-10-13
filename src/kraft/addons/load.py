@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -68,6 +68,66 @@ class InstalledAddon:
         """The repository this is the repo library of; None for an add-on."""
         collection = self.id.partition("@")[2]
         return collection.removeprefix(_REPO) if collection.startswith(_REPO) else None
+
+
+def scope_message(name: str, repo_id: str) -> str:
+    """Why `name` cannot be read here: it is in `repo_id`'s repo library. The
+    one wording every door that refuses a repo library from outside uses."""
+    return f"{name} is in {repo_id}'s repo library, {_visible_only(repo_id)}"
+
+
+def _visible_only(repo_id: str) -> str:
+    return f"visible only to items in {repo_id}"
+
+
+def _library_out_of_scope(repo_id: str) -> str:
+    return f"{repo_id}'s repo library is {_visible_only(repo_id)}"
+
+
+def out_of_scope(name: object, owner: str | None, repo_ids: Collection[str]) -> str | None:
+    """`name` (`<q>:<x>`) names a connected repository's library (`q` in
+    `repo_ids`) from outside it (`q` is not `owner`): the reason, else None."""
+    if not isinstance(name, str):
+        return None
+    qualifier, colon, _ = name.partition(":")
+    if not colon or qualifier not in repo_ids or qualifier == owner:
+        return None
+    return scope_message(name, qualifier)
+
+
+def _pin_repo(pin: Mapping[str, str | None]) -> str | None:
+    """The repository a pin's `library@repo:<id>` names; None for an add-on."""
+    collection = str(pin.get("id") or "").partition("@")[2]
+    return collection.removeprefix(_REPO) if collection.startswith(_REPO) else None
+
+
+def scope_problem(
+    pins: Mapping[str, Mapping[str, str | None]] | None, repo_id: str | None
+) -> str | None:
+    """Why a chain pinned as `pins` cannot run for `repo_id`'s items: the
+    first repo library it reads that is not `repo_id`'s. None when every pin
+    is in scope. `repo_id` None (no repository, or an entry with no `id`)
+    refuses every repo library; an add-on is never scoped."""
+    for pin in (pins or {}).values():
+        owner = _pin_repo(pin)
+        if owner is not None and owner != repo_id:
+            return f"it reads {owner}'s repo library, {_visible_only(owner)}"
+    return None
+
+
+def scoped(
+    addons: Iterable[InstalledAddon], repo_id: str | None, keep: Collection[str] = ()
+) -> tuple[InstalledAddon, ...]:
+    """`addons` as `repo_id`'s items see them: each repo library that is not
+    `repo_id`'s, and whose namespace is not in `keep` (pinned by the item
+    already), left out, quietly. Never dropped: a namespace missing from a
+    launch's add-ons is read as another tool's plugin."""
+    return tuple(
+        replace(a, left_out=_library_out_of_scope(a.namespace), quiet=True)
+        if a.repo_id is not None and a.repo_id != repo_id and a.namespace not in keep
+        else a
+        for a in addons
+    )
 
 
 def _reference(value: str, addon: InstalledAddon, *, bare_is_own: bool) -> str:
@@ -433,12 +493,23 @@ def for_item(
     pins: Mapping[str, Mapping[str, str | None]] | None,
     config_dir: Path | None = None,
     addons_root: Path | None = None,
+    *,
+    repo_id: str | None,
 ) -> tuple[InstalledAddon, ...]:
     """The add-ons one work item reads: the versions its chain was
     materialized with (`pins`, namespace to `InstalledAddon.pin`), and the
     lock's for every namespace it did not pin. A pinned version whose store
     is gone is known and not loaded: its skills are refused, never handed to
-    the agent as another tool's."""
+    the agent as another tool's.
+
+    `repo_id` is the item's repository (a workspace's root): every other
+    repo library it did not pin is left out (`scoped`). None, no repository,
+    leaves every unpinned repo library out.
+
+    Every connected repository id that names no loaded or pinned add-on
+    comes back too, left out: `<repo-id>:<skill>` is then refused, never
+    handed to the agent as another tool's plugin, whether or not that
+    repository's library is accepted."""
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
     pinned = []
     for namespace, pin in (pins or {}).items():
@@ -460,13 +531,58 @@ def for_item(
                 source=pin.get("source"),
             )
         )
-    live = [p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})]
-    return tuple(
+    live = scoped(
+        (p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})),
+        repo_id,
+    )
+    # After `scoped`: a store out of this item's scope is never hashed.
+    loading = tuple(
         replace(addon, left_out=why)
         if addon.left_out is None and (why := _launch_problem(addon))
         else addon
         for addon in (*live, *pinned)
     )
+    taken = {p.namespace for p in loading}
+    reserved = [
+        InstalledAddon(
+            repo_library_id(rid),
+            "library",
+            rid,
+            "",
+            store / "not-accepted",
+            left_out=f"repository {rid!r} has no accepted repo library",
+            quiet=True,
+        )
+        for rid in connected_ids(config_dir, addons_root=addons_root)
+        if rid not in taken
+    ]
+    return (*loading, *reserved)
+
+
+def connected_ids(
+    config_dir: Path | None, repos: Mapping | None = None, *, addons_root: Path | None = None
+) -> list[str]:
+    """Every connected repository's id in `config_dir`'s `repos.yaml` (or in
+    `repos`, one not saved yet) that is a repo library's namespace: each is
+    reserved for that repository's library. Not `kraft`, and not a namespace
+    an add-on holds: such an id (set by hand, or minted before ids skipped
+    them) never names a repo library. None when the file cannot be read (its
+    own check says why)."""
+    from kraft import paths
+    from kraft.addons.config import RESERVED_NAMESPACE
+    from kraft.addons.repo_library import held_namespaces
+    from kraft.config import ConfigError, read_yaml
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    try:
+        repos = repos if repos is not None else read_yaml(config_dir / "repos.yaml", {})
+        entries = repos.get("repos")
+    except ConfigError:
+        return []
+    found = (e.get("id") for e in entries or () if isinstance(e, dict))
+    root = Path(addons_root) if addons_root is not None else addons_dir()
+    held = {RESERVED_NAMESPACE, *held_namespaces(config_dir, root)}
+    return [i for i in found if isinstance(i, str) and i and i not in held]
 
 
 def _launch_problem(addon: InstalledAddon) -> str | None:

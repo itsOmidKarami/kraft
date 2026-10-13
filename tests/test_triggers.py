@@ -297,3 +297,53 @@ def test_the_poller_runs_with_no_triggers_at_boot(fast_trigger_poller, client):
     while not fast_trigger_poller and time.monotonic() < deadline:
         time.sleep(0.02)
     assert fast_trigger_poller, "no trigger poller is running"
+
+
+class _WithRepoLibrary:
+    """The seeded library, where `app:ship` resolves to its `default` chain
+    pinned to app's repo library, as a chain from that library would be."""
+
+    def __init__(self, library):
+        self._library = library
+
+    def __getattr__(self, name):
+        return getattr(self._library, name)
+
+    def resolve_chain(self, name):
+        from dataclasses import replace
+
+        resolved = self._library.resolve_chain("default")
+        pin = {"id": "library@repo:app", "digest": "sha256:0", "version": "0"}
+        return replace(resolved, addons={"app": pin}) if name == "app:ship" else resolved
+
+
+@pytest.mark.parametrize(
+    ("repo_id", "filed"),
+    [
+        pytest.param("web", 0, id="another-repos-library"),
+        pytest.param("app", 1, id="own-repos-library"),
+    ],
+)
+async def test_a_trigger_naming_another_repos_library_is_skipped_not_the_whole_tick(
+    tmp_path, stub_app, caplog, repo_id, filed
+):
+    import yaml
+
+    repo = isolated_bd(tmp_path)
+    pol = policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="app:ship", title="t")],
+    )
+    state = _state(tmp_path, policy_obj=pol)
+    app = stub_app(**{**state, "library": _WithRepoLibrary(state["library"])})
+    (tmp_path / "templates" / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(repo), "id": repo_id}]})
+    )
+
+    with caplog.at_level("WARNING", logger="kraft.triggers"):
+        found = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
+
+    assert len(found) == filed
+    warned = any("visible only to items in app" in r.message for r in caplog.records)
+    assert warned == (not filed)

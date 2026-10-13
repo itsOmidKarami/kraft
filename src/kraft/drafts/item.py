@@ -139,10 +139,12 @@ def evaluate(
     current: str | None,
     ops: list[dict],
     library: TemplateLibrary | None,
+    repo_id: str | None = None,
 ) -> Evaluated:
     """`ops` applied in order to `chain`, the item standing on `current` (None:
     not started). Each op is its own change set, so a problem names its op;
-    the next op applies to the chain as the ones before it left it."""
+    the next op applies to the chain as the ones before it left it. `repo_id`
+    is the item's repository, whose repo library an added node may read."""
     parsed = OPS.validate_python(ops)
     ids = [n.id for n in chain.chain.nodes]
     at = current if current in ids else None
@@ -164,7 +166,7 @@ def evaluate(
                     else {"skip": [{"node": op.node, "evidence": EVIDENCE}]}
                 )
                 changes = revision.ChangeSet.model_validate({"rationale": EVIDENCE, **change})
-                chain = revision.revise(chain, changes, at=at, library=library)
+                chain = revision.revise(chain, changes, at=at, library=library, repo_id=repo_id)
         except (revision.RevisionError, RetryOverrideError, PathError) as exc:
             problems.append({"op": i, "message": str(exc)})
     return Evaluated(ops=marked, problems=problems, chain=chain, skips=skips)

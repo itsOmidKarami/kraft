@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 
 from kraft import executor
+from kraft.addons.load import scope_problem
 from kraft.api import deps as api_deps
 from kraft.executor.entry import one_line_title
 from kraft.policy import PolicyError, Trigger, cron_due
@@ -93,17 +94,20 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
                 "; ".join(getattr(st, "invalid_library", None) or ["config/library.yaml"]),
             )
             continue
-        chain = api_deps.resolve_chain(st, trig.chain)
-        if chain is None:
-            logger.warning("%s: unknown chain %r, skipped", index, trig.chain)
-            continue
         try:
-            api_deps.connected_or_422(st, trig.repo)
+            entry = api_deps.connected_or_422(st, trig.repo)
         except HTTPException as exc:
             # Same door the HTTP intake routes use (`deps.connected_or_422`,
             # Kraft-ta8nv): an operator-authored trigger naming an unconnected
             # repo skips, not a whole tick over one bad `policy.yaml` entry.
             logger.warning("%s: %s, skipped", index, exc.detail)
+            continue
+        chain = api_deps.resolve_chain(st, trig.chain)
+        if chain is None:
+            logger.warning("%s: unknown chain %r, skipped", index, trig.chain)
+            continue
+        if why := scope_problem(chain.addons, entry.id):
+            logger.warning("%s: %s, skipped", index, why)
             continue
         title, description = one_line_title(trig.title, trig.description)
         if not title.strip():

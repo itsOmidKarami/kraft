@@ -164,6 +164,12 @@ def test_a_bounded_instance_with_a_current_addon_has_nothing_to_say(installed):
             "app: could not be checked (auth: Permission denied)",
             id="failed",
         ),
+        pytest.param(
+            "named",
+            "chains/mine.yaml: nodes[n].tasks[t]: extends app:base is in app's repo library, "
+            "visible only to items in app",
+            id="named-from-outside",
+        ),
     ],
 )
 def test_the_repo_libraries_row(tmp_path, monkeypatch, status, expected):
@@ -171,12 +177,15 @@ def test_the_repo_libraries_row(tmp_path, monkeypatch, status, expected):
     config_dir, addons_dir = instance(tmp_path)
     accept_repo_library(config_dir, addons_dir, repo, "app")
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    if status:
+    if status == "named":
+        (config_dir / "chains").mkdir(exist_ok=True)
+        (config_dir / "chains" / "mine.yaml").write_text(json.dumps(chain("app:base")))
+    elif status:
         (addons_dir / "status.json").write_text(json.dumps({"library@repo:app": status}))
 
     row = _rows(config_dir)["repo libraries"]
 
-    assert row["ok"] is True
+    assert row["ok"] is (status != "named")
     assert expected in row["detail"]
 
 

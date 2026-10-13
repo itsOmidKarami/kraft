@@ -104,6 +104,25 @@ def test_lint_reports_an_unreadable_library_file_as_an_issue(client, templates_d
     assert body["issues"][0]["chain"] is None
 
 
+def test_lint_reports_a_local_chain_naming_a_repo_library(client, templates_dir, tmp_path):
+    """It resolves (the library is loaded), and is still an issue: an
+    instance-wide chain must not quietly depend on one repository."""
+    from support.addons import accept_repo_library, chain, repo_with_library
+
+    from kraft.api import deps
+
+    st = client.app.state
+    accept_repo_library(templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")
+    deps._reload_templates(st)
+    (templates_dir / "chains" / "mine.yaml").write_text(yaml.safe_dump(chain("app:base")))
+
+    body = client.get("/api/templates/lint").json()
+
+    (issue,) = [i for i in body["issues"] if i["chain"] == "mine"]
+    assert issue["message"].endswith("visible only to items in app")
+    assert "mine" not in body["chains"]
+
+
 # ── GET /templates/chains/{id}/resolved (resolved-template-api-shows-saved-chain) ──
 
 

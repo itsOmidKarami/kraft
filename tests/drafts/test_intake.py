@@ -103,14 +103,24 @@ def test_schedule_ops_rewrite_schedules_in_place(client, connected):
             id="repo-and-chain",
         ),
         pytest.param({"cron": "61 9 * * 1-5"}, {"cron"}, id="a-cron-the-scheduler-cannot-run"),
+        pytest.param({"chain": "app:ship"}, {"chain"}, id="another-repos-library"),
     ],
 )
 def test_a_schedule_naming_no_connected_repo_or_no_chain_is_a_problem(
-    client, connected, over, fields
+    client, connected, templates_dir, tmp_path, over, fields
 ):
     """Each is named once, on its schedule, and the screen still renders the
     file. A cron is checked as the scheduler runs it (R12a-01): `61` was
-    published, then never fired."""
+    published, then never fired. A repo library is another repository's."""
+    if over.get("chain") == "app:ship":
+        from support.addons import accept_repo_library, repo_with_library
+
+        from kraft.api import deps
+
+        st = client.app.state
+        app = repo_with_library(tmp_path)
+        accept_repo_library(templates_dir, st.run_dirs.addons, app, "app")
+        deps._reload_templates(st)
     on = {"op": "set_intake", "patch": {"enabled": True}}
     body = resolved(client, on, schedule(**{"repo": connected, **over}))
     by_field = {p["field"]: p for p in body["problems"] if "schedule" in p}

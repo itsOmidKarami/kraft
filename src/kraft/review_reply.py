@@ -154,6 +154,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
             **executor.frozen_steering(row),
             item_repo=row["repo"],
             policy=executor.scope_policy(row, task),
+            repo_id=launch.item_repo_id,
         )
     except _steering.SteeringError:
         return "no_agent"

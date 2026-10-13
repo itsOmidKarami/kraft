@@ -540,6 +540,7 @@ async def dispatch(
             # escalation turn runs in the item's own checkout.
             item_repo=row["repo"],
             policy=policy,
+            repo_id=launch.item_repo_id,
         )
     except _agent.HarnessUnavailable as exc:
         await _record_message(

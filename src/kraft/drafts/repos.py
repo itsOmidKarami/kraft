@@ -204,8 +204,35 @@ def _changes(before: object, after: object) -> list[dict]:
     return out
 
 
+def _scope_problems(st, data: object) -> list[dict]:
+    """`update.scope_problems` of the draft's `repos.yaml`, each named on the
+    entry it is in: an entry may name its own repo library and no other."""
+    from kraft.addons import update as addon_update
+
+    items = data.get("repos") if isinstance(data, dict) else None
+    labels = {
+        f"{FILE}: repos[{item.get('id', i)}]": item.get("path")
+        for i, item in enumerate(items if isinstance(items, list) else ())
+        if isinstance(item, dict)
+    }
+    out = []
+    for file, why in addon_update.scope_problems(
+        st.templates_dir, data if isinstance(data, dict) else None
+    ):
+        if file != FILE:
+            continue
+        where, _, rest = why.partition("]: ")
+        field = rest.split(" ", 1)[0]
+        out.append(_problem(labels.get(f"{where}]"), field, why))
+    return out
+
+
 def resolve(st, key, raw, files, published) -> dict:
     out = config.resolve_files(st, files, published, FILES)
+    scoped = _scope_problems(st, raw.get(FILE))
+    # Named on their entries below, not again for the file.
+    said = {p["message"] for p in scoped}
+    out["problems"] = [p for p in out["problems"] if p.get("message") not in said] + scoped
     entries = _entries(raw.get(FILE))
     before = {e.path for e in _entries(authored.parse(published.get(FILE)))}
     running = st.db.read(open_counts_by_repo)

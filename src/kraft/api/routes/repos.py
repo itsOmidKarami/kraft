@@ -274,6 +274,20 @@ def _validate_repos(
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if steering:
+        # An entry may name its own repo library and no other. Only what this
+        # change adds is refused: a hand edit already on disk is not this
+        # save's to answer for (`kraft admin doctor` reports it).
+        def named(data=None):
+            problems = addon_update.scope_problems(st.templates_dir, data)
+            return [why for rel, why in problems if rel == "repos.yaml"]
+
+        before = set(named())
+        added = [
+            why for why in named({"repos": repos, "workspaces": workspaces}) if why not in before
+        ]
+        if added:
+            raise HTTPException(422, added[0])
 
 
 class LibraryAccept(BaseModel):

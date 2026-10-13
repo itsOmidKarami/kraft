@@ -612,3 +612,45 @@ def test_installed_notices_a_changed_repo_library_lock(accepted):
     write_yaml(found[0] / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
 
     assert load.installed(*found) == ()
+
+
+def _pin(addon_id):
+    return {"id": addon_id, "digest": "sha256:0", "version": "1"}
+
+
+@pytest.mark.parametrize(
+    ("pins", "repo_id", "refused"),
+    [
+        pytest.param({"app": _pin("library@repo:app")}, "app", None, id="own-repo"),
+        pytest.param({"app": _pin("library@repo:app")}, "web", "app", id="another-repo"),
+        pytest.param({"app": _pin("library@repo:app")}, None, "app", id="no-repo-id"),
+        pytest.param({"release": _pin("release@acme")}, None, None, id="addon-pin-is-not-scoped"),
+        pytest.param(None, "web", None, id="no-pins"),
+    ],
+)
+def test_scope_problem(pins, repo_id, refused):
+    why = load.scope_problem(pins, repo_id)
+    if refused is None:
+        assert why is None
+    else:
+        assert why == f"it reads {refused}'s repo library, visible only to items in {refused}"
+
+
+@pytest.mark.parametrize(
+    ("addon_id", "keep", "left_out"),
+    [
+        pytest.param("library@repo:app", (), True, id="another"),
+        pytest.param("library@repo:web", (), False, id="own"),
+        pytest.param("library@repo:app", ("app",), False, id="kept"),
+        pytest.param("release@acme", (), False, id="addon"),
+    ],
+)
+def test_scoped_leaves_another_repos_library_out(tmp_path, addon_id, keep, left_out):
+    namespace = addon_id.split("@")[0] if "repo:" not in addon_id else addon_id.rsplit(":", 1)[1]
+    addon = load.InstalledAddon(addon_id, "x", namespace, "1", tmp_path)
+    (out,) = load.scoped([addon], "web", keep=keep)
+    if left_out:
+        assert out.left_out == f"{namespace}'s repo library is visible only to items in {namespace}"
+        assert out.quiet and out.id == addon_id
+    else:
+        assert out == addon

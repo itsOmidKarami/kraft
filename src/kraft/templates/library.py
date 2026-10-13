@@ -17,8 +17,6 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -743,20 +741,33 @@ class TemplateLibrary:
         a component it extends or selects, or a skill or agent profile one of
         its tasks names."""
         data = resolved.chain.model_dump(mode="json")
-        named = " ".join(
-            [
-                f"{id} ",
-                *(name for names in self.references(id).values() for name in names),
-                json.dumps(data),
-                *self._fallback_profiles(data),
-            ]
-        )
+        named = {
+            id,
+            *(name.partition(".")[2] for names in self.references(id).values() for name in names),
+            *_qualified_names(data),
+            *self._fallback_profiles(data),
+        }
+        qualifiers = {name.partition(":")[0] for name in named if ":" in name}
         return {
             addon.namespace: addon.pin
             for addon in self.addons
-            if addon.left_out is None
-            and re.search(rf"(?<![a-z0-9_-]){re.escape(addon.namespace)}:", named)
+            if addon.left_out is None and addon.namespace in qualifiers
         }
+
+
+def _qualified_names(data: object) -> set[str]:
+    """Every name `data`, a chain dumped to JSON, reads something by: each
+    `skill:` and `profile:` value (a task's and a `fallback:` entry's) and
+    each `steering:` item. Prose (a prompt, a model) names nothing."""
+    if isinstance(data, dict):
+        found = {v for k, v in data.items() if k in ("skill", "profile") and isinstance(v, str)}
+        steering = data.get("steering")
+        if isinstance(steering, list):
+            found.update(v for v in steering if isinstance(v, str))
+        return found.union(*(_qualified_names(v) for v in data.values()))
+    if isinstance(data, list):
+        return set().union(*(_qualified_names(v) for v in data))
+    return set()
 
 
 def _profile_names(data: object) -> set[str]:
@@ -1064,8 +1075,17 @@ class _Resolution:
                 f"{other.singular}, not a {namespace.singular}",
                 loc=(*loc, "extends"),
             )
+        qualifier = name.partition(":")[0] if ":" in name else None
+        why = next(
+            (
+                f"; {addon.left_out}"
+                for addon in self._library.addons
+                if addon.namespace == qualifier and addon.left_out is not None
+            ),
+            "",
+        )
         raise TemplateLibraryError(
-            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
+            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}{why}",
             loc=(*loc, "extends"),
             addon_ref=":" in name,
         )

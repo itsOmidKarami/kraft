@@ -229,7 +229,12 @@ _MAX_BYTES = 1_000_000
 
 
 def revise(
-    chain: MaterializedChain, changes: ChangeSet, *, at: str | None, library: TemplateLibrary | None
+    chain: MaterializedChain,
+    changes: ChangeSet,
+    *,
+    at: str | None,
+    library: TemplateLibrary | None,
+    repo_id: str | None = None,
 ) -> MaterializedChain:
     """`chain` with `changes` applied, or `RevisionError` naming why not.
 
@@ -245,6 +250,11 @@ def revise(
     parent's), and every scope under the item's own policy (`check_scopes`).
     So an invalid change set never reaches the chain: nothing here writes
     anything.
+
+    `repo_id` is the item's repository (a workspace's root): an added node may
+    come from that repository's repo library and no other. None, no
+    repository, puts every repo library out of reach; add-ons are never
+    scoped.
     """
     if changes.empty:
         return chain
@@ -284,7 +294,9 @@ def revise(
     steering = chain.chain.steering
     addons = chain.chain.addons
     if changes.add:
-        added, added_steering, added_addons = _added_nodes(changes.add, _pinned(library, chain))
+        added, added_steering, added_addons = _added_nodes(
+            changes.add, _pinned(library, chain, repo_id), repo_id
+        )
         # An add-on the item had not touched yet is pinned now, at the lock's version.
         addons = {**(added_addons or {}), **(addons or {})} or None
         for add, node in zip(changes.add, added, strict=True):
@@ -348,7 +360,8 @@ def revise(
             untrimmed=None,
         )
         revised = replace(
-            revised, untrimmed=revise(whole, changes, at=at, library=library).chain.chain
+            revised,
+            untrimmed=revise(whole, changes, at=at, library=library, repo_id=repo_id).chain.chain,
         )
     return revised
 
@@ -375,19 +388,31 @@ def _lands(node: ResolvedNode) -> bool:
     )
 
 
-def _pinned(library: TemplateLibrary | None, chain: MaterializedChain) -> TemplateLibrary | None:
+def _pinned(
+    library: TemplateLibrary | None, chain: MaterializedChain, repo_id: str | None
+) -> TemplateLibrary | None:
     """`library` as this item reads it: the add-on versions its snapshot
     pinned in place of the lock's, so an added node resolves against what the
-    item runs on. An add-on it has not touched yet is taken from the lock."""
-    if library is None or not chain.chain.addons:
-        return library
+    item runs on, and every repo library but `repo_id`'s left out. An add-on
+    it has not touched yet is taken from the lock."""
+    if library is None:
+        return None
     from kraft.addons import load
 
-    return library.with_addons(load.for_item(chain.chain.addons))
+    pins = chain.chain.addons or {}
+    if pins:
+        config_dir = library.library_path.parent if library.library_path else None
+        addons = load.for_item(pins, config_dir, repo_id=repo_id)
+    else:
+        addons = tuple(library.addons)
+    seen = load.scoped(addons, repo_id, keep=pins)
+    if not pins and seen == addons:
+        return library
+    return library.with_addons(seen)
 
 
 def _added_nodes(
-    adds: list[Add], library: TemplateLibrary | None
+    adds: list[Add], library: TemplateLibrary | None, repo_id: str | None
 ) -> tuple[list[ExecNode], dict[str, str] | None, dict | None]:
     """Each added node expanded out of `library`, by the resolution a chain
     file gets (`TemplateLibrary.resolve_chain`: `extends`, steering, skills, a
@@ -402,6 +427,10 @@ def _added_nodes(
         resolved = candidate.resolve_chain(id)
     except TemplateLibraryError as exc:
         raise RevisionError(f"add: {exc}") from exc
+    from kraft.addons import load
+
+    if why := load.scope_problem(resolved.addons, repo_id):
+        raise RevisionError(f"add: {why}")
     return [n.node for n in resolved.nodes], resolved.steering, resolved.addons
 
 
@@ -460,7 +489,11 @@ def _source(node: AddedNode) -> str:
 
 
 def render(
-    text: str, chain: MaterializedChain, gate: str, library: TemplateLibrary | None
+    text: str,
+    chain: MaterializedChain,
+    gate: str,
+    library: TemplateLibrary | None,
+    repo_id: str | None = None,
 ) -> tuple[str, MaterializedChain | None]:
     """The gate's document for a person, and the revised chain it shows (None
     when it shows none): the rationale, each change with its evidence, every
@@ -485,7 +518,7 @@ def render(
     if changes.empty:
         lines.append("None: the chain stays as it is.")
     try:
-        revised = revise(chain, changes, at=gate, library=library)
+        revised = revise(chain, changes, at=gate, library=library, repo_id=repo_id)
     except RevisionError as exc:
         return "\n".join(
             [*lines, "", "## Cannot be applied", "", f"**{exc}**", "", _REJECT, ""]
@@ -508,7 +541,12 @@ def digest(revised: MaterializedChain) -> str:
 
 
 def artifact_digest(
-    chain: MaterializedChain, gate: str, text: str, *, library: TemplateLibrary | None = None
+    chain: MaterializedChain,
+    gate: str,
+    text: str,
+    *,
+    library: TemplateLibrary | None = None,
+    repo_id: str | None = None,
 ) -> str | None:
     """What `gate`'s chain-revision artifact currently resolves to, or None
     when it cannot be parsed or applied, or resolves to no change -- an
@@ -523,7 +561,7 @@ def artifact_digest(
     """
     try:
         changes = parse(text)
-        revised = revise(chain, changes, at=gate, library=library)
+        revised = revise(chain, changes, at=gate, library=library, repo_id=repo_id)
     except RevisionError:
         return None
     if revised is chain:

@@ -220,8 +220,36 @@ def chain_issues(
     return issues + chain_icon_issues(candidate, path, tid, data)
 
 
+def scope_issues(path: Path, data: dict, ctx: CheckContext) -> list[TemplateIssue]:
+    """Each reference `data`, the unsaved contents of `path`, makes to a
+    connected repository's repo library from outside that repository: one is
+    visible only to its own repository's items. Problems in other files are
+    theirs to report."""
+    from kraft.addons import update as addon_update
+
+    rel = path.relative_to(ctx.templates_dir).as_posix()
+    chain = path.stem if CHAIN_FILE.fullmatch(rel) else None
+    return [
+        TemplateIssue(path, chain, why)
+        for file, why in addon_update.scope_problems(ctx.templates_dir, replacing={rel: data})
+        if file == rel
+    ]
+
+
+def _scope_lint(templates_dir: Path) -> list[TemplateIssue]:
+    """`scope_issues` of every file as saved, for `lint_report`."""
+    from kraft.addons import update as addon_update
+
+    out = []
+    for rel, why in addon_update.scope_problems(templates_dir):
+        chain = CHAIN_FILE.fullmatch(rel)
+        out.append(TemplateIssue(templates_dir / rel, chain[1] if chain else None, why))
+    return out
+
+
 def _check_chain(path, data, ctx):
-    return chain_issues(ctx.library, path, path.stem, data, ctx.instance_policy)
+    issues = chain_issues(ctx.library, path, path.stem, data, ctx.instance_policy)
+    return issues + scope_issues(path, data, ctx)
 
 
 def library_candidate(
@@ -310,7 +338,8 @@ def _check_library(path, data, ctx):
         repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
     except config_mod.ConfigError:
         repos = []
-    return library_issues(ctx.library, data, path, ctx.instance_policy, repos, ctx.skills_dir)
+    issues = library_issues(ctx.library, data, path, ctx.instance_policy, repos, ctx.skills_dir)
+    return issues + scope_issues(path, data, ctx)
 
 
 # ── policy ──
@@ -336,7 +365,7 @@ def _check_policy(path, data, ctx):
         for addon in ctx.addons
         if addon.left_out is None
         and (why := addons_load.limits_problem(addon, instance)) is not None
-    ]
+    ] + scope_issues(path, data, ctx)
 
 
 # ── intake ──
@@ -364,7 +393,7 @@ def _check_intake(path, data, ctx):
             model.model_validate(data)
         except ValidationError as exc:
             return [_pydantic_issue(path, exc)]
-    return []
+    return scope_issues(path, data, ctx)
 
 
 # ── access, theme, notify ──
@@ -586,6 +615,7 @@ def lint_report(
         )
         for (chain, _), why in sorted(problems.items()):
             issues.append(TemplateIssue(library.chain_file(chain), chain, why))
+    issues += _scope_lint(templates_dir)
     failed = {issue.chain for issue in issues}
     return {
         "valid": not issues,
@@ -667,7 +697,7 @@ def _check_harnesses(path, data, ctx):
         for addon in ctx.addons
         if addon.left_out is None
         and (why := _unmet_requires(addon, ctx, harnesses=data)) is not None
-    ]
+    ] + scope_issues(path, data, ctx)
 
 
 def _what(addon) -> str:
@@ -808,7 +838,7 @@ def _check_repos(path, data, ctx):
         TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
         for addon in ctx.addons
         if addon.left_out is None and (why := _unmet_requires(addon, ctx, repos=data)) is not None
-    ]
+    ] + scope_issues(path, data, ctx)
 
 
 _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] = {

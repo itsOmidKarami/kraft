@@ -4,6 +4,7 @@ import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Repo, SearchResult, TemplateSummary } from "../../../types";
+import { chainsForRepo } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -101,7 +102,7 @@ export function NewItem() {
         <label className="ph-field">
           <span>Chain</span>
           <select className="ph-input ph-select" value={d.chain} onChange={(e) => set({ chain: e.target.value })}>
-            {chains.filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " (repo default)" : ""}`}</option>)}
+            {chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " (repo default)" : ""}`}</option>)}
           </select>
         </label>
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>

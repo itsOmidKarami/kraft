@@ -466,7 +466,11 @@ def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
 
 def _item_view(st, row, draft: dict | None) -> dict:
     evaluated = item.evaluate(
-        _chain(row), row["current_node_id"], draft["ops"] if draft else [], st.library
+        _chain(row),
+        row["current_node_id"],
+        draft["ops"] if draft else [],
+        st.library,
+        repo_id=deps.item_repo_id(st, row),
     )
     cap = board.budget_cap(st, row)
     return {
@@ -533,7 +537,9 @@ async def apply_item_draft(wid: str, request: Request):
         if draft is None:
             return 404, {"detail": "this work item has no draft"}
         chain = _chain(row)
-        evaluated = item.evaluate(chain, row["current_node_id"], draft["ops"], library)
+        evaluated = item.evaluate(
+            chain, row["current_node_id"], draft["ops"], library, deps.item_repo_id(st, row)
+        )
         if evaluated.passed:
             return 409, {
                 "detail": "the item has moved past some of this draft's ops; remove them or "

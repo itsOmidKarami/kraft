@@ -163,6 +163,10 @@ class LaunchContext:
     #: right before it does, so the reviewer's own approval can be bound to
     #: exactly that, not to whatever a person separately rendered.
     chain_revision_digest: Callable[[Any, str, str], str | None] | None = None
+    #: The id of the item's own repository (a workspace's root): the one repo
+    #: library its launches may read (`addons.load.for_item`). Kept for a
+    #: fanned-out member's run too. None: no id, so no repo library.
+    item_repo_id: str | None = None
 
 
 class Steer:

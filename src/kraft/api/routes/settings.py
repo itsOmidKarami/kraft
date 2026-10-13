@@ -20,6 +20,7 @@ from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft import storage, store
 from kraft.adapters import agent, beads
+from kraft.addons import load as addons_load
 from kraft.api import api_router, config_check, deps, perimeter
 from kraft.api.config_check import IntakeBody
 from kraft.templates import catalogue, positions
@@ -231,6 +232,8 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
     entry = next((r for r in repos if repo in (r.name, r.path)), None)
     if entry is None:
         raise HTTPException(404, f"no connected repository {repo!r}")
+    if why := addons_load.scope_problem(resolved.addons, entry.id):
+        raise HTTPException(422, f"{chain}: {why}")
     harnesses = harness_mod.load(None)
     try:
         inv = agent.resolve_agent_task(
@@ -240,6 +243,8 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
             skills_dir=st.skills_dir,
             harnesses=harnesses,
             steering=resolved.steering,
+            addons=resolved.addons,
+            repo_id=entry.id,
         )
     except (agent.HarnessUnavailable, skill_mod.SkillError, steering_mod.SteeringError) as exc:
         raise HTTPException(422, f"{task}: {exc}") from exc
@@ -485,6 +490,23 @@ async def get_policy(request: Request):
     return data
 
 
+def _refuse_new_scope_problems(st, rel: str, data: dict) -> None:
+    """422 when saving `data` as `rel` would add a reference to a repo
+    library from outside its repository (`update.scope_problems`). One a hand
+    edit already left in the file is not this save's to refuse: `kraft admin
+    doctor` reports it."""
+    from kraft.addons import update as addon_update
+
+    def named(replacing=None):
+        problems = addon_update.scope_problems(st.templates_dir, replacing=replacing)
+        return [why for file, why in problems if file == rel]
+
+    before = set(named())
+    added = [why for why in named({rel: data}) if why not in before]
+    if added:
+        raise HTTPException(422, added[0])
+
+
 # The snapshot: `02` §2.C. The merge: Kraft-xh2x8.
 @api_router.put("/policy")
 async def put_policy(body: PolicyBody, request: Request):
@@ -522,6 +544,7 @@ async def put_policy(body: PolicyBody, request: Request):
         parsed, policy_obj = config_check.validate_policy(data)
     except policy_mod.PolicyError as exc:
         raise HTTPException(422, str(exc)) from exc
+    _refuse_new_scope_problems(st, "policy.yaml", data)
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     deps.apply_policy(st, policy_obj, parsed.instance_policy())
     storage.kick(request.app)
@@ -624,6 +647,7 @@ async def put_intake(body: IntakeBody, request: Request):
         intake = config_mod.Intake.model_validate(data)
     except ValidationError as exc:
         raise HTTPException(422, config_mod.first_error(exc, config_mod.Intake.FILE)) from exc
+    _refuse_new_scope_problems(st, "intake.yaml", data)
     intake.save(path)
     st.intake = data = intake.model_dump()
     st.invalid_intake = None

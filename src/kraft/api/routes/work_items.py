@@ -648,8 +648,8 @@ async def duplicate_work_item(wid: str, request: Request):
     if row["chain_template"] is None:
         # Not the repo library's `default` now: the copy runs what the original ran.
         deps.library_or_503(st)
-        deps.connected_or_422(st, row["repo"])
-        chain_template, chain = None, deps.resolve_chain_or_422(st, None)
+        repo_entry = deps.connected_or_422(st, row["repo"])
+        chain_template, chain = None, deps.scoped_chain_or_422(st, repo_entry, None)
     else:
         chain_template, chain = deps.intake_chain_or_422(st, row["repo"], row["chain_template"])
     attachments = _duplicate_attachments(row)
@@ -1106,7 +1106,9 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         target = previous.target if previous is not None else None
         try:
             new_materialized = (
-                deps.resolve_chain_or_422(st, body.chain_template)
+                deps.scoped_chain_or_422(
+                    st, deps.connected_or_422(st, row["repo"]), body.chain_template
+                )
                 .materialize(
                     target=target or entry.single_repo_target(row["repo"]),
                     # The instance and repository layers, never

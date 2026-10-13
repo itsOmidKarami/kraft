@@ -133,13 +133,38 @@ def test_add_repo_of_a_repo_with_no_commit_is_refused(client, tmp_path):
     assert "has no commit yet" in r.text
 
 
-def test_a_default_chain_naming_no_chain_is_a_problem(client, connected):
+@pytest.mark.parametrize(
+    "chain, says",
+    [
+        pytest.param("nope", "'nope'", id="names-no-chain"),
+        pytest.param("app:ship", "visible only to items in app", id="another-repos-library"),
+    ],
+)
+def test_a_default_chain_naming_no_chain_is_a_problem(
+    client, connected, templates_dir, tmp_path, chain, says
+):
+    if chain == "app:ship":
+        _accept_app_library(client, templates_dir, tmp_path, connected)
     body = resolved(
         client,
-        {"op": "set_repo", "path": connected, "patch": {"default_chain": "nope"}},
+        {"op": "set_repo", "path": connected, "patch": {"default_chain": chain}},
     )
-    (problem,) = [p for p in body["problems"] if p["field"] == "default_chain"]
-    assert "'nope'" in problem["message"]
+    (problem,) = [p for p in body["problems"] if says in p["message"]]
+    assert (problem["field"], problem["repo"]) == ("default_chain", connected)
+
+
+def _accept_app_library(client, templates_dir, tmp_path, connected):
+    """app's repo library accepted, and the connected repo given the id `r`."""
+    from support.addons import accept_repo_library, repo_with_library
+
+    from kraft.api import deps
+
+    st = client.app.state
+    accept_repo_library(templates_dir, st.run_dirs.addons, repo_with_library(tmp_path), "app")
+    repos = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    next(e for e in repos["repos"] if e["path"] == connected)["id"] = "r"
+    (templates_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    deps._reload_templates(st)
 
 
 def test_connect_detected_sets_managed(client, repo, templates_dir):

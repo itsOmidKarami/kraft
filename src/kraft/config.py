@@ -18,7 +18,7 @@ import re
 import stat
 import subprocess
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
@@ -596,6 +596,27 @@ def load_workspaces(path: str | Path) -> dict[str, Workspace]:
                 )
         out[ws_id] = ws
     return out
+
+
+def connected_entry[E](repos: Iterable[E], path: object) -> E | None:
+    """The entry of `repos` (anything with a `path`) connected at `path`.
+
+    `POST /repos` stores git's `--show-toplevel`, which resolves symlinks (on
+    macOS /var -> /private/var), so the path a client added with is not always
+    the path stored. Match either, or a caller cannot patch or delete the repo
+    it just connected.
+
+    A relative path matches nothing: this process would resolve it against its
+    own cwd, not the caller's, and find the wrong repo (Kraft-9efnk.39).
+    """
+    if not isinstance(path, str) or not (os.path.isabs(path) or path.startswith("~")):
+        return None
+    repos = list(repos)
+    entry = next((r for r in repos if getattr(r, "path", None) == path), None)
+    if entry is not None:
+        return entry
+    resolved = str(Path(path).expanduser().resolve())
+    return next((r for r in repos if getattr(r, "path", None) == resolved), None)
 
 
 def save_repos(path: str | Path, repos: list[dict], workspaces: dict | None = None) -> None:

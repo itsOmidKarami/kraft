@@ -275,6 +275,48 @@ def test_a_local_chain_through_the_library_is_in_the_review(app, home):
     assert any(line.startswith("mine.") for line in found.review.reach), found.review.reach
 
 
+@pytest.mark.parametrize(
+    "named_by, refused",
+    [
+        pytest.param("local-chain", "chains/mine.yaml", id="local-chain"),
+        pytest.param("another-repos-entry", "repos.yaml: repos[web]", id="another-repos-entry"),
+        pytest.param("an-addons-skill", "notes@acme: library.yaml", id="an-addons-skill"),
+        pytest.param("its-own-entry", None, id="its-own-entry"),
+    ],
+)
+def test_a_first_accept_is_refused_while_something_outside_names_it(
+    tmp_path, app, home, named_by, refused
+):
+    """A connected id is reserved from connect onward; the first accept
+    names everything outside the repository that already reads it, rather
+    than silently capturing it. Its own entry is only reach."""
+    config_dir, addons_dir = home
+    _library(app, skills={"notes": "# notes\n"})
+    repos = read_yaml(config_dir / "repos.yaml")
+    if named_by == "local-chain":
+        write(config_dir, "chains/mine.yaml", yaml.safe_dump(chain("app:base")))
+    elif named_by == "another-repos-entry":
+        repos["repos"].append(
+            {"path": str(make_repo(tmp_path, "web")), "id": "web", "default_chain": "app:ship"}
+        )
+    elif named_by == "an-addons-skill":
+        task = {**AGENT, "skill": "app:notes"}
+        collection = make_collection(tmp_path, {"notes": {"library": {"tasks": {"t": task}}}})
+        install(config_dir, addons_dir, collection, "notes")
+    else:
+        repos["repos"][0]["default_chain"] = "app:ship"
+    write_yaml(config_dir / "repos.yaml", repos)
+
+    found = repo_library.check(app, "app", *home, repos=repos)
+
+    if refused is None:
+        assert found.outcome == "waiting", found.problems
+        assert any("is now read from this repo library" in r for r in found.review.reach)
+        return
+    assert found.outcome == "refused"
+    assert any(p.startswith(refused) for p in found.problems), found.problems
+
+
 def test_an_accept_after_the_lock_moved_writes_nothing(app, home):
     _library(app)
     stale = repo_library.check(app, "app", *home)

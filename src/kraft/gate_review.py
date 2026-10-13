@@ -69,7 +69,9 @@ def _artifact_line(rel: str | None) -> str:
     return f"The document this gate is about: {rel} (relative to this worktree)\n"
 
 
-def _profile_fallback_refusal(task: AgentTask, gate: str, pins=None) -> str | None:
+def _profile_fallback_refusal(
+    task: AgentTask, gate: str, pins=None, repo_id: str | None = None
+) -> str | None:
     """None, or the operator-facing reason `task` must not launch (Kraft-t4y8g):
     its `profile:` names an agent profile that itself carries a `fallback:`
     list.
@@ -97,7 +99,7 @@ def _profile_fallback_refusal(task: AgentTask, gate: str, pins=None) -> str | No
         return None
     try:
         # The item's pinned add-on versions: the profile the launch will use.
-        table, _path = harness_table(_harness.load(None), pins)
+        table, _path = harness_table(_harness.load(None), pins, repo_id)
     except HarnessUnavailable:
         # The launch a moment later hits the identical problem and reports
         # it; nothing here needs to say it twice.
@@ -176,7 +178,8 @@ async def review(
         # and its `fallback:`, are only there once its store is.
         await executor.restore_pins(item)
     pins = executor.frozen_steering(item)["addons"] if item is not None else None
-    if (refusal := _profile_fallback_refusal(auto_review.task, gate, pins)) is not None:
+    refusal = _profile_fallback_refusal(auto_review.task, gate, pins, launch.item_repo_id)
+    if refusal is not None:
         # Same posture as the kind-check above: an unpaired skip, no
         # `_started`, so `_gate_review_attempts` still counts it as one
         # attempt and the delay poller does not re-arm a dead gate forever.
@@ -294,6 +297,7 @@ async def review(
             item_repo=row["repo"],
             # The gate scope's policy: its tool lists and sandbox, as for any task.
             policy=executor.scope_policy(row, auto_review),
+            repo_id=launch.item_repo_id,
         )
     except _steering.SteeringError as exc:
         # Modelled on the `SandboxUnresolved` handler above: recorded as the

@@ -663,8 +663,15 @@ class HarnessProfileTable:
         for addon in addons:
             if addon.left_out is None:
                 agent_profiles |= _addon_profiles(addon, harnesses)
+        # A repo library left out of this table (another repository's, or a
+        # connected id with none) is known: a fallback into it is not a broken
+        # file, and the launch that walks into it stops with that library's own
+        # reason (`resolve_agent_task`).
+        known = {f"{a.namespace}:" for a in addons if a.repo_id is not None and a.left_out}
         for p in agent_profiles.values():
             for n, entry in enumerate(p.fallback):
+                if entry.profile is not None and entry.profile.startswith(tuple(known)):
+                    continue
                 if entry.profile is not None and entry.profile not in agent_profiles:
                     raise TemplateEnvironmentError(
                         f"{path}: profiles.{p.id}.fallback[{n}]: profile {entry.profile!r} "

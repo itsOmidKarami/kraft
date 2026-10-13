@@ -24,6 +24,7 @@ from kraft.adapters import agent
 from kraft.addons import load, update
 from kraft.executor import dispatch
 from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.skill import SkillError
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
@@ -160,7 +161,9 @@ def test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored(home, tm
     }
     assert library.commit and library.tree
     drop_store(library.root)
-    (pinned,) = [p for p in load.for_item(resolved.addons, config_dir, addons_dir) if p.repo_id]
+    (pinned,) = [
+        p for p in load.for_item(resolved.addons, config_dir, addons_dir, repo_id=None) if p.repo_id
+    ]
     assert pinned.left_out is not None
 
     load.restore(pinned, config_dir, addons_dir)
@@ -205,9 +208,20 @@ def test_a_local_profiles_fallback_pins_the_addon_it_names(home):
     assert list(resolved.addons) == ["release"]
 
 
-def test_a_chain_that_reads_no_addon_stores_no_pins(home):
+@pytest.mark.parametrize(
+    "task",
+    [
+        pytest.param({}, id="plain"),
+        pytest.param(
+            {"prompt": "release: write the notes", "model": "release:x"},
+            id="prose-names-a-namespace",
+        ),
+    ],
+)
+def test_a_chain_that_reads_no_addon_stores_no_pins(home, task):
     repo, config_dir, addons_dir = home
-    (config_dir / "chains" / "plain.yaml").write_text(json.dumps(chain("base")))
+    body = {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **AGENT, **task}]}]}
+    (config_dir / "chains" / "plain.yaml").write_text(json.dumps(body))
     resolved = _resolved(config_dir, addons_dir, "plain")
     assert resolved.addons == {}
     stored = _stored(resolved)
@@ -409,3 +423,153 @@ def test_a_revision_cannot_add_from_an_addon_that_is_not_loaded(home, gone):
 
     with pytest.raises(RevisionError, match=r"extends no (node|task) named"):
         revise(snapshot, ChangeSet(rationale="r", add=[add]), at=None, library=live)
+
+
+#: A repo library's default `library.yaml` holds the task `base` and no node.
+_DIRECT = AddedNode(id="x", tasks=[{"id": "t", "extends": "app:base"}])
+
+
+@pytest.mark.parametrize(
+    "node, repo_id",
+    [
+        pytest.param(AddedNode(id="x", extends="via_app"), "app", id="own-repo"),
+        pytest.param(AddedNode(id="x", extends="via_app"), "web", id="another-repo"),
+        pytest.param(_DIRECT, "web", id="another-repo-direct"),
+        pytest.param(_DIRECT, None, id="no-repo"),
+    ],
+)
+def test_a_revision_adds_only_from_the_items_own_repo_library(home, tmp_path, node, repo_id):
+    """`app:base` is in app's repo library: an added node reads it only for
+    an item in app, whether through a local node or directly."""
+    repo, config_dir, addons_dir = home
+    accept_repo_library(config_dir, addons_dir, repo_with_library(tmp_path), "app")
+    repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": "/web", "id": "web"})
+    (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    via = {"kind": "exec", "tasks": [{"id": "t", "extends": "app:base"}]}
+    library = {"tasks": {"base": AGENT}, "nodes": {"via_app": via}}
+    (config_dir / "library.yaml").write_text(json.dumps(library))
+    snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
+    live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    changes = ChangeSet(rationale="r", add=[Add(after="n", node=node, evidence="e")])
+
+    if repo_id == "app":
+        revised = revise(snapshot, changes, at=None, library=live, repo_id=repo_id)
+        assert sorted(revised.chain.addons) == ["app", "release"]
+        return
+    with pytest.raises(RevisionError, match="visible only to items in app"):
+        revise(snapshot, changes, at=None, library=live, repo_id=repo_id)
+
+
+@pytest.fixture
+def two_repos(home, tmp_path):
+    """`home`, plus `app`'s repo library (skill `notes`, profile `deep`)
+    accepted, and `web` connected with no library. The pin of a chain that
+    read app's library, for an item filed before the scope rule."""
+    repo, config_dir, addons_dir = home
+    deep = {"profiles": {"deep": {"model": {"codex": "gpt-5"}}}}
+    app = repo_with_library(
+        tmp_path,
+        skills={"notes": "the app method"},
+        extra={".kraft/profiles.yaml": yaml.safe_dump(deep)},
+    )
+    store = accept_repo_library(config_dir, addons_dir, app, "app")
+    repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": "/web", "id": "web"})
+    (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    (library,) = [p for p in load.installed(config_dir, addons_dir) if p.repo_id == "app"]
+    return {"app": library.pin}, store, config_dir
+
+
+_SCOPED = "visible only to items in app"
+
+
+@pytest.mark.parametrize(
+    "fields, pinned, repo_id, read, stops",
+    [
+        pytest.param(
+            {"skill": "app:notes"}, False, "app", "the app method", None, id="own-repo-skill"
+        ),
+        pytest.param({"skill": "app:notes"}, False, "web", None, _SCOPED, id="another-repos-skill"),
+        pytest.param(
+            {"profile": "app:deep"}, False, "web", None, _SCOPED, id="another-repos-profile"
+        ),
+        pytest.param(
+            {"skill": "app:notes"},
+            True,
+            "web",
+            "the app method",
+            None,
+            id="pinned-before-the-change",
+        ),
+        pytest.param(
+            {"skill": "web:notes"},
+            False,
+            "app",
+            None,
+            "repository 'web' has no accepted repo library",
+            id="reserved-id-not-delegated",
+        ),
+        pytest.param(
+            {"skill": "superpowers:brainstorm"},
+            False,
+            "app",
+            "Follow the superpowers:brainstorm skill",
+            None,
+            id="another-tools-plugin",
+        ),
+        pytest.param(
+            {"profile": "app:deep"},
+            False,
+            "app",
+            None,
+            "profiles.yaml does not match its digest",
+            id="own-repo-edited-store",
+        ),
+        pytest.param(
+            {"skill": "kraft:spec"}, False, "app", "name: spec", None, id="kraft-id-is-not-reserved"
+        ),
+        pytest.param(
+            {"profile": "fast"}, False, "web", None, _SCOPED, id="fallback-into-another-repo"
+        ),
+        pytest.param({}, False, "web", "", None, id="unrelated-task-beside-that-fallback"),
+        pytest.param({}, False, None, "", None, id="instance-table-beside-that-fallback"),
+    ],
+)
+def test_a_launch_reads_only_its_own_repos_library(
+    request, two_repos, fields, pinned, repo_id, read, stops
+):
+    """Another repository's library, and a connected id with none, stop the
+    launch with that library's own reason, never delegated as another tool's
+    plugin. An own-repo store edited after it was accepted stops with the
+    digest's reason, never the scope's (D13). `kraft` or an add-on's namespace
+    as a repo id (set by hand, or minted before ids skipped them) reserves
+    nothing, and a `harnesses.yaml` fallback into another repository's library
+    stops only the launch that walks into it."""
+    pins, store, config_dir = two_repos
+    case = request.node.callspec.id
+    if stops and "digest" in stops:
+        edit_store(store, "profiles.yaml", "profiles: {deep: {model: {codex: evil}}}\n")
+    if case == "kraft-id-is-not-reserved":
+        repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+        repos["repos"].append({"path": "/kraft", "id": "kraft"})
+        (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    if "fallback" in case:
+        fast = {"model": {"codex": "gpt-5"}, "fallback": [{"profile": "app:deep"}]}
+        harnesses = yaml.safe_load((config_dir / "harnesses.yaml").read_text()) or {}
+        harnesses["profiles"] = {**(harnesses.get("profiles") or {}), "fast": fast}
+        (config_dir / "harnesses.yaml").write_text(yaml.safe_dump(harnesses))
+    task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
+
+    def launch():
+        return agent.resolve_agent_task(
+            task, None, steering={}, addons=pins if pinned else None, repo_id=repo_id
+        )
+
+    if read is not None:
+        assert read in (launch().method_text or "")
+        return
+    with pytest.raises((SkillError, agent.HarnessUnavailable)) as stop:
+        launch()
+    assert stops in str(stop.value)
+    assert (_SCOPED in str(stop.value)) == (stops == _SCOPED)
