@@ -447,13 +447,16 @@ def diff(before: ResolvedChain, after: ResolvedChain) -> list[str]:
 _REJECT = "Approving it is refused; reject it back to the node that wrote it, with this reason."
 
 
-def _sources(node: AddedNode) -> list[str]:
-    """The library components an added node is built from, as authored: its
-    `extends`, or each of its tasks', in order and without repeats."""
+def _source(node: AddedNode) -> str:
+    """`, from ...` naming the library components an added node is built
+    from, as authored: its `extends`, or each of its tasks', in order and
+    without repeats. Empty for a node that names none."""
     if node.extends is not None:
-        return [node.extends]
-    tasks = node.tasks or [t for step in node.steps or [] for t in step.tasks]
-    return list(dict.fromkeys(t.extends for t in tasks))
+        names = [node.extends]
+    else:
+        tasks = node.tasks or [t for step in node.steps or [] for t in step.tasks]
+        names = list(dict.fromkeys(t.extends for t in tasks))
+    return f", from {', '.join(f'`{name}`' for name in names)}" if names else ""
 
 
 def render(
@@ -471,8 +474,7 @@ def render(
     lines = ["# Chain revision", "", changes.rationale, "", "## Changes", ""]
     lines += [f"- skip `{s.node}` -- {s.evidence}" for s in changes.skip]
     lines += [
-        f"- add `{a.node.id}` after `{a.after}`, from "
-        f"{', '.join(f'`{name}`' for name in _sources(a.node))} -- {a.evidence}"
+        f"- add `{a.node.id}` after `{a.after}`{_source(a.node)} -- {a.evidence}"
         for a in changes.add
     ]
     lines += [

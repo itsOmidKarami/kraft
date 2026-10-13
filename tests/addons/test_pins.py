@@ -337,13 +337,14 @@ def _task(extends):
 
 
 @pytest.mark.parametrize(
-    "added, pinned",
+    "added, pinned, disable",
     [
-        ({"id": "x", "extends": "via_release"}, ["release"]),
-        ({"id": "x", "extends": "via_tools"}, ["release", "tools"]),
-        ({"id": "x", "extends": "release:stage"}, ["release"]),
-        (_task("release:base"), ["release"]),
-        (_task("tools:base"), ["release", "tools"]),
+        ({"id": "x", "extends": "via_release"}, ["release"], False),
+        ({"id": "x", "extends": "via_tools"}, ["release", "tools"], False),
+        ({"id": "x", "extends": "release:stage"}, ["release"], False),
+        (_task("release:base"), ["release"], False),
+        (_task("tools:base"), ["release", "tools"], False),
+        ({"id": "x", "extends": "release:stage"}, ["release"], True),
     ],
     ids=[
         "through-a-pinned-addon",
@@ -351,12 +352,14 @@ def _task(extends):
         "added-node-extends-an-addon",
         "added-task-extends-an-addon",
         "added-task-extends-an-addon-not-touched-yet",
+        "pinned-addon-disabled-since",
     ],
 )
-def test_a_revision_resolves_against_pinned_addons(home, added, pinned):
+def test_a_revision_resolves_against_pinned_addons(home, added, pinned, disable):
     """A node a revision adds runs on the versions the item runs on, whether it
     names an add-on's component or a local one that does; an add-on the item
-    had not read from yet joins its pins at the lock's version."""
+    had not read from yet joins its pins at the lock's version. An add-on the
+    item pinned stays loaded for it after it is disabled, as at launch."""
     repo, config_dir, addons_dir = home
     (config_dir / "library.yaml").write_text(json.dumps(_VIA))
     snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
@@ -364,6 +367,8 @@ def test_a_revision_resolves_against_pinned_addons(home, added, pinned):
     newer["library"]["tasks"]["base"]["prompt"] = "the 1.1.0 prompt"
     publish(repo, "release", **newer)
     _update(config_dir, addons_dir, [ID])
+    if disable:
+        edit_addons_yaml(config_dir, lambda w: w["addons"].update({ID: False}))
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
     add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
 
