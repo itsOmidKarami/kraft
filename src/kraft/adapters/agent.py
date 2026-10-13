@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -36,6 +37,7 @@ from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+from kraft.worker.worktree_read import open_dir_no_symlinks
 
 logger = logging.getLogger(__name__)
 
@@ -739,20 +741,53 @@ def _config_dir(
     A sandboxed item gets a directory of its own inside its `sandbox_home`,
     which its sandboxes already mount: the shared one would be a directory
     one item's worker could rewrite under every other item's launches,
-    sandboxed or not."""
+    sandboxed or not. That home is the worker's to write, so nothing in it is
+    trusted: the directory is opened one component at a time with no link
+    followed (`open_dir_no_symlinks`), and each file is written relative to
+    it, so a link a worker planted is refused or replaced, never written
+    through. A refusal is `LaunchRefused`, naming the directory."""
     if h.config_env is None:
         return {}
-    directory = (
-        sandbox_home / ".kraft-harness-config" / h.id
-        if sandbox_home is not None
-        else run_dirs.base / "harness-config" / h.id
-    )
-    directory.mkdir(parents=True, exist_ok=True)
-    for name, text in h.config_files.items():
-        tmp = directory / f".{name}.{session_id}"
-        tmp.write_text(text)
-        os.replace(tmp, directory / name)
+    if sandbox_home is None:
+        directory = run_dirs.base / "harness-config" / h.id
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, text in h.config_files.items():
+            tmp = directory / f".{name}.{session_id}"
+            tmp.write_text(text)
+            os.replace(tmp, directory / name)
+        return {h.config_env: str(directory)}
+    directory = sandbox_home / ".kraft-harness-config" / h.id
+    try:
+        # The home itself is Kraft's (`item_paths.sandbox_home`, which takes
+        # no link for the old one); everything below it is the worker's.
+        sandbox_home.mkdir(parents=True, exist_ok=True)
+        dir_fd = open_dir_no_symlinks(sandbox_home, (".kraft-harness-config", h.id), create=True)
+        try:
+            for name, text in h.config_files.items():
+                _replace_at(dir_fd, name, f".{name}.{session_id}", text)
+        finally:
+            os.close(dir_fd)
+    except OSError as exc:
+        raise LaunchRefused(
+            f"cannot write {h.id}'s config into {directory}: {exc}; something in the "
+            f"sandbox home is not a plain folder or file (a link is never followed), "
+            f"so remove it and retry"
+        ) from exc
     return {h.config_env: str(directory)}
+
+
+def _replace_at(dir_fd: int, name: str, tmp: str, text: str) -> None:
+    """Write `text` to `name` in the folder `dir_fd` by way of `tmp`, a rename
+    so a reader never sees half a file. `tmp` is created with `O_CREAT |
+    O_EXCL | O_NOFOLLOW` after removing whatever held its name (the name,
+    never what a link there points at), and the rename replaces a link at
+    `name` rather than writing through it."""
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(tmp, dir_fd=dir_fd)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
 
 
 def _bounded_instruction(path: Path, task_instruction: str) -> str:

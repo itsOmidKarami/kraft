@@ -33,6 +33,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from kraft import item_paths
 from kraft.config import ConfigError
 from kraft.paths import RunDirs, config_dir, default_run_dir, kraft_home
 from kraft.worker import ca as _ca
@@ -1599,8 +1600,10 @@ def foreign_owned(paths: Iterable[Path], host: Runtime) -> str | None:
 def sandbox_home(run_dirs, work_item_id: str) -> Path:
     """The `HOME` a sandboxed item's containers share, kept across its
     sessions so an agent CLI can resume one: the same directory for every
-    session of the item, never shared with another item."""
-    return run_dirs.base / "sandbox-home" / work_item_id
+    session of the item, never shared with another item. An older item's
+    `run/sandbox-home/<id>/` while it exists, else `items/<id>/sandbox-home/`
+    (`item_paths.sandbox_home`)."""
+    return item_paths.sandbox_home(run_dirs, work_item_id)
 
 
 def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
@@ -1888,7 +1891,15 @@ class DockerBackend:
         # before the worktree goes; its members' by the item they record.
         _refstore.discard(run_dirs.base, worktree)
         _refstore.discard_item(run_dirs.base, work_item_id)
-        shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
+        # Both places, not `sandbox_home`'s one answer: the old one is never
+        # made after the upgrade, so this leaves no home behind either way.
+        # `rmtree` refuses a link at the top and removes one inside without
+        # following it, so nothing a worker planted reaches past the home.
+        for home in (
+            run_dirs.base / "sandbox-home" / work_item_id,
+            item_paths.item_dir(run_dirs, work_item_id) / "sandbox-home",
+        ):
+            shutil.rmtree(home, ignore_errors=True)
 
     async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from support.harness import fake_docker_bin
 from support.worktree import make_item
+from worker.backends.test_docker import _volumes
 
 from kraft import item_paths, store
 from kraft.adapters import subprocess as sp
@@ -24,8 +25,9 @@ def argv_seen(monkeypatch, tmp_path):
     real = docker_backend.docker_argv
 
     def spy(cmd, cwd, sandbox, results, **kw):
-        seen.append({"results": results, **kw})
-        return real(cmd, cwd, sandbox, results, **kw)
+        argv = real(cmd, cwd, sandbox, results, **kw)
+        seen.append({"results": results, "argv": argv, **kw})
+        return argv
 
     monkeypatch.setattr(docker_backend, "docker_argv", spy)
     return seen
@@ -102,6 +104,38 @@ async def test_a_session_records_its_folder_and_mounts_only_its_out_files(
     assert seen["rw_files"] == (f.result, f.summary)
     assert seen["rw_dirs"] == (item_paths.docs_dir(run_dirs, "w1"),)
     assert {f.folder, f.writable}.isdisjoint(Path(p) for p in seen["results"])
+
+
+@pytest.mark.parametrize("old_home", [True, False], ids=["old-home-exists", "no-old-home"])
+async def test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps(
+    argv_seen, run_dirs, database, tmp_path, old_home
+):
+    """The container's `HOME` is an older item's `sandbox-home/<id>/` while
+    it exists, for the chats a paused session resumes from, else the item's
+    own folder's. Of that folder it is handed only the home, `docs/` and the
+    session's two files: never what was filed, earlier versions, or the
+    session folder."""
+    await make_item(database, "/r")
+    old = run_dirs.base / "sandbox-home" / "w1"
+    if old_home:
+        old.mkdir(parents=True)
+    item = item_paths.item_dir(run_dirs, "w1")
+    for part in ("filed/spec.md", "history/spec.1.md"):
+        (item / part).parent.mkdir(parents=True, exist_ok=True)
+        (item / part).write_text("x")
+
+    await _run(database, run_dirs, tmp_path, "s1")
+
+    home = old if old_home else item / "sandbox-home"
+    f = item_paths.session_files(run_dirs, "w1", "s1")
+    (seen,) = argv_seen
+    assert seen["home"] == home and home.is_dir()
+    assert f"HOME={home}" in seen["argv"]
+    assert old_home or not old.exists()
+    sources = {Path(v.split(":")[0]) for v in _volumes(seen["argv"])}
+    assert {p for p in sources if p.is_relative_to(item)} == {
+        p for p in (home, item / "docs", f.result, f.summary) if p.is_relative_to(item)
+    }
 
 
 @pytest.mark.parametrize("planted", [None, "symlink"], ids=["fresh", "symlink-replaced"])

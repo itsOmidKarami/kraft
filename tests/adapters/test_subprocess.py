@@ -735,7 +735,7 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
     assert seen["env"] == {"GIT_COMMITTER_NAME": "Daemon", "PYTHONDONTWRITEBYTECODE": "1"}
     assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]
-    assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"
+    assert seen["home"] == run_dirs.base / "items" / "w1" / "sandbox-home"
 
 
 async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(

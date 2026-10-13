@@ -39,14 +39,14 @@ origin: src/kraft/item_paths.py §document -- the new place is read first becaus
 
 WHILE `run/sandbox-home/<id>/` exists, the system SHALL use it as the item's
 sandbox home.
-enforced-by: tests/test_item_paths.py::test_an_existing_sandbox_home_is_kept[old-home-exists]
+enforced-by: tests/test_item_paths.py::test_an_existing_sandbox_home_is_kept[old-home-exists], tests/adapters/test_subprocess_sandbox_results.py::test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps[old-home-exists], tests/adapters/test_agent_sandbox.py::test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own[old-home-exists]
 origin: src/kraft/item_paths.py §sandbox_home -- the old home holds the agent CLI's chats a paused session resumes from.
 
 ## REQ a-new-sandbox-home-is-in-the-items-folder
 
 WHILE `run/sandbox-home/<id>/` does not exist, the system SHALL use
 `run/items/<id>/sandbox-home/` as the item's sandbox home.
-enforced-by: tests/test_item_paths.py::test_an_existing_sandbox_home_is_kept[no-old-home]
+enforced-by: tests/test_item_paths.py::test_an_existing_sandbox_home_is_kept[no-old-home], tests/adapters/test_subprocess_sandbox_results.py::test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps[no-old-home], tests/adapters/test_agent_sandbox.py::test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own[no-old-home]
 origin: src/kraft/item_paths.py §sandbox_home
 
 ## REQ an-escalation-thread-keeps-its-paths
@@ -97,21 +97,22 @@ origin: src/kraft/adapters/agent.py §_writable_dirs -- for codex this is a real
 
 WHEN the system reads a file in a folder a worker can write, it SHALL NOT
 follow a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[fifo], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_refuses_a_symlink_out_of_the_worktree[docs], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[pending-gate], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[produced]
+enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[fifo], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_refuses_a_symlink_out_of_the_worktree[docs], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[pending-gate], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[produced], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-sandbox-home], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-docs]
 origin: src/kraft/item_paths.py -- every read goes through `worker.worktree_read`, which opens one component at a time with `O_NOFOLLOW` and opens the file non-blocking, so a planted FIFO cannot hang the server either.
 
 ## REQ no-write-into-a-worker-folder-follows-a-link
 
 WHEN the system writes into a folder a worker can write, it SHALL NOT follow or
 replace a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced]
+enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[harness-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-file], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[temporary-file], tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
 origin: src/kraft/item_paths.py §copy_in -- each folder on the way is opened with `open_dir_no_symlinks` and the file with `O_CREAT | O_EXCL | O_NOFOLLOW` relative to it, so a name already there is refused rather than written through.
 
 ## REQ history-and-filed-are-not-mounted
 
 WHILE a sandboxed session runs, the system SHALL NOT mount its item's
 `history/` or `filed/`.
-enforced-by:
+enforced-by: tests/adapters/test_subprocess_sandbox_results.py::test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps[old-home-exists], tests/adapters/test_subprocess_sandbox_results.py::test_a_sandbox_mounts_its_item_s_home_and_nothing_kraft_keeps[no-old-home]
+origin: src/kraft/adapters/subprocess.py §run_task -- a sandbox is handed `docs/` and the session's two `out/` files to write, and nothing else of the item's folder, so a worker cannot rewrite what a person filed or a version a gate decided on.
 
 ## REQ every-agent-is-told-its-items-documents
 
@@ -130,27 +131,32 @@ origin: src/kraft/item_paths.py §keep_version -- the document stays where it is
 ## REQ archiving-removes-the-sandbox-home
 
 WHEN a work item is archived, the system SHALL remove its sandbox home.
-enforced-by:
+enforced-by: tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home]
+origin: src/kraft/worker/backends/docker.py §release -- both places, since an older item's home is in `sandbox-home/<id>/`; the home is a cache of the agent CLI's, and the worktree it served is gone.
 
 ## REQ archiving-keeps-the-items-folder
 
 WHEN a work item is archived, the system SHALL keep its `docs/`, `history/`,
 `filed/` and `sessions/`.
-enforced-by:
+enforced-by: tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home]
+origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes the worktree and the sandbox home only, so an archived item's documents and session files stay readable where they were written.
 
 ## REQ abandoning-removes-the-items-folder
 
 WHEN a work item is abandoned, the system SHALL remove `run/items/<id>/`.
-enforced-by:
+enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage
+origin: src/kraft/api/routes/lifecycle.py §abandon_work_item -- `shutil.rmtree` walks by folder handle and removes a link without following it, so a link a worker planted in `docs/` or the sandbox home takes nothing outside with it.
 
 ## REQ storage-counts-item-sandbox-homes
 
 The system SHALL count every `run/items/*/sandbox-home` in the governed
 storage figure, under its item.
-enforced-by:
+enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item, tests/test_storage.py::test_refresh_drops_an_item_removed_while_it_walked[item-sandbox-home]
+origin: src/kraft/storage.py §measure -- only the sandbox home is governed, since archiving removes it; `docs/`, `history/` and `filed/` count as attachments and `sessions/` as logs, so the Storage page still adds up.
 
 ## REQ doctor-counts-worktrees-with-old-documents
 
 WHEN `kraft admin doctor` runs, the system SHALL report how many worktrees
 hold a `.engineering/` folder.
-enforced-by:
+enforced-by: tests/test_doctor_documents.py::test_doctor_counts_worktrees_with_old_documents[none], tests/test_doctor_documents.py::test_doctor_counts_worktrees_with_old_documents[two], tests/cli/test_doctor.py::test_doctor_on_a_live_instance_reaches_every_check
+origin: src/kraft/doctor.py §_old_documents_check -- a warning, never a failure: the documents are read where they are, and the count reaching zero is when the `.engineering/` fallbacks can go.

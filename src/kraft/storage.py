@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from kraft import render
+from kraft.item_paths import ITEMS
 from kraft.store import _now
 from kraft.vocab import Verb, admitting
 from kraft.vocab.sql import in_list
@@ -40,6 +41,16 @@ _CATEGORY = {
 CATEGORIES = ("worktrees", "sandboxes", "logs", "results", "databases", "attachments", "other")
 #: Folders whose children are named by work item id.
 _PER_ITEM = ("worktrees", "sandbox-home")
+#: What of an item's own folder, `items/<id>/<name>`, counts where. Only the
+#: sandbox home is the item's in `governed`: archiving removes it, and keeps
+#: the rest (`kraft.item_paths`).
+_IN_ITEM = {
+    "sandbox-home": "sandboxes",
+    "docs": "attachments",
+    "history": "attachments",
+    "filed": "attachments",
+    "sessions": "logs",
+}
 
 
 @dataclass(frozen=True)
@@ -94,7 +105,17 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
     categories = dict.fromkeys(CATEGORIES, 0)
     for top in _children(base):
         category = _CATEGORY.get(top.name) or ("databases" if ".db" in top.name else "other")
-        if top.name in _PER_ITEM:
+        if top.name == ITEMS and top.is_dir(follow_symlinks=False):
+            for item in _children(Path(top.path)):
+                for part in (
+                    _children(Path(item.path)) if item.is_dir(follow_symlinks=False) else ()
+                ):
+                    size = _bytes(part, seen, stop)
+                    kind = _IN_ITEM.get(part.name, "other")
+                    categories[kind] += size
+                    if kind == "sandboxes":
+                        items[item.name] = items.get(item.name, 0) + size
+        elif top.name in _PER_ITEM:
             for child in _children(Path(top.path)):
                 size = _bytes(child, seen, stop)
                 items[child.name] = items.get(child.name, 0) + size
@@ -186,7 +207,9 @@ async def refresh(app) -> Usage:
     # An item archived or abandoned while the walk ran was measured before it
     # went: take it off again, or the walk would put it back.
     for wid in list(st.storage_usage.items):
-        if not any((st.run_dirs.base / top / wid).exists() for top in _PER_ITEM):
+        if not any(
+            (st.run_dirs.base / top / wid).exists() for top in _PER_ITEM
+        ) and not os.path.lexists(st.run_dirs.base / ITEMS / wid / "sandbox-home"):
             forget(st, wid)
     return st.storage_usage
 

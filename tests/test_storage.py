@@ -58,6 +58,23 @@ def test_measure_totals_each_item_and_category(tmp_path):
     assert used.governed < 6 * MB  # logs and databases are not governed
 
 
+def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path):
+    """Of an item's own folder only the sandbox home is governed and the
+    item's: archiving removes it and keeps the documents and session files."""
+    _fill(tmp_path / "items" / "w1" / "sandbox-home" / "f")
+    for part in ("docs/spec.md", "history/spec.1.md", "filed/spec.md", "sessions/s1/session.log"):
+        _fill(tmp_path / "items" / "w1" / part, 4096)
+
+    used = storage.measure(tmp_path)
+
+    assert set(used.items) == {"w1"}
+    assert used.items["w1"] == used.categories["sandboxes"]
+    assert MB <= used.items["w1"] < 2 * MB
+    assert used.categories["attachments"] >= 3 * 4096 and used.categories["logs"] >= 4096
+    assert used.categories["other"] == 0
+    assert used.governed == used.categories["worktrees"] + used.categories["sandboxes"]
+
+
 def test_measure_counts_a_hard_linked_file_once(tmp_path):
     _fill(tmp_path / "worktrees" / "a" / "f")
     before = storage.measure(tmp_path).governed
@@ -65,11 +82,16 @@ def test_measure_counts_a_hard_linked_file_once(tmp_path):
     assert storage.measure(tmp_path).governed - before < MB // 2
 
 
-def test_measure_does_not_follow_a_symlink(tmp_path):
+@pytest.mark.parametrize(
+    "where",
+    ["worktrees/a", "items/a/sandbox-home", "items/a/docs", "items/a"],
+    ids=["worktree", "item-sandbox-home", "item-docs", "item-folder"],
+)
+def test_measure_does_not_follow_a_symlink(tmp_path, where):
     _fill(tmp_path / "outside" / "big", 4 * MB)
-    (tmp_path / "run" / "worktrees" / "a").mkdir(parents=True)
-    (tmp_path / "run" / "worktrees" / "a" / "link").symlink_to(tmp_path / "outside")
-    assert storage.measure(tmp_path / "run").governed < MB
+    (tmp_path / "run" / where).mkdir(parents=True)
+    (tmp_path / "run" / where / "link").symlink_to(tmp_path / "outside")
+    assert sum(storage.measure(tmp_path / "run").categories.values()) < MB
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-0 directory")
@@ -149,8 +171,12 @@ async def test_refresh_runs_one_walk_for_two_callers(tmp_path, monkeypatch):
     assert storage.usage(app.state).governed == 7
 
 
-async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypatch):
-    (tmp_path / "worktrees" / "here").mkdir(parents=True)
+@pytest.mark.parametrize(
+    "left", ["worktrees/here", "items/here/sandbox-home"], ids=["worktree", "item-sandbox-home"]
+)
+async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypatch, left):
+    (tmp_path / left).mkdir(parents=True)
+    (tmp_path / "items" / "gone" / "docs").mkdir(parents=True)  # kept by archive, not governed
     monkeypatch.setattr(
         storage, "measure", lambda base, stop=None: _usage(7, {"here": 2, "gone": 5})
     )
