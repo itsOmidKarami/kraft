@@ -385,12 +385,9 @@ def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str 
         # Bounded and no-follow: the manifest must hash to the store's name.
         if verify:
             fetch.verify_store(root)
-        else:
-            fetch.open_store(root)
-        declared = manifest.addon(
-            manifest.parse((root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
-            manifest.ADDON_JSON,
-        )
+        # `addon.json` too: never a FIFO's endless read, and never an edit.
+        text = (fetch.open_store(root).read(manifest.ADDON_JSON) or b"").decode()
+        declared = manifest.addon(manifest.parse(text, manifest.ADDON_JSON), manifest.ADDON_JSON)
     except fetch.StoreMismatch:
         return mismatch
     except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
@@ -780,18 +777,18 @@ def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
     """Each loaded add-on a Kraft `version` would leave out, with why: its
     `requires.kraft` names another major. What `kraft admin update` lists
     before it installs a release."""
-    from kraft.addons import manifest
+    from kraft.addons import fetch, manifest
 
     out = []
     for addon in installed(config_dir):
         if addon.left_out is not None or addon.repo_id is not None:
             continue
         try:
+            text = (fetch.open_store(addon.root).read(manifest.ADDON_JSON) or b"").decode()
             declared = manifest.addon(
-                manifest.parse((addon.root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
-                manifest.ADDON_JSON,
+                manifest.parse(text, manifest.ADDON_JSON), manifest.ADDON_JSON
             )
-        except (OSError, ValueError, manifest.ManifestError):
+        except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError):
             continue
         if why := manifest.kraft_compatible(declared.requires.kraft, version):
             out.append(f"{addon.id} {addon.version} {why}")

@@ -709,14 +709,14 @@ def _unmet_requires(
 ) -> str | None:
     """Why `addon` would not load once `harnesses` is saved as harnesses.yaml,
     or `repos` as repos.yaml."""
+    from kraft.addons import fetch
+
     try:
+        text = (fetch.open_store(addon.root).read(addon_manifest.ADDON_JSON) or b"").decode()
         declared = addon_manifest.addon(
-            addon_manifest.parse(
-                (addon.root / addon_manifest.ADDON_JSON).read_text(), addon_manifest.ADDON_JSON
-            ),
-            addon_manifest.ADDON_JSON,
+            addon_manifest.parse(text, addon_manifest.ADDON_JSON), addon_manifest.ADDON_JSON
         )
-    except (OSError, ValueError, addon_manifest.ManifestError):
+    except (OSError, ValueError, fetch.AddonRefused, addon_manifest.ManifestError):
         return None  # already not loading; the load says why
     return addons_load.instance_problem(
         addon.namespace,

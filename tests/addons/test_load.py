@@ -2,6 +2,7 @@
 pins, from the store, and never one that fails a load-time check."""
 
 import ast
+import os
 import shutil
 import threading
 from dataclasses import replace
@@ -127,6 +128,15 @@ def test_a_digest_mismatch_leaves_the_addon_out(instance, manifest):
         remove_from_store(store, ".kraft-digest")
         digest.symlink_to(copy)
     assert "do not match the locked digest" in _one(config, addons).left_out
+
+
+def test_an_addon_json_swapped_for_a_fifo_is_left_out_not_waited_on(instance):
+    """`addon.json` is read through the store's digest like every other file:
+    a FIFO in its place is a mismatch, never a read that does not return."""
+    config, addons, store = instance
+    remove_from_store(store, manifest.ADDON_JSON)
+    os.mkfifo(store / manifest.ADDON_JSON)
+    assert _one(config, addons).left_out == "its files do not match the locked digest"
 
 
 def test_an_addon_for_another_major_is_left_out(instance, monkeypatch):
