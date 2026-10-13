@@ -73,7 +73,12 @@ def _state(it, library=LIBRARY):
             pass
 
     return SimpleNamespace(
-        db=it.database, run_dirs=it.run_dirs, indexer=_Indexer(), library=library
+        db=it.database,
+        run_dirs=it.run_dirs,
+        indexer=_Indexer(),
+        library=library,
+        # No repos.yaml: the item's repository has no id, so no repo library.
+        templates_dir=it.run_dirs.worktrees.parent / "config",
     )
 
 

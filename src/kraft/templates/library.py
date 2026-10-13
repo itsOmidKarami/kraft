@@ -1046,8 +1046,17 @@ class _Resolution:
                 f"{other.singular}, not a {namespace.singular}",
                 loc=(*loc, "extends"),
             )
+        qualifier = name.partition(":")[0] if ":" in name else None
+        why = next(
+            (
+                f"; {addon.left_out}"
+                for addon in self._library.addons
+                if addon.namespace == qualifier and addon.left_out is not None
+            ),
+            "",
+        )
         raise TemplateLibraryError(
-            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
+            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}{why}",
             loc=(*loc, "extends"),
             addon_ref=":" in name,
         )

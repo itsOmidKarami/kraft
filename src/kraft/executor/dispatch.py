@@ -467,7 +467,7 @@ async def restore_pins(row) -> None:
     pins = frozen_steering(row)["addons"]
     if not pins:
         return
-    pinned = tuple(p for p in _addons_load.for_item(pins) if p.namespace in pins)
+    pinned = tuple(p for p in _addons_load.for_item(pins, repo_id=None) if p.namespace in pins)
     if any(not p.root.is_dir() for p in pinned):
         async with _restoring:
             await asyncio.to_thread(_addons_load.restore_missing, pinned)

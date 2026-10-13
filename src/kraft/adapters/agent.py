@@ -293,6 +293,7 @@ def resolve_agent_task(
     item_repo: str | None = None,
     policy: InstancePolicy | None = None,
     addons: Mapping[str, Mapping[str, str | None]] | None = None,
+    repo_id: str | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
 
@@ -358,8 +359,8 @@ def resolve_agent_task(
             f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
     harnesses = harnesses if harnesses is not None else _harness.load(None)
-    table, path = harness_table(harnesses, addons)
-    known = addons_load.for_item(addons, path.parent)
+    table, path = harness_table(harnesses, addons, repo_id)
+    known = addons_load.for_item(addons, path.parent, repo_id=repo_id)
     for addon in known:
         if (
             addon.namespace in (addons or {})

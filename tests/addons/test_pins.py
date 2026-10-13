@@ -26,7 +26,7 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
 from kraft.templates.retry import validate_retry_override
-from kraft.templates.revision import Add, AddedNode, ChangeSet, Override, revise
+from kraft.templates.revision import Add, AddedNode, ChangeSet, Override, RevisionError, revise
 
 ID = "release@acme"
 
@@ -147,7 +147,9 @@ def test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored(home, tm
     }
     assert library.commit and library.tree
     drop_store(library.root)
-    (pinned,) = [p for p in load.for_item(resolved.addons, config_dir, addons_dir) if p.repo_id]
+    (pinned,) = [
+        p for p in load.for_item(resolved.addons, config_dir, addons_dir, repo_id=None) if p.repo_id
+    ]
     assert pinned.left_out is not None
 
     load.restore(pinned, config_dir, addons_dir)
@@ -353,3 +355,33 @@ def test_a_revision_resolves_against_pinned_addons(home, extends, pinned):
     assert revised.chain.chain.nodes[1].tasks[0].prompt == AGENT["prompt"]
     assert sorted(revised.chain.addons) == pinned
     assert revised.chain.addons["release"]["version"] == "1.0.0"
+
+
+@pytest.mark.parametrize(
+    "node, repo_id",
+    [
+        pytest.param(AddedNode(id="x", extends="via_app"), "app", id="own-repo"),
+        pytest.param(AddedNode(id="x", extends="via_app"), "web", id="another-repo"),
+    ],
+)
+def test_a_revision_adds_only_from_the_items_own_repo_library(home, tmp_path, node, repo_id):
+    """`app:base` is in app's repo library: an added node reads it only for
+    an item in app, whether through a local node or directly."""
+    repo, config_dir, addons_dir = home
+    accept_repo_library(config_dir, addons_dir, repo_with_library(tmp_path), "app")
+    repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": "/web", "id": "web"})
+    (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    via = {"kind": "exec", "tasks": [{"id": "t", "extends": "app:base"}]}
+    library = {"tasks": {"base": AGENT}, "nodes": {"via_app": via}}
+    (config_dir / "library.yaml").write_text(json.dumps(library))
+    snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
+    live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    changes = ChangeSet(rationale="r", add=[Add(after="n", node=node, evidence="e")])
+
+    if repo_id == "app":
+        revised = revise(snapshot, changes, at=None, library=live, repo_id=repo_id)
+        assert sorted(revised.chain.addons) == ["app", "release"]
+        return
+    with pytest.raises(RevisionError, match="visible only to items in app"):
+        revise(snapshot, changes, at=None, library=live, repo_id=repo_id)

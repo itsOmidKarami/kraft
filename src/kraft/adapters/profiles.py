@@ -34,17 +34,23 @@ _PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
 
 
 def harness_table(
-    harnesses: _harness.HarnessSet, pins: Mapping[str, Mapping[str, str | None]] | None = None
+    harnesses: _harness.HarnessSet,
+    pins: Mapping[str, Mapping[str, str | None]] | None = None,
+    repo_id: str | None = None,
 ) -> tuple[HarnessProfileTable, Path]:
     """The live `harnesses.yaml` and its path, or `HarnessUnavailable`. Read
     from the app's templates directory (`KRAFT_CONFIG_DIR`, else
     `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch.
     An add-on's agent profiles are the exception: `pins` are the versions a
-    work item started with (`ResolvedChain.addons`), and theirs are read."""
+    work item started with (`ResolvedChain.addons`), and theirs are read.
+    `repo_id` is the item's repository: only its repo library's profiles
+    are in the table (None: no repo library's)."""
     path = config_dir() / "harnesses.yaml"
     try:
         table = HarnessProfileTable.from_yaml(
-            path, harnesses=harnesses.valid, addons=addons_load.for_item(pins, path.parent)
+            path,
+            harnesses=harnesses.valid,
+            addons=addons_load.for_item(pins, path.parent, repo_id=repo_id),
         )
         return table, path
     except TemplateEnvironmentError as exc:

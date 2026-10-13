@@ -492,12 +492,18 @@ def for_item(
     pins: Mapping[str, Mapping[str, str | None]] | None,
     config_dir: Path | None = None,
     addons_root: Path | None = None,
+    *,
+    repo_id: str | None,
 ) -> tuple[InstalledAddon, ...]:
     """The add-ons one work item reads: the versions its chain was
     materialized with (`pins`, namespace to `InstalledAddon.pin`), and the
     lock's for every namespace it did not pin. A pinned version whose store
     is gone is known and not loaded: its skills are refused, never handed to
-    the agent as another tool's."""
+    the agent as another tool's.
+
+    `repo_id` is the item's repository (a workspace's root): every other
+    repo library it did not pin is left out (`scoped`). None, no repository,
+    leaves every unpinned repo library out."""
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
     pinned = []
     for namespace, pin in (pins or {}).items():
@@ -519,7 +525,10 @@ def for_item(
                 source=pin.get("source"),
             )
         )
-    live = [p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})]
+    live = scoped(
+        (p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})),
+        repo_id,
+    )
     return (*live, *pinned)
 
 

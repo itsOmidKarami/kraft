@@ -398,7 +398,7 @@ async def get_work_item_artifact(wid: str, request: Request):
     ):
         # A change set is JSON for Kraft to apply; the person deciding reads
         # it rendered, with the diff it makes and anything that stops it.
-        body, revised = revision.render(text, chain, gate, st.library)
+        body, revised = revision.render(text, chain, gate, st.library, deps.item_repo_id(st, row))
         # What an approval must still apply (Kraft-ze1yj).
         if revised is not None and revised is not chain:
             shown = revision.digest(revised)
@@ -501,7 +501,8 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
             gates = (n.id for n in chain.chain.nodes if getattr(n.node, "artifact", None) == kind)
             gate = next(gates, None)
             if gate is not None:
-                body = revision.render(result.text, chain, gate, st.library)[0]
+                repo_id = deps.item_repo_id(st, row)
+                body = revision.render(result.text, chain, gate, st.library, repo_id)[0]
         shown = _worktree_document(st, wid, rel, result.text, result.truncated, body)
         return {"kind": kind, **shown}
     if reason != "absent":

@@ -763,6 +763,17 @@ def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
     return next((r for r in repos if r.path == resolved), None)
 
 
+def item_repo_id(st, row) -> str | None:
+    """The id of the repository work item `row` was filed in (a workspace's
+    root): whose repo library it reads. None when `repos.yaml` cannot be
+    read or no longer holds it."""
+    try:
+        entry = _connected(config_mod.load_repos(repos_path(st)), row["repo"])
+    except config_mod.ConfigError:
+        return None
+    return entry.id if entry is not None else None
+
+
 def connected_or_422(st, repo: str) -> RepoEntry:
     """`repo`'s entry, or a 422 saying how to connect it (Kraft-ta8nv).
 
@@ -1076,10 +1087,12 @@ def launch(st, repo: str) -> executor.LaunchContext:
             library_steering=steering,
             chain_revision_digest=digest,
         )
+    entry = _connected(repos, repo)
+    repo_id = entry.id if entry is not None else None
     return executor.LaunchContext(
-        repo_entry=_connected(repos, repo),
+        repo_entry=entry,
         skills_dir=st.skills_dir,
         repositories={r.id: r for r in repos if r.id},
         library_steering=steering,
-        chain_revision_digest=digest,
+        chain_revision_digest=functools.partial(digest, repo_id=repo_id),
     )
