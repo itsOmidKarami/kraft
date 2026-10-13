@@ -221,9 +221,16 @@ def _scope_problems(st, data: object) -> list[dict]:
     ):
         if file != FILE:
             continue
-        where, _, rest = why.partition("]: ")
-        field = rest.split(" ", 1)[0]
-        out.append(_problem(labels.get(f"{where}]"), field, why))
+        # `<label>[.<nested>]: <key> <why>`: the entry's own label, then any
+        # key path under it (an `areas:` mapping, say), then the key.
+        label = next((k for k in labels if why.startswith(k) and why[len(k)] in ".:"), None)
+        if label is None:
+            out.append(_problem(None, None, why))
+            continue
+        nested, _, rest = why[len(label) :].partition(": ")
+        key = rest.split(" ", 1)[0]
+        field = f"{nested.lstrip('.')}.{key}" if nested else key
+        out.append(_problem(labels[label], field, why))
     return out
 
 

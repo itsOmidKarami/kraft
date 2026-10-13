@@ -133,24 +133,32 @@ def test_add_repo_of_a_repo_with_no_commit_is_refused(client, tmp_path):
     assert "has no commit yet" in r.text
 
 
+_SCOPED = "visible only to items in app"
+
+
 @pytest.mark.parametrize(
-    "chain, says",
+    "patch, says, field",
     [
-        pytest.param("nope", "'nope'", id="names-no-chain"),
-        pytest.param("app:ship", "visible only to items in app", id="another-repos-library"),
+        pytest.param({"default_chain": "nope"}, "'nope'", "default_chain", id="names-no-chain"),
+        pytest.param(
+            {"default_chain": "app:ship"}, _SCOPED, "default_chain", id="another-repos-library"
+        ),
+        pytest.param(
+            {"areas": {"docs": {"chain": "app:ship"}}},
+            _SCOPED,
+            "areas.docs.chain",
+            id="another-repos-library-nested",
+        ),
     ],
 )
 def test_a_default_chain_naming_no_chain_is_a_problem(
-    client, connected, templates_dir, tmp_path, chain, says
+    client, connected, templates_dir, tmp_path, patch, says, field
 ):
-    if chain == "app:ship":
+    if says == _SCOPED:
         _accept_app_library(client, templates_dir, tmp_path, connected)
-    body = resolved(
-        client,
-        {"op": "set_repo", "path": connected, "patch": {"default_chain": chain}},
-    )
+    body = resolved(client, {"op": "set_repo", "path": connected, "patch": patch})
     (problem,) = [p for p in body["problems"] if says in p["message"]]
-    assert (problem["field"], problem["repo"]) == ("default_chain", connected)
+    assert (problem["field"], problem["repo"]) == (field, connected)
 
 
 def _accept_app_library(client, templates_dir, tmp_path, connected):

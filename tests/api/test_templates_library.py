@@ -261,3 +261,30 @@ def test_the_steering_preview_refuses_a_task_that_is_not_an_agent(client):
     response = _preview(client, task="verification.tests.test_changed_scopes")
     assert response.status_code == 422
     assert "not an agent task" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "previewed, status", [("app", 200), ("web", 422)], ids=["own-repo", "another-repo"]
+)
+def test_the_steering_preview_reads_a_repo_library_only_for_its_repo(
+    client, templates_dir, tmp_path, previewed, status
+):
+    """app's chain previewed in app; in web it is refused, as its intake is."""
+    from support.addons import accept_repo_library, repo_with_library
+
+    from kraft.api import deps
+
+    st = client.app.state
+    app = repo_with_library(tmp_path)
+    accept_repo_library(templates_dir, st.run_dirs.addons, app, "app")
+    repos = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": "/srv/web", "name": "web", "id": "web"})
+    (templates_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    deps._reload_templates(st)
+
+    repo = str(app) if previewed == "app" else "web"
+    response = _preview(client, chain="app:ship", task="n.main.t", repo=repo)
+
+    assert response.status_code == status, response.text
+    if status == 422:
+        assert response.json()["detail"].endswith("visible only to items in app")
