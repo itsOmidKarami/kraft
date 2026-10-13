@@ -5,6 +5,7 @@ see the sibling modules for the actual routes:
 - `startup` -- `lifespan()` and its background tasks
 - `perimeter` -- SPA navigation shortcut, local-client check, auth middleware
 - `apidocs` -- `/docs` and `/redoc`, with their CDN scripts pinned
+- `item_ids` -- a work item id's unique start made whole before routing
 - `routes/*` -- one module per resource, each decorating `api_router` below
 
 Nothing outside this package imports anything from here except `app` --
@@ -21,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import config as config_mod
 from kraft import update
-from kraft.api import apidocs, perimeter
+from kraft.api import apidocs, item_ids, perimeter
 from kraft.api.startup import lifespan
 
 # The title and version are what `/docs`, `/redoc` and `/openapi.json` show,
@@ -57,7 +58,10 @@ SENTENCE_ERROR = "kraft_sentence"
 # declared after `_authenticate` (session/bearer), after `_spa_navigation`
 # (the SPA-shell fast path) -- see `perimeter._perimeter`'s own docstring.
 # `_frame_guard` only adds response headers, and goes last so that even a
-# refusal from `_perimeter` carries them.
+# refusal from `_perimeter` carries them. `whole_work_item_id` is declared
+# first, so it runs innermost: only a caller the others admitted learns
+# whether the start of an id matches anything.
+app.middleware("http")(item_ids.whole_work_item_id)
 app.middleware("http")(perimeter._spa_navigation)
 app.middleware("http")(perimeter._authenticate)
 app.middleware("http")(perimeter._perimeter)
