@@ -13,10 +13,18 @@ from support.api import _paused
 FIRST = "abcd1111" + "0" * 24
 SECOND = "abcd1122" + "0" * 24
 SHORT = "abcd"
+# An id with a character outside `[0-9a-z]`: Kraft mints none, and its start
+# is no start of an id.
+MIXED = "Wxyz3333" + "0" * 24
 
 
-def _three_items():
-    for sid, wid in (("s-first", FIRST), ("s-second", SECOND), ("s-short", SHORT)):
+def _items():
+    for sid, wid in (
+        ("s-first", FIRST),
+        ("s-second", SECOND),
+        ("s-short", SHORT),
+        ("s-mixed", MIXED),
+    ):
         permissions.seed_session(sid=sid, wid=wid)
 
 
@@ -30,11 +38,23 @@ def _three_items():
         ("abc", 404, None),
         ("abcd9", 404, None),
         ("ABCD111", 404, None),
+        (MIXED, 200, MIXED),
+        ("Wxyz333", 404, None),
     ],
-    ids=["whole", "unique-start", "exact-wins", "ambiguous", "short", "unknown", "uppercase"],
+    ids=[
+        "whole",
+        "unique-start",
+        "exact-wins",
+        "ambiguous",
+        "short",
+        "unknown",
+        "uppercase",
+        "outside-chars-whole",
+        "outside-chars-start",
+    ],
 )
 def test_an_id_or_its_unique_start_names_the_item(client, given, status, named):
-    _three_items()
+    _items()
 
     r = client.get(f"/api/work-items/{given}")
 

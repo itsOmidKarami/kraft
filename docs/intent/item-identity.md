@@ -11,7 +11,7 @@ origin: src/kraft/api/item_ids.py §whole_work_item_id
 
 ## REQ an-exact-id-wins-over-a-prefix
 WHEN a work item id given to the API equals one item's id and is the start of another's, the system SHALL act on the item it equals.
-enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[exact-wins]
+enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[exact-wins], tests/store/test_work_items.py::test_ids_in_hand_and_stored_ids_are_matched_alike[exact-wins]
 origin: src/kraft/store/work_items.py §match_work_item_ids
 
 ## REQ an-ambiguous-prefix-is-refused
@@ -26,7 +26,7 @@ origin: src/kraft/store/work_items.py §match_work_item_ids
 
 ## REQ a-prefix-is-lowercase
 IF a work item id given to the API has a character outside `[0-9a-z]` and equals no item's id, THEN the system SHALL answer it as unknown.
-enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[uppercase]
+enforced-by: tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[uppercase], tests/api/test_item_ids.py::test_an_id_or_its_unique_start_names_the_item[outside-chars-start], tests/store/test_work_items.py::test_ids_in_hand_and_stored_ids_are_matched_alike[uppercase]
 origin: src/kraft/store/work_items.py §match_work_item_ids
 
 ## REQ a-prefix-is-resolved-only-for-an-admitted-caller

@@ -638,3 +638,26 @@ async def test_the_queue_is_read_earliest_first_and_a_kept_place_survives(databa
     assert database.read(store.queued_ids) == ["b", "a"]
     await database.write(lambda c: store.keep_place(c, "a", taken["at"]))
     assert database.read(store.queued_ids) == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("given", "matched"),
+    [
+        ("abcd", ["abcd"]),
+        ("abcd111", ["abcd1111" + "0" * 24]),
+        ("abcd11", ["abcd1111" + "0" * 24, "abcd1122" + "0" * 24]),
+        ("abc", []),
+        ("ABCD", []),
+    ],
+    ids=["exact-wins", "unique-start", "ambiguous", "short", "uppercase"],
+)
+def test_ids_in_hand_and_stored_ids_are_matched_alike(conn, given, matched):
+    """`match_ids` (an item's own dependencies) answers what
+    `match_work_item_ids` answers over the table: an exact id before every id
+    it is the start of."""
+    ids = ["abcd1122" + "0" * 24, "abcd", "abcd1111" + "0" * 24]
+    for wid in ids:
+        _mk_item(conn, wid)
+
+    assert store.match_ids(ids, given) == matched
+    assert store.match_work_item_ids(conn, given) == matched

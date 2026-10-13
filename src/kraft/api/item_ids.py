@@ -49,8 +49,11 @@ async def whole_work_item_id(request: Request, call_next):
         request.scope["path"] = path[: m.start(1)] + whole + path[m.end(1) :]
         raw = request.scope.get("raw_path")
         if raw:
-            # A prefix is only ever `[0-9a-z]`, so its bytes in the raw path
-            # are the same characters, never percent-encoded.
+            # Best effort: Starlette routes and builds `request.url` from
+            # `scope["path"]`, and nothing in Kraft reads `raw_path`; this only
+            # keeps the two alike for whatever might. A client that
+            # percent-encoded a character of the segment sent other bytes, and
+            # its `raw_path` is left as sent.
             head = b"/api/work-items/"
             request.scope["raw_path"] = raw.replace(head + given.encode(), head + whole.encode(), 1)
     return await call_next(request)

@@ -240,7 +240,10 @@ def _cmd_archive(ns: argparse.Namespace) -> None:
     out["results"] += [{"id": i, "ok": False, "error": why} for i, why in refused.items()]
     out["results"].sort(key=lambda r: ids.index(r["id"]))
     common.emit(out, render.archive_results, ns.json)
-    if found > len(ids):
+    # Only --reclaimable can find more than one call takes. IDs given by
+    # hand can shrink in the preview (two names for one item), which is not
+    # "the largest of" anything.
+    if ns.reclaimable and found > len(ids):
         # stderr under --json, so stdout stays the one payload.
         print(
             f"archived the {len(ids)} largest of {found} reclaimable items; "

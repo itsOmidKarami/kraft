@@ -484,13 +484,17 @@ def _archived(wid) -> bool:
     return bool(asyncio.run(cli.item.client.transport._get(f"/work-items/{wid}"))["archived_at"])
 
 
-@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:8]], ids=["whole", "start"])
+@pytest.mark.parametrize(
+    "typed",
+    [lambda w: [w], lambda w: [w[:8]], lambda w: [w[:8], w]],
+    ids=["whole", "start", "same-item-twice"],
+)
 def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys, typed):
     wid = make_item(repo)
     _set_status(wid, "completed")
 
     with pytest.raises(SystemExit) as stopped:
-        cli.main(["item", "archive", typed(wid)])
+        cli.main(["item", "archive", *typed(wid)])
 
     assert stopped.value.code == 1
     seen = capsys.readouterr()
@@ -498,9 +502,12 @@ def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys, typ
     assert "pass --yes" in seen.err
     assert not _archived(wid)
 
-    cli.main(["item", "archive", typed(wid), "--yes"])
+    cli.main(["item", "archive", *typed(wid), "--yes"])
 
-    assert f"archived {wid}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"archived {wid}" in out
+    # Two names for one item are one item, not one of two reclaimable ones.
+    assert "largest of" not in out
     assert _archived(wid)
 
     cli.main(["item", "restore", wid])
