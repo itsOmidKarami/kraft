@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from support.addons import installed
 from support.harness import v1_node, v1_task
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -88,6 +89,21 @@ def test_a_change_set_with_only_a_rationale_is_empty():
             ),
             "extends",
         ),
+        (
+            _artifact(
+                {
+                    "rationale": "ok",
+                    "add": [
+                        {
+                            "after": "build",
+                            "evidence": "e",
+                            "node": {"id": "release:x", "extends": "release:stage"},
+                        }
+                    ],
+                }
+            ),
+            r"node\.id",
+        ),
     ],
     ids=[
         "prose-before",
@@ -103,6 +119,7 @@ def test_a_change_set_with_only_a_rationale_is_empty():
         "override-setting-nothing",
         "added-task-not-from-the-library",
         "added-node-with-no-shape",
+        "added-node-with-a-qualified-id",
     ],
 )
 def test_anything_but_one_strict_change_set_is_refused(text, match):
@@ -145,21 +162,18 @@ def _chain(**maxima):
     )
 
 
-LIBRARY = TemplateLibrary.from_mappings(
-    {
-        "tasks": {
-            "check": {"kind": "subprocess", "command": "just check"},
-            "merge_it": {"kind": "forge", "target": "mr.merge"},
-            "costly": {"kind": "subprocess", "command": "true", "policy": {"token_budget": 500}},
-        },
-        "nodes": {
-            "extra_check": {"kind": "exec", "tasks": [{"id": "run", "extends": "check"}]},
-            "a_gate": {"kind": "gate", "message": "look"},
-        },
+_LOCAL = {
+    "tasks": {
+        "check": {"kind": "subprocess", "command": "just check"},
+        "merge_it": {"kind": "forge", "target": "mr.merge"},
+        "costly": {"kind": "subprocess", "command": "true", "policy": {"token_budget": 500}},
     },
-    (),
-    library_path=Path("library.yaml"),
-)
+    "nodes": {
+        "extra_check": {"kind": "exec", "tasks": [{"id": "run", "extends": "check"}]},
+        "a_gate": {"kind": "gate", "message": "look"},
+    },
+}
+LIBRARY = TemplateLibrary.from_mappings(_LOCAL, (), library_path=Path("library.yaml"))
 
 
 def _changes(**kw) -> revision.ChangeSet:
@@ -361,6 +375,44 @@ def test_the_gate_reads_the_rationale_each_change_with_its_evidence_then_the_dif
 
     assert shown.index("docs only") < shown.index("- skip `brief` -- plan: not needed")
     assert shown.index("plan: not needed") < shown.index("```diff") < shown.index("- brief")
+
+
+@pytest.mark.parametrize(
+    ("node", "source"),
+    [
+        ({"id": "x", "extends": "extra_check"}, "`extra_check`"),
+        ({"id": "x", "extends": "release:stage"}, "`release:stage`"),
+        (
+            {
+                "id": "x",
+                "tasks": [
+                    {"id": "a", "extends": "release:base"},
+                    {"id": "b", "extends": "check"},
+                    {"id": "c", "extends": "release:base"},
+                ],
+            },
+            "`release:base`, `check`",
+        ),
+    ],
+    ids=["local-node", "addon-node", "addon-tasks"],
+)
+def test_the_gate_names_what_an_added_node_comes_from(tmp_path, node, source):
+    release = installed(
+        tmp_path,
+        "release",
+        library={
+            "tasks": {"base": {"kind": "subprocess", "command": "true"}},
+            "nodes": {"stage": {"kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}},
+        },
+    )
+    library = TemplateLibrary.from_mappings(
+        _LOCAL, (), library_path=tmp_path / "library.yaml", addons=[release]
+    )
+    text = _artifact({"rationale": "r", "add": [_add("build", node)]})
+
+    shown, _ = revision.render(text, _chain(), GATE, library)
+
+    assert f"- add `x` after `build`, from {source} -- plan: needs it" in shown
 
 
 @pytest.mark.parametrize(

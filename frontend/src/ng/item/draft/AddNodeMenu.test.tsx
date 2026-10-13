@@ -13,6 +13,7 @@ const library = { components: [
   { kind: "nodes", name: "security", definition: { steps: [{ id: "scan", tasks: [{ id: "sast" }] }] } },
   { kind: "nodes", name: "docs", definition: { steps: [{ id: "write", tasks: [{ id: "doc" }] }] } },
   { kind: "tasks", name: "lint", definition: {} },
+  { kind: "nodes", name: "release:stage", definition: { tasks: [{ id: "t" }] } },
 ] };
 const scan = { id: "security", kind: "exec" as const, gate_after: null, tasks: ["security.scan.sast"], steps: [["security.scan.sast"]] };
 const after = (ops: unknown[], nodes = [...V1.slice(0, 3), scan, V1[3]]): [number, DraftView] => [200, { ops, problems: [], checks: { budget: { spent_usd: 0, cap_usd: null } }, nodes, base_seq: 1, updated_at: null } as DraftView];
@@ -52,16 +53,14 @@ describe("AddNodeMenu", () => {
     expect(screen.getByText(/Runs after verification\./)).toBeInTheDocument();
   });
 
-  it("fills the id with the library id, and Create sends add_node after the seam's node", async () => {
-    const security = await open({ "PUT /work-items/w1/draft": after([{ op: "add_node", after: "verification", node: { id: "security", extends: "security" }, passed: false }]) });
-    await userEvent.click(security);
+  it.each([["security", "security"], ["release:stage", "stage"]])("fills the id with the library id, and Create sends add_node after the seam's node: %s", async (base, bare) => {
+    await open({ "PUT /work-items/w1/draft": after([{ op: "add_node", after: "verification", node: { id: bare, extends: base }, passed: false }]) });
+    await userEvent.click(screen.getByRole("option", { name: new RegExp(base) }));
     const id = screen.getByRole("textbox", { name: "Node id" });
-    expect(id).toHaveValue("security");
+    expect(id).toHaveValue(bare);
     await waitFor(() => expect(id).toHaveFocus());
-    await userEvent.clear(id);
-    await userEvent.type(id, "security_scan");
     await userEvent.click(screen.getByRole("button", { name: "Create & open →" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ ops: [{ op: "add_node", after: "verification", node: { id: "security_scan", extends: "security" } }] }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ ops: [{ op: "add_node", after: "verification", node: { id: bare, extends: base } }] }));
   });
 
   it("opens the new node's pane once it is on the canvas", async () => {

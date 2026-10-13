@@ -34,7 +34,7 @@ export function AddNodeMenu({ at, seam, onClose }: { at: number; seam: HTMLEleme
   return (
     <Popover anchor={anchor} open onClose={close} role="dialog" label="New node">
       <div className="idr-add-id">
-        <IdRow label="Node id" initial={base} taken={nodes.map((n) => n.id)} placeholder="e.g. security_scan" go="Create & open →" refused={refused} onGo={create} />
+        <IdRow label="Node id" initial={base.split(":").pop()!} taken={nodes.map((n) => n.id)} placeholder="e.g. security_scan" go="Create & open →" refused={refused} onGo={create} />
       </div>
     </Popover>
   );

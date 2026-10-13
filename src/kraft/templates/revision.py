@@ -34,7 +34,7 @@ from pydantic import (
 )
 
 from kraft.policy import FROZEN, PolicyError
-from kraft.templates.environment import Identifier
+from kraft.templates.environment import Identifier, QualifiedIdentifier
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import (
     PATH_SEPARATOR,
@@ -69,13 +69,14 @@ class _Change(BaseModel):
 
 
 class AddedTask(BaseModel):
-    """A task of an added node: a library task by name, and nothing else, so a
-    revision can only run work an administrator already wrote."""
+    """A task of an added node: a library task by name, local or an add-on's
+    (`<namespace>:<name>`), and nothing else, so a revision can only run work
+    an administrator wrote or accepted."""
 
     model_config = _STRICT
 
     id: Identifier
-    extends: Identifier
+    extends: QualifiedIdentifier
 
 
 class AddedStep(BaseModel):
@@ -86,13 +87,14 @@ class AddedStep(BaseModel):
 
 
 class AddedNode(BaseModel):
-    """An execution node built from library components only: a library node
-    (`extends`), or `tasks`/`steps` of library tasks."""
+    """An execution node built from library components only, local or an
+    add-on's (`<namespace>:<name>`): a library node (`extends`), or
+    `tasks`/`steps` of library tasks. Its own ids stay bare."""
 
     model_config = _STRICT
 
     id: Identifier
-    extends: Identifier | None = None
+    extends: QualifiedIdentifier | None = None
     tasks: list[AddedTask] | None = None
     steps: list[AddedStep] | None = None
 
@@ -445,6 +447,15 @@ def diff(before: ResolvedChain, after: ResolvedChain) -> list[str]:
 _REJECT = "Approving it is refused; reject it back to the node that wrote it, with this reason."
 
 
+def _sources(node: AddedNode) -> list[str]:
+    """The library components an added node is built from, as authored: its
+    `extends`, or each of its tasks', in order and without repeats."""
+    if node.extends is not None:
+        return [node.extends]
+    tasks = node.tasks or [t for step in node.steps or [] for t in step.tasks]
+    return list(dict.fromkeys(t.extends for t in tasks))
+
+
 def render(
     text: str, chain: MaterializedChain, gate: str, library: TemplateLibrary | None
 ) -> tuple[str, MaterializedChain | None]:
@@ -459,7 +470,11 @@ def render(
         return f"# Chain revision\n\n## Cannot be read\n\n**{exc}**\n\n{_REJECT}\n", None
     lines = ["# Chain revision", "", changes.rationale, "", "## Changes", ""]
     lines += [f"- skip `{s.node}` -- {s.evidence}" for s in changes.skip]
-    lines += [f"- add `{a.node.id}` after `{a.after}` -- {a.evidence}" for a in changes.add]
+    lines += [
+        f"- add `{a.node.id}` after `{a.after}`, from "
+        f"{', '.join(f'`{name}`' for name in _sources(a.node))} -- {a.evidence}"
+        for a in changes.add
+    ]
     lines += [
         f"- set {', '.join(f'{k}={v}' for k, v in {**o.task_config(), **o.policy()}.items())} "
         f"on `{path}` -- {o.evidence}"

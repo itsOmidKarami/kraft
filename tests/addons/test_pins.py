@@ -12,6 +12,7 @@ from support.addons import (
     accept_repo_library,
     chain,
     drop_store,
+    edit_addons_yaml,
     instance,
     make_collection,
     publish,
@@ -26,16 +27,27 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
 from kraft.templates.retry import validate_retry_override
-from kraft.templates.revision import Add, AddedNode, ChangeSet, Override, revise
+from kraft.templates.revision import (
+    Add,
+    AddedNode,
+    ChangeSet,
+    Override,
+    RevisionError,
+    revise,
+)
 
 ID = "release@acme"
+
+
+def _node(extends):
+    return {"kind": "exec", "tasks": [{"id": "t", "extends": extends}]}
 
 
 def _release(version, model):
     task = {**AGENT, "skill": "notes", "profile": "release:deep"}
     return {
         "version": version,
-        "library": {"tasks": {"base": task}},
+        "library": {"tasks": {"base": task}, "nodes": {"stage": _node("base")}},
         "chains": {"ship": chain("base")},
         "skills": {"notes": f"the {version} method"},
         "profiles": {"deep": {"model": {"codex": model}}},
@@ -314,27 +326,46 @@ async def test_an_unrestorable_pin_stops_the_launch_and_says_why(home):
     assert "could not be fetched" in str(stop.value)
 
 
+_VIA = {
+    "tasks": {"base": AGENT},
+    "nodes": {f"via_{n}": _node(f"{n}:base") for n in ("release", "tools")},
+}
+
+
+def _task(extends):
+    return {"id": "x", "tasks": [{"id": "t", "extends": extends}]}
+
+
 @pytest.mark.parametrize(
-    "extends, pinned",
-    [("release:base", ["release"]), ("tools:base", ["release", "tools"])],
-    ids=["through-a-pinned-addon", "through-an-addon-not-touched-yet"],
+    "added, pinned",
+    [
+        ({"id": "x", "extends": "via_release"}, ["release"]),
+        ({"id": "x", "extends": "via_tools"}, ["release", "tools"]),
+        ({"id": "x", "extends": "release:stage"}, ["release"]),
+        (_task("release:base"), ["release"]),
+        (_task("tools:base"), ["release", "tools"]),
+    ],
+    ids=[
+        "through-a-pinned-addon",
+        "through-an-addon-not-touched-yet",
+        "added-node-extends-an-addon",
+        "added-task-extends-an-addon",
+        "added-task-extends-an-addon-not-touched-yet",
+    ],
 )
-def test_a_revision_resolves_against_pinned_addons(home, extends, pinned):
-    """A node a revision adds runs on the versions the item runs on; an add-on
-    the item had not read from yet joins its pins at the lock's version."""
+def test_a_revision_resolves_against_pinned_addons(home, added, pinned):
+    """A node a revision adds runs on the versions the item runs on, whether it
+    names an add-on's component or a local one that does; an add-on the item
+    had not read from yet joins its pins at the lock's version."""
     repo, config_dir, addons_dir = home
-    library = {
-        "tasks": {"base": AGENT},
-        "nodes": {"extra": {"kind": "exec", "tasks": [{"id": "t", "extends": extends}]}},
-    }
-    (config_dir / "library.yaml").write_text(json.dumps(library))
+    (config_dir / "library.yaml").write_text(json.dumps(_VIA))
     snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
     newer = _release("1.1.0", "o3")
     newer["library"]["tasks"]["base"]["prompt"] = "the 1.1.0 prompt"
     publish(repo, "release", **newer)
     _update(config_dir, addons_dir, [ID])
     live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
-    add = Add(after="n", node=AddedNode(id="x", extends="extra"), evidence="e")
+    add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
 
     revised = revise(snapshot, ChangeSet(rationale="r", add=[add]), at=None, library=live)
 
@@ -342,3 +373,24 @@ def test_a_revision_resolves_against_pinned_addons(home, extends, pinned):
     assert revised.chain.chain.nodes[1].tasks[0].prompt == AGENT["prompt"]
     assert sorted(revised.chain.addons) == pinned
     assert revised.chain.addons["release"]["version"] == "1.0.0"
+
+
+@pytest.mark.parametrize("gone", ["disabled", "pinned-version-gone"])
+def test_a_revision_cannot_add_from_an_addon_that_is_not_loaded(home, gone):
+    """Refused with the resolver's message, never resolved against another version."""
+    repo, config_dir, addons_dir = home
+    snapshot = MaterializedChain.from_json(_stored(_resolved(config_dir, addons_dir, "mine")))
+    if gone == "disabled":
+        edit_addons_yaml(config_dir, lambda w: w["addons"].update({"tools@acme": False}))
+        added = _task("tools:base")
+    else:
+        old = load.installed(config_dir, addons_dir)[0].root
+        publish(repo, "release", **_release("1.1.0", "o3"))
+        _update(config_dir, addons_dir, [ID])
+        drop_store(old)
+        added = {"id": "x", "extends": "release:stage"}
+    live = TemplateLibrary.from_yaml_dir(config_dir, addons=load.installed(config_dir, addons_dir))
+    add = Add(after="n", node=AddedNode.model_validate(added), evidence="e")
+
+    with pytest.raises(RevisionError, match=r"extends no (node|task) named"):
+        revise(snapshot, ChangeSet(rationale="r", add=[add]), at=None, library=live)
