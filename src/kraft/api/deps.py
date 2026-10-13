@@ -1095,4 +1095,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         repositories={r.id: r for r in repos if r.id},
         library_steering=steering,
         chain_revision_digest=functools.partial(digest, repo_id=repo_id),
+        item_repo_id=repo_id,
     )

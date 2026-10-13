@@ -503,7 +503,12 @@ def for_item(
 
     `repo_id` is the item's repository (a workspace's root): every other
     repo library it did not pin is left out (`scoped`). None, no repository,
-    leaves every unpinned repo library out."""
+    leaves every unpinned repo library out.
+
+    Every connected repository id that names no loaded or pinned add-on
+    comes back too, left out: `<repo-id>:<skill>` is then refused, never
+    handed to the agent as another tool's plugin, whether or not that
+    repository's library is accepted."""
     store = (Path(addons_root) if addons_root is not None else addons_dir()) / "store"
     pinned = []
     for namespace, pin in (pins or {}).items():
@@ -529,7 +534,36 @@ def for_item(
         (p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})),
         repo_id,
     )
-    return (*live, *pinned)
+    taken = {p.namespace for p in (*live, *pinned)}
+    reserved = [
+        InstalledAddon(
+            repo_library_id(rid),
+            "library",
+            rid,
+            "",
+            store / "not-accepted",
+            left_out=f"repository {rid!r} has no accepted repo library",
+            quiet=True,
+        )
+        for rid in _connected_ids(config_dir)
+        if rid not in taken
+    ]
+    return (*live, *pinned, *reserved)
+
+
+def _connected_ids(config_dir: Path | None) -> list[str]:
+    """Every connected repository's id in `config_dir`'s `repos.yaml`;
+    none when it cannot be read (its own check says why)."""
+    from kraft import paths
+    from kraft.config import ConfigError, read_yaml
+
+    config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
+    try:
+        entries = read_yaml(config_dir / "repos.yaml", {}).get("repos")
+    except ConfigError:
+        return []
+    found = (e.get("id") for e in entries or () if isinstance(e, dict))
+    return [i for i in found if isinstance(i, str) and i]
 
 
 #: Why the last restore of a store failed, by its digest: what a launch that

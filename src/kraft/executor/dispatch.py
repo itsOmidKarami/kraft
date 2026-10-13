@@ -1298,7 +1298,11 @@ async def _dispatch_task(
         # A profile's own list is live configuration, like the profile body;
         # a file that does not load has none, and the launch below says why.
         table = (
-            _agent.harness_table(harnesses, frozen_steering(work_item_row)["addons"])[0]
+            _agent.harness_table(
+                harnesses,
+                frozen_steering(work_item_row)["addons"],
+                launch.item_repo_id if launch else None,
+            )[0]
             if t.fallback is None and t.profile
             else None
         )
@@ -1327,6 +1331,7 @@ async def _dispatch_task(
                 # repository's frozen key is its own path, not the item's.
                 item_repo=work_item_row["repo"] if repository is None else None,
                 policy=task_policy,
+                repo_id=launch.item_repo_id if launch else None,
             )
             if listed and not sandbox:
                 _fallback.require_on_path(inv, harnesses)

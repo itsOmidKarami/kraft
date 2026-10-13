@@ -21,6 +21,7 @@ import yaml
 
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
 from kraft import policy as policy_mod
+from kraft import skill as skill_mod
 from kraft.adapters import forge
 from kraft.addons import load as addons_load
 from kraft.api import config_check
@@ -782,23 +783,34 @@ def _cost_checks(live: Path, harnesses) -> list[dict]:
     from kraft.adapters import agent
 
     unpriced: dict[str, set[str]] = {}
-    table = None
     for chain in _resolved_chains(live):
+        # Each chain on its own pins: a repo library's profiles are in no
+        # instance-wide table, only in the table of a chain that reads it.
+        table = None
         for node in chain.nodes:
             for t in node.tasks():
                 if not isinstance(t.task, AgentTask):
                     continue
                 try:
-                    table = table or agent.harness_table(harnesses)[0]
+                    table = table or agent.harness_table(harnesses, chain.addons)[0]
                     candidates = fallback.candidates(t.task, table)
                 except agent.HarnessUnavailable:
                     return []
                 for c in candidates:
                     try:
                         inv = agent.resolve_agent_task(
-                            c, None, None, harnesses=harnesses, steering=chain.steering
+                            c,
+                            None,
+                            None,
+                            harnesses=harnesses,
+                            steering=chain.steering,
+                            addons=chain.addons,
                         )
-                    except (agent.HarnessUnavailable, steering_mod.SteeringError):
+                    except (
+                        agent.HarnessUnavailable,
+                        skill_mod.SkillError,
+                        steering_mod.SteeringError,
+                    ):
                         continue
                     reader = harnesses.valid[inv.harness].capabilities["usage"].reader
                     if reader in usage.READERS and not usage.READERS[reader].reports_cost:

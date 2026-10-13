@@ -362,13 +362,19 @@ def resolve_agent_task(
     table, path = harness_table(harnesses, addons, repo_id)
     known = addons_load.for_item(addons, path.parent, repo_id=repo_id)
     for addon in known:
-        if (
-            addon.namespace in (addons or {})
-            and addon.left_out is not None
-            and _reads_namespace(task, table, addon.namespace)
-        ):
+        if addon.left_out is None or not _reads_namespace(task, table, addon.namespace):
+            continue
+        if addon.namespace in (addons or {}):
             raise HarnessUnavailable(
                 f"add-on {addon.id} {addon.version} could not be read: {addon.left_out}"
+            )
+        if addon.repo_id is not None:
+            # Another repository's library, or a connected id with none: its
+            # own reason, never a guess that it is another tool's plugin.
+            if task.skill is not None and task.skill.startswith(f"{addon.namespace}:"):
+                raise _skill.SkillError(f"skill: {task.skill}: {addon.left_out}")
+            raise ProfileUnavailable(
+                f"{_profile_in(task, table, addon.namespace)}: {addon.left_out}"
             )
     profile = select_profile(table.profiles, task.harness, path)
     # The task's own rung: its agent profile, read live, or its own fields.
@@ -402,14 +408,26 @@ def resolve_agent_task(
     return inv._replace(allowed_tools=policy.allowed_tools, grants=tuple(policy.grants))
 
 
+def _read_names(task: AgentTask, table: HarnessProfileTable) -> list[str | None]:
+    """What a launch of `task` reads by name: its skill, its agent profile,
+    and each `fallback:` entry of the task or of that profile."""
+    profile = table.agent_profiles.get(task.profile) if task.profile else None
+    names = [task.skill, task.profile]
+    names += [e.profile for e in (*(profile.fallback if profile else ()), *(task.fallback or ()))]
+    return names
+
+
 def _reads_namespace(task: AgentTask, table: HarnessProfileTable, namespace: str) -> bool:
     """Whether this launch reads from add-on `namespace`: only through its
     skill or its agent profile (extends and steering were frozen at
     materialization), or a `fallback:` entry of the task or of that profile."""
-    profile = table.agent_profiles.get(task.profile) if task.profile else None
-    names = [task.skill, task.profile]
-    names += [e.profile for e in (*(profile.fallback if profile else ()), *(task.fallback or ()))]
-    return any(n is not None and n.startswith(f"{namespace}:") for n in names)
+    return any(n is not None and n.startswith(f"{namespace}:") for n in _read_names(task, table))
+
+
+def _profile_in(task: AgentTask, table: HarnessProfileTable, namespace: str) -> str:
+    """The first agent profile (or fallback) of `task` in `namespace`."""
+    names = _read_names(task, table)[1:]
+    return next(n for n in names if n is not None and n.startswith(f"{namespace}:"))
 
 
 def _envelope_is_error(

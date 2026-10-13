@@ -173,6 +173,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
         # member's.
         item_repo=item["repo"],
         policy=policy,
+        repo_id=launch.item_repo_id,
     )
     return inv.allowed_tools, inv.deny_tools, inv.grants
 

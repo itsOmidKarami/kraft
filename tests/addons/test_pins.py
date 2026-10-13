@@ -22,6 +22,7 @@ from kraft.adapters import agent
 from kraft.addons import load, update
 from kraft.executor import dispatch
 from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.skill import SkillError
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask, MaterializedChain
@@ -385,3 +386,62 @@ def test_a_revision_adds_only_from_the_items_own_repo_library(home, tmp_path, no
         return
     with pytest.raises(RevisionError, match="visible only to items in app"):
         revise(snapshot, changes, at=None, library=live, repo_id=repo_id)
+
+
+@pytest.fixture
+def two_repos(home, tmp_path):
+    """`home`, plus `app`'s repo library (skill `notes`, profile `deep`)
+    accepted, and `web` connected with no library. The pin of a chain that
+    read app's library, for an item filed before the scope rule."""
+    repo, config_dir, addons_dir = home
+    deep = {"profiles": {"deep": {"model": {"codex": "gpt-5"}}}}
+    app = repo_with_library(
+        tmp_path,
+        skills={"notes": "the app method"},
+        extra={".kraft/profiles.yaml": yaml.safe_dump(deep)},
+    )
+    store = accept_repo_library(config_dir, addons_dir, app, "app")
+    repos = yaml.safe_load((config_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": "/web", "id": "web"})
+    (config_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    (library,) = [p for p in load.installed(config_dir, addons_dir) if p.repo_id == "app"]
+    return {"app": library.pin}, store
+
+
+@pytest.mark.parametrize(
+    "fields, pinned, repo_id, read",
+    [
+        pytest.param({"skill": "app:notes"}, False, "app", "the app method", id="own-repo-skill"),
+        pytest.param({"skill": "app:notes"}, False, "web", None, id="another-repos-skill"),
+        pytest.param({"profile": "app:deep"}, False, "web", None, id="another-repos-profile"),
+        pytest.param(
+            {"skill": "app:notes"}, True, "web", "the app method", id="pinned-before-the-change"
+        ),
+        pytest.param({"skill": "web:notes"}, False, "app", None, id="reserved-id-not-delegated"),
+        pytest.param(
+            {"skill": "superpowers:brainstorm"},
+            False,
+            "app",
+            "Follow the superpowers:brainstorm skill",
+            id="another-tools-plugin",
+        ),
+    ],
+)
+def test_a_launch_reads_only_its_own_repos_library(two_repos, fields, pinned, repo_id, read):
+    pins, _store = two_repos
+    task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
+
+    def launch():
+        return agent.resolve_agent_task(
+            task, None, steering={}, addons=pins if pinned else None, repo_id=repo_id
+        )
+
+    if read is not None:
+        assert read in launch().method_text
+        return
+    with pytest.raises((SkillError, agent.ProfileUnavailable)) as stop:
+        launch()
+    owner = next(iter(fields.values())).partition(":")[0]
+    assert owner in str(stop.value)
+    if owner == "app":
+        assert "visible only to items in app" in str(stop.value)

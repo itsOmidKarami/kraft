@@ -20,6 +20,7 @@ from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft import storage, store
 from kraft.adapters import agent, beads
+from kraft.addons import load as addons_load
 from kraft.api import api_router, config_check, deps, perimeter
 from kraft.api.config_check import IntakeBody
 from kraft.templates import catalogue, positions
@@ -231,6 +232,8 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
     entry = next((r for r in repos if repo in (r.name, r.path)), None)
     if entry is None:
         raise HTTPException(404, f"no connected repository {repo!r}")
+    if why := addons_load.scope_problem(resolved.addons, entry.id):
+        raise HTTPException(422, f"{chain}: {why}")
     harnesses = harness_mod.load(None)
     try:
         inv = agent.resolve_agent_task(
@@ -240,6 +243,8 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
             skills_dir=st.skills_dir,
             harnesses=harnesses,
             steering=resolved.steering,
+            addons=resolved.addons,
+            repo_id=entry.id,
         )
     except (agent.HarnessUnavailable, skill_mod.SkillError, steering_mod.SteeringError) as exc:
         raise HTTPException(422, f"{task}: {exc}") from exc

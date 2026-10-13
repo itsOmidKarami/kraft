@@ -232,3 +232,19 @@ def test_a_repo_library_is_used_by_its_own_repo(client, tmp_path, case):
         assert r.status_code == 201, r.text
         item = client.get(f"/api/work-items/{r.json()['id']}").json()
         assert item["chain_template"] == stored
+
+
+@pytest.mark.parametrize(
+    "repos_yaml, repo_id",
+    [
+        pytest.param(None, "app", id="single-repo"),
+        pytest.param("[", None, id="poisoned-repos-yaml"),
+    ],
+)
+def test_a_launch_carries_its_items_repository_id(client, tmp_path, repos_yaml, repo_id):
+    st = client.app.state
+    app, _web = _two_repos(client, tmp_path)
+    if repos_yaml is not None:
+        (st.templates_dir / "repos.yaml").write_text(repos_yaml)
+
+    assert deps.launch(st, str(app)).item_repo_id == repo_id
