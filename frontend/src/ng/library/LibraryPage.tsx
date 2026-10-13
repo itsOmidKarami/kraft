@@ -20,7 +20,7 @@ import { ProblemWhere } from "./ProblemWhere";
 import { listRows, withAddons } from "./rows";
 import { AddonBadge, ReadOnly } from "../templates/addon";
 import { LIBRARY_FILE } from "../templates/draft/view";
-import { parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
+import { addonRepo, parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
@@ -217,6 +217,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onDuplicated={(to) => navigate(refUrl(to))}
               onCollapse={collapse}
               onExpand={() => expand()}
+              copyable={!addonRepo(row.addon)}
             />}
           </ReadOnly.Provider>
         )}

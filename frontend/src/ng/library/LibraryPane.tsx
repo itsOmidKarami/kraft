@@ -35,7 +35,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** The side pane for the selected library component or the part of it picked on its canvas (Decisions §10):
  *  crumbs, icon and title, a subtitle, the first problem, Overview | Config | YAML. The same Inspector, tabs
  *  and field rows as the Chains pane, over the library's own file. */
-export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibrary, onRenamed, onRemoved, onDuplicated, onCollapse, onExpand }: {
+export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibrary, onRenamed, onRemoved, onDuplicated, onCollapse, onExpand, copyable = true }: {
   draft: ConfigDraft;
   /** `tasks.implementer`, or a part of a node: `nodes.verification.review.code_review`. */
   path: string;
@@ -56,6 +56,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   onDuplicated: (id: string) => void;
   onCollapse: () => void;
   onExpand: () => void;
+  /** False for a repo library's content: it is edited in that repository's `.kraft/`, and the server refuses a copy. */
+  copyable?: boolean;
 }) {
   const [tab, setTab] = useState("overview");
   const [card, setCard] = useState<{ t: "icon" } | { t: "remove" } | { t: "dup" } | { t: "copy" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
@@ -179,7 +181,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     closeCard();
     if (a.status === 200) showToast(`Base is now ${base}`);
   };
-  const footer = readOnly ? (root ? <Button variant="primary" onClick={(e) => { at(e.currentTarget); setCard({ t: "copy" }); }}>Copy to my library</Button> : undefined) : (
+  const footer = readOnly ? (root && copyable ? <Button variant="primary" onClick={(e) => { at(e.currentTarget); setCard({ t: "copy" }); }}>Copy to my library</Button> : undefined) : (
     <>
       {root && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "dup" }); }}>Duplicate</Button>}
       {d.kind === "node" && typeof own?.extends === "string" && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "extend" }); }}>Change base…</Button>}

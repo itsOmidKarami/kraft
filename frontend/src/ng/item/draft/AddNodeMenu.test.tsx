@@ -63,6 +63,17 @@ describe("AddNodeMenu", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ ops: [{ op: "add_node", after: "verification", node: { id: bare, extends: base } }] }));
   });
 
+  it("Create sends the id typed over the one filled in", async () => {
+    const security = await open({ "PUT /work-items/w1/draft": after([{ op: "add_node", after: "verification", node: { id: "security_scan", extends: "security" }, passed: false }]) });
+    await userEvent.click(security);
+    const id = screen.getByRole("textbox", { name: "Node id" });
+    await waitFor(() => expect(id).toHaveFocus());
+    await userEvent.clear(id);
+    await userEvent.type(id, "security_scan");
+    await userEvent.click(screen.getByRole("button", { name: "Create & open →" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ ops: [{ op: "add_node", after: "verification", node: { id: "security_scan", extends: "security" } }] }));
+  });
+
   it("opens the new node's pane once it is on the canvas", async () => {
     const security = await open({ "PUT /work-items/w1/draft": after([{ op: "add_node", after: "verification", node: { id: "security", extends: "security" }, passed: false }]) });
     await userEvent.click(security);

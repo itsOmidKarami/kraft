@@ -24,6 +24,16 @@ const SHIPPED: DraftView = {
   result: { ...LOCAL.result, model: { "chains/release:ship.yaml": LOCAL.result.model[FILE] }, sources: {} },
 };
 
+/** The same chain from a repository's `.kraft/`: read-only here, never copied. */
+const REPO_SHIPPED: DraftView = {
+  ...SHIPPED,
+  key: "app:ship",
+  addon: { id: "library@repo:app", version: "", repo: "app" },
+  files: { "chains/app:ship.yaml": LOCAL.files[FILE] },
+  base: { "chains/app:ship.yaml": LOCAL.base[FILE] },
+  result: { ...SHIPPED.result, model: { "chains/app:ship.yaml": LOCAL.result.model[FILE] } },
+};
+
 let where = "";
 function Where() {
   where = useLocation().pathname;
@@ -96,6 +106,15 @@ describe("An add-on's chain on the Chains page", () => {
     const yaml = screen.getByRole("textbox", { name: `chains/${chain}.yaml, YAML` });
     expect(yaml).toHaveValue(LOCAL.files[FILE]);
     expect(yaml.hasAttribute("readonly")).toBe(shipped);
+  });
+
+  it("a repo library's chain is badged with its repository and offers no copy", async () => {
+    vi.spyOn(d, "getDraft").mockImplementation(() => ok(REPO_SHIPPED));
+    mount("app:ship");
+    await screen.findByRole("group", { name: "app:ship" });
+    expect(screen.getAllByText("repo library app").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Copy to my library" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Review & publish/ })).toBeNull();
   });
 
   it("the switcher badges the add-on's chain and not the local one", async () => {

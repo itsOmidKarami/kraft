@@ -56,6 +56,20 @@ describe("An add-on's component in the Library", () => {
     expect(posts()).toEqual([]);
   });
 
+  it("a repo library's component is badged with its repository and offers no copy", async () => {
+    const repo = { id: "library@repo:app", version: "", repo: "app" };
+    const listed = { ...PUBLISHED, components: [...PUBLISHED.components, { id: "tasks.app:base", kind: "tasks", name: "app:base", used_by: [], used_by_paths: [], addon: repo }] };
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...libView(), addon_library: { tasks: { "app:base": SHIPPED.tasks["release:base"] } } }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(listed), { status: 200 })));
+    mount("/templates/library/tasks.app%3Abase");
+    expect(await screen.findByRole("heading", { name: "app:base" })).toBeInTheDocument();
+    const list = screen.getByRole("listbox", { name: "Library components" });
+    await waitFor(() => expect(within(list).getByRole("option", { name: /app:base/ })).toHaveTextContent("repo library app"));
+    const pane = screen.getByRole("complementary", { name: "app:base pane" });
+    expect(within(pane).getByText("Write the release notes.")).toBeInTheDocument();
+    expect(within(pane).queryByRole("button", { name: "Copy to my library" })).toBeNull();
+  });
+
   it("⌘Z over an add-on's component undoes nothing: the draft's last request is not on screen", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok({ ...libView({}, true), addon_library: SHIPPED }));
     const undo = vi.spyOn(d, "undo").mockImplementation(() => ok({ ...libView({}, true), addon_library: SHIPPED }) as never);

@@ -21,6 +21,7 @@ import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
+import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
@@ -331,8 +332,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           </IconButton>
         )}
         {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
+        {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
-          ? <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>
+          ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
           : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
