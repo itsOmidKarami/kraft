@@ -368,3 +368,125 @@ def test_an_edit_that_drops_a_repo_librarys_id_is_reported(client, tmp_path):
     assert [i.message for i in issues] == [
         "would leave repo library app out: repository id 'app' is no longer in repos.yaml"
     ]
+
+
+@pytest.fixture
+def two_repos(client, tmp_path):
+    """app's repo library accepted (task `base`, chain `ship`, steering
+    `tone`, profile `deep`); `web` connected as `web` with no library."""
+    from support.addons import AGENT, accept_repo_library, repo_with_library
+    from support.harness import make_repo
+
+    st = client.app.state
+    deep = {"profiles": {"deep": {"model": {"codex": "gpt-5"}}}}
+    app = repo_with_library(
+        tmp_path,
+        library={"tasks": {"base": AGENT}, "steering": {"tone": {"instructions": "terse"}}},
+        extra={".kraft/profiles.yaml": yaml.safe_dump(deep)},
+    )
+    web = make_repo(tmp_path, "web")
+    accept_repo_library(st.templates_dir, st.run_dirs.addons, app, "app")
+    repos = yaml.safe_load((st.templates_dir / "repos.yaml").read_text())
+    repos["repos"].append({"path": str(web), "id": "web"})
+    (st.templates_dir / "repos.yaml").write_text(yaml.safe_dump(repos))
+    deps._reload_templates(st)
+    return st.templates_dir, {"app": str(app), "web": str(web)}
+
+
+def _chain_with(task):
+    return {"id": "mine", "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", **task}]}]}
+
+
+def _entry(repo, **fields):
+    def edit(data, paths):
+        (entry,) = [e for e in data["repos"] if e["path"] == paths[repo]]
+        entry.update(fields)
+
+    return edit
+
+
+def _schedule(repo):
+    def edit(data, paths):
+        schedule = {"cron": "0 0 * * *", "repo": paths[repo], "chain": "app:ship", "title": "t"}
+        data.update(enabled=False, interval_s=60, priority_ceiling=2, schedules=[schedule])
+
+    return edit
+
+
+def _trigger(repo):
+    def edit(data, paths):
+        trigger = {"cron": "0 0 * * *", "repo": paths[repo], "chain": "app:ship", "title": "t"}
+        data["triggers"] = [trigger]
+
+    return edit
+
+
+def _fallback(data, paths):
+    data.setdefault("profiles", {})["fast"] = {
+        "model": {"claude": "sonnet"},
+        "fallback": [{"profile": "app:deep"}],
+    }
+
+
+def _library_extends(data, paths):
+    data.setdefault("tasks", {})["mine"] = {"extends": "app:base"}
+
+
+@pytest.mark.parametrize(
+    "rel, edit, outside",
+    [
+        pytest.param(
+            "chains/mine.yaml", _chain_with({"extends": "app:base"}), True, id="local-chain-extends"
+        ),
+        pytest.param("library.yaml", _library_extends, True, id="library-extends"),
+        pytest.param("harnesses.yaml", _fallback, True, id="harnesses-fallback"),
+        pytest.param(
+            "repos.yaml",
+            _entry("web", default_chain="app:ship"),
+            True,
+            id="another-repos-default-chain",
+        ),
+        pytest.param(
+            "repos.yaml", _entry("web", steering=["app:tone"]), True, id="another-repos-steering"
+        ),
+        pytest.param("intake.yaml", _schedule("web"), True, id="intake-schedule-for-another-repo"),
+        pytest.param("policy.yaml", _trigger("web"), True, id="policy-trigger-for-another-repo"),
+        pytest.param(
+            "chains/mine.yaml",
+            _chain_with({"kind": "agent", "harness": "claude", "prompt": "p", "skill": "web:x"}),
+            True,
+            id="reserved-id-with-no-library",
+        ),
+        pytest.param(
+            "repos.yaml", _entry("app", default_chain="app:ship"), False, id="own-default-chain"
+        ),
+        pytest.param("repos.yaml", _entry("app", steering=["app:tone"]), False, id="own-steering"),
+        pytest.param("intake.yaml", _schedule("app"), False, id="own-schedule"),
+        pytest.param(
+            "chains/mine.yaml",
+            _chain_with(
+                {"kind": "agent", "harness": "claude", "prompt": "p", "skill": "superpowers:x"}
+            ),
+            False,
+            id="addon-reference",
+        ),
+    ],
+)
+def test_a_repo_library_is_named_only_from_its_repo(client, two_repos, rel, edit, outside):
+    templates, paths = two_repos
+    if callable(edit):
+        path = templates / rel
+        data = (yaml.safe_load(path.read_text()) if path.is_file() else None) or {}
+        edit(data, paths)
+    else:
+        data = edit
+
+    issues = config_check.check(rel, yaml.safe_dump(data), config_check.context(client.app.state))
+
+    scoped = [i.message for i in issues if "visible only to items in" in i.message]
+    owner = "web" if "web:x" in yaml.safe_dump(data) else "app"
+    if not outside:
+        assert scoped == []
+        return
+    (message,) = scoped
+    assert message.startswith(rel) and message.endswith(f"visible only to items in {owner}")

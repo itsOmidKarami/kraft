@@ -160,6 +160,13 @@ def _door(door, client, app, web, caplog):
         r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "app:ship"})
         assert client.get(f"/api/work-items/{wid}").json()["chain_template"] is None
         return r
+    if door in ("put-intake", "put-policy"):
+        entry = {"cron": "0 0 * * *", "repo": str(web), "chain": "app:ship", "title": "t"}
+        if door == "put-intake":
+            body = {"enabled": False, "interval_s": 60, "priority_ceiling": 2, "schedules": [entry]}
+            return client.put("/api/intake", json=body)
+        policy = client.get("/api/policy").json()
+        return client.put("/api/policy", json={**policy, "triggers": [entry]})
     if door == "auto-intake":
         entry = deps.connected_or_422(client.app.state, str(web))
         with caplog.at_level("WARNING", logger="kraft.intake"):
@@ -181,6 +188,8 @@ def _door(door, client, app, web, caplog):
         pytest.param(
             "auto-intake", {"default_chain": "app:ship"}, id="auto-intake-for-another-repo"
         ),
+        pytest.param("put-intake", None, id="put-intake-schedule-for-another-repo"),
+        pytest.param("put-policy", None, id="put-policy-trigger-for-another-repo"),
         pytest.param("workspace", None, id="workspace-members-library"),
     ],
 )

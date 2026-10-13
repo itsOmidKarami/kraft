@@ -69,7 +69,7 @@ origin: src/kraft/cli/repo.py §_cmd_library
 ## REQ a-named-repo-library-holds-its-repo
 
 IF local configuration names a repo library's namespace, THEN the system SHALL refuse to disconnect the repository and list each reference.
-enforced-by: tests/api/test_repos_library.py::test_disconnect_is_refused_while_something_names_the_library
+enforced-by: tests/api/test_repos_library.py::test_disconnect_is_refused_while_something_names_the_library[its-own-schedule], tests/api/test_repos_library.py::test_disconnect_is_refused_while_something_names_the_library[a-hand-edit]
 origin: src/kraft/api/routes/repos.py §remove_repo
 
 ## REQ an-opted-in-repo-takes-text-changes

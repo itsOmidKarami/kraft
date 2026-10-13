@@ -744,23 +744,8 @@ def _absolute(path: str) -> bool:
 
 
 def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
-    """Find a connected repo by path.
-
-    `POST /repos` stores git's `--show-toplevel`, which resolves symlinks (on
-    macOS /var -> /private/var), so the path a client added with is not always
-    the path stored. Match either, or a caller cannot patch or delete the repo
-    it just connected.
-
-    A relative path matches nothing: this process would resolve it against its
-    own cwd, not the caller's, and find the wrong repo (Kraft-9efnk.39).
-    """
-    if not _absolute(path):
-        return None
-    entry = next((r for r in repos if r.path == path), None)
-    if entry is not None:
-        return entry
-    resolved = str(Path(path).expanduser().resolve())
-    return next((r for r in repos if r.path == resolved), None)
+    """Find a connected repo by path (`config.connected_entry`)."""
+    return config_mod.connected_entry(repos, path)
 
 
 def item_repo_id(st, row) -> str | None:

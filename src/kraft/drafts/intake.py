@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from pydantic import ValidationError
 
@@ -95,7 +96,11 @@ def _problem(index: int, field: str, message: str) -> dict:
     }
 
 
-def _schedule_problems(st, index: int, entry: dict, chains: set) -> list[dict]:
+def _schedule_problems(
+    st, index: int, entry: dict, chains: set, scoped: Mapping[int, list[str]]
+) -> list[dict]:
+    """`scoped` is each schedule's references to a repo library from outside
+    its repository (`_scoped`)."""
     out = []
     repo = entry.get("repo")
     if isinstance(repo, str):
@@ -108,6 +113,7 @@ def _schedule_problems(st, index: int, entry: dict, chains: set) -> list[dict]:
     chain = entry.get("chain")
     if isinstance(chain, str) and chains and chain not in chains:
         out.append(_problem(index, "chain", f"chain {chain!r} is not in the library"))
+    out += [_problem(index, "chain", why) for why in scoped.get(index, ())]
     cron = entry.get("cron")
     if isinstance(cron, str):
         try:
@@ -120,6 +126,20 @@ def _schedule_problems(st, index: int, entry: dict, chains: set) -> list[dict]:
 #: A file-level problem `_schedule_problems` already names on its schedule.
 _SCHEDULE_CRON = re.compile(r"schedules\.\d+\.cron")
 
+_SCHEDULE_AT = re.compile(rf"{re.escape(INTAKE)}: schedules\[(\d+)\]")
+
+
+def _scoped(st, data: dict) -> dict[int, list[str]]:
+    """Each schedule's references to a repo library from outside the
+    repository it files for (`update.scope_problems`), by its index."""
+    from kraft.addons import update as addon_update
+
+    out: dict[int, list[str]] = {}
+    for file, why in addon_update.scope_problems(st.templates_dir, replacing={INTAKE: data}):
+        if file == INTAKE and (at := _SCHEDULE_AT.match(why)):
+            out.setdefault(int(at[1]), []).append(why)
+    return out
+
 
 def _only_crons(exc: ValidationError) -> bool:
     """Whether every error is a schedule's cron, which `_schedule_problems`
@@ -129,10 +149,14 @@ def _only_crons(exc: ValidationError) -> bool:
 
 def resolve(st, key, raw, files, published) -> dict:
     out = config.resolve_files(st, files, published, FILES, keyed=True)
-    out["problems"] = [
-        p for p in out["problems"] if not _SCHEDULE_CRON.fullmatch(str(p.get("field")))
-    ]
     data = raw.get(INTAKE) if isinstance(raw.get(INTAKE), dict) else {}
+    scoped = _scoped(st, data)
+    said = {why for whys in scoped.values() for why in whys}
+    out["problems"] = [
+        p
+        for p in out["problems"]
+        if not _SCHEDULE_CRON.fullmatch(str(p.get("field"))) and p.get("message") not in said
+    ]
     try:
         intake = config_mod.Intake.model_validate(data)
     except ValidationError as exc:
@@ -148,7 +172,7 @@ def resolve(st, key, raw, files, published) -> dict:
         if isinstance(t, dict)
     ]
     for s in schedules:
-        out["problems"] += _schedule_problems(st, s["index"], s, chains)
+        out["problems"] += _schedule_problems(st, s["index"], s, chains, scoped)
     out["resolved"] = {
         "enabled": intake.enabled,
         "interval_s": intake.interval_s,

@@ -41,6 +41,7 @@ from kraft.addons.manifest import AddonManifest
 from kraft.config import (
     ConfigError,
     bounded_yaml,
+    connected_entry,
     first_error,
     read_yaml,
     write_text,
@@ -343,14 +344,81 @@ def references(config_dir: Path, repos: dict | None = None) -> Iterator[tuple[st
     `harnesses.yaml`. `kind` is what the others must resolve as; None for a
     library reference, which lint judges. `repos` is a `repos.yaml` to read in
     place of the file: an edit not saved yet."""
-    local = ["library.yaml", *sorted(f"chains/{p.name}" for p in config_dir.glob("chains/*.yaml"))]
+    return ((w, k, kind, v) for w, k, kind, v, _ in scoped_references(config_dir, repos))
+
+
+#: The files whose list items each belong to one repository, and that list:
+#: a `repos.yaml` entry is its own; a schedule or trigger is its `repo`'s.
+_OWNED = {"repos.yaml": "repos", "intake.yaml": "schedules", "policy.yaml": "triggers"}
+
+
+@dataclass(frozen=True)
+class _Entry:
+    path: object
+    id: object
+
+
+def _repo_entries(data: object) -> list[_Entry]:
+    entries = data.get("repos") if isinstance(data, Mapping) else None
+    entries = entries if isinstance(entries, list) else []
+    return [_Entry(e.get("path"), e.get("id")) for e in entries if isinstance(e, Mapping)]
+
+
+def _owners(rel: str, data: object, entries: list[_Entry]) -> dict[str, str | None]:
+    """Each owned item's key path (as `_mappings` labels it) to the id of the
+    repository it belongs to."""
+    section = _OWNED.get(rel)
+    items = data.get(section) if section and isinstance(data, Mapping) else None
+    out: dict[str, str | None] = {}
+    for index, item in enumerate(items if isinstance(items, list) else ()):
+        if not isinstance(item, Mapping):
+            continue
+        if rel == "repos.yaml":
+            owner = item.get("id")
+        else:
+            found = connected_entry(entries, item.get("repo"))
+            owner = found.id if found is not None else None
+        out[f"{section}[{item.get('id', index)}]"] = owner if isinstance(owner, str) else None
+    return out
+
+
+def _owner(at: str, owners: Mapping[str, str | None]) -> str | None:
+    for prefix, owner in owners.items():
+        if at == prefix or at.startswith((f"{prefix}.", f"{prefix}[")):
+            return owner
+    return None
+
+
+def scoped_references(
+    config_dir: Path,
+    repos: dict | None = None,
+    *,
+    replacing: Mapping[str, object] | None = None,
+) -> Iterator[tuple[str, str, str | None, str, str | None]]:
+    """`references()`, each with a fifth field: the id of the repository the
+    reference belongs to, whose own repo library it may name. Everything under
+    a `repos.yaml` entry is that entry's; a schedule's or trigger's is the
+    entry its `repo` path names; anything else is no repository's (None).
+    `replacing` maps a file to parsed data to read in its place: an edit not
+    saved yet."""
+    replacing = {**(replacing or {}), **({"repos.yaml": repos} if repos is not None else {})}
+    chains = {f"chains/{p.name}" for p in config_dir.glob("chains/*.yaml")}
+    chains |= {rel for rel in replacing if rel.startswith("chains/")}
+    local = ["library.yaml", *sorted(chains)]
+
+    def read(rel: str) -> object:
+        return replacing[rel] if rel in replacing else read_yaml(config_dir / rel)
+
+    try:
+        entries = _repo_entries(read("repos.yaml"))
+    except ConfigError:
+        entries = []
     for rel in (*local, "repos.yaml", "intake.yaml", "policy.yaml", "harnesses.yaml"):
         try:
-            data = (
-                repos if rel == "repos.yaml" and repos is not None else read_yaml(config_dir / rel)
-            )
+            data = read(rel)
         except ConfigError:
             continue  # that file's own check says why
+        owners = _owners(rel, data, entries)
         keys = (
             {"extends": None, "skill": None, "profile": None}
             if rel in local
@@ -365,7 +433,33 @@ def references(config_dir: Path, repos: dict | None = None) -> Iterator[tuple[st
             ]
             for key, kind, value in found:
                 if _qualifier(value) is not None:
-                    yield f"{rel}: {at}" if at else rel, key, kind, value
+                    where = f"{rel}: {at}" if at else rel
+                    yield where, key, kind, value, _owner(at, owners)
+
+
+def scope_problems(
+    config_dir: Path,
+    repos: dict | None = None,
+    *,
+    replacing: Mapping[str, object] | None = None,
+) -> list[tuple[str, str]]:
+    """`(file, why)` for each reference of the instance's own files to a
+    connected repository's repo library from outside that repository
+    (`load.out_of_scope`). A connected id with no library counts: it is
+    reserved from connect onward."""
+    source = repos if repos is not None else (replacing or {}).get("repos.yaml")
+    try:
+        source = source if source is not None else read_yaml(config_dir / "repos.yaml")
+    except ConfigError:
+        return []  # that file's own check says why
+    ids = {e.id for e in _repo_entries(source) if isinstance(e.id, str)}
+    return [
+        (where.split(":", 1)[0], f"{where}: {key} {why}")
+        for where, key, _kind, value, owner in scoped_references(
+            config_dir, repos, replacing=replacing
+        )
+        if (why := load.out_of_scope(value, owner, ids)) is not None
+    ]
 
 
 def breaks(

@@ -490,6 +490,23 @@ async def get_policy(request: Request):
     return data
 
 
+def _refuse_new_scope_problems(st, rel: str, data: dict) -> None:
+    """422 when saving `data` as `rel` would add a reference to a repo
+    library from outside its repository (`update.scope_problems`). One a hand
+    edit already left in the file is not this save's to refuse: `kraft admin
+    doctor` reports it."""
+    from kraft.addons import update as addon_update
+
+    def named(replacing=None):
+        problems = addon_update.scope_problems(st.templates_dir, replacing=replacing)
+        return [why for file, why in problems if file == rel]
+
+    before = set(named())
+    added = [why for why in named({rel: data}) if why not in before]
+    if added:
+        raise HTTPException(422, added[0])
+
+
 # The snapshot: `02` §2.C. The merge: Kraft-xh2x8.
 @api_router.put("/policy")
 async def put_policy(body: PolicyBody, request: Request):
@@ -527,6 +544,7 @@ async def put_policy(body: PolicyBody, request: Request):
         parsed, policy_obj = config_check.validate_policy(data)
     except policy_mod.PolicyError as exc:
         raise HTTPException(422, str(exc)) from exc
+    _refuse_new_scope_problems(st, "policy.yaml", data)
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     deps.apply_policy(st, policy_obj, parsed.instance_policy())
     storage.kick(request.app)
@@ -629,6 +647,7 @@ async def put_intake(body: IntakeBody, request: Request):
         intake = config_mod.Intake.model_validate(data)
     except ValidationError as exc:
         raise HTTPException(422, config_mod.first_error(exc, config_mod.Intake.FILE)) from exc
+    _refuse_new_scope_problems(st, "intake.yaml", data)
     intake.save(path)
     st.intake = data = intake.model_dump()
     st.invalid_intake = None

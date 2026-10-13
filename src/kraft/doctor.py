@@ -613,16 +613,22 @@ def _addon_checks(templates: Path) -> list[dict]:
     except config.ConfigError:
         opted_in = []  # repos.yaml's own row says why
     libraries = [p for p in everything if p.repo_id]
-    return [addons, updates, _repo_libraries_check(libraries, status, opted_in, bounded)]
+    from kraft.addons import update as addon_update
+
+    named = [why for _file, why in addon_update.scope_problems(templates)]
+    return [addons, updates, _repo_libraries_check(libraries, status, opted_in, bounded, named)]
 
 
 def _repo_libraries_check(
-    libraries: list, status: dict, opted_in: list[str], bounded: bool
+    libraries: list, status: dict, opted_in: list[str], bounded: bool, named: list[str] = ()
 ) -> dict:
     """Each accepted repo library: what does not load, what the last check of
     its remote found waiting, held or could not read, and whether one updates
-    itself on an instance that bounds nothing."""
-    faults = [f"{p.repo_id}: {p.left_out}" for p in libraries if p.left_out and not p.quiet]
+    itself on an instance that bounds nothing. `named` is each reference of
+    the instance's own files to a repo library from outside its repository
+    (`update.scope_problems`): a fault, listed first."""
+    faults = [*named]
+    faults += [f"{p.repo_id}: {p.left_out}" for p in libraries if p.left_out and not p.quiet]
     said = []
     for p in libraries:
         entry = status.get(p.id) or {}
