@@ -746,6 +746,8 @@ def new_chain(d: Draft, **source: str) -> None:
     else:
         library = getattr(d.st, "library", None)
         if isinstance(origin, str) and library is not None and library.addon_of(origin):
+            if why := catalogue.repo_library_copy(library, origin):
+                raise OpError(why)
             # A loaded add-on's chain, as the library holds it: its own bare
             # references already made `<namespace>:<name>`, so the copy resolves.
             if origin not in library.chain_ids:
@@ -986,6 +988,8 @@ def copy_component(d: Draft, ref: str, name: str) -> dict:
         raise OpError(f"there is no add-on component {ref!r} to copy")
     if library.addon_of(qualified) is None:
         raise OpError(f"{ref!r} is not an add-on's component; edit it where it is")
+    if why := catalogue.repo_library_copy(library, qualified):
+        raise OpError(why)
     if section == Namespace.STEERING.value:
         found = library.steering.get(qualified)
         body = None if found is None else found.model_dump(mode="json", exclude_unset=True)

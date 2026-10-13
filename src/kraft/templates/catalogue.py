@@ -66,7 +66,9 @@ def addon_view(library: TemplateLibrary, name: str) -> dict | None:
     """`{id, version}` of the add-on a chain or component comes from; None for
     the instance's own. What a screen badges and refuses to edit."""
     addon = library.addon_of(name)
-    return None if addon is None else {"id": addon.id, "version": addon.version}
+    if addon is None:
+        return None
+    return {"id": addon.id, "version": addon.version, "repo": addon.repo_id}
 
 
 def read_only_message(library: TemplateLibrary, name: str) -> str | None:
@@ -74,7 +76,25 @@ def read_only_message(library: TemplateLibrary, name: str) -> str | None:
     addon = library.addon_of(name)
     if addon is None:
         return None
+    if addon.repo_id is not None:
+        return f"{name} comes from {addon.repo_id}'s repo library; {EDIT_IN_ITS_REPO}"
     return f"{name} comes from add-on {addon.id}; extend it or copy it to your library"
+
+
+#: Where a repo library's content is changed: never copied into the instance's
+#: own library, which would make an instance-wide chain out of one repository's.
+EDIT_IN_ITS_REPO = "edit it in that repository's .kraft/"
+
+
+def repo_library_copy(library: TemplateLibrary, name: str) -> str | None:
+    """Why `name` may not be copied into the instance's own library: it is a
+    repo library's, visible only to that repository's items. None otherwise."""
+    from kraft.addons.load import scope_message
+
+    addon = library.addon_of(name)
+    if addon is None or addon.repo_id is None:
+        return None
+    return f"{scope_message(name, addon.repo_id)}; {EDIT_IN_ITS_REPO}"
 
 
 class AmbiguousName(LookupError):
