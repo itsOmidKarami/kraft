@@ -8,6 +8,7 @@ import yaml
 from support.addons import (
     AGENT,
     chain,
+    edit_store,
     install,
     instance,
     make_collection,
@@ -166,14 +167,25 @@ def test_accept_writes_the_store_and_the_lock(app, home):
     assert repo_library.check(app, "app", *home).outcome == "current"
 
 
-def test_a_change_is_reviewed_against_the_accepted_version(app, home):
+@pytest.mark.parametrize("edited", [False, True], ids=["unchanged", "store-edited"])
+def test_a_change_is_reviewed_against_the_accepted_version(app, home, edited):
+    """A store edited since it was accepted is never what the change is
+    diffed against: the review says it could not compare."""
     _library(app)
-    repo_library.accept(repo_library.check(app, "app", *home), *home)
+    accepted = repo_library.check(app, "app", *home)
+    repo_library.accept(accepted, *home)
+    if edited:
+        store = home[1] / "store" / accepted.digest.removeprefix("sha256:")
+        edit_store(store, "library.yaml", "tasks: {base: {kind: agent, prompt: new words}}\n")
     _library(app, library={"tasks": {"base": {**AGENT, "prompt": "new words"}}})
 
     found = repo_library.check(app, "app", *home)
 
     assert found.outcome == "waiting"
+    if edited:
+        unread = "the accepted version's files could not be read to compare with"
+        assert found.review.reach[0] == unread
+        return
     assert found.review.old_version is not None
     assert found.review.old_version != found.review.new_version
     assert any("base" in line for line in (*found.review.reach, *found.review.content))

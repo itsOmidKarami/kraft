@@ -378,7 +378,7 @@ def check(
     store = addons_root / "store" / was.removeprefix("sha256:") if was else None
     if store is not None and store.is_dir():
         try:
-            old = fetch.extract_dir(store)
+            old = fetch.verify_store(store)
         except Exception:  # noqa: BLE001 -- an edited store can break in any way
             old = None
     reviewed = review_mod.review(addon_id, old, extracted)

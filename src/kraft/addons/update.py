@@ -585,7 +585,7 @@ def update(
             old = reviewed = None
             if store is not None and store.is_dir():
                 try:
-                    old = fetch.extract_dir(store)
+                    old = fetch.verify_store(store)
                     reviewed = review_mod.review(addon_id, old, extracted)
                 except Exception:  # noqa: BLE001 -- an edited store can break in any way
                     old = None
