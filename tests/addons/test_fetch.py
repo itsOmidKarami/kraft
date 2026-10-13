@@ -320,8 +320,10 @@ def test_a_store_is_addressed_by_its_content(collection, addons_dir, monkeypatch
     assert (store / "library.yaml").read_bytes() == extracted.files["library.yaml"][1]
     assert (store / fetch.DIGEST_FILE).read_bytes() == fetch.digest_manifest(extracted.files)
     assert not (store / "library.yaml").stat().st_mode & 0o222
-    inode = store.stat().st_ino
     outside = damage(store, monkeypatch) if damage is not None else None
+    # Taken after the damage: a deleted store's inode can be reused by the
+    # fresh one, and a link's target outlives the test.
+    inode = store.stat().st_ino
     # The same content from a directory collection is the same store.
     again = fetch.write_store(addons_dir, fetch.extract_dir(collection / "addons/release"))
     assert again == store and not store.is_symlink()
