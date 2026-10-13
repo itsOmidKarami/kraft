@@ -576,14 +576,19 @@ def _addon_profiles(
     section is read: an add-on never chooses an executable, so a `harnesses:`
     section in it has no reader here."""
     # Imported here: `kraft.config` imports this module.
+    from kraft.addons import fetch
     from kraft.addons.load import qualify
     from kraft.config import bounded_yaml
 
     path = addon.root / "profiles.yaml"
-    if not path.is_file():
-        return {}
     try:
-        data = qualify(bounded_yaml(path.read_text(), [20_000]), addon)
+        # Through the store's digest: the bytes parsed are the bytes checked.
+        raw = fetch.open_store(addon.root).read("profiles.yaml", optional=True)
+        if raw is None:
+            return {}
+        data = qualify(bounded_yaml(raw.decode(), [20_000]), addon)
+    except fetch.StoreMismatch as exc:
+        raise TemplateEnvironmentError(f"{path}: {exc}") from exc
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
     return _agent_profiles(_section(data, "profiles", path), path, harnesses, addon.namespace)

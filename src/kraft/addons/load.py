@@ -462,7 +462,31 @@ def for_item(
             )
         )
     live = [p for p in installed(config_dir, addons_root) if p.namespace not in (pins or {})]
-    return (*live, *pinned)
+    return tuple(
+        replace(addon, left_out=why)
+        if addon.left_out is None and (why := _launch_problem(addon))
+        else addon
+        for addon in (*live, *pinned)
+    )
+
+
+def _launch_problem(addon: InstalledAddon) -> str | None:
+    """Why `addon`'s store cannot be read at this launch: its manifest, and
+    its `profiles.yaml`, which every launch's profile table reads, checked
+    against the digest the store was written with. An edited store leaves
+    only this add-on out, so only a launch that reads from it stops. Skills
+    are checked where they are read (`skill.read`)."""
+    from kraft.addons import fetch
+
+    if not addon.root.is_dir():
+        return None  # the load checks say why
+    try:
+        fetch.open_store(addon.root).read("profiles.yaml", optional=True)
+    except fetch.StoreMismatch as exc:
+        return str(exc)
+    except OSError as exc:
+        return f"its store cannot be read: {exc}"
+    return None
 
 
 #: Why the last restore of a store failed, by its digest: what a launch that
