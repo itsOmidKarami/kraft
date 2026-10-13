@@ -37,5 +37,5 @@ origin: src/kraft/store/work_items.py §release_blocked
 
 IF `unblock` names a dependency the work item does not have, THEN the system
 SHALL refuse with 409 and drop nothing.
-enforced-by: tests/api/test_lifecycle_blocked.py::test_unblock_refuses_an_id_that_is_not_a_dependency
+enforced-by: tests/api/test_lifecycle_blocked.py::test_unblock_refuses_an_id_that_is_not_a_dependency[not-a-dependency]
 origin: src/kraft/api/routes/lifecycle.py §unblock_work_item

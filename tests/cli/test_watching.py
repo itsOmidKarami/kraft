@@ -87,8 +87,9 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     assert [line["n"] for line in lines] == sorted(line["n"] for line in lines)
 
 
+@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:8]], ids=["whole", "start"])
 def test_events_follow_filters_by_item_and_stops_on_completion(
-    app, monkeypatch, capsys, make_item, repo
+    app, monkeypatch, capsys, make_item, repo, typed
 ):
     """The bus is instance-wide and never ends on its own: a foreign-item event
     must not print, and work_item_completed must end the follow rather than
@@ -103,7 +104,7 @@ def test_events_follow_filters_by_item_and_stops_on_completion(
         yield {"type": "node_started", "seq": 104, "work_item_id": wid}  # must never be reached
 
     monkeypatch.setattr(client, "stream_events", fake_stream)
-    cli.main(["view", "events", wid, "-f"])
+    cli.main(["view", "events", typed(wid), "-f"])
     out = capsys.readouterr().out
     assert "101" not in out  # foreign item filtered out
     assert "102" in out

@@ -219,6 +219,9 @@ def _cmd_archive(ns: argparse.Namespace) -> None:
         common.emit({"results": []}, lambda _: "nothing to archive", ns.json)
         return
     preview = asyncio.run(client.storage_preview(ids))
+    # The preview answers each id whole and once, in order: from here on the
+    # results are matched to those, not to what was typed (a start of an id).
+    ids = [i["id"] for i in preview["items"]]
     # With --json --yes stdout is the one bulk payload, nothing else.
     if not (ns.json and ns.yes):
         common.emit(preview, render.storage_preview, ns.json)
@@ -237,7 +240,10 @@ def _cmd_archive(ns: argparse.Namespace) -> None:
     out["results"] += [{"id": i, "ok": False, "error": why} for i, why in refused.items()]
     out["results"].sort(key=lambda r: ids.index(r["id"]))
     common.emit(out, render.archive_results, ns.json)
-    if found > len(ids):
+    # Only --reclaimable can find more than one call takes. IDs given by
+    # hand can shrink in the preview (two names for one item), which is not
+    # "the largest of" anything.
+    if ns.reclaimable and found > len(ids):
         # stderr under --json, so stdout stays the one payload.
         print(
             f"archived the {len(ids)} largest of {found} reclaimable items; "
