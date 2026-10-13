@@ -5,6 +5,7 @@ import logging
 import re
 import tempfile
 import time
+from collections.abc import Mapping
 from itertools import count
 from pathlib import Path
 from typing import Annotated
@@ -175,21 +176,32 @@ def _auto_connect_children(
     return children
 
 
-def _repository_id(entry: dict, repos: list[dict]) -> str:
+def _repository_id(entry: dict, repos: list[dict], held: Mapping[str, str]) -> str:
     """`entry`'s repository id, minted from its name when it has none: the
-    `[a-z][a-z0-9_-]*` rule a workspace reference must match, and unique
-    among `repos`. Adding an id changes nothing else about an entry."""
+    `[a-z][a-z0-9_-]*` rule a workspace reference must match, unique among
+    `repos`, and never `kraft` or a namespace in `held`
+    (`repo_library.held_namespaces`). Adding an id changes nothing else about
+    an entry."""
     if entry.get("id"):
         return entry["id"]
     base = re.sub(r"[^a-z0-9_-]+", "-", str(entry.get("name") or "repo").lower()).strip("-_")
     base = base if base[:1].isalpha() else f"repo-{base}".rstrip("-")
     taken = {r.get("id") for r in repos}
-    entry["id"] = next(c for n in count(1) if (c := base if n == 1 else f"{base}-{n}") not in taken)
+    entry["id"] = next(
+        c
+        for n in count(1)
+        if (c := base if n == 1 else f"{base}-{n}") not in taken
+        and repo_library.namespace_problem(c, held) is None
+    )
     return entry["id"]
 
 
 def _declare_workspace(
-    workspaces: dict, repos: list[dict], root: dict, children: dict[str, dict]
+    workspaces: dict,
+    repos: list[dict],
+    root: dict,
+    children: dict[str, dict],
+    held: Mapping[str, str],
 ) -> None:
     """Declare `root` a workspace mounting `children` (`workspace-declares-
     root-and-members`), unless one is already rooted there. Typed membership
@@ -197,12 +209,12 @@ def _declare_workspace(
     members, and the item's checkout assembles exactly the ones chosen."""
     if not children:
         return
-    root_id = _repository_id(root, repos)
+    root_id = _repository_id(root, repos, held)
     if any(w.get("root") == root_id for w in workspaces.values()):
         return
     members = {}
     for rel, child in children.items():
-        child_id = _repository_id(child, repos)
+        child_id = _repository_id(child, repos, held)
         members[child_id] = {"repository": child_id, "path": rel}
     ws_id = root_id if root_id not in workspaces else f"{root_id}-workspace"
     workspaces[ws_id] = {"root": root_id, "members": members}
@@ -285,7 +297,8 @@ async def _check_library(st, path: str) -> tuple[list[dict], dict, repo_library.
     repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
-    repo_id = _repository_id(entry, repos)
+    held = repo_library.held_namespaces(st.templates_dir, st.run_dirs.addons)
+    repo_id = _repository_id(entry, repos, held)
     try:
         found = await deps._in_thread(
             st,
@@ -481,6 +494,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
     # From here to the save, nothing awaits: PATCH and DELETE save without the
     # connect lock, and a stale list saved over theirs would undo them.
     repos, _ = _editable_repos(st)
+    held = repo_library.held_namespaces(st.templates_dir, st.run_dirs.addons)
     # `""` is a decision, not an absence: the repo deliberately has no tests.
     test_command = body.test_command if body.test_command is not None else probed["test_command"]
     # Probed regardless of test_command now (Kraft-k4mx): probe_repo already
@@ -521,7 +535,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
     repos.append(entry)
     children = _auto_connect_children(repos, entry, child_probes)
     workspaces = _workspaces(st)
-    _declare_workspace(workspaces, repos, entry, children)
+    _declare_workspace(workspaces, repos, entry, children, held)
     _refuse_enable_without_test_command(entry)
     _validate_repos(st, repos, workspaces)
     config_mod.save_repos(deps.repos_path(st), repos, workspaces)
