@@ -121,6 +121,8 @@ export interface TemplateSummary {
 export interface Addon {
   id: string;
   version: string;
+  /** The repository whose repo library this is; null for an add-on. */
+  repo?: string | null;
 }
 
 /** One reusable component of `library.yaml` (`GET /templates/library`). */

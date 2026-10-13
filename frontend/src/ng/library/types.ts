@@ -35,7 +35,25 @@ export function parseRef(ref: string | undefined): { section: Section; name: str
   return name && !rest.length && (SECTIONS as readonly string[]).includes(section) ? { section: section as Section, name } : null;
 }
 
-/** `release@acme 1.4.0`: what an add-on's chain or component is badged with, on both layouts. */
-export const addonLabel = (p: Addon) => `${p.id} ${p.version}`.trim();
+/** `release@acme 1.4.0`, or `repo library app`: what an add-on's or a repo
+ *  library's chain or component is badged with, on both layouts. */
+export const addonLabel = (p: Addon) => (addonRepo(p) ? `repo library ${addonRepo(p)}` : `${p.id} ${p.version}`.trim());
+
+const REPO_LIBRARY = "library@repo:";
+
+/** The repository `p` is the repo library of; null for an add-on. */
+export const addonRepo = (p: Addon | null | undefined): string | null =>
+  p?.repo ?? (p?.id.startsWith(REPO_LIBRARY) ? p.id.slice(REPO_LIBRARY.length) : null);
+
+/** The chains an item in the repository `repoId` may run: the instance's own,
+ *  add-ons', and that repository's own repo library, never another's
+ *  (`addons/load.py` `scope_problem`; the VS Code extension's `chainsFor`).
+ *  A repo with no id reads no repo library. */
+export function chainsForRepo<C extends { addon?: Addon | null }>(chains: C[], repoId: string | null | undefined): C[] {
+  return chains.filter((c) => {
+    const owner = addonRepo(c.addon);
+    return owner === null || (!!repoId && owner === repoId);
+  });
+}
 
 export const refUrl = (id: string) => `/templates/library/${encodeURIComponent(id)}`;

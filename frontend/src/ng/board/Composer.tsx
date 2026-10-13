@@ -5,6 +5,7 @@ import { repoName } from "../../format";
 import { humanSize } from "../../sizes";
 import { useStore } from "../../store";
 import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
+import { chainsForRepo } from "../library/types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf, jsonBody, request } from "../http";
 import { useFocusSoon } from "../item/useFocusSoon";
@@ -163,7 +164,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           label="Chain"
           triggerClass="composer-chip composer-mono"
           trigger={<>{d.chain || "chain"} <span className="composer-muted">{full.length} nodes</span> <span aria-hidden className="board-caret">▾</span></>}
-          items={chains.filter((c) => !c.error).map((c) => ({
+          items={chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => ({
             label: c.id,
             checked: c.id === d.chain,
             hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " · repo default" : ""}`,

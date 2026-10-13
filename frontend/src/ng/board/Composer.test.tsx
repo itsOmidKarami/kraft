@@ -55,6 +55,25 @@ const settle = async () => {
 };
 
 describe("Composer", () => {
+  it("lists only the chosen repo's own repo library chains, and switching the repo changes the list", async () => {
+    const lib = (repo: string) => ({ id: `${repo}:ship`, nodes: [N("implementation")], gates: 0, addon: { id: `library@repo:${repo}`, version: "abc", repo } });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([...CHAINS, lib("plugins"), lib("docs")]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [
+      { path: "/code/kraft-plugins", id: "plugins", default_chain: "default", enabled: true },
+      { path: "/code/kraft-docs", id: "docs", default_chain: "docs_only", enabled: true },
+    ] as never });
+    mount();
+    await settle();
+    const listed = () => screen.getAllByRole("menuitemradio").map((m) => m.textContent ?? "");
+    fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^plugins:ship/)]);
+    fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^kraft-plugins/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /kraft-docs/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^docs_only/ }));
+    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^docs:ship/)]);
+  });
+
   it("creates and starts on ⌘↵ and creates paused from the button, sending the create body", async () => {
     const { calls, onCreated } = mount();
     await settle();
