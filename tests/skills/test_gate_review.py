@@ -22,7 +22,7 @@ from support.harness import (
 )
 
 from kraft import caps as _caps
-from kraft import events, executor, gate_review, store
+from kraft import events, executor, gate_review, item_paths, store
 from kraft import policy as _policy
 from kraft.db import Database
 from kraft.executor import walk
@@ -68,7 +68,7 @@ async def _seed(database, rd, wid):
     )
     await database.write(lambda c: store.enter_node(c, wid, "spec_approval"))
     await database.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
-    doc = rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md"
+    doc = item_paths.docs_dir(rd, wid) / "spec.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("# the design\n")
 
@@ -238,7 +238,9 @@ async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_di
     assert kw["hook_point"] == _gate(run_dirs).auto_review.path
     assert kw.get("resume_session_id") is None
     assert "spec_approval" in kw["task_instruction"]
-    assert ".engineering/specs/w1.md" in kw["task_instruction"]
+    # By absolute path: it is in the item's `docs/`, not in the worktree.
+    spec = item_paths.docs_dir(run_dirs, "w1") / "spec.md"
+    assert f"The document this gate is about: {spec}\n" in kw["task_instruction"]
 
 
 async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing(

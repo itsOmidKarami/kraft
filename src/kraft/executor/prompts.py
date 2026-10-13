@@ -8,7 +8,6 @@ from kraft import item_paths
 from kraft import progress as _progress
 from kraft import review as _review
 from kraft import store as _store
-from kraft.adapters import agent as _agent
 from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
 from kraft.vocab import ADVANCING
@@ -296,7 +295,13 @@ _SOURCE_PROMPTS = {"seeded": _SEEDED_PROMPT, "gate_review": _GATE_REVIEW_PROMPT}
 
 
 def steer_prefix(
-    artifact_kind: str | None, work_item_row, worktree, note: str, *, source: str = "human"
+    artifact_kind: str | None,
+    work_item_row,
+    worktree,
+    note: str,
+    *,
+    run_dirs,
+    source: str = "human",
 ) -> str:
     """What a steered agent launch leads with.
 
@@ -310,9 +315,15 @@ def steer_prefix(
     template = _SOURCE_PROMPTS.get(source)
     if template is not None:
         return template.format(note=note)
-    rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
-    if rel and (Path(worktree) / rel).is_file():
-        return _REVISE_PROMPT.format(path=rel, steer=note)
+    wid = work_item_row["id"]
+    name = (
+        item_paths.document(run_dirs, wid, artifact_kind, worktree=worktree)
+        if artifact_kind
+        else None
+    )
+    if name is not None:
+        path = item_paths.path_of(run_dirs, wid, name, worktree=worktree)
+        return _REVISE_PROMPT.format(path=path, steer=note)
     return _STEER_PROMPT.format(steer=note)
 
 
@@ -401,7 +412,9 @@ _PROGRESS_NOTE_NO_CHANNEL = (
 )
 
 
-def progress_note(task: AgentTask, work_item_row, worktree, db=None, sandbox=None) -> str:
+def progress_note(
+    task: AgentTask, work_item_row, worktree, db=None, sandbox=None, *, run_dirs
+) -> str:
     """Only for the task doing the work from the brief, and only for a plan with
     `## Task N` headings to count.
 
@@ -416,7 +429,7 @@ def progress_note(task: AgentTask, work_item_row, worktree, db=None, sandbox=Non
     if db is not None and _progress.rework_run(db, work_item_row):
         # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
-    tasks = _progress.tasks_for(work_item_row, Path(worktree))
+    tasks = _progress.tasks_for(work_item_row, Path(worktree), run_dirs)
     note = _PROGRESS_NOTE if _callback.reachable(sandbox) else _PROGRESS_NOTE_NO_CHANNEL
     return note.format(total=len(tasks)) if tasks else ""
 

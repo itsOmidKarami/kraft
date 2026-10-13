@@ -6,9 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import escalate, events, gate_review, node_runs, store
+from kraft import escalate, events, gate_review, item_paths, node_runs, store
 from kraft import policy as _policy
-from kraft.adapters import agent as _agent
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
@@ -76,9 +75,12 @@ def gate_artifact(run_dirs, row, gate: str | None) -> str | None:
     """The document the pending gate is a decision *about*, or None.
 
     The gate's own `artifact` field names the kind
-    (`gate-owns-gate-behaviour`), and the kind plus the work item id is the path
-    (`agent.artifact_path`). It is not stored and nothing goes stale when a
-    re-run revises the same file.
+    (`gate-owns-gate-behaviour`), and the kind plus the work item id is the
+    document (`item_paths.document`): `items/<id>/docs/<kind>.md`, relative to
+    the run folder, or for an item that ran before the upgrade
+    `.engineering/<kind>s/<id>.md`, relative to its worktree. The name says
+    which (`item_paths.base_for`). It is not stored and nothing goes stale
+    when a re-run revises the same file.
 
     Replaces a scan of the *preceding* node's hook bindings for an `artifact:`
     key -- a gate that had to be told what it was about by the node in front of
@@ -99,8 +101,7 @@ def gate_artifact(run_dirs, row, gate: str | None) -> str | None:
     )
     if node is None or node.node.artifact is None:
         return None
-    rel = _agent.artifact_path(node.node.artifact, row["id"])
-    return rel if (run_dirs.worktrees / row["id"] / rel).is_file() else None
+    return item_paths.document(run_dirs, row["id"], node.node.artifact)
 
 
 def preceding_exec_node(nodes: Sequence[ResolvedNode], gate_index: int) -> int | None:
@@ -320,8 +321,12 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
         return False
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
     if node.node.artifact == revision.CHAIN_REVISION and run_dirs is not None:
-        rel = _agent.artifact_path(revision.CHAIN_REVISION, work_item_id)
-        why = revision.unchanged(run_dirs.worktrees / work_item_id, rel)
+        rel = item_paths.document(run_dirs, work_item_id, revision.CHAIN_REVISION)
+        why = (
+            revision.unchanged(item_paths.base_for(run_dirs, work_item_id, rel), rel)
+            if rel is not None
+            else None
+        )
         if why is not None:
             await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
             return False
@@ -361,7 +366,9 @@ def _chain_revision_seen(
     chain = store.materialized_chain_of(row)
     if chain is None:
         return None
-    result, _reason = read_worktree_file(run_dirs.worktrees / row["id"], rel, _ARTIFACT_MAX_BYTES)
+    result, _reason = read_worktree_file(
+        item_paths.base_for(run_dirs, row["id"], rel), rel, _ARTIFACT_MAX_BYTES
+    )
     if result is None:
         return None
     return launch.chain_revision_digest(chain, gate, result.text)

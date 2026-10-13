@@ -9,7 +9,8 @@ and Kraft never follows a link in anything a worker can write.
 
 WHEN the system tells an agent where to write a gate document, it SHALL name
 `run/items/<id>/docs/<kind>.md`.
-enforced-by:
+enforced-by: tests/adapters/test_agent.py::test_the_system_prompt_carries_in_order[artifact-path], tests/adapters/test_agent.py::test_the_system_prompt_carries_in_order[mr-meta-fields], tests/executor/test_dispatch_documents.py::test_a_later_launch_is_told_where_the_document_an_earlier_one_wrote_is
+origin: src/kraft/adapters/agent.py §artifact_path -- outside the repository, so nothing Kraft writes for itself can reach a merge request, and in the folder a sandbox mounts read-write.
 
 ## REQ a-session-s-files-are-in-its-own-folder
 
@@ -30,7 +31,7 @@ enforced-by:
 WHEN the system reads a work item's gate document, it SHALL read
 `run/items/<id>/docs/<kind>.md` if that exists, and otherwise
 `.engineering/<kind>s/<id>.md` in the item's worktree.
-enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[both-new-wins], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[new-only], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-only], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[neither]
+enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[both-new-wins], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[new-only], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-only], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[neither], tests/executor/test_gates_documents.py::test_the_gate_names_the_document_where_it_is[new-place], tests/executor/test_gates_documents.py::test_the_gate_names_the_document_where_it_is[older-worktree], tests/executor/test_gates_documents.py::test_the_gate_names_the_document_where_it_is[nothing-yet], tests/api/test_artifact.py::test_gate_artifact_names_the_file_the_hook_wrote[new-place], tests/api/test_artifact.py::test_gate_artifact_names_the_file_the_hook_wrote[older-worktree], tests/api/test_artifact.py::test_a_tasks_produced_document_reads_off_the_worktree_then_from_the_index[older-worktree], tests/test_progress.py::test_read_tasks_prefers_the_plan_attachment[docs-before-older-worktree], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_reads_every_field[docs], tests/adapters/test_agent.py::test_a_declared_artifact_guards_the_node[written-to-the-old-place-stays-green]
 origin: src/kraft/item_paths.py §document -- the new place is read first because a newer revision is only ever written there; nothing is moved at upgrade, so the old place is the fallback rather than a per-item flag.
 
 ## REQ an-existing-sandbox-home-is-kept
@@ -95,7 +96,7 @@ origin: src/kraft/adapters/agent.py §_writable_dirs -- for codex this is a real
 
 WHEN the system reads a file in a folder a worker can write, it SHALL NOT
 follow a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink]
+enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[fifo], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_refuses_a_symlink_out_of_the_worktree[docs], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[pending-gate], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[produced]
 origin: src/kraft/item_paths.py -- every read goes through `worker.worktree_read`, which opens one component at a time with `O_NOFOLLOW` and opens the file non-blocking, so a planted FIFO cannot hang the server either.
 
 ## REQ no-write-into-a-worker-folder-follows-a-link
@@ -115,13 +116,14 @@ enforced-by:
 
 WHEN the system launches an agent, it SHALL name in its context the absolute
 path of each of its item's documents that exists.
-enforced-by:
+enforced-by: tests/adapters/test_agent_documents.py::test_every_agent_is_told_where_its_item_s_documents_are[new-place], tests/adapters/test_agent_documents.py::test_every_agent_is_told_where_its_item_s_documents_are[older-worktree], tests/adapters/test_agent_documents.py::test_every_agent_is_told_where_its_item_s_documents_are[attached], tests/adapters/test_agent_documents.py::test_every_agent_is_told_where_its_item_s_documents_are[none-yet], tests/executor/test_dispatch_documents.py::test_a_later_launch_is_told_where_the_document_an_earlier_one_wrote_is
+origin: src/kraft/adapters/agent.py §documents_note -- built in `run_agent_task`, so a fix loop, an override, an escalation turn and a gate review are told too; a later node used to find a document by its place in the worktree, where it no longer is.
 
 ## REQ a-revised-document-keeps-its-earlier-version
 
 WHEN the system dispatches a task that produces a kind whose document exists,
 it SHALL first copy that document to `history/<kind>.<n>.md`.
-enforced-by: tests/test_item_paths.py::test_a_revised_document_keeps_its_earlier_versions, tests/test_item_paths.py::test_an_old_document_is_seeded_into_docs_before_its_revision[own-worktree], tests/test_item_paths.py::test_an_old_document_is_seeded_into_docs_before_its_revision[member-worktree]
+enforced-by: tests/test_item_paths.py::test_a_revised_document_keeps_its_earlier_versions, tests/test_item_paths.py::test_an_old_document_is_seeded_into_docs_before_its_revision[own-worktree], tests/test_item_paths.py::test_an_old_document_is_seeded_into_docs_before_its_revision[member-worktree], tests/executor/test_dispatch_documents.py::test_a_re_dispatch_keeps_the_version_it_revises[steered], tests/executor/test_dispatch_documents.py::test_a_re_dispatch_keeps_the_version_it_revises[retried], tests/executor/test_dispatch_documents.py::test_a_re_dispatch_keeps_the_version_it_revises[older-worktree]
 origin: src/kraft/item_paths.py §keep_version -- the document stays where it is, so the agent revises it in place and a failed re-run still leaves the gate one; an old document is also seeded into `docs/` so the revise note and the write-to path name one file.
 
 ## REQ archiving-removes-the-sandbox-home

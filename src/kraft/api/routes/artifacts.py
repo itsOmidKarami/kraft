@@ -6,8 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
-from kraft import events, review, store
-from kraft.adapters import agent as agent_mod
+from kraft import events, item_paths, review, store
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -314,14 +313,17 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
 
 
 async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:
-    """Safely read `rel` out of `wid`'s worktree via `worktree_read.read_worktree_file`
-    (resolve, check containment, open with no symlink followed anywhere along the
-    path, cap the read at `DIFF_MAX_BYTES`), and record why via `_refuse_artifact`
-    on any failure -- shared by the reviewer-facing read and gate-approval
-    ingestion (`approve_gate`) so both trust the exact same containment walk.
+    """Safely read the document `rel` names -- under the run folder for one in
+    the item's `docs/`, else out of `wid`'s worktree (`item_paths.base_for`) --
+    via `worktree_read.read_worktree_file` (resolve, check containment, open
+    with no symlink followed anywhere along the path, cap the read at
+    `DIFF_MAX_BYTES`), and record why via `_refuse_artifact` on any failure --
+    shared by the reviewer-facing read and gate-approval ingestion
+    (`approve_gate`) so both trust the exact same containment walk.
     """
-    worktree = st.run_dirs.worktrees / wid
-    result, reason = read_worktree_file(worktree, rel, DIFF_MAX_BYTES)
+    result, reason = read_worktree_file(
+        item_paths.base_for(st.run_dirs, wid, rel), rel, DIFF_MAX_BYTES
+    )
     if result is None:
         await _refused(st, wid, rel, reason)
         return None
@@ -421,7 +423,7 @@ def _worktree_document(st, wid: str, rel: str, text: str, truncated: bool, body=
         "work_item_id": wid,
         "path": rel,
         # Where the file is on this machine, for the viewer's Open in editor and Copy path.
-        "absolute_path": str(st.run_dirs.worktrees / wid / rel),
+        "absolute_path": str(item_paths.path_of(st.run_dirs, wid, rel)),
         "title": ingest_mod.derive_title(rel, fm, body),
         # Front matter stripped: it is the contract's plumbing, not the
         # document, and a reviewer reading a spec should not have to skip it.
@@ -442,7 +444,7 @@ def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, mi
     st = request.app.state
     row = deps._work_item_row(st, wid)
     rel = rel_of(st, row)
-    path = worktree_file_path(st.run_dirs.worktrees / wid, rel) if rel else None
+    path = worktree_file_path(item_paths.base_for(st.run_dirs, wid, rel), rel) if rel else None
     if path is None:
         raise HTTPException(404, missing)
     return {"work_item_id": wid, **_launch_editor(request, editor, path)}
@@ -462,19 +464,21 @@ async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request
     )
 
 
-def _produced_path(row, kind: str) -> str:
-    """Where a task with `produces: <kind>` wrote its document, or a 404 when the
-    item's chain names no such kind: no node produces it and no gate decides it
-    (its `artifact`). Checked against the chain rather than the kind's spelling:
-    only a kind the chain names reaches `artifact_path`, so nothing a caller
-    types becomes part of a path."""
+def _produced_path(st, row, kind: str) -> str:
+    """Where a task with `produces: <kind>` wrote its document
+    (`item_paths.document`, the new place first, else the new name), or a 404
+    when the item's chain names no such kind: no node produces it and no gate
+    decides it (its `artifact`). Checked against the chain rather than the
+    kind's spelling: only a kind the chain names becomes part of a path."""
     chain = store.materialized_chain_of(row)
     nodes = chain.chain.nodes if chain else ()
     kinds = {k for n in nodes for k in n.produces() if k}
     kinds |= {n.node.artifact for n in nodes if getattr(n.node, "artifact", None)}
     if kind not in kinds:
         raise HTTPException(404, f"no task of this work item produces {kind!r}")
-    return agent_mod.artifact_path(kind, row["id"])
+    return item_paths.document(st.run_dirs, row["id"], kind) or item_paths.document_name(
+        row["id"], kind
+    )
 
 
 @api_router.get("/work-items/{wid}/artifacts/{kind}")
@@ -492,8 +496,10 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
-    rel = _produced_path(row, kind)
-    result, reason = read_worktree_file(st.run_dirs.worktrees / wid, rel, DIFF_MAX_BYTES)
+    rel = _produced_path(st, row, kind)
+    result, reason = read_worktree_file(
+        item_paths.base_for(st.run_dirs, wid, rel), rel, DIFF_MAX_BYTES
+    )
     if result is not None:
         body = None
         if kind == revision.CHAIN_REVISION:
@@ -508,14 +514,17 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
     if reason != "absent":
         await _refused(st, wid, rel, reason)
         raise HTTPException(404, f"this work item's {kind} could not be read: {reason}")
-    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] == rel), None)
+    # Indexed at approval under the name it had then: an item that ran before
+    # the upgrade wrote it in its worktree's `.engineering/`.
+    names = (rel, item_paths.legacy_document_name(wid, kind))
+    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] in names), None)
     doc = indexed and st.indexer.get_document(indexed["document_id"])
     if not doc:
         raise HTTPException(404, f"this work item has no {kind}")
     return {
         "work_item_id": wid,
         "kind": kind,
-        "path": rel,
+        "path": indexed["path"],
         "title": doc["title"],
         "content": doc["content"],
         "truncated": False,
@@ -531,7 +540,7 @@ async def open_produced_artifact(wid: str, kind: str, body: OpenDocument, reques
         request,
         wid,
         body.editor,
-        lambda _st, row: _produced_path(row, kind),
+        lambda st, row: _produced_path(st, row, kind),
         f"this work item has no {kind} in its worktree",
     )
 

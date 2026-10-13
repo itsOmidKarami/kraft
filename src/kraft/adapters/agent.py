@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import item_paths
+from kraft import item_paths, store
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -115,15 +115,19 @@ _USAGE_REQUEST = (
 )
 
 
-def artifact_path(kind: str, work_item_id: str) -> str:
-    """Where a hook with `artifact: <kind>` must write its document.
+def artifact_path(run_dirs, kind: str, work_item_id: str) -> Path:
+    """Where a task producing `kind` must write its document: its item's
+    `docs/<kind>.md`, outside the repository, absolute.
 
     Derived on both sides — injected here, read back by
-    `GET /work-items/{wid}/artifact` — rather than stored on the work item.
-    Nothing to migrate, nothing to go stale, and a rerun after a rejected gate
-    revises the same file instead of leaving a stale pointer behind.
+    `GET /work-items/{wid}/artifact` through `item_paths.document` — rather
+    than stored on the work item. Nothing to migrate, nothing to go stale, and
+    a rerun after a rejected gate revises the same file instead of leaving a
+    stale pointer behind. An item that ran before the upgrade may still have
+    its document at `item_paths.legacy_document_name`, in its worktree; the
+    dispatch seeds `docs/` from it before a revision (`item_paths.keep_version`).
     """
-    return f".engineering/{kind}s/{work_item_id}.md"
+    return run_dirs.base / item_paths.document_name(work_item_id, kind)
 
 
 #: The contract a hook with an `artifact:` binding is held to. Not part of the
@@ -131,8 +135,8 @@ def artifact_path(kind: str, work_item_id: str) -> str:
 #: result goes, how a reviewer finds it and what the chain does with it next
 #: (`artifact_notes`). Swapping the method must not be able to lose the contract.
 _ARTIFACT = (
-    "\n\nWrite your {kind} to {path}, relative to the repo root, creating that "
-    "directory if it does not exist, and to no other path. Start it with YAML "
+    "\n\nWrite your {kind} to {path}, creating that directory if it does not "
+    "exist, and to no other path. Start it with YAML "
     "front matter carrying exactly these keys:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
@@ -159,6 +163,38 @@ _MR_META_KEYS = (
     "assignees: [<a username the repo names, or an empty list>]\n"
     "reviewers: [<usernames CODEOWNERS names for these paths, or an empty list>]\n"
 )
+
+#: Every launch's list of its item's documents (`documents_note`).
+_DOCUMENTS = "\n\nThis work item's documents so far, by path:\n{lines}\n"
+
+
+def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> str:
+    """Where this item's documents are: each kind its chain produces or a gate
+    decides that is on disk, by absolute path (`item_paths.document`, the new
+    place first), then each document attached at intake, by its path in the
+    worktree, where `_copy_attachments` puts it. A later node used to find a
+    gate-written document by its place in the worktree; it is not there now.
+    "" when there is none, or no row."""
+    if work_item_row is None:
+        return ""
+    wid = work_item_row["id"]
+    chain = store.materialized_chain_of(work_item_row)
+    nodes = chain.chain.nodes if chain is not None else ()
+    kinds = dict.fromkeys(
+        [k for n in nodes for k in sorted(k for k in n.produces() if k)]
+        + [a for n in nodes if (a := getattr(n.node, "artifact", None))]
+    )
+    lines = [
+        f"{kind}: {item_paths.path_of(run_dirs, wid, name, worktree=worktree)}"
+        for kind in kinds
+        if (name := item_paths.document(run_dirs, wid, kind, worktree=worktree)) is not None
+    ]
+    raw = work_item_row["attachments"] if "attachments" in work_item_row.keys() else None
+    lines += [
+        f"{a['kind']}, attached at intake: {a['path']} in the worktree"
+        for a in (json.loads(raw) if raw else [])
+    ]
+    return _DOCUMENTS.format(lines="\n".join(lines)) if lines else ""
 
 
 class Invocation(NamedTuple):
@@ -458,7 +494,9 @@ def _envelope_is_error(
     return _base_status
 
 
-def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: str | None):
+def _resolve_status(
+    artifact: str | None, work_item_id: str, run_dirs, cwd: Path, reader: str | None
+):
     """`post_resolve` for an agent task: a bad envelope *or* a missing artifact.
 
     A binding that declares `artifact:` is held to producing it — the contract
@@ -477,7 +515,10 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: 
         # stop reason generic, and 409s both /steer and /resume.
         if artifact is None or status not in ADVANCING:
             return status
-        if (Path(cwd) / artifact_path(artifact, work_item_id)).is_file():
+        # Either place: a worker re-adopted after the upgrade may be on
+        # instructions that named the worktree's `.engineering/`. Never
+        # through a link (`item_paths.document`).
+        if item_paths.document(run_dirs, work_item_id, artifact, worktree=Path(cwd)) is not None:
             return status
         return "failed"
 
@@ -534,6 +575,11 @@ def context_sections(
     #: escalation thread's shared one), absolute; None shows a placeholder
     #: (the steering preview, which has no session).
     summary_path: str | None = None,
+    #: Where it writes the `artifact` document (`artifact_path`), absolute;
+    #: None shows a placeholder, as for `summary_path`.
+    document_path: str | None = None,
+    #: The item's documents so far (`documents_note`), "" for none.
+    documents: str = "",
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -561,7 +607,7 @@ def context_sections(
                 artifact,
                 _ARTIFACT.format(
                     kind=artifact,
-                    path=artifact_path(artifact, work_item_id),
+                    path=document_path or "<document path>",
                     work_item_id=work_item_id,
                     node_id=node_id,
                     hook_point=hook_point,
@@ -570,6 +616,11 @@ def context_sections(
                 + _artifact_notes.NOTES.get(artifact, ""),
             )
         )
+    if documents:
+        # Every launch, not only the node's own default instruction: a later
+        # node used to find a document by its place in the worktree, and it
+        # is not there any more.
+        sections.append(("documents", "kraft", documents))
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
@@ -877,6 +928,12 @@ async def run_agent_task(
 
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     task_instruction = _bounded_instruction(files.instruction, task_instruction)
+    # Every launch is told where its item's documents are, whoever launched
+    # it: a node's own pass, a fix loop, an override, an escalation turn or a
+    # gate review.
+    item_row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -893,6 +950,8 @@ async def run_agent_task(
         intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
         summary_path=str(files.summary),
+        document_path=str(artifact_path(run_dirs, artifact, work_item_id)) if artifact else None,
+        documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
     )
     options = {
         k: v
@@ -1127,6 +1186,8 @@ async def run_agent_task(
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
+            # Where its documents go: a sandbox mounts this folder read-write.
+            "KRAFT_DOCS_DIR": str(item_paths.docs_dir(run_dirs, work_item_id)),
             **(
                 {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
             ),
@@ -1134,7 +1195,7 @@ async def run_agent_task(
             **config_env,
             **rules_env,
         },
-        post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
+        post_resolve=_resolve_status(artifact, work_item_id, run_dirs, cwd, reader),
         round=round,
         head_sha=head_sha,
         thread=thread,

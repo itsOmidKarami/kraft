@@ -1249,7 +1249,7 @@ async def _dispatch_task(
             )
             + (prompts.METHOD_NOTE if method_is_own else "")
             + prompts.scope_note(t, launch.repo_entry if launch else None)
-            + prompts.progress_note(t, work_item_row, worktree, db, sandbox)
+            + prompts.progress_note(t, work_item_row, worktree, db, sandbox, run_dirs=run_dirs)
             + prompts.review_threads_note(t, work_item_row, db, note, sandbox)
         )
     ) + prompts.BEAD_NOTE
@@ -1316,6 +1316,14 @@ async def _dispatch_task(
         )
     except _agent.HarnessUnavailable:
         table = None
+    if t.produces:
+        # A re-run revises its document in place, so keep the one a gate or a
+        # person last saw first (`a-revised-document-keeps-its-earlier-
+        # version`); on a first run there is none and nothing is written. Once
+        # per dispatch, before any candidate: a fallback relaunch is the same
+        # revision, and the steer note below must name the `docs/` copy this
+        # seeds from an older worktree's.
+        item_paths.keep_version(run_dirs, work_item_row["id"], t.produces, worktree=worktree)
     cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
@@ -1665,7 +1673,14 @@ async def _launch_agent(
             method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(
-                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                prompts.steer_prefix(
+                    t.produces,
+                    work_item_row,
+                    worktree,
+                    note,
+                    run_dirs=run_dirs,
+                    source=note_source,
+                )
                 if note
                 else ""
             )

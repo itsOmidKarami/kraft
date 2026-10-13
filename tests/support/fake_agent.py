@@ -87,12 +87,12 @@ def _write_artifact(argv: list[str]) -> None:
     if os.environ.get("KRAFT_FAKE_AGENT_SKIP_ARTIFACT"):
         return
     ctx = _context(argv)
-    match = re.search(r"Write your (\w+) to (\S+?), relative to the repo root", ctx)
+    match = re.search(r"Write your (\w+) to (\S+?), creating that directory", ctx)
     if not match:
         return
-    kind, rel = match.group(1), match.group(2)
+    kind, where = match.group(1), match.group(2)
     fields = _ctx_fields(argv)
-    path = pathlib.Path(rel)
+    path = pathlib.Path(where)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "---\n"

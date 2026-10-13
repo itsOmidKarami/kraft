@@ -24,7 +24,8 @@ def run(monkeypatch):
         import asyncio
 
         kwargs = dict(
-            db=None,
+            # Knows no work item: the launch lists no documents.
+            db=SimpleNamespace(read=lambda fn: None),
             # Only `base` is read: where the session's files are, and what a
             # harness declaring `writable_dirs` is handed of them.
             run_dirs=SimpleNamespace(base=Path("/kraft/run")),

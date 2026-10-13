@@ -9,24 +9,36 @@ from pathlib import Path
 import pytest
 from support.harness import write
 
+from kraft import item_paths
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.mr import MRMeta
+from kraft.paths import RunDirs
 
 WID = "a" * 32
+#: Where an item that ran before the upgrade has it, in its worktree.
+OLD = f".engineering/mr_metas/{WID}.md"
 
 
-def _meta(worktree: Path, front: str, body: str) -> Path:
-    return write(worktree, f".engineering/mr_metas/{WID}.md", f"---\n{front}---\n{body}")
+def _meta(base: Path, front: str, body: str, rel: str = OLD) -> Path:
+    return write(base, rel, f"---\n{front}---\n{body}")
 
 
-def test_read_mr_meta_reads_every_field(tmp_path):
+def _run(tmp_path: Path) -> RunDirs:
+    return RunDirs(tmp_path / "run")
+
+
+@pytest.mark.parametrize(
+    "rel", [OLD, item_paths.document_name(WID, "mr_meta")], ids=["older-worktree", "docs"]
+)
+def test_read_mr_meta_reads_every_field(tmp_path, rel):
     _meta(
-        tmp_path,
+        item_paths.base_for(_run(tmp_path), WID, rel, worktree=tmp_path),
         "work_item_ids: [x]\ntitle: Publish auto-escalate controls\n"
         "labels: [release::minor, area::ui]\nassignees: [omid]\nreviewers: [ada, grace]\n",
         "## What this introduces\n\nTwo forms and a CLI door.\n",
+        rel,
     )
-    meta = mr_ops.read_mr_meta(tmp_path, WID)
+    meta = mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path))
     assert meta.title == "Publish auto-escalate controls"
     assert meta.labels == ("release::minor", "area::ui")
     assert meta.assignees == ("omid",)
@@ -35,30 +47,33 @@ def test_read_mr_meta_reads_every_field(tmp_path):
 
 
 def test_read_mr_meta_absent_is_empty_not_an_error(tmp_path):
-    assert mr_ops.read_mr_meta(tmp_path, WID) == MRMeta()
+    assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)) == MRMeta()
 
 
 def test_read_mr_meta_front_matter_only_has_no_description(tmp_path):
     _meta(tmp_path, "title: T\n", "\n   \n")
-    assert mr_ops.read_mr_meta(tmp_path, WID).description == ""
+    assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)).description == ""
 
 
 def test_read_mr_meta_malformed_front_matter_keeps_the_body(tmp_path):
     # split_front_matter already degrades bad YAML to ({}, body): the
     # description survives, the structured fields do not.
     _meta(tmp_path, "title: [unclosed\n", "Body survives.\n")
-    meta = mr_ops.read_mr_meta(tmp_path, WID)
+    meta = mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path))
     assert meta.title is None and meta.labels == ()
     assert meta.description == "Body survives."
 
 
-def test_read_mr_meta_refuses_a_symlink_out_of_the_worktree(tmp_path):
+@pytest.mark.parametrize(
+    "rel", [OLD, item_paths.document_name(WID, "mr_meta")], ids=["older-worktree", "docs"]
+)
+def test_read_mr_meta_refuses_a_symlink_out_of_the_worktree(tmp_path, rel):
     outside = tmp_path / "outside.md"
     outside.write_text("---\ntitle: stolen\n---\nsecrets\n")
-    d = tmp_path / "wt" / ".engineering" / "mr_metas"
-    d.mkdir(parents=True)
-    (d / f"{WID}.md").symlink_to(outside)
-    assert mr_ops.read_mr_meta(tmp_path / "wt", WID) == MRMeta()
+    planted = item_paths.path_of(_run(tmp_path), WID, rel, worktree=tmp_path / "wt")
+    planted.parent.mkdir(parents=True)
+    planted.symlink_to(outside)
+    assert mr_ops.read_mr_meta(tmp_path / "wt", WID, _run(tmp_path)) == MRMeta()
 
 
 def test_read_mr_meta_drops_hostile_and_oversized_values(tmp_path):
@@ -70,7 +85,7 @@ def test_read_mr_meta_drops_hostile_and_oversized_values(tmp_path):
         "assignees: notalist\nreviewers: [{}, 7, 'grace']\n",
         "Body.\n",
     )
-    meta = mr_ops.read_mr_meta(tmp_path, WID)
+    meta = mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path))
     assert meta.title == "real title", "a multi-line title is clipped to its first line"
     assert "--web-url=http://evil" not in meta.labels, "an argument that reads as a flag is dropped"
     assert "" not in meta.labels and all("\n" not in x for x in meta.labels)
@@ -81,7 +96,7 @@ def test_read_mr_meta_drops_hostile_and_oversized_values(tmp_path):
 
 def test_read_mr_meta_drops_an_over_long_scalar(tmp_path):
     _meta(tmp_path, f"labels: ['{'x' * 201}', keep]\n", "Body.\n")
-    assert mr_ops.read_mr_meta(tmp_path, WID).labels == ("keep",)
+    assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)).labels == ("keep",)
 
 
 def test_mr_body_leads_with_the_description_and_demotes_the_commits():

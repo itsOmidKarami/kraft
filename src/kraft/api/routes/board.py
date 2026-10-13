@@ -581,7 +581,7 @@ def _detail_fallback(st, wid: str) -> dict | None:
 
 def _board_progress(st, row) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
-    p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"])
+    p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"], st.run_dirs)
     return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
@@ -1233,7 +1233,7 @@ async def get_work_item(wid: str, request: Request):
     passes = st.db.read(lambda c: store.session_passes(c, wid, [n["id"] for n in chain["nodes"]]))
     payload = store.work_item_payload(row)
     node_overrides = payload["node_overrides"]
-    progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid)
+    progress = progress_mod.for_detail(st.db, row, st.run_dirs.worktrees / wid, st.run_dirs)
     mr_ref = _mr_ref(st, wid)
     status = row["status"]
     # What it still comes after: unblock, and resume or retry past an abandoned one.

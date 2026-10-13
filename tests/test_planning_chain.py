@@ -63,7 +63,7 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
 
     _await_gate(client, wid, "spec_approval")
     body = client.get(f"/api/work-items/{wid}").json()
-    assert body["gate_artifact"] == f".engineering/specs/{wid}.md"
+    assert body["gate_artifact"] == f"items/{wid}/docs/spec.md"
     assert client.get(f"/api/work-items/{wid}/artifact").json()["title"] == "fake spec"
 
     client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
@@ -75,8 +75,7 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
     client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
     _await_gate(client, wid, "plan_approval")
     assert (
-        client.get(f"/api/work-items/{wid}").json()["gate_artifact"]
-        == f".engineering/plans/{wid}.md"
+        client.get(f"/api/work-items/{wid}").json()["gate_artifact"] == f"items/{wid}/docs/plan.md"
     )
     assert client.get(f"/api/work-items/{wid}/artifact").json()["title"] == "fake plan"
 
@@ -108,5 +107,6 @@ def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_
     sent = [p for p in prompt_log.read_text().split("\n\x00\n") if p.strip()]
     revised = [p for p in sent if "task 4 has no test" in p]
     assert len(revised) == 1
-    assert f".engineering/plans/{wid}.md" in revised[0]
+    plan = Path(client.app.state.run_dirs.base) / "items" / wid / "docs" / "plan.md"
+    assert f"A human read {plan} and" in revised[0]
     assert not revised[0].startswith("A human has steered this run:")

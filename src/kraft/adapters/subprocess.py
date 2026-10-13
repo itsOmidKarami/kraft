@@ -929,8 +929,11 @@ async def run_task(
             # the item's, never `cwd`'s, which is the member on a fanned-out run.
             identity = await _item_identity(db, work_item_id)
             full_env = {**identity, **full_env}
-            # Where $KRAFT_RESULT_PATH points, as a sandboxed launch has it.
+            # Where $KRAFT_RESULT_PATH points, as a sandboxed launch has it,
+            # and the folder $KRAFT_DOCS_DIR names.
             _create_worker_files(files)
+            for d in rw_dirs:
+                d.mkdir(parents=True, exist_ok=True)
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = backend.client_cwd(session_id) if backend is not None else None

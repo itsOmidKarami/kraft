@@ -5,10 +5,14 @@ DB/git half is exercised through the API in tests/api/test_progress.py."""
 
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 from pydantic import ValidationError
+from support.harness import write
 
-from kraft import progress
+from kraft import item_paths, progress
 from kraft.progress import ProgressReport, TaskProgress
 
 PLAN = """# Land it
@@ -212,22 +216,42 @@ def test_two_implementing_nodes_is_said_out_loud(caplog):
     assert "2 implementing nodes (implementation, implementation_again)" in caplog.text
 
 
-def test_read_tasks_prefers_the_plan_attachment(tmp_path):
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "p.md").write_text("## Task 1 — attached\n")
-    artifact = tmp_path / ".engineering" / "plans" / "w1.md"
-    artifact.parent.mkdir(parents=True)
-    artifact.write_text("## Task 1 — artifact\n")
-    assert progress.read_tasks(tmp_path, [{"kind": "plan", "path": "docs/p.md"}], "w1") == [
-        ("attached", False)
-    ]
-    assert progress.read_tasks(tmp_path, [{"kind": "spec", "path": "docs/p.md"}], "w1") == [
-        ("artifact", False)
-    ]
+def _row(attachments: list[dict]) -> dict:
+    return {"id": "w1", "attachments": json.dumps(attachments)}
 
 
-def test_read_tasks_without_a_plan_file_is_empty(tmp_path):
-    assert progress.read_tasks(tmp_path, [], "w1") == []
+@pytest.mark.parametrize(
+    ("attached", "written", "title"),
+    [
+        ("plan", [".engineering/plans/w1.md", "items/w1/docs/plan.md"], "attached"),
+        ("spec", [".engineering/plans/w1.md"], "old"),
+        ("spec", [".engineering/plans/w1.md", "items/w1/docs/plan.md"], "new"),
+    ],
+    ids=["the-attachment-wins", "older-worktree", "docs-before-older-worktree"],
+)
+def test_read_tasks_prefers_the_plan_attachment(tmp_path, run_dirs, attached, written, title):
+    worktree = tmp_path / "wt"
+    write(worktree, "docs/p.md", "## Task 1 — attached\n")
+    for rel in written:
+        base = run_dirs.base if rel.startswith("items/") else worktree
+        write(base, rel, f"## Task 1 — {'new' if rel.startswith('items/') else 'old'}\n")
+
+    rows = [{"kind": attached, "path": "docs/p.md"}]
+    assert progress.read_tasks(run_dirs, _row(rows), worktree) == [(title, False)]
+
+
+@pytest.mark.parametrize("planted", [None, "symlink", "fifo"], ids=["none", "symlink", "fifo"])
+def test_read_tasks_without_a_plan_file_is_empty(tmp_path, run_dirs, planted):
+    """A worker writes `docs/`: a link there is not followed, and a FIFO does
+    not hang the board."""
+    plan = item_paths.docs_dir(run_dirs, "w1") / "plan.md"
+    if planted:
+        plan.parent.mkdir(parents=True)
+    if planted == "symlink":
+        plan.symlink_to(write(tmp_path, "secret", "## Task 1 — host file\n"))
+    elif planted == "fifo":
+        os.mkfifo(plan)
+    assert progress.read_tasks(run_dirs, _row([]), tmp_path / "wt") == []
 
 
 def _ev(type_: str, node_id: str | None = None) -> dict:
@@ -316,7 +340,6 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
     from support.harness import git, v1_named_chain
 
     from kraft import events, store
-    from kraft.adapters.agent import artifact_path
 
     it = await item_on(v1_named_chain(templates_dir, "default"), status="needs_human")
     git(it.repo, "worktree", "add", "-q", "-b", it.id, str(it.worktree))
@@ -325,9 +348,8 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
     git(it.worktree, "commit", "-q", "--allow-empty", "-m", "fix: task 1 again")
     named = git(it.worktree, "rev-parse", "--short", "HEAD")
     git(it.worktree, "commit", "-q", "--allow-empty", "-m", "fmt: tidy")
-    plan = it.worktree / artifact_path("plan", it.id)
-    plan.parent.mkdir(parents=True)
-    plan.write_text("# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n\n## Task 3 — render\n")
+    tasks = "# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n\n## Task 3 — render\n"
+    write(it.run_dirs.base, item_paths.document_name(it.id, "plan"), tasks)
     await database.write(
         lambda c: c.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (base, it.id))
     )
@@ -342,7 +364,7 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
                 lambda c: events.append(c, it.id, "gate_rejected", {"gate": "g", "note": "n"})
             )
 
-    p = progress.for_detail(database, it.row(), it.worktree)
+    p = progress.for_detail(database, it.row(), it.worktree, it.run_dirs)
 
     if states is None:
         assert p is None

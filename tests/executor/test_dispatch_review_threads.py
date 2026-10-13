@@ -65,7 +65,9 @@ async def test_a_sandboxed_worker_is_told_to_run_kraft_only_with_a_route_to_it(
         return "done"
 
     monkeypatch.setattr(dispatch._agent, "run_agent_task", fake_run_agent_task)
-    monkeypatch.setattr(dispatch.prompts._progress, "tasks_for", lambda row, wt: ["a", "b"])
+    monkeypatch.setattr(
+        dispatch.prompts._progress, "tasks_for", lambda row, wt, run_dirs: ["a", "b"]
+    )
     task = {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
     it = await item_on([{"id": "implementation", "kind": "exec", "tasks": [task]}])
     await _publish(it.database, it.id)

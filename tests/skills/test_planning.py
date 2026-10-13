@@ -6,12 +6,13 @@ import pytest
 
 from kraft import skill
 
-#: Per skill, because the plan method legitimately names its *input* directory
-#: (`.engineering/specs/`, where the approved spec is) while nothing may name
-#: its own *output* path — that is `_ARTIFACT`'s to state.
+#: Nothing may name a document's path, its own or its input's: `_ARTIFACT`
+#: states where the output goes, and every launch's context lists the item's
+#: documents (`agent.documents_note`). A method that names `.engineering/`
+#: points at where they no longer are.
 FORBIDDEN = {
-    "spec": (".engineering/", "front matter", "git add", "git commit"),
-    "plan": (".engineering/plans", "front matter", "git add", "git commit"),
+    "spec": (".engineering/", "items/", "front matter", "git add", "git commit"),
+    "plan": (".engineering/", "items/", "front matter", "git add", "git commit"),
 }
 
 
