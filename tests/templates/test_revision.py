@@ -104,6 +104,47 @@ def test_a_change_set_with_only_a_rationale_is_empty():
             ),
             r"node\.id",
         ),
+        (
+            _artifact(
+                {
+                    "rationale": "ok",
+                    "add": [
+                        {
+                            "after": "build",
+                            "evidence": "e",
+                            "node": {
+                                "id": "x",
+                                "tasks": [{"id": "release:t", "extends": "release:base"}],
+                            },
+                        }
+                    ],
+                }
+            ),
+            r"node\.tasks\.0\.id",
+        ),
+        (
+            _artifact(
+                {
+                    "rationale": "ok",
+                    "add": [
+                        {
+                            "after": "build",
+                            "evidence": "e",
+                            "node": {
+                                "id": "x",
+                                "steps": [
+                                    {
+                                        "id": "release:s",
+                                        "tasks": [{"id": "t", "extends": "check"}],
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ),
+            r"node\.steps\.0\.id",
+        ),
     ],
     ids=[
         "prose-before",
@@ -120,6 +161,8 @@ def test_a_change_set_with_only_a_rationale_is_empty():
         "added-task-not-from-the-library",
         "added-node-with-no-shape",
         "added-node-with-a-qualified-id",
+        "added-task-with-a-qualified-id",
+        "added-step-with-a-qualified-id",
     ],
 )
 def test_anything_but_one_strict_change_set_is_refused(text, match):
@@ -393,8 +436,9 @@ def test_the_gate_reads_the_rationale_each_change_with_its_evidence_then_the_dif
             },
             "`release:base`, `check`",
         ),
+        ({"id": "x", "tasks": []}, None),
     ],
-    ids=["local-node", "addon-node", "addon-tasks"],
+    ids=["local-node", "addon-node", "addon-tasks", "no-tasks"],
 )
 def test_the_gate_names_what_an_added_node_comes_from(tmp_path, node, source):
     release = installed(
@@ -412,7 +456,8 @@ def test_the_gate_names_what_an_added_node_comes_from(tmp_path, node, source):
 
     shown, _ = revision.render(text, _chain(), GATE, library)
 
-    assert f"- add `x` after `build`, from {source} -- plan: needs it" in shown
+    from_ = f", from {source}" if source else ""
+    assert f"- add `x` after `build`{from_} -- plan: needs it" in shown
 
 
 @pytest.mark.parametrize(
