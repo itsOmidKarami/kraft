@@ -333,7 +333,10 @@ async def test_a_trigger_naming_another_repos_library_is_skipped_not_the_whole_t
     pol = policy.Policy(
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
-        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="app:ship", title="t")],
+        triggers=[
+            policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="app:ship", title="t"),
+            policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="after"),
+        ],
     )
     state = _state(tmp_path, policy_obj=pol)
     app = stub_app(**{**state, "library": _WithRepoLibrary(state["library"])})
@@ -344,6 +347,11 @@ async def test_a_trigger_naming_another_repos_library_is_skipped_not_the_whole_t
     with caplog.at_level("WARNING", logger="kraft.triggers"):
         found = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
 
-    assert len(found) == filed
+    titles = app.state.db.read(
+        lambda c: sorted(r["title"] for r in c.execute("SELECT title FROM work_items"))
+    )
+    # The trigger after the skipped one still files: one entry, not the tick.
+    assert titles == sorted(["after", *(["t"] if filed else [])])
+    assert len(found) == filed + 1
     warned = any("visible only to items in app" in r.message for r in caplog.records)
     assert warned == (not filed)
