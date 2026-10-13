@@ -38,6 +38,11 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
     )
 
 
+def _case_folded_twin(store, _rel, text):
+    """What a case-insensitive filesystem (APFS) shows beside the skill."""
+    edit_store(store, "skills/Deploy-Review/SKILL.md", text)
+
+
 @pytest.mark.parametrize(
     ("ref", "text", "error", "tamper"),
     [
@@ -58,6 +63,7 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
             "SKILL.md is missing; the store was changed",
             remove_from_store,
         ),
+        ("release:Deploy-Review", None, "has no skill 'Deploy-Review'", _case_folded_twin),
     ],
     ids=[
         "loaded-addon-is-read",
@@ -67,6 +73,7 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
         "edited-store-is-refused",
         "edited-digest-manifest-is-refused",
         "deleted-skill-is-refused",
+        "a-name-no-store-holds-is-no-skill",
     ],
 )
 def test_addon_skill_references(tmp_path, ref, text, error, tamper):

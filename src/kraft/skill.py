@@ -139,7 +139,11 @@ def _addon_path(
         )
     _bare(name, where)
     rel = f"skills/{name}/SKILL.md"
-    if present and not _is_file(Path(root) / rel):
+    from kraft.addons.manifest import in_layout  # manifest imports kraft.config, which imports this
+
+    # A name no store can hold (`Deploy`) is no skill, even where a
+    # case-insensitive filesystem finds `skills/deploy/` under it.
+    if not in_layout(rel) or (present and not _is_file(Path(root) / rel)):
         raise _no_skill(where, value, Path(root) / rel)
     return Path(root), rel
 
