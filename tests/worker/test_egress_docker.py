@@ -34,6 +34,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from support.harness import own_files
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
@@ -274,7 +275,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
             if e["type"] == SandboxEvent.EGRESS_REFUSED
         ]
         out = work / "out"
-        log = short_run.logs / f"s{os.getpid()}.log"
+        log = own_files(short_run, f"s{os.getpid()}").log
         assert status != "config_error", log.read_text() if log.exists() else status
         (row,) = database.read(lambda c: c.execute("SELECT egress FROM worker_sessions").fetchall())
         transport = json.loads(row["egress"])["transport"]

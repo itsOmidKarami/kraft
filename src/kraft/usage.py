@@ -50,6 +50,8 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
+from kraft.worker.worktree_read import read_no_follow
+
 
 @dataclass(frozen=True)
 class Usage:
@@ -1243,8 +1245,9 @@ def read(log_path: Path, result_path: Path, reader: str | None = None) -> Usage 
     name is a config error, not a silent skip.
     """
     try:
-        result = json.loads(result_path.read_text())
-    except (OSError, json.JSONDecodeError):
+        # A worker wrote it: no symlink is followed, no FIFO waited on.
+        result = json.loads(read_no_follow(Path(result_path)))
+    except (OSError, ValueError):
         result = None
     if isinstance(result, dict):
         u = from_envelope(result)

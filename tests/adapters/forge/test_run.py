@@ -9,7 +9,7 @@ import json
 import subprocess
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, own_files
 
 from kraft.adapters import forge
 
@@ -539,7 +539,7 @@ async def test_ci_poll_writes_findings_for_a_code_red_pipeline(run_forge, run_di
         hook_point="merge_request_feedback.ci.await_ci",
     )
 
-    payload = json.loads((run_dirs.results / "s-f.json").read_text())
+    payload = json.loads(own_files(run_dirs, "s-f").result.read_text())
     assert payload["findings"]
     assert "test" in payload["findings"][0]["message"]
     assert {f["source_plugin"] for f in payload["findings"]} == {

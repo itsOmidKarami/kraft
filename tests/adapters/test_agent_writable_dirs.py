@@ -1,17 +1,21 @@
 """`kraft.adapters.agent` on codex's sandbox (Kraft-rs9pk).
 
 codex's workspace-write sandbox writes only the worktree and /tmp. A worker
-must also write $KRAFT_RESULT_PATH, in `run_dirs.results`, and commit, which
-writes the main checkout's `.git`. So Kraft hands a harness that declares
-`writable_dirs` both, on every launch. And `codex exec resume` rejects `-s`
+must also write $KRAFT_RESULT_PATH and its summary, in its session's `out/`,
+its item's documents, in `docs/`, and commit, which writes the main
+checkout's `.git`. So Kraft hands a harness that declares `writable_dirs`
+those, on every launch, and never the session folder that holds the log and
+exit code the host trusts. And `codex exec resume` rejects `-s`
 and `--add-dir` after `resume`, so every codex option must be a form the
 resume path parses too."""
 
 import json
 import subprocess
 
-# The `run` fixture's (tests/adapters/conftest.py) stand-in `run_dirs.results`.
-RESULTS = "/kraft/run/results"
+# Under the `run` fixture's (tests/adapters/conftest.py) stand-in run folder:
+# session s1's `out/` and item w1's `docs/`, and nothing else of either.
+OUT = "/kraft/run/items/w1/sessions/s1/out"
+DOCS = "/kraft/run/items/w1/docs"
 ROOTS = "sandbox_workspace_write.writable_roots="
 
 #: The only options `codex exec resume` accepts that codex.yaml can use
@@ -34,17 +38,19 @@ def test_a_codex_worktree_launch_may_write_its_results_and_its_git_dir(run, repo
 
     cmd = run(harness="codex", command="codex", cwd=str(worktree))["cmd"]
 
-    assert _roots(cmd) == [RESULTS, str((repo / ".git").resolve())]
+    assert _roots(cmd) == [OUT, DOCS, str((repo / ".git").resolve())]
     # Ahead of the bare prompt, which a preceding flag would otherwise swallow.
     assert cmd[-1] == "do the thing"
 
 
 def test_outside_a_repo_only_the_results_dir_is_granted(run, tmp_path):
-    assert _roots(run(harness="codex", command="codex", cwd=str(tmp_path))["cmd"]) == [RESULTS]
+    assert _roots(run(harness="codex", command="codex", cwd=str(tmp_path))["cmd"]) == [OUT, DOCS]
 
 
 def test_a_harness_without_writable_dirs_is_given_no_directory(run):
-    assert not any(RESULTS in a for a in run(harness="claude")["cmd"])
+    # The context names the summary's path in `out/`; only the list is a grant.
+    granted = json.dumps([OUT, DOCS])[1:-1]
+    assert not any(granted in a for a in run(harness="claude")["cmd"])
 
 
 def test_every_codex_option_parses_on_resume(run):

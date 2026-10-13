@@ -21,6 +21,10 @@ _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _ATX_HEADING = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 
 SESSIONS_DIR = ".engineering/sessions"
+#: A document and a session summary in an item's folder, named relative to
+#: the run folder (`kraft.item_paths`).
+ITEM_DOCUMENT = re.compile(r"items/(?P<item>[^/]+)/docs/(?P<kind>[^/]+)\.md")
+ITEM_SUMMARY = re.compile(r"items/(?P<item>[^/]+)/sessions/(?P<folder>[^/]+)/out/summary\.md")
 
 
 @dataclass(frozen=True)
@@ -70,9 +74,15 @@ def split_front_matter(text: str) -> tuple[dict, str]:
 
 
 def derive_kind(path: str, front_matter: dict) -> str | None:
+    """The front matter's `kind`, else what the path says: `<kind>s` for a
+    document, `sessions` for a summary, as `.engineering/<kind>s/` did."""
     fm = front_matter.get("kind")
     if isinstance(fm, str) and fm.strip():
         return fm.strip()
+    if m := ITEM_DOCUMENT.fullmatch(path):
+        return f"{m['kind']}s"
+    if ITEM_SUMMARY.fullmatch(path):
+        return "sessions"
     parts = Path(path).parts
     try:
         i = parts.index(".engineering")
@@ -87,12 +97,22 @@ def derive_title(path: str, front_matter: dict, body: str) -> str:
     if isinstance(fm, str) and fm.strip():
         return fm.strip()
     m = _ATX_HEADING.search(body)
-    return m.group(1).strip() if m else Path(path).stem
+    if m:
+        return m.group(1).strip()
+    # Every item's file has the same stem (`spec`, `summary`): say whose.
+    if doc := ITEM_DOCUMENT.fullmatch(path):
+        return f"{doc['kind']} for {doc['item']}"
+    if summary := ITEM_SUMMARY.fullmatch(path):
+        return f"session summary for {summary['item']}"
+    return Path(path).stem
 
 
 def source_kind_for(path: str) -> str:
-    """04 §6: everything under .engineering/sessions/ is a session summary."""
-    return "session_summary" if path.startswith(f"{SESSIONS_DIR}/") else "artifact"
+    """04 §6: everything under .engineering/sessions/ is a session summary,
+    and so is a session's `out/summary.md` in its item's folder."""
+    if path.startswith(f"{SESSIONS_DIR}/") or ITEM_SUMMARY.fullmatch(path):
+        return "session_summary"
+    return "artifact"
 
 
 def _str_or_none(value) -> str | None:

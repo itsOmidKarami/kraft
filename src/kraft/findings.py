@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from kraft.render import strip_ansi
+from kraft.worker.worktree_read import read_no_follow
 
 SEVERITIES: tuple[str, ...] = ("critical", "important", "minor")
 
@@ -166,8 +167,9 @@ def parse_counted(result_path: str | Path) -> tuple[list[Finding], int]:
     reviewer that found nothing.
     """
     try:
-        data = json.loads(Path(result_path).read_text())
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        # A worker wrote it: no symlink is followed, no FIFO waited on.
+        data = json.loads(read_no_follow(Path(result_path)))
+    except (OSError, ValueError):
         return [], 0
     if not isinstance(data, dict):
         return [], 0

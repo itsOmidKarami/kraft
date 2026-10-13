@@ -25,8 +25,9 @@ def run(monkeypatch):
 
         kwargs = dict(
             db=None,
-            # Only `results` is read: a harness declaring `writable_dirs` is handed it.
-            run_dirs=SimpleNamespace(results=Path("/kraft/run/results")),
+            # Only `base` is read: where the session's files are, and what a
+            # harness declaring `writable_dirs` is handed of them.
+            run_dirs=SimpleNamespace(base=Path("/kraft/run")),
             session_id="s1",
             work_item_id="w1",
             node_id="implementation",

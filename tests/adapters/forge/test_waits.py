@@ -11,7 +11,7 @@ import asyncio
 import json
 
 import pytest
-from support.harness import git
+from support.harness import git, own_files
 
 from kraft import events
 from kraft.adapters import forge
@@ -61,7 +61,7 @@ async def test_automated_review_reports_ordinary_task_results(
 
     assert await run_forge(fake, "automated_review", "r1") == (expected, expected)
 
-    written = run_dirs.results / "r1.json"
+    written = own_files(run_dirs, "r1").result
     got = (
         [f["message"] for f in json.loads(written.read_text())["findings"]]
         if written.exists()

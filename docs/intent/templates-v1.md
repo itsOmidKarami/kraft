@@ -1243,13 +1243,14 @@ origin: src/kraft/worker/backends/docker.py §Runtime -- sandbox Part 2, P1: roo
 
 ## REQ sandbox-sees-only-its-own-items-results
 
-A sandboxed launch SHALL mount, of the results folder, only files that belong
-to its own work item: the result file, review package and cut instruction of
-that item's sessions, taken from its session rows. It SHALL NOT mount the
-folder itself, nor any file of another work item, nor a path that is not an
-existing plain file. Every such file SHALL be read-only except the launching
-session's own result file. A launch that is no session SHALL mount none.
-enforced-by: tests/worker/backends/test_docker.py::test_docker_argv_mounts_only_this_session_s_result_file_read_write, tests/worker/backends/test_docker.py::test_docker_argv_refuses_the_results_folder_itself, tests/worker/backends/test_docker.py::test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir, tests/store/test_session_result_files.py::test_result_files_are_the_items_own_and_only_those_that_exist, tests/adapters/test_subprocess_sandbox_results.py::test_a_sandboxed_launch_mounts_only_its_own_items_results, tests/worker/backends/test_docker_results_e2e.py::test_a_sandboxed_session_sees_only_its_own_items_results[docker]
+A sandboxed launch SHALL mount, of the results folder and its item's session
+folders, only files that belong to its own work item: the result file,
+summary, review package and cut instruction of that item's sessions, taken
+from its session rows. It SHALL NOT mount either folder itself, nor any file
+of another work item, nor a path that is not an existing plain file. Every
+such file SHALL be read-only except the launching session's own result file
+and summary. A launch that is no session SHALL mount none.
+enforced-by: tests/worker/backends/test_docker.py::test_docker_argv_mounts_only_this_session_s_result_file_read_write, tests/worker/backends/test_docker.py::test_docker_argv_refuses_the_results_folder_itself, tests/worker/backends/test_docker.py::test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir, tests/store/test_session_result_files.py::test_result_files_are_the_items_own_and_only_those_that_exist, tests/adapters/test_subprocess_sandbox_results.py::test_a_sandboxed_launch_mounts_only_its_own_items_results, tests/worker/backends/test_docker_results_e2e.py::test_a_sandboxed_session_sees_only_its_own_items_results[docker], tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/store/test_session_result_files.py::test_result_files_lists_older_files_and_session_folders
 origin: src/kraft/store/sessions.py §result_files -- Kraft-dni4n: the whole folder was mounted read-only, so a sandboxed worker on one repository could read the diffs and findings of every other work item.
 
 ## REQ sandbox-egress-is-deny-by-default-when-declared

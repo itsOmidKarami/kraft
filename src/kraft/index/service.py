@@ -180,6 +180,24 @@ class Indexer:
         base = (self._run_dirs.worktrees / work_item_id).resolve()
         return ingest.read_inside(base, str(path.relative_to(base)))
 
+    def _read_summary(self, ref: str, work_item_id: str, session_id: str) -> str | None:
+        """The text of a session's summary ref, or None. Untrusted input: a
+        worker may still report its own. A ref under `items/` is read only
+        when it is exactly this item's session's own `out/summary.md`, or its
+        escalation thread's, in the run folder; Kraft records no other there.
+        Any other ref is read inside the item's worktree, as before
+        (`_read_worktree_file`). Never through a symlink or a FIFO."""
+        if self._run_dirs is None:
+            return None
+        if m := ingest.ITEM_SUMMARY.fullmatch(ref):
+            own = m["folder"] == session_id or m["folder"].startswith("escalation-")
+            if m["item"] != work_item_id or not own:
+                return None
+            return ingest.read_inside(self._run_dirs.base.resolve(), ref)
+        if Path(ref).parts[:1] == ("items",):
+            return None
+        return self._read_worktree_file(ref, work_item_id, markdown=True)
+
     async def ingest_session_summary(self, session_id: str) -> bool:
         """Ingest the summary a finished worker session reported. Returns False
         (and logs) on anything unusable — the index never blocks the executor."""
@@ -195,9 +213,7 @@ class Indexer:
         if row is None or not row["session_summary_ref"]:
             return False
         ref = row["session_summary_ref"]
-        text = await asyncio.to_thread(
-            self._read_worktree_file, ref, row["work_item_id"], markdown=True
-        )
+        text = await asyncio.to_thread(self._read_summary, ref, row["work_item_id"], session_id)
         if text is None:
             logger.warning("session %s summary ref %r not readable; skipping", session_id, ref)
             return False

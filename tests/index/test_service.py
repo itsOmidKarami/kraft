@@ -5,21 +5,11 @@ import os
 
 import pytest
 from support.harness import make_repo_with_engineering
+from support.index import seed_session as _seed_session
+from support.index import seed_work_item as _seed_work_item
 
-from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
-
-
-def _seed_work_item(db: Database, repo: str, wid: str = "w1"):
-    return db.write(
-        lambda c: c.execute(
-            "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
-            "chain_definition, status, created_at, updated_at) VALUES "
-            "(?, 'b1', 't', ?, 'quick-task', '{}', 'active', 'now', 'now')",
-            (wid, repo),
-        )
-    )
 
 
 async def test_repos_union_of_work_items_and_env(tmp_path, database, conn):
@@ -111,25 +101,6 @@ async def test_search_unparseable_query_falls_back_to_literal(database, conn):
 
     ix = Indexer(conn, database, repos_env="")
     assert ix.search('"unterminated') == []
-
-
-def _seed_session(db, sid, wid, ref, node="implementation", hook="on.implementation.start"):
-    from kraft import store
-
-    return db.write(
-        lambda c: (
-            store.create_session(
-                c,
-                id=sid,
-                work_item_id=wid,
-                node_id=node,
-                hook_point=hook,
-                log_path="/dev/null",
-                result_path="/dev/null",
-            ),
-            c.execute("UPDATE worker_sessions SET session_summary_ref=? WHERE id=?", (ref, sid)),
-        )
-    )
 
 
 async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):

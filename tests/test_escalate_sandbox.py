@@ -77,7 +77,7 @@ async def test_a_member_symlinked_to_another_worktree_never_launches_a_turn(
         ),
     )
 
-    log = next(run_dirs.logs.glob("*.log")).read_text()
+    log = next((run_dirs.base / "items").glob("*/sessions/*/session.log")).read_text()
     assert status == "config_error"
     assert f"workspace member {_REL} of" in log and "no checkout Kraft made" in log, log
     assert _tree(victim_admin) == before

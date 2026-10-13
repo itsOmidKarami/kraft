@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, harness_without, write_harness_profiles
+from support.harness import entry_of, harness_without, own_files, write_harness_profiles
 
 from kraft import skill, store
 from kraft.adapters import agent
@@ -85,16 +85,16 @@ async def test_agent_error_envelope_downgrades_to_failed(launch, monkeypatch):
     assert (status, row["status"]) == ("failed", "failed")
 
 
-async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, repo, monkeypatch):
-    """04 §6: the injected prompt carries the linkage fields, the worker writes
-    .engineering/sessions/<session>.md, and its ref lands on worker_sessions."""
+async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, run_dirs, monkeypatch):
+    """04 §6: the injected prompt carries the linkage fields and the path, the
+    worker writes its session's `out/summary.md`, and Kraft records it."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
 
     status, row = await launch("s3")
 
     assert (status, row["harness"]) == ("done", "claude")  # reattach's reader (Kraft-9elw1)
-    assert row["session_summary_ref"] == ".engineering/sessions/s3.md"
-    summary = (repo / ".engineering" / "sessions" / "s3.md").read_text()
+    assert row["session_summary_ref"] == "items/w1/sessions/s3/out/summary.md"
+    summary = own_files(run_dirs, "s3").summary.read_text()
     for line in (
         "work_item_ids: [w1]",
         "node_id: implementation",
@@ -295,7 +295,7 @@ def test_default_profile_reproduces_todays_command_line(run):
         node_id="implementation",
         hook_point="on.implementation.start",
         session_id="s1",
-        summary_name="s1",
+        summary_path="/kraft/run/items/w1/sessions/s1/out/summary.md",
     )
 
     assert run()["cmd"] == [

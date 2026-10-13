@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from pathlib import Path
 
 import pytest
 from support.harness import write
@@ -149,6 +150,30 @@ def test_an_id_that_is_not_one_path_component_is_refused(run_dirs, value):
 )
 def test_a_log_outside_an_item_folder_is_an_older_session_s(log, legacy):
     assert item_paths.is_legacy_log(log) is legacy
+
+
+@pytest.mark.parametrize(
+    ("log", "result", "exit"),
+    [
+        ("/r/logs/s1.log", "/r/results/s1.json", "/r/results/s1.exit"),
+        (
+            "/r/items/w1/sessions/s1/session.log",
+            "/r/items/w1/sessions/s1/out/result.json",
+            "/r/items/w1/sessions/s1/result.exit",
+        ),
+        (
+            "/r/items/w1/sessions/s2/session.log",
+            "/r/items/w1/sessions/escalation-1/out/result.json",
+            "/r/items/w1/sessions/s2/result.exit",
+        ),
+    ],
+    ids=["older-beside-its-result", "own-folder", "thread-turn-s-own"],
+)
+def test_a_session_s_exit_code_is_found_by_its_row(log, result, exit):
+    """Never derived from the result file alone: in a session folder the
+    exit code is Kraft's, beside the log, and an escalation turn's result is
+    its thread's while its exit code is its own."""
+    assert item_paths.exit_file(log, result) == Path(exit)
 
 
 @pytest.mark.parametrize(

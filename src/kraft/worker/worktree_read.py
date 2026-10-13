@@ -85,6 +85,18 @@ def open_no_symlinks(root: Path, rel: str) -> int:
     return fd
 
 
+def read_no_follow(path: Path) -> bytes:
+    """The whole of the regular file `path`, opened without following a
+    symlink at its last component and without blocking on a FIFO: a file a
+    worker writes into a folder Kraft made, such as its result file, whose
+    folder the worker cannot replace but whose name it can. Raises `OSError`,
+    `FileNotFoundError` when nothing is there, for anything it will not
+    read."""
+    fd = open_no_symlinks(path.parent, path.name)
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read()
+
+
 def worktree_file_path(root: Path, rel: str) -> Path | None:
     """`root/rel` when it is a regular file reached with no symlink at any
     component and inside `root`: the walk `read_worktree_file` makes, for a

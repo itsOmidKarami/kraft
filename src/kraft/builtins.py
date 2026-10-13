@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
-from kraft import events, logs, store
+from kraft import events, item_paths, logs, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -2027,8 +2027,11 @@ async def start_session(
     returned id/paths are that row's, not `session_id`'s -- the caller must
     use the returned id, not `session_id`, for the rest of its work.
     """
-    log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = run_dirs.results / f"{session_id}.json"
+    files = item_paths.session_files(run_dirs, work_item_id, session_id)
+    # Its own `out/`, which holds the result file `finish_session` writes:
+    # nothing but Kraft writes there for an in-process task.
+    files.writable.mkdir(parents=True, exist_ok=True)
+    log_path, result_path = files.log, files.result
     actual_id, log_str, result_str = await db.write(
         lambda c: store.create_session(
             c,

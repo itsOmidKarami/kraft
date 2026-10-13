@@ -7,8 +7,9 @@ KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS (comma-separated `--model` values, `-` for a
 launch that names none) puts only those launches in rate_limit mode.
 
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
-reads the linkage fields back out of the prompt, writes
-.engineering/sessions/<session>.md, and reports session_summary_ref.
+reads the linkage fields and the summary's path back out of the prompt and
+writes the summary there; Kraft records it, so no session_summary_ref is
+reported.
 
 The reported `status` defaults to "done". KRAFT_FAKE_AGENT_STATUS overrides it
 for every invocation; KRAFT_FAKE_AGENT_CONCERNS / KRAFT_FAKE_AGENT_QUESTION /
@@ -54,12 +55,12 @@ def _ctx_fields(argv: list[str]) -> dict[str, str]:
     return fields
 
 
-def _write_summary(fields: dict[str, str]) -> str | None:
+def _write_summary(argv: list[str], fields: dict[str, str]) -> None:
     session = fields.get("Worker session")
-    if not session:
-        return None
-    ref = f".engineering/sessions/{session}.md"
-    path = pathlib.Path(ref)
+    found = re.search(r"session summary to (\S+?), starting", _context(argv))
+    if not session or not found:
+        return
+    path = pathlib.Path(found.group(1))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "---\n"
@@ -69,7 +70,6 @@ def _write_summary(fields: dict[str, str]) -> str | None:
         f"worker_session_id: {session}\n"
         "---\n\nfake agent session\n"
     )
-    return ref
 
 
 def _write_artifact(argv: list[str]) -> None:
@@ -190,7 +190,7 @@ def main() -> int:
     if mode not in ("error", "rate_limit") and result_path:
         _write_artifact(sys.argv)
         fields = _ctx_fields(sys.argv)
-        ref = _write_summary(fields)
+        _write_summary(sys.argv, fields)
         entry = _plan_entry()
         # KRAFT_FAKE_AGENT_STATUS/_CONCERNS/_QUESTION are the single-shot knobs;
         # a plan entry (per invocation) overrides them when present. Default
@@ -206,8 +206,6 @@ def main() -> int:
         verdict = entry.get("verdict") or os.environ.get("KRAFT_FAKE_AGENT_VERDICT")
         if verdict:
             result["verdict"] = verdict
-        if ref:
-            result["session_summary_ref"] = ref
         # Lets a test pin that the fix task's own result never leaks into the
         # next cycle's findings (KRAFT_FAKE_AGENT_FINDING sets the message).
         finding = os.environ.get("KRAFT_FAKE_AGENT_FINDING")

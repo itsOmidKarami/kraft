@@ -50,7 +50,7 @@ async def test_a_sandboxed_session_sees_only_its_own_items_results(
         ["sh", "-c", script],
         worktree,
         {"kind": "docker", "image": git_image},
-        database.read(lambda c: store.result_files(c, results, "w1")),
+        database.read(lambda c: store.result_files(c, run_dirs, "w1")),
         result_path=own,
     )
     ran = subprocess.run(argv, capture_output=True, text=True)

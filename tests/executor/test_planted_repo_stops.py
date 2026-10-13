@@ -133,7 +133,7 @@ async def test_the_review_package_is_not_read_while_a_sandboxed_co_task_runs(
         assert "the review package is available once" in _log_of(it, CONFIG_ERROR)
     else:
         assert (status, launched) == ("done", ["implementation.main.implement"])
-        (package,) = it.run_dirs.results.glob("*.review.md")
+        (package,) = (it.run_dirs.base / "items" / it.id).glob("sessions/*/review.md")
         assert package.is_file()
 
 

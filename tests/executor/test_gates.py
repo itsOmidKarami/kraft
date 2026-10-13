@@ -3,11 +3,11 @@ and is auto-reviewed only when it declares a reviewer and the item opts in.
 
 Auto-escalation of a non-gate `needs_human` stop is tests/executor/test_escalation.py."""
 
-import json
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from support import harness
 from support.harness import entry_of, fake_harness_home, v1_chain, v1_resolved, v1_walk
 
 from kraft import events, executor, store
@@ -585,9 +585,8 @@ async def test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate(
 
     async def _capture(_db, _rd, **kw):
         seen.update(kw)
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "looks right"})
-        )
+        verdict = {"status": "done", "verdict": "approve", "concerns": "looks right"}
+        harness.write_own_result(it.run_dirs, kw["work_item_id"], kw["session_id"], verdict)
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _capture)
@@ -630,9 +629,8 @@ async def test_auto_review_launches_with_the_method_mode_and_tools_it_resolved(
 
     async def _capture(_db, _rd, **kw):
         seen.update(kw)
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "ok"})
-        )
+        verdict = {"status": "done", "verdict": "approve", "concerns": "ok"}
+        harness.write_own_result(it.run_dirs, kw["work_item_id"], kw["session_id"], verdict)
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _capture)

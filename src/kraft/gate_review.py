@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from kraft import caps, events, executor
+from kraft import caps, events, executor, item_paths
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -366,7 +366,7 @@ async def review(
         )
         return "undecided", str(exc)
 
-    result_path = run_dirs.results / f"{session_id}.json"
+    result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
     # A verdict counts only from a session that finished thinking (`vocab.ADVANCING`),

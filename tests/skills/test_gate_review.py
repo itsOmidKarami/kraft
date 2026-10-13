@@ -11,7 +11,15 @@ import os
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, v1_chain, v1_item, v1_node, v1_task, write_harness_profiles
+from support.harness import (
+    entry_of,
+    v1_chain,
+    v1_item,
+    v1_node,
+    v1_task,
+    write_harness_profiles,
+    write_own_result,
+)
 
 from kraft import caps as _caps
 from kraft import events, executor, gate_review, store
@@ -70,7 +78,7 @@ def _fake_agent(result: dict | None, seen: dict):
         seen["kwargs"] = kw
         seen["session_id"] = session_id
         if result is not None:
-            (run_dirs.results / f"{session_id}.json").write_text(json.dumps(result))
+            write_own_result(run_dirs, kw["work_item_id"], session_id, result)
         return result.get("status", "done") if result else "failed"
 
     return fake_run_agent_task

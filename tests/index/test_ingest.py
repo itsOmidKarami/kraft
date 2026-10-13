@@ -46,6 +46,10 @@ def test_derive_kind_from_folder():
     assert ingest.derive_kind(".engineering/specs/a.md", {}) == "specs"
     assert ingest.derive_kind(".engineering/specs/sub/a.md", {}) == "specs"
     assert ingest.derive_kind(".engineering/a.md", {}) is None
+    # An item's folder, named relative to the run folder: the same kinds.
+    assert ingest.derive_kind("items/w1/docs/spec.md", {}) == "specs"
+    assert ingest.derive_kind("items/w1/sessions/s1/out/summary.md", {}) == "sessions"
+    assert ingest.derive_kind("items/w1/history/spec.1.md", {}) is None
 
 
 def test_derive_kind_front_matter_overrides():
@@ -56,6 +60,10 @@ def test_derive_title_precedence():
     assert ingest.derive_title("x/a.md", {"title": "FM"}, "# Heading\n") == "FM"
     assert ingest.derive_title("x/a.md", {}, "\n#  Heading here \nmore") == "Heading here"
     assert ingest.derive_title("x/my-doc.md", {}, "no heading here") == "my-doc"
+    # Every item's file has the same stem: the fallback says whose it is.
+    assert ingest.derive_title("items/w1/docs/plan.md", {}, "") == "plan for w1"
+    summary = "items/w1/sessions/s1/out/summary.md"
+    assert ingest.derive_title(summary, {}, "") == "session summary for w1"
 
 
 # ---- scan_repo ----
@@ -254,6 +262,9 @@ def test_source_kind_for_sessions_folder():
     assert ingest.source_kind_for(".engineering/sessions/s1.md") == "session_summary"
     assert ingest.source_kind_for(".engineering/specs/a.md") == "artifact"
     assert ingest.source_kind_for("README.md") == "artifact"
+    assert ingest.source_kind_for("items/w1/sessions/s1/out/summary.md") == "session_summary"
+    assert ingest.source_kind_for("items/w1/sessions/s1/out/result.json") == "artifact"
+    assert ingest.source_kind_for("items/w1/docs/spec.md") == "artifact"
 
 
 def test_links_from_front_matter_full():

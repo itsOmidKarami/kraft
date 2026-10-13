@@ -21,6 +21,7 @@ from support.chain_builders import (  # re-exported: the v1_* family
     v1_task_at,  # noqa: F401
 )
 from support.fake_docker import fake_docker_bin  # noqa: F401 -- re-exported
+from support.session_files import own_files, write_own_result  # noqa: F401 -- re-exported
 
 _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -573,6 +574,10 @@ class Item:
 
         evts = self.database.read(lambda c: events.read_after(c, 0, self.id))
         return [dict(e) for e in evts if type is None or e["type"] == type]
+
+    def files(self, sid: str):
+        """Where this item's session `sid`, started now, keeps its files."""
+        return own_files(self.run_dirs, sid, self.id)
 
     def sessions(self, node: str | None = None) -> list[dict]:
         """This item's worker_sessions rows, oldest first, optionally one node's."""

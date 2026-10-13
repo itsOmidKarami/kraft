@@ -858,6 +858,8 @@ def docker_argv(
     result_path: str | Path | None = None,
     cidfile: str | Path | None = None,
     *,
+    rw_files: Iterable[str | Path] = (),
+    rw_dirs: Iterable[str | Path] = (),
     refstores: Sequence[RefStore] = (),
     workdir: str | Path | None = None,
     home: str | Path | None = None,
@@ -887,18 +889,24 @@ def docker_argv(
     then `.git/modules/<sub>/hooks`, then `.git/worktrees/<id>/modules/...`),
     and the container only has to find the one nobody listed.
 
-    `results`: the files of the results folder this session may read, each
-    mounted read-only at its own path (`store.result_files`): its work item's
-    result files, review packages and cut instructions, and nothing of another
-    item's. That folder is one directory for every work item of every
-    repository, so it is never mounted itself (Kraft-dni4n): a worker would
-    read every other item's diff and findings there. Read-only, because a
-    session writing another session's `<other>.json` would forge its status
-    and findings. Only this session's own `result_path` is mounted back
-    read-write. Docker makes a directory, as root, of a source that does not
-    exist, so the caller lists only files it has seen. `None` for a launch
-    that is no session and has no results to read (a repository's
-    `setup_command`, `builtins.run_setup_command`): nothing is mounted.
+    `results`: the files of its item's sessions this session may read, each
+    mounted read-only at its own path (`store.result_files`): result files,
+    summaries, review packages and cut instructions, and nothing of another
+    item's. Neither the shared results folder nor a session folder is ever
+    mounted itself (Kraft-dni4n): a worker would read every other item's
+    diff and findings in the one, and could rewrite the log and exit code
+    the host reads and writes in the other. Read-only, because a session
+    writing another session's result would forge its status and findings.
+    Docker makes a directory, as root, of a source that does not exist, so
+    the caller lists only files it has seen. `None` for a launch that is no
+    session and has no results to read (a repository's `setup_command`,
+    `builtins.run_setup_command`): nothing is mounted.
+
+    What the session writes is mounted back read-write: `result_path` and
+    `rw_files` (its own result and summary, `SessionFiles`), each as a file,
+    which cannot be removed or swapped for a symlink from inside the
+    container; and `rw_dirs` (its item's `docs/`), each as a folder, where
+    it creates the document it was asked for.
 
     `<repo>/.git`, for every repository of the checkout -- the worktree's own
     and each workspace member's: a private ref store (`refstores` below), so
@@ -1017,12 +1025,17 @@ def docker_argv(
     if isinstance(results, str | Path):
         # Iterated, a path is its characters, and the first is `/`.
         raise TypeError("`results` is the files to mount, never the results folder itself")
+    own = list(dict.fromkeys(str(p) for p in (*([result_path] if result_path else ()), *rw_files)))
     for path in dict.fromkeys(str(p) for p in results or ()):
-        # Its own is mounted read-write below; docker refuses a target twice.
-        if result_path is None or path != str(result_path):
+        # Its own are mounted read-write below; docker refuses a target twice.
+        if path not in own:
             argv += ["-v", f"{path}:{path}:ro"]
-    if result_path is not None:
-        argv += ["-v", f"{result_path}:{result_path}"]
+    # Each its own file mount: a bind-mounted file cannot be removed or
+    # swapped for a symlink from inside the container.
+    for path in own:
+        argv += ["-v", f"{path}:{path}"]
+    for path in dict.fromkeys(str(d) for d in rw_dirs):
+        argv += ["-v", f"{path}:{path}"]
     argv += _gitdir_mounts(Path(cwd), refstores)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
@@ -1637,6 +1650,8 @@ class DockerBackend:
         result_path: Path,
         *,
         members: Mapping[str, tuple[Path, Path] | None] = {},
+        rw_files: Iterable[Path] = (),
+        rw_dirs: Iterable[Path] = (),
     ) -> str | None:
         try:
             host = await asyncio.to_thread(_launch_runtime)
@@ -1651,7 +1666,10 @@ class DockerBackend:
         admins = [dirs[1]] if dirs is not None else []
         admins += [d[1] for d in members.values() if d is not None]
         shadows = [_refstore.shadow_dir(run_dirs.base, a) for a in admins]
-        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadows, result_path), host)
+        return foreign_owned(
+            (sandbox_home(run_dirs, work_item_id), *shadows, result_path, *rw_files, *rw_dirs),
+            host,
+        )
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
@@ -1697,6 +1715,8 @@ class DockerBackend:
         *,
         session_id: str | None = None,
         result_path: str | Path | None = None,
+        rw_files: Iterable[str | Path] = (),
+        rw_dirs: Iterable[str | Path] = (),
         cidfile: str | Path | None = None,
         refs: Sequence[RefStore] = (),
         workdir: str | Path | None = None,
@@ -1716,6 +1736,8 @@ class DockerBackend:
             name=container_name(session_id) if session_id is not None else None,
             result_path=result_path,
             cidfile=cidfile,
+            rw_files=rw_files,
+            rw_dirs=rw_dirs,
             refstores=refs,
             workdir=workdir,
             home=home,

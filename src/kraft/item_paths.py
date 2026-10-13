@@ -204,6 +204,17 @@ def is_legacy_log(log_path: str | os.PathLike[str]) -> bool:
     )
 
 
+def exit_file(log_path: str | os.PathLike[str], result_path: str | os.PathLike[str]) -> Path:
+    """Where a session's launch wrapper wrote its exit code, by the paths its
+    row records: its own folder's `result.exit` for a session with a session
+    folder, else beside its result file (`results/<sid>.exit`), as before the
+    upgrade. Never derived from the result file alone: an escalation turn's
+    is its thread's, and the exit code is always the turn's own."""
+    if not is_legacy_log(log_path):
+        return Path(log_path).parent / "result.exit"
+    return Path(result_path).with_suffix(".exit")
+
+
 def sandbox_home(run_dirs, wid: str) -> Path:
     """The `HOME` an item's sandboxes share: the old `run/sandbox-home/<id>/`
     while it exists (it holds the agent CLI's chats a paused session resumes

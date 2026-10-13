@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import item_paths
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -50,20 +51,18 @@ _CTX = (
     "Hook point: {hook_point}\n"
     "Worker session: {session_id}\n"
     "\n"
-    "When you are done, write a short session summary to "
-    ".engineering/sessions/{summary_name}.md under the repo, starting with YAML "
-    "front-matter carrying exactly these keys and values:\n"
+    "When you are done, write a short session summary to {summary_path}, "
+    "starting with YAML front-matter carrying exactly these keys and values:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
     "worker_session_id: {session_id}\n"
     "---\n"
-    'Then write that path, relative to the repo root, as "session_summary_ref" '
-    "in the JSON result file at $KRAFT_RESULT_PATH.\n"
     "\n"
-    'Report how it went as "status" in that same result file: "done" if you '
-    'finished the work; "done_with_concerns" if you finished it but have '
+    'Report how it went as "status" in the JSON result file at '
+    '$KRAFT_RESULT_PATH: "done" if you finished the work; '
+    '"done_with_concerns" if you finished it but have '
     'doubts about correctness, with why in a "concerns" field; "failed" if you '
     'could not complete the task; or "needs_context" if you were missing '
     'information nobody gave you, with what you need in a "question" field. '
@@ -85,12 +84,11 @@ _CTX = (
     "not push and do not merge: Kraft pushes the branch and opens, updates "
     "and merges the merge request itself.\n"
     "\n"
-    "Exception: `.engineering/` (your session summary, and any spec/plan/"
-    "review document a hook asked you to write) is gitignored on purpose. "
-    "Kraft reads those files straight off disk, never from git, so they must "
-    "not reach the merge request. If `git add` refuses one of those paths, "
-    "that is git working as intended — do not `git add -f` it or otherwise "
-    "force it in."
+    "Exception: `.engineering/` (any spec/plan/review document an earlier "
+    "run left there) is gitignored on purpose. Kraft reads those files "
+    "straight off disk, never from git, so they must not reach the merge "
+    "request. If `git add` refuses one of those paths, that is git working as "
+    "intended — do not `git add -f` it or otherwise force it in."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -532,7 +530,10 @@ def context_sections(
     intent_dir: str | None = None,
     #: `(source, text)` per steering profile, the repository's then the task's.
     steering: Sequence[tuple[str, str]] = (),
-    summary_name: str | None = None,  # else session_id: `escalate.thread_files`
+    #: Where the session writes its summary (`SessionFiles.summary`, an
+    #: escalation thread's shared one), absolute; None shows a placeholder
+    #: (the steering preview, which has no session).
+    summary_path: str | None = None,
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -548,7 +549,7 @@ def context_sections(
                 node_id=node_id,
                 hook_point=hook_point,
                 session_id=session_id,
-                summary_name=summary_name or session_id,
+                summary_path=summary_path or "<session summary path>",
             ),
         )
     ]
@@ -634,15 +635,19 @@ def context_sections(
 INSTRUCTION_MAX_BYTES = 24 * 1024
 
 
-def _writable_dirs(run_dirs, name: str, cwd) -> str:
+def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd) -> str:
     """The `writable_dirs` value: a JSON array (also a TOML inline array) of
     the directories outside the worktree a worker must write (Kraft-rs9pk).
 
-    The result file's directory, under $KRAFT_HOME/run/results. And the
-    worktree's git common dir, where every commit writes -- the main
-    checkout's `.git`, outside a linked worktree -- asked of git rather than
-    guessed, and left out when git has none to give."""
-    dirs = [str(_subprocess.result_path_for(run_dirs, name).parent)]
+    The session's `out/`, which holds its result file and summary, and its
+    item's `docs/`. Never the session folder itself: it holds the log Kraft
+    reads usage and rate limits from and the exit code the host writes with
+    a plain `>`, and for `codex` this list is its OS sandbox's writable roots
+    (`harnesses/codex.yaml`), so a worker granted it could plant a link
+    there. And the worktree's git common dir, where every commit writes --
+    the main checkout's `.git`, outside a linked worktree -- asked of git
+    rather than guessed, and left out when git has none to give."""
+    dirs = [str(files.writable), str(item_paths.docs_dir(run_dirs, work_item_id))]
     common = git_read(
         Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
     )
@@ -699,7 +704,7 @@ def _config_dir(
     return {h.config_env: str(directory)}
 
 
-def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
+def _bounded_instruction(path: Path, task_instruction: str) -> str:
     """`task_instruction`, or its head plus where the whole of it is written.
 
     One place for every note an agent is launched with, because
@@ -708,7 +713,9 @@ def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> st
     raw = task_instruction.encode()
     if len(raw) <= INSTRUCTION_MAX_BYTES:
         return task_instruction
-    path = run_dirs.results / f"{session_id}.instruction.md"
+    # The session's own folder, which a worker never writes: a sandbox mounts
+    # the file read-only.
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(task_instruction)
     head = raw[:INSTRUCTION_MAX_BYTES].decode(errors="ignore")
     head = head[: head.rfind("\n")] if "\n" in head else head
@@ -850,7 +857,9 @@ async def run_agent_task(
     repository: str | None = None,
     repo_entry: RepoEntry | None = None,
     time_cap=None,
-    files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
+    #: The session's files, else its own folder's (`item_paths.session_files`):
+    #: an escalation turn's result and summary are its thread's (Kraft-s7c04.54).
+    files: item_paths.SessionFiles | None = None,
     harness_id: str | None = None,  # the harnesses.yaml id; keys `rate_limit_hit`
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
@@ -866,7 +875,8 @@ async def run_agent_task(
             f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
         ) from None
 
-    task_instruction = _bounded_instruction(run_dirs, session_id, task_instruction)
+    files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
+    task_instruction = _bounded_instruction(files.instruction, task_instruction)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -882,7 +892,7 @@ async def run_agent_task(
         method_text=method_text,
         intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
-        summary_name=files,
+        summary_path=str(files.summary),
     )
     options = {
         k: v
@@ -1065,7 +1075,7 @@ async def run_agent_task(
         rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
-        options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
+        options["writable_dirs"] = _writable_dirs(run_dirs, files, work_item_id, cwd)
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).

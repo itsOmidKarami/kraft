@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import v1_resolved, write_harness_profiles
+from support.harness import own_files, v1_resolved, write_harness_profiles
 
 from kraft import escalate, events, executor, store
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -48,7 +48,7 @@ def launched(monkeypatch):
 
     async def fake(db, run_dirs, *, session_id, **kw):
         seen.append(kw)
-        log = run_dirs.logs / f"{session_id}.log"
+        log = own_files(run_dirs, session_id, kw["work_item_id"]).log
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps({"type": "thread.started", "thread_id": "thread-1"}) + "\n")
         return "done"
