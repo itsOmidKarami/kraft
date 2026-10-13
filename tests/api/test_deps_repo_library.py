@@ -130,10 +130,11 @@ def _workspace(client, tmp_path):
     return root, ids
 
 
-def _file(client, repo, **body):
-    return client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False, **body}
-    )
+def _file(client, repo, chain_template=None):
+    """File a paused item on `repo`, running `chain_template` when given."""
+    chosen = {"chain_template": chain_template} if chain_template else {}
+    body = {"title": "t", "repo": str(repo), "autostart": False, **chosen}
+    return client.post("/api/work-items", json=body)
 
 
 def _set_chain(wid, chain_template):
