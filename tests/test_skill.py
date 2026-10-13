@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from support.addons import edit_and_forge, edit_store, installed
+from support.addons import edit_and_forge, edit_store, installed, remove_from_store
 
 from kraft import skill
 
@@ -52,6 +52,12 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
             "the store was changed after it was installed",
             edit_and_forge,
         ),
+        (
+            "release:deploy-review",
+            None,
+            "SKILL.md is missing; the store was changed",
+            remove_from_store,
+        ),
     ],
     ids=[
         "loaded-addon-is-read",
@@ -60,6 +66,7 @@ def test_a_plugin_reference_is_passed_through_without_a_lookup(tmp_path, loaded)
         "unloaded-addon-is-an-error",
         "edited-store-is-refused",
         "edited-digest-manifest-is-refused",
+        "deleted-skill-is-refused",
     ],
 )
 def test_addon_skill_references(tmp_path, ref, text, error, tamper):
@@ -73,7 +80,8 @@ def test_addon_skill_references(tmp_path, ref, text, error, tamper):
     dirs = {"release": store, "legacy": None}
     if error is not None:
         with pytest.raises(skill.SkillError, match=error):
-            skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
+            if tamper is None:  # `validate` checks presence only; `read` checks the store
+                skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)
             skill.read(tmp_path, ref, addon_dirs=dirs)
         return
     skill.validate(tmp_path, ref, where="library.yaml", addon_dirs=dirs)

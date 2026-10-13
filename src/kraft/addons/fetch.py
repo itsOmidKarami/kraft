@@ -392,6 +392,8 @@ class StoreFiles:
         try:
             data = read_regular(path, _cap(rel))
         except FetchError as exc:
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                raise StoreMismatch(f"{rel} is not a regular file; {CHANGED}") from exc
             raise StoreMismatch(f"{rel} does not match its digest; {CHANGED}") from exc
         if hashlib.sha256(data).hexdigest() != self.listed[rel][1]:
             raise StoreMismatch(f"{rel} does not match its digest; {CHANGED}")
@@ -450,11 +452,26 @@ def write_scratch(parent: Path, extracted: Extracted) -> Path:
 
 
 def remove_tree(path: Path) -> None:
-    """Delete a store, or a copy of one: its folders are read-only."""
-    for found in [path, *path.rglob("*")]:
-        if found.is_dir() and not found.is_symlink():
-            found.chmod(0o755)
+    """Delete a store, or a copy of one: its folders are read-only. A symlink
+    is removed itself, and nothing is followed through one."""
+    if path.is_symlink():
+        path.unlink()
+        return
+    path.chmod(0o755)
+    for dirpath, dirnames, _files in os.walk(path):  # top-down: made writable before entered
+        for name in dirnames:
+            if not (Path(dirpath) / name).is_symlink():
+                (Path(dirpath) / name).chmod(0o755)
     shutil.rmtree(path)
+
+
+def _discard(path: Path) -> None:
+    """`remove_tree`, best effort: what is left stays in `staging/` for GC."""
+    try:
+        if os.path.lexists(path):
+            remove_tree(path)
+    except OSError:
+        pass
 
 
 def write_store(addons_dir: Path, extracted: Extracted) -> Path:
@@ -463,11 +480,12 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     into place (one filesystem, so the rename is atomic), then never changed:
     files and directories are read-only. The digest's manifest sits beside the
     files as `.kraft-digest`, outside the hashed set. A store already there is
-    reused only if `verify_store` passes; one edited since it was written is
-    replaced by these files, which hash to its name by construction."""
+    reused only if it is a directory and `verify_store` passes; one edited
+    since it was written, or a symlink, is replaced by these files, which hash
+    to its name by construction."""
     final = addons_dir / "store" / digest(extracted.files).removeprefix("sha256:")
-    stale = False
-    if final.is_dir():
+    stale = final.is_symlink()
+    if not stale and final.is_dir():
         try:
             verify_store(final)
             return final
@@ -485,9 +503,12 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     aside = staging / f"{tmp.name}.stale"
     if stale:
         try:
-            # macOS will not move a read-only directory to another parent.
-            final.chmod(0o755)
-            os.rename(final, aside)
+            if final.is_symlink():
+                final.unlink()  # never chmod or move what it points at
+            else:
+                # macOS will not move a read-only directory to another parent.
+                final.chmod(0o755)
+                os.rename(final, aside)
         except FileNotFoundError:
             pass  # another writer moved it first
     try:
@@ -497,12 +518,11 @@ def write_store(addons_dir: Path, extracted: Extracted) -> Path:
     except OSError:
         # Another writer renamed the same content into place first.
         if not final.is_dir():
+            _discard(aside)
             raise
         shutil.rmtree(tmp)
-        return final
-    finally:
-        if aside.exists():
-            remove_tree(aside)
-    for folder in (final, *(final / p.relative_to(tmp) for p in folders)):
-        folder.chmod(0o555)
+    else:
+        for folder in (final, *(final / p.relative_to(tmp) for p in folders)):
+            folder.chmod(0o555)
+    _discard(aside)
     return final

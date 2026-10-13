@@ -8,7 +8,6 @@ reads add-ons, so an import the other way would be a cycle.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import threading
 from collections.abc import Callable, Collection, Mapping
@@ -323,11 +322,11 @@ def _why_left_out(addon: InstalledAddon, config_dir: Path, verify: bool) -> str 
         return "its store is missing and has not been restored"
     mismatch = "its files do not match the locked digest"
     try:
-        recorded = (root / fetch.DIGEST_FILE).read_bytes()
-        if hashlib.sha256(recorded).hexdigest() != root.name:
-            return mismatch
+        # Bounded and no-follow: the manifest must hash to the store's name.
         if verify:
             fetch.verify_store(root)
+        else:
+            fetch.open_store(root)
         declared = manifest.addon(
             manifest.parse((root / manifest.ADDON_JSON).read_text(), manifest.ADDON_JSON),
             manifest.ADDON_JSON,
@@ -639,15 +638,16 @@ def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> 
     is not waited for (raises `update.Busy`): the next collection takes what
     this one left. Returns the digests deleted. Only the daemon calls this:
     it alone knows what its loaded library and its unfinished work items read."""
-    import shutil
-
     from kraft.addons import fetch, update
 
     root = Path(addons_root) if addons_root is not None else addons_dir()
     removed: list[str] = []
     with update.write_lock(root, wait=0):
         kept = keep()
-        shutil.rmtree(root / "staging", ignore_errors=True)
+        try:
+            fetch.remove_tree(root / "staging")  # a replaced store's copy is read-only
+        except OSError:
+            pass  # gone already, or the next collection takes it
         stores = sorted((root / "store").iterdir()) if (root / "store").is_dir() else []
         for store in stores:
             if store.name in kept:

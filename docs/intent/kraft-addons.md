@@ -141,7 +141,7 @@ origin: src/kraft/addons/load.py §installed
 ## REQ an-addon-whose-digest-does-not-match-is-not-loaded
 
 IF an add-on's extracted files do not match the lock's digest, THEN the system SHALL leave that add-on out and report it under `invalid_templates`.
-enforced-by: tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out, tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-edited]
+enforced-by: tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out[emptied], tests/addons/test_load.py::test_a_digest_mismatch_leaves_the_addon_out[a-link-to-a-copy], tests/api/test_deps.py::test_health_names_an_addon_that_did_not_load[store-edited]
 origin: src/kraft/addons/load.py §installed
 
 ## REQ an-edited-store-file-is-never-read

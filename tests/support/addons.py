@@ -240,6 +240,13 @@ def forge_digest(store: Path) -> None:
     manifest_path.write_bytes(fetch.digest_manifest(fetch.extract_dir(store).files))
 
 
+def remove_from_store(store: Path, rel: str, _text: str | None = None) -> None:
+    """Delete `rel` from a read-only store, leaving its `.kraft-digest` as it
+    was. `_text` is ignored, so it fits beside `edit_store` in a table."""
+    edit_store(store, rel, "")
+    (store / rel).unlink()
+
+
 def edit_and_forge(store: Path, rel: str, text: str) -> None:
     """`edit_store`, then `forge_digest`: an edit whose manifest was rewritten
     to match it."""
