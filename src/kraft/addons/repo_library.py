@@ -366,7 +366,12 @@ def check(
     except manifest.ManifestError as exc:
         return refused(str(exc))
     others = {p.namespace for p in loaded if p.id != addon_id} | {repo_id}
-    problems = update.problems(declared, extracted.files, other_namespaces=others)
+    problems = update.problems(
+        declared,
+        extracted.files,
+        other_namespaces=others,
+        repositories=set(load.connected_ids(config_dir, repos)) - {repo_id},
+    )
     if why := load.instance_problem(
         repo_id, declared.requires, config_dir, repos=repos, repo_library=True
     ):
@@ -414,11 +419,19 @@ def check(
             else ()
         )
         if was is None:
-            reach += [
-                f"{where}: {key} {value!r} is now read from this repo library"
-                for where, key, _kind, value in update.references(config_dir)
-                if update._qualifier(value) == repo_id
-            ]
+            # A first accept: the id was reserved, so nothing outside the
+            # repository may already read it, config or an add-on's skill.
+            outside = []
+            for where, key, _kind, value, owner in update.scoped_references(config_dir, repos):
+                if update._qualifier(value) != repo_id:
+                    continue
+                if owner == repo_id:
+                    reach.append(f"{where}: {key} {value!r} is now read from this repo library")
+                else:
+                    outside.append(f"{where}: {key} {load.scope_message(value, repo_id)}")
+            outside += update.referrers(repo_id, [p for p in loaded if p.repo_id is None])
+            if outside:
+                return replace(refused(*outside, "change those first"), review=reviewed)
         own = f"{repo_id}:default"
         if default_chain in (None, "default") and after.library is not None:
             had = state.library is not None and own in state.library.chain_ids

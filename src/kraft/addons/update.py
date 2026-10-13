@@ -134,10 +134,13 @@ def problems(
     files: Mapping[str, tuple[str, bytes]],
     *,
     other_namespaces: Collection[str] = (),
+    repositories: Collection[str] = (),
 ) -> list[str]:
     """Every reason this add-on's content is refused; empty when it is taken.
     `other_namespaces` are the installed add-ons' namespaces, this one's own
-    left out: a skill reference into one of them is an add-on dependency."""
+    left out: a skill reference into one of them is an add-on dependency.
+    `repositories` are the connected repository ids: each is reserved for
+    that repository's library, whether or not one is accepted."""
     out: list[str] = []
     allowed_harnesses = set(found.requires.harnesses)
     for rel in sorted(files):
@@ -183,7 +186,12 @@ def problems(
                         "self-contained"
                     )
             skill = component.get("skill")
-            if _qualifier(skill) in set(other_namespaces) - {found.name, _KRAFT}:
+            if (qualifier := _qualifier(skill)) in set(repositories) - {found.name}:
+                out.append(
+                    f"{where}: skill {skill!r} names repository {qualifier}'s repo library "
+                    "namespace; there are no add-on dependencies"
+                )
+            elif _qualifier(skill) in set(other_namespaces) - {found.name, _KRAFT}:
                 out.append(
                     f"{where}: skill {skill!r} names another installed Kraft add-on; there are "
                     "no add-on dependencies"
@@ -226,11 +234,12 @@ def check(
     *,
     other_namespaces: Collection[str] = (),
     named_by: Sequence[str] = (),
+    repositories: Collection[str] = (),
 ) -> None:
     """Raise `Refused` when this add-on's content may not be installed.
     `named_by` is what `referrers()` says of its namespace."""
     if found_problems := [
-        *problems(found, files, other_namespaces=other_namespaces),
+        *problems(found, files, other_namespaces=other_namespaces, repositories=repositories),
         *named_by,
     ]:
         raise Refused(found_problems)
@@ -642,6 +651,7 @@ def update(
                     extracted.files,
                     other_namespaces=others,
                     named_by=referrers(namespace, [p for p in loaded if p.id != addon_id]),
+                    repositories=load.connected_ids(config_dir),
                 )
             except fetch.FetchError as exc:
                 results[addon_id] = Result(addon_id, "failed", problems=(str(exc),), kind=exc.kind)

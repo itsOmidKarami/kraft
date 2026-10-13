@@ -545,21 +545,23 @@ def for_item(
             left_out=f"repository {rid!r} has no accepted repo library",
             quiet=True,
         )
-        for rid in _connected_ids(config_dir)
+        for rid in connected_ids(config_dir)
         if rid not in taken
     ]
     return (*live, *pinned, *reserved)
 
 
-def _connected_ids(config_dir: Path | None) -> list[str]:
-    """Every connected repository's id in `config_dir`'s `repos.yaml`;
-    none when it cannot be read (its own check says why)."""
+def connected_ids(config_dir: Path | None, repos: Mapping | None = None) -> list[str]:
+    """Every connected repository's id in `config_dir`'s `repos.yaml` (or in
+    `repos`, one not saved yet); none when it cannot be read (its own check
+    says why). Each is a namespace reserved for that repository's library."""
     from kraft import paths
     from kraft.config import ConfigError, read_yaml
 
     config_dir = Path(config_dir) if config_dir is not None else paths.config_dir()
     try:
-        entries = read_yaml(config_dir / "repos.yaml", {}).get("repos")
+        repos = repos if repos is not None else read_yaml(config_dir / "repos.yaml", {})
+        entries = repos.get("repos")
     except ConfigError:
         return []
     found = (e.get("id") for e in entries or () if isinstance(e, dict))
