@@ -3,10 +3,21 @@
   "htmlLabels": false,
   "flowchart": { "htmlLabels": false, "curve": "basis" },
   "themeVariables": {
-    "fontFamily": "ui-sans-serif, system-ui, sans-serif",
+    "fontFamily": "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif",
     "fontSize": "15px",
-    "lineColor": "#7b8494",
-    "edgeLabelBackground": "#eef0f3"
+    "primaryColor": "#f1f5f9",
+    "primaryBorderColor": "#64748b",
+    "primaryTextColor": "#0f172a",
+    "nodeBorder": "#64748b",
+    "mainBkg": "#f1f5f9",
+    "lineColor": "#64748b",
+    "edgeLabelBackground": "#f1f5f9",
+    "actorBkg": "#f1f5f9",
+    "actorBorder": "#64748b",
+    "actorTextColor": "#0f172a",
+    "noteBkgColor": "#f1f5f9",
+    "noteBorderColor": "#64748b",
+    "noteTextColor": "#0f172a"
   },
-  "themeCSS": ".edgeLabel rect, .edgeLabel .label rect { opacity: 1; fill: #eef0f3; } .transition, .messageLine0, .messageLine1, .actor-line { stroke: #7b8494; } [id$=\"-arrowhead\"] path { fill: #7b8494; stroke: #7b8494; } .node circle.state-start { fill: #7b8494; stroke: #7b8494; } .cluster rect { fill: transparent; stroke: #7b8494; } .cluster-label text, .cluster-label tspan, .messageText, .messageText > tspan, .actor-man text > tspan { stroke: #eef0f3; stroke-width: 4px; stroke-linejoin: round; paint-order: stroke fill; }"
+  "themeCSS": ".edgeLabel rect, .edgeLabel .label rect { opacity: 1; fill: #f1f5f9; } .transition, .messageLine0, .messageLine1, .actor-line { stroke: #64748b; } [id$=\"-arrowhead\"] path { fill: #64748b; stroke: #64748b; } .node circle.state-start { fill: #64748b; stroke: #64748b; } .cluster rect { fill: transparent; stroke: #64748b; } .cluster-label text, .cluster-label tspan, .messageText, .messageText > tspan, .actor-man text > tspan { fill: #0f172a; stroke: #f1f5f9; stroke-width: 4px; stroke-linejoin: round; paint-order: stroke fill; } .cluster-label text, .cluster-label tspan, text.actor, text.actor > tspan { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }"
 }
