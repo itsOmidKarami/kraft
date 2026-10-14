@@ -1317,8 +1317,9 @@ async def _retry(wid: str, body: Retry, request: Request):
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
     # The caller as this item's session, bare, as every event records one:
-    # `<wid>/<sid>` names it only when `wid` is this item, and an older bare
-    # id is unique on its own (`deps.caller_ref`).
+    # `<wid>/<sid>` names it only when `wid` is this item, and a bare id is
+    # unique on its own: `deps.caller_ref` takes one only at the 32
+    # characters of a session from before per-item ids.
     caller = deps.caller_ref(request)
     caller_session_id = caller[1] if caller is not None and caller[0] in (None, wid) else None
     running = escalate.escalation_running(st.db, wid)

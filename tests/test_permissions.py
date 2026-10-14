@@ -171,7 +171,7 @@ def test_the_worker_side_fails_closed(monkeypatch):
     async def dead(*_a, **_kw):
         raise ValueError("no Kraft server at http://127.0.0.1:8765 — start one with `kraft`")
 
-    monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
+    monkeypatch.setenv("KRAFT_SESSION_ID", "w1/s1")
     monkeypatch.setattr(transport, "_post", dead)
     answer = asyncio.run(client_mod.permission_request("Bash", {"command": "ls"}))
     assert answer["behavior"] == "deny"

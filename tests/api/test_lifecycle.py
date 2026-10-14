@@ -302,7 +302,7 @@ def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session
     r = client.post(
         f"/api/work-items/{wid}/retry",
         json={},
-        headers={"x-kraft-session-id": "s1"},
+        headers={"x-kraft-session-id": f"{wid}/s1"},
     )
 
     assert r.status_code == 200, r.text
@@ -557,7 +557,11 @@ def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
 
 @pytest.mark.parametrize(
     ("headers", "by_person"),
-    [({}, True), ({"X-Kraft-Session-Id": "s-worker"}, False), ({"X-Kraft-Client": "mcp"}, False)],
+    [
+        ({}, True),
+        ({"X-Kraft-Session-Id": "w-other/s-worker"}, False),
+        ({"X-Kraft-Client": "mcp"}, False),
+    ],
     ids=["person", "worker", "mcp-assistant"],
 )
 def test_only_a_persons_retry_resets_a_cap_counter(client, repo, headers, by_person):

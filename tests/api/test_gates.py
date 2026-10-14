@@ -714,7 +714,7 @@ def test_a_worker_agent_s_gate_approval_is_not_recorded_as_a_person_s(client, re
     _await_gate(client, wid, "spec_approval")
     r = client.post(
         f"/api/work-items/{wid}/gates/spec_approval/approve",
-        headers={"X-Kraft-Session-Id": "abc123"},
+        headers={"X-Kraft-Session-Id": "w-other/abc123"},
     )
     assert r.status_code == 200, r.text
     evts = client.get(f"/api/work-items/{wid}/events").json()
@@ -762,7 +762,7 @@ def test_a_worker_s_own_session_id_outranks_how_it_connected(client, repo):
     _await_gate(client, wid, "spec_approval")
     r = client.post(
         f"/api/work-items/{wid}/gates/spec_approval/approve",
-        headers={"X-Kraft-Session-Id": "abc123", "X-Kraft-Client": "mcp"},
+        headers={"X-Kraft-Session-Id": "w-other/abc123", "X-Kraft-Client": "mcp"},
     )
     assert r.status_code == 200, r.text
     evts = client.get(f"/api/work-items/{wid}/events").json()

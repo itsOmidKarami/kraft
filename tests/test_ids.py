@@ -60,11 +60,32 @@ def test_a_session_reference_names_its_item(value, parsed):
 
 @pytest.mark.parametrize(
     "value",
-    ["", "k7m2x9qa/", "/p3n8w2", "k7m2x9qa/p3n8w2/x", "k7m2x9qa//p3n8w2"],
-    ids=["empty", "no-session", "no-item", "a-second-slash", "an-empty-segment"],
+    [
+        "",
+        "k7m2x9qa/",
+        "/p3n8w2",
+        "k7m2x9qa/p3n8w2/x",
+        "k7m2x9qa//p3n8w2",
+        "p3n8w2",
+        "8cbfe6e27c1044b3e445c0f0d726357",
+        "8cbfe6e27c1044b3e445c0f0d726357d0",
+    ],
+    ids=[
+        "empty",
+        "no-session",
+        "no-item",
+        "a-second-slash",
+        "an-empty-segment",
+        "bare-per-item-id",
+        "bare-one-short-of-pre-upgrade",
+        "bare-one-past-pre-upgrade",
+    ],
 )
 def test_a_malformed_session_reference_names_no_session(value):
-    """Refused whole, never split some way that happens to find a session."""
+    """Refused whole, never split some way that happens to find a session. A
+    bare value is a pre-upgrade session's only at its 32 characters, which is
+    what makes it unique on its own; a per-item id says nothing of whose it
+    is."""
     with pytest.raises(ValueError, match="not a session reference"):
         ids.parse_session_ref(value)
 

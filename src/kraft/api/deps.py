@@ -274,9 +274,9 @@ def caller_ref(request) -> tuple[str | None, str] | None:
     """The calling session as `X-Kraft-Session-Id` names it
     (`ids.parse_session_ref`): `(work item id, session id)` for a
     `<wid>/<sid>` reference, `(None, id)` for a bare id from a session started
-    before per-item ids, None with no header. A value that is neither is a
-    400: it is never split some other way, or matched by a prefix, to find a
-    session."""
+    before per-item ids (32 characters, and no other length), None with no
+    header. A value that is neither is a 400: it is never split some other
+    way, or matched by a prefix, to find a session."""
     value = request.headers.get("x-kraft-session-id")
     if not value:
         return None
@@ -285,16 +285,19 @@ def caller_ref(request) -> tuple[str | None, str] | None:
     except ValueError:
         raise HTTPException(
             400,
-            f"X-Kraft-Session-Id {value!r} is neither a session id nor <work item id>/<session id>",
+            f"X-Kraft-Session-Id {value!r} is neither <work item id>/<session id> nor a "
+            f"{ids.LEGACY_LENGTH}-character session id from before per-item ids",
         ) from None
 
 
 def caller_sessions(st, request) -> list:
     """The calling session's rows (`work_item_id`, `id`, `node_id`,
     `hook_point`): the one session a `<wid>/<sid>` reference names, matched
-    whole on both; for a bare id, every session with that id. That is one for
-    an id minted before per-item ids, but a caller decides as if it could be
-    several: the self-action guard refuses if any of them is the target's."""
+    whole on both; for a bare id, every session with that id. A bare id is
+    only ever one minted before per-item ids (`ids.parse_session_ref` refuses
+    a bare one of any other length), so that is one, but a caller decides as
+    if it could be several: the self-action guard refuses if any of them is
+    the target's, and a thread reply takes none."""
     ref = caller_ref(request)
     if ref is None:
         return []

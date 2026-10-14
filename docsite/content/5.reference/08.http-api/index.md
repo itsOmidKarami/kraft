@@ -142,8 +142,9 @@ session or more than one session has, they answer `404`, ending
 
 A worker's own session travels in the `X-Kraft-Session-Id` header as
 `<work item id>/<session id>`, from [`KRAFT_SESSION_ID`](/reference/configuration/environment-variables#kraft_session_id).
-A bare ID is a session from before then. A value that is neither answers
-`400`. A sandboxed worker's channel admits only its own session's
+A bare ID is a session from before then, so it is accepted only at that
+session's 32 characters. Any other value, a bare 6-character session ID
+included, answers `400`. A sandboxed worker's channel admits only its own session's
 `permission` and `permission-hook` routes, by both whole IDs.
 
 ## Routes the pages document

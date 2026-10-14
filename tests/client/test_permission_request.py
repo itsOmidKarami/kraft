@@ -23,7 +23,7 @@ def test_prompt_without_a_session_still_denies(monkeypatch):
 
 
 def test_enforce_with_the_server_down_is_unavailable(monkeypatch):
-    monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
+    monkeypatch.setenv("KRAFT_SESSION_ID", "w1/s1")
 
     async def down(*_a, **_k):
         raise ValueError("no server")
@@ -39,13 +39,15 @@ def test_enforce_with_the_server_down_is_unavailable(monkeypatch):
         ("k7m2x9qa/p3n8w2", "/work-items/k7m2x9qa/sessions/p3n8w2/permission"),
         (_OLD, f"/worker-sessions/{_OLD}/permission"),
         ("k7m2x9qa/", None),
+        ("p3n8w2", None),
     ],
-    ids=["under-its-item", "pre-upgrade-bare", "malformed"],
+    ids=["under-its-item", "pre-upgrade-bare", "malformed", "bare-per-item-id"],
 )
 def test_the_ask_goes_to_the_session_kraft_session_id_names(monkeypatch, ref, path):
     """`<wid>/<sid>` is asked under its item; a bare id, from a session
     launched before per-item ids, by the flat route that still answers it;
-    anything else is denied without asking."""
+    anything else is denied without asking, a bare id of any other length
+    included: it is no session's on its own."""
     monkeypatch.setenv("KRAFT_SESSION_ID", ref)
     asked = []
 

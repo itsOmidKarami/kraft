@@ -104,12 +104,10 @@ def _session(wid: str, sid: str | None) -> None:
         ("w-o/s-ended", None, ["w-o/s-ended"]),
         ("w-o/s-ended", "s-retried", []),
         ("w-o/s-ended", "completed", []),
-        # A summary from before per-item session ids names the session alone.
-        ("s-ended", None, ["s-ended"]),
         # Another item's session of the same id is not this one.
         ("w-x/s-ended", None, []),
     ],
-    ids=["still-stopped", "retried-since", "completed", "bare-id", "same-id-other-item"],
+    ids=["still-stopped", "retried-since", "completed", "same-id-other-item"],
 )
 def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(
     client, ref, then, orphaned

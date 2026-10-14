@@ -45,15 +45,24 @@ def session_ref(work_item_id: str, session_id: str) -> str:
 
 def parse_session_ref(value: str) -> tuple[str | None, str]:
     """`(work item id, session id)`. A value with no `/` is a session from
-    before per-item ids, unique on its own, so its item is None.
+    before per-item ids, so its item is None; it is accepted only at that
+    session's length, `LEGACY_LENGTH`, which is what makes it unique on its
+    own. A bare per-item id names a session of whichever items have one.
 
-    `ValueError` for anything else: an empty value, an empty half, or a
-    second `/`. Such a value names no session, and a caller refuses it rather
-    than guess which one it meant."""
+    `ValueError` for anything else: an empty value, an empty half, a second
+    `/`, or a bare value of any other length. Such a value names no session,
+    and a caller refuses it rather than guess which one it meant."""
     wid, sep, sid = value.partition("/")
-    if not value or (sep and (not wid or not sid or "/" in sid)):
-        raise ValueError(f"not a session reference: {value!r}")
-    return (wid, sid) if sep else (None, value)
+    if sep:
+        if not wid or not sid or "/" in sid:
+            raise ValueError(f"not a session reference: {value!r}")
+        return wid, sid
+    if len(value) != LEGACY_LENGTH:
+        raise ValueError(
+            f"not a session reference: {value!r} (a bare id is a session's from before "
+            f"per-item ids, {LEGACY_LENGTH} characters; any other is <work item id>/<session id>)"
+        )
+    return None, value
 
 
 def qualified(work_item_id: str, session_id: str) -> str:

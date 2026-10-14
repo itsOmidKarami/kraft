@@ -80,9 +80,9 @@ def still_orphaned(conn, unknown: list[str]) -> list[str]:
     no session since. A retry that went on to complete must not leave
     `/health`, and so `kraft admin doctor`, failing until the next restart.
 
-    Each is a `<wid>/<sid>` reference (`ids.session_ref`): a session id is
-    unique only within its item. A bare id, from a summary written before
-    that, is matched by id alone."""
+    Each is a `<wid>/<sid>` reference startup built (`ids.session_ref`): a
+    session id is unique only within its item. The summary lives in this
+    process alone, so no reference in it predates that."""
     if not unknown:
         return []
     refs = [ids.parse_session_ref(ref) for ref in unknown]
@@ -96,12 +96,7 @@ def still_orphaned(conn, unknown: list[str]) -> list[str]:
         (*(sid for _w, sid in refs), WorkItemStatus.NEEDS_HUMAN),
     ).fetchall()
     kept = {(r["work_item_id"], r["id"]) for r in rows}
-    bare = {sid for _w, sid in kept}
-    return [
-        ref
-        for ref, (wid, sid) in zip(unknown, refs, strict=True)
-        if ((wid, sid) in kept if wid is not None else sid in bare)
-    ]
+    return [ref for ref, pair in zip(unknown, refs, strict=True) if pair in kept]
 
 
 def _reap(pid: int) -> None:

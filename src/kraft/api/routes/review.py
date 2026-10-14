@@ -593,7 +593,8 @@ async def agent_reply(tid: str, body: ReplyIn, request: Request):
     """The one door an agent speaks through. Author and item come from its
     session, never from the request body."""
     st = request.app.state
-    # One session or none: a bare id two items' sessions share names neither.
+    # One session or none. A bare id is a pre-upgrade one, unique on its own
+    # (`deps.caller_ref`), but should two rows ever share one, it names neither.
     callers = deps.caller_sessions(st, request)
     session = callers[0] if len(callers) == 1 else None
     if session is None:
