@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from kraft import render
+from kraft import item_paths, render
 from kraft.item_paths import ITEMS
 from kraft.store import _now
 from kraft.vocab import Verb, admitting
@@ -28,8 +28,9 @@ from kraft.vocab.sql import in_list
 logger = logging.getLogger(__name__)
 
 #: Top-level run folders by the category the Storage page shows them under.
-#: Everything archiving an item removes is `worktrees` or `sandboxes`, and
-#: those two are the figure the quota and limit govern.
+#: Everything a worker can write (`worktrees`, `sandboxes`, and the
+#: `documents` and session output it writes outside its worktree) is the
+#: figure the quota and limit govern: what an agent can grow at will.
 _CATEGORY = {
     "worktrees": "worktrees",
     "sandbox-git": "sandboxes",
@@ -38,15 +39,29 @@ _CATEGORY = {
     "results": "results",
     "attachments": "attachments",
 }
-CATEGORIES = ("worktrees", "sandboxes", "logs", "results", "databases", "attachments", "other")
+CATEGORIES = (
+    "worktrees",
+    "sandboxes",
+    "documents",
+    "logs",
+    "results",
+    "databases",
+    "attachments",
+    "other",
+)
+#: The categories the quota and limit govern.
+GOVERNED = ("worktrees", "sandboxes", "documents")
 #: Folders whose children are named by work item id.
 _PER_ITEM = ("worktrees", "sandbox-home")
-#: What of an item's own folder, `items/<id>/<name>`, counts where. Only the
-#: sandbox home is the item's in `governed`: archiving removes it, and keeps
-#: the rest (`kraft.item_paths`).
+#: What of an item's own folder, `items/<id>/<name>`, counts where
+#: (`kraft.item_paths`). `docs/` is the worker's to write at any size, so it
+#: is governed, as is each session's `out/` (below); `history/` and `filed/`
+#: are Kraft's copies, capped in size, and `sessions/` Kraft's own files.
+#: Only the sandbox home is also the item's in `items`: archiving removes
+#: it, and keeps the rest.
 _IN_ITEM = {
     "sandbox-home": "sandboxes",
-    "docs": "attachments",
+    "docs": "documents",
     "history": "attachments",
     "filed": "attachments",
     "sessions": "logs",
@@ -58,15 +73,20 @@ class Usage:
     measured_at: str
     #: Bytes the quota and limit are compared with.
     governed: int
-    #: Bytes per work item id.
+    #: Bytes per work item id: its worktree and sandbox home, what archiving
+    #: frees.
     # shortcut: a sandboxed item's ref store (`sandbox-git/`) is in `governed`
     # but not here, so archiving frees a little more than this says; attribute
     # it through `worker.refstore` if the Storage page's rows must be exact.
+    # An item's `documents` are in `governed` and not here either: archiving
+    # keeps them.
     items: dict[str, int]
     categories: dict[str, int]
 
 
 def _children(path: Path) -> list[os.DirEntry]:
+    """The entries of a folder Kraft owns, a link to one followed: `run/`,
+    `worktrees/`, `items/` and an item's folder. Never a worker's folder."""
     try:
         with os.scandir(path) as entries:
             return list(entries)
@@ -74,25 +94,82 @@ def _children(path: Path) -> list[os.DirEntry]:
         return []  # missing, unreadable, or removed while we walked
 
 
-def _bytes(entry: os.DirEntry, seen: set[tuple[int, int]], stop) -> int:
-    """Disk blocks under `entry`, symlinks not followed, a hard-linked file once."""
-    total = 0
-    stack = [entry]
-    while stack and not (stop is not None and stop.is_set()):
-        current = stack.pop()
-        try:
-            info = current.stat(follow_symlinks=False)
-        except OSError:
-            continue
-        if stat.S_ISDIR(info.st_mode):
-            stack.extend(_children(Path(current.path)))
-        elif info.st_nlink > 1:
-            key = (info.st_dev, info.st_ino)
-            if key in seen:
-                continue
-            seen.add(key)
-        total += info.st_blocks * 512
+def _blocks(info: os.stat_result, seen: set[tuple[int, int]]) -> int:
+    """`info`'s disk blocks, a hard-linked file counted once (uv and pnpm
+    link from their caches)."""
+    if not stat.S_ISDIR(info.st_mode) and info.st_nlink > 1:
+        key = (info.st_dev, info.st_ino)
+        if key in seen:
+            return 0
+        seen.add(key)
+    return info.st_blocks * 512
+
+
+def _bytes(path: str | os.PathLike[str], seen: set[tuple[int, int]], stop) -> int:
+    """Disk blocks under `path`, a hard-linked file once, no link followed.
+
+    `path` itself is not followed either: a link there counts as the link. A
+    folder is walked by descriptor (`os.fwalk`, which opens each folder
+    relative to its parent and checks it is the folder it listed), so a
+    worker swapping a folder in its worktree or home for a link to `/` while
+    the walk runs makes it count the link, never what it points at."""
+    if stop is not None and stop.is_set():
+        return 0
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return 0
+    total = _blocks(info, seen)
+    if not stat.S_ISDIR(info.st_mode):
+        return total
+    walk = os.fwalk(path, follow_symlinks=False)
+    try:
+        for _here, dirs, files, here_fd in walk:
+            if stop is not None and stop.is_set():
+                break
+            for name in (*dirs, *files):
+                try:
+                    total += _blocks(os.stat(name, dir_fd=here_fd, follow_symlinks=False), seen)
+                except OSError:
+                    continue
+    finally:
+        walk.close()
     return total
+
+
+def _item_bytes(item: Path, seen: set[tuple[int, int]], stop) -> dict[str, int]:
+    """One item folder's bytes by category: each part of it as `_IN_ITEM`
+    says, and each session's `out/`, the worker's, as `documents`."""
+    sizes: dict[str, int] = {}
+    for part in _children(item):
+        kind = _IN_ITEM.get(part.name, "other")
+        if part.name != "sessions" or not part.is_dir(follow_symlinks=False):
+            sizes[kind] = sizes.get(kind, 0) + _bytes(part.path, seen, stop)
+            continue
+        # Kraft makes `sessions/` and each session's folder, and no worker
+        # can write either; only `out/` in one is the worker's.
+        logs = _bytes_of_folder_itself(part.path, seen)
+        for session in _children(Path(part.path)):
+            if not session.is_dir(follow_symlinks=False):
+                logs += _bytes(session.path, seen, stop)
+                continue
+            logs += _bytes_of_folder_itself(session.path, seen)
+            for entry in _children(Path(session.path)):
+                size = _bytes(entry.path, seen, stop)
+                if entry.name == "out":
+                    sizes["documents"] = sizes.get("documents", 0) + size
+                else:
+                    logs += size
+        sizes["logs"] = sizes.get("logs", 0) + logs
+    return sizes
+
+
+def _bytes_of_folder_itself(path: str, seen: set[tuple[int, int]]) -> int:
+    """A folder's own blocks, not what is in it."""
+    try:
+        return _blocks(os.lstat(path), seen)
+    except OSError:
+        return 0
 
 
 def measure(base: Path, stop: threading.Event | None = None) -> Usage:
@@ -105,24 +182,25 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
     categories = dict.fromkeys(CATEGORIES, 0)
     for top in _children(base):
         category = _CATEGORY.get(top.name) or ("databases" if ".db" in top.name else "other")
-        if top.name == ITEMS and top.is_dir(follow_symlinks=False):
+        # `items/` and the per-item folders are Kraft's, and a link to one
+        # (moved to another disk) is followed, as `worktrees/` always was.
+        if top.name == ITEMS and top.is_dir():
             for item in _children(Path(top.path)):
-                for part in (
-                    _children(Path(item.path)) if item.is_dir(follow_symlinks=False) else ()
-                ):
-                    size = _bytes(part, seen, stop)
-                    kind = _IN_ITEM.get(part.name, "other")
+                if not item.is_dir():
+                    continue
+                for kind, size in _item_bytes(Path(item.path), seen, stop).items():
                     categories[kind] += size
                     if kind == "sandboxes":
                         items[item.name] = items.get(item.name, 0) + size
         elif top.name in _PER_ITEM:
             for child in _children(Path(top.path)):
-                size = _bytes(child, seen, stop)
+                size = _bytes(child.path, seen, stop)
                 items[child.name] = items.get(child.name, 0) + size
                 categories[category] += size
         else:
-            categories[category] += _bytes(top, seen, stop)
-    return Usage(_now(), categories["worktrees"] + categories["sandboxes"], items, categories)
+            categories[category] += _bytes(top.path, seen, stop)
+    governed = sum(categories[c] for c in GOVERNED)
+    return Usage(_now(), governed, items, categories)
 
 
 def usage(st) -> Usage | None:
@@ -207,9 +285,8 @@ async def refresh(app) -> Usage:
     # An item archived or abandoned while the walk ran was measured before it
     # went: take it off again, or the walk would put it back.
     for wid in list(st.storage_usage.items):
-        if not any(
-            (st.run_dirs.base / top / wid).exists() for top in _PER_ITEM
-        ) and not os.path.lexists(st.run_dirs.base / ITEMS / wid / "sandbox-home"):
+        left = (st.run_dirs.base / "worktrees" / wid, *item_paths.sandbox_homes(st.run_dirs, wid))
+        if not any(os.path.lexists(p) for p in left):
             forget(st, wid)
     return st.storage_usage
 

@@ -50,7 +50,7 @@ describe("Settings › Storage, usage", () => {
     stubFetch({ "GET /storage": [200, storageUsage()] });
     mount();
     const totals = (await screen.findByText("Sandbox stores and homes")).closest("dl") as HTMLElement;
-    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
+    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Item documents and session output", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
     expect(within(totals).getByText("Worktrees").nextElementSibling).toHaveTextContent("11G");
     expect(within(totals).getByText("Logs").nextElementSibling).toHaveTextContent("200M");
     expect(screen.getByText("measured 2m ago")).toBeInTheDocument();

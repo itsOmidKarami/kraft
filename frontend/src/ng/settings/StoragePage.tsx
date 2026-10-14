@@ -11,10 +11,11 @@ import "./settings.css";
 import "./storage.css";
 
 const HOUSEKEEPING = "/settings/policy/housekeeping";
-/** The spec's seven categories, in the order the page lists them. */
+/** The server's eight categories, in the order the page lists them. */
 const CATEGORIES: [key: string, label: string][] = [
   ["worktrees", "Worktrees"],
   ["sandboxes", "Sandbox stores and homes"],
+  ["documents", "Item documents and session output"],
   ["logs", "Logs"],
   ["results", "Results"],
   ["databases", "Databases and backups"],

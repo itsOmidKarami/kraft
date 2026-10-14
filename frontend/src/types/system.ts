@@ -102,7 +102,7 @@ export interface StorageUsage {
   quota_bytes: number | null;
   limit_bytes: number | null;
   reclaimable_bytes: number;
-  /** worktrees, sandboxes, logs, results, databases, attachments, other. */
+  /** worktrees, sandboxes, documents, logs, results, databases, attachments, other. */
   categories: Record<string, number>;
   /** Largest first. */
   items: StorageItem[];

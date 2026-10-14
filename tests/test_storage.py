@@ -58,21 +58,65 @@ def test_measure_totals_each_item_and_category(tmp_path):
     assert used.governed < 6 * MB  # logs and databases are not governed
 
 
-def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path):
-    """Of an item's own folder only the sandbox home is governed and the
-    item's: archiving removes it and keeps the documents and session files."""
-    _fill(tmp_path / "items" / "w1" / "sandbox-home" / "f")
-    for part in ("docs/spec.md", "history/spec.1.md", "filed/spec.md", "sessions/s1/session.log"):
-        _fill(tmp_path / "items" / "w1" / part, 4096)
+@pytest.mark.parametrize("items", ["folder", "link"], ids=["items-folder", "items-is-a-link"])
+def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path, items):
+    """Of an item's own folder, what a worker writes is governed: its
+    sandbox home, which is also the item's (archiving removes it), and its
+    `docs/` and sessions' `out/`, which archiving keeps. Kraft's copies and
+    session files are not. A `run/items` moved elsewhere and linked is
+    Kraft's, and counted as `worktrees/` is."""
+    run = tmp_path / "run"
+    run.mkdir()
+    if items == "link":
+        (tmp_path / "elsewhere").mkdir()
+        (run / "items").symlink_to(tmp_path / "elsewhere")
+    item = run / "items" / "w1"
+    _fill(item / "sandbox-home" / "f")
+    _fill(item / "docs" / "spec.md", 2 * MB)
+    _fill(item / "sessions" / "s1" / "out" / "result.json", 2 * MB)
+    for part in ("history/spec.1.md", "filed/spec.md", "sessions/s1/session.log"):
+        _fill(item / part, 4096)
 
-    used = storage.measure(tmp_path)
+    used = storage.measure(run)
 
     assert set(used.items) == {"w1"}
     assert used.items["w1"] == used.categories["sandboxes"]
     assert MB <= used.items["w1"] < 2 * MB
-    assert used.categories["attachments"] >= 3 * 4096 and used.categories["logs"] >= 4096
+    assert 4 * MB <= used.categories["documents"] < 5 * MB
+    assert 2 * 4096 <= used.categories["attachments"] < MB
+    assert 4096 <= used.categories["logs"] < MB
     assert used.categories["other"] == 0
-    assert used.governed == used.categories["worktrees"] + used.categories["sandboxes"]
+    assert used.governed == sum(used.categories[c] for c in ("worktrees", "sandboxes", "documents"))
+
+
+def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypatch):
+    """A worker can swap a folder in its home or worktree for a link to `/`
+    while the walk runs. The walk lists each folder by the descriptor it
+    opened, so it counts what was there, never what the link points at."""
+    _fill(tmp_path / "outside" / "big", 4 * MB)
+    cache = tmp_path / "run" / "items" / "w1" / "sandbox-home" / "cache"
+    _fill(cache / "f", 4096)
+    original = os.stat(cache)
+    real = os.scandir
+    swapped = []
+
+    def swap_then_list(arg="."):
+        try:
+            seen = os.fstat(arg) if isinstance(arg, int) else os.stat(arg)
+        except OSError:
+            seen = None
+        if not swapped and seen is not None and os.path.samestat(seen, original):
+            swapped.append(arg)
+            cache.rename(cache.with_name("moved"))
+            cache.symlink_to(tmp_path / "outside")
+        return real(arg)
+
+    monkeypatch.setattr(os, "scandir", swap_then_list)
+
+    used = storage.measure(tmp_path / "run")
+
+    assert swapped, "the walk never listed the folder"
+    assert used.categories["sandboxes"] < MB
 
 
 def test_measure_counts_a_hard_linked_file_once(tmp_path):
