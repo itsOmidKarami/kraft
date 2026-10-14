@@ -2,14 +2,26 @@
 can print to the same stdout. No line of it may stop Kraft reading the rest,
 or recording the session's exit and spend."""
 
+import json
+
 import pytest
 
 from kraft import usage
 from kraft.adapters import agent
 
-#: Deeper than the JSON parser recurses: `json.loads` raises RecursionError,
-#: which is neither OSError nor ValueError.
+#: A line deeper than the JSON parser recurses: `json.loads` raises
+#: RecursionError, which is neither OSError nor ValueError. How deep that is
+#: differs between Python versions, so the tests raise it directly.
 _DEEP = "[" * 100_000
+
+
+@pytest.fixture(autouse=True)
+def too_deep(monkeypatch):
+    def loads(_text):
+        raise RecursionError
+
+    monkeypatch.setattr(json, "loads", loads)
+
 
 _PARTS = ("stream", "envelope", "rate_limit", "session_id", "unfinished_jobs")
 

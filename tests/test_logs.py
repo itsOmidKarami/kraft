@@ -3,6 +3,7 @@
 
 import json
 
+from kraft import logs
 from kraft.logs import classify, summary
 
 
@@ -21,8 +22,13 @@ def test_non_json_line_falls_back_to_the_line_itself():
     assert summary(None, "plain stdout, not JSON") == "plain stdout, not JSON"
 
 
-def test_a_line_nested_past_the_parser_reads_as_plain_stdout():
+def test_a_line_nested_past_the_parser_reads_as_plain_stdout(monkeypatch):
     """The worker can print to the log: a line deeper than `json.loads`
-    recurses must not break the log view."""
-    deep = '{"a": ' + "[" * 100_000 + "]" * 100_000 + "}"
-    assert classify(deep) == ("stdout", None)
+    recurses must not break the log view. Raised directly, since how deep the
+    parser goes before giving up differs between Python versions."""
+
+    def too_deep(_text):
+        raise RecursionError
+
+    monkeypatch.setattr(logs.json, "loads", too_deep)
+    assert classify('{"type": "assistant"}') == ("stdout", None)
