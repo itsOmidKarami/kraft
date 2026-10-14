@@ -55,7 +55,7 @@ async def test_a_summary_is_read_only_from_its_own_session_s_folder(
     path.write_text("---\nkind: sessions\n---\n# done\nthe summary body\n")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
 
-    assert await ix.ingest_session_summary("s1") is ingested
+    assert await ix.ingest_session_summary("w1", "s1") is ingested
     hits = ix.search("summary body")
     assert [(h["path"], h["source_kind"]) for h in hits] == (
         [(ref, "session_summary")] if ingested else []
@@ -83,6 +83,6 @@ async def test_a_summary_in_an_item_folder_is_never_read_through_a_link(
         out.symlink_to(secret.parent)
 
     assert (
-        await Indexer(conn, database, repos_env="", run_dirs=rd).ingest_session_summary("s1")
+        await Indexer(conn, database, repos_env="", run_dirs=rd).ingest_session_summary("w1", "s1")
         is False
     )

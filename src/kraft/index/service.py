@@ -206,16 +206,17 @@ class Indexer:
             return None
         return self._read_worktree_file(ref, work_item_id, markdown=True)
 
-    async def ingest_session_summary(self, session_id: str) -> bool:
-        """Ingest the summary a finished worker session reported. Returns False
+    async def ingest_session_summary(self, work_item_id: str, session_id: str) -> bool:
+        """Ingest the summary a finished worker session of `work_item_id`
+        reported (a session id is unique only within its item). Returns False
         (and logs) on anything unusable — the index never blocks the executor."""
         row = self._state.read(
             lambda c: c.execute(
                 "SELECT ws.work_item_id, ws.node_id, ws.hook_point, ws.thread, "
                 "       ws.session_summary_ref, wi.repo "
                 "FROM worker_sessions ws JOIN work_items wi ON wi.id = ws.work_item_id "
-                "WHERE ws.id = ?",
-                (session_id,),
+                "WHERE ws.work_item_id = ? AND ws.id = ?",
+                (work_item_id, session_id),
             ).fetchone()
         )
         if row is None or not row["session_summary_ref"]:
@@ -351,7 +352,7 @@ class Indexer:
                 self._wakeup.clear()
                 new = self._state.read(lambda c: events.read_after(c, self._cursor))
                 repos: list[str] = []
-                summaries: list[str] = []
+                summaries: list[tuple[str, str]] = []
                 for ev in new:
                     self._cursor = ev["seq"]
                     payload = ev["payload"]
@@ -371,12 +372,12 @@ class Indexer:
                         if row is not None and row["repo"] not in repos:
                             repos.append(row["repo"])
                     elif ev["type"] == SessionEvent.WORKER_SESSION_EXITED:
-                        summaries.append(payload["session_id"])
-                for sid in summaries:
+                        summaries.append((ev["work_item_id"], payload["session_id"]))
+                for wid, sid in summaries:
                     try:
-                        await self.ingest_session_summary(sid)
+                        await self.ingest_session_summary(wid, sid)
                     except Exception:  # noqa: BLE001
-                        logger.exception("session summary ingest failed for %s", sid)
+                        logger.exception("session summary ingest failed for %s/%s", wid, sid)
                 for repo in repos:
                     try:
                         await self.rescan_repo(repo)

@@ -258,7 +258,7 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
             result_path="/r0",
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s-m0", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s-m0", "failed", work_item_id=wid))
     cap = policy.resolve_cap(pol, "verify.fix_loop")
     n0, _started0, _ = await database.write(
         lambda c: store.bump_counter(c, wid, "verify.fix_loop", cap)
@@ -278,7 +278,9 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
         )
     )
     await database.write(
-        lambda c: store.session_exited(c, "s-fix1", "done", "pre-crash-summary.md")
+        lambda c: store.session_exited(
+            c, "s-fix1", "done", "pre-crash-summary.md", work_item_id=wid
+        )
     )
     await database.write(
         lambda c: store.create_session(
@@ -292,7 +294,7 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
             round=1,
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s-m1", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s-m1", "failed", work_item_id=wid))
 
     result = await executor.resume(
         database,

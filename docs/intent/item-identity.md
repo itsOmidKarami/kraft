@@ -68,3 +68,23 @@ origin: src/kraft/executor/entry.py §work_item_id_taken_on_disk
 IF a ref under `refs/heads/kraft/` or `refs/remotes/origin/kraft/` in the item's repo is named a candidate work item id or ends in `-` and that id, THEN the system SHALL draw another.
 enforced-by: tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[plain-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[titled-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[remote-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[titled-remote-branch], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[longer-name], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[outside-kraft], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[a-tag]
 origin: src/kraft/executor/entry.py §work_item_id_taken_on_disk
+
+## REQ session-id-is-six-characters
+WHEN a session is created, the system SHALL give it an id of 6 characters.
+enforced-by: tests/store/test_session_ids.py::test_a_new_session_id_is_six_characters_its_item_has_not_used, tests/executor/test_raised_task_sessions.py::test_a_task_that_raises_leaves_its_session_and_the_reason[builtin-error-before-its-row], tests/executor/test_raised_task_sessions.py::test_a_task_that_raises_leaves_its_session_and_the_reason[forge-after-its-row]
+origin: src/kraft/store/sessions.py §new_session_id
+
+## REQ session-id-is-unique-within-its-item
+WHEN a session is created, the system SHALL give it an id no other session of the same work item has.
+enforced-by: tests/store/test_session_ids.py::test_a_new_session_id_is_six_characters_its_item_has_not_used, tests/store/test_session_ids.py::test_a_session_id_another_item_has_is_free_for_this_one
+origin: src/kraft/store/sessions.py §new_session_id
+
+## REQ two-items-may-share-a-session-id
+The system SHALL accept a session whose id another work item's session already has.
+enforced-by: tests/store/test_session_ids.py::test_two_items_may_each_have_a_session_with_the_same_id, tests/test_db_session_key.py::test_the_session_key_migration_keeps_every_row_and_lets_items_share_an_id
+origin: src/kraft/db.py §worker_sessions
+
+## REQ a-session-is-looked-up-with-its-item
+WHEN the system reads or writes a session it holds the work item of, it SHALL find it by its work item id and its session id together.
+enforced-by: tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[exited], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[running], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[unknown], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[escalation-stopped], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[item-paused], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[egress], tests/api/test_board_stop.py::test_each_item_reads_its_own_escalation_turn_of_a_shared_session_id
+origin: src/kraft/store/sessions.py, src/kraft/api/routes/board.py §_stop_episode

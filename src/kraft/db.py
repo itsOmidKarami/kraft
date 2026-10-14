@@ -1332,9 +1332,10 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
   tokens_cache_read, cost_usd, wall_ms, exited_at, head_sha, command, harness,
   cost_estimated, sandbox, egress, repository)
 SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
-       result_path, status, attempt, thread, session_summary_ref, created_at, started_at, round, model,
-       tokens_in, tokens_out, tokens_cache_write, tokens_cache_read, cost_usd, wall_ms,
-       exited_at, head_sha, command, harness, cost_estimated, sandbox, egress, repository
+       result_path, status, attempt, thread, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, tokens_cache_write, tokens_cache_read, cost_usd,
+       wall_ms, exited_at, head_sha, command, harness, cost_estimated, sandbox, egress,
+       repository
   FROM worker_sessions ORDER BY rowid""",
         "DROP TABLE worker_sessions",
         "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",

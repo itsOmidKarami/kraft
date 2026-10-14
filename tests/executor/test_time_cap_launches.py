@@ -254,7 +254,7 @@ async def test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline(
         await it.session("s1", "build.main.t", running=(proc.pid, None))
         started = time.monotonic()
 
-        await reattach._adopt(database, "s1", proc.pid, poll_s=0.01)
+        await reattach._adopt(database, "s1", proc.pid, work_item_id=it.id, poll_s=0.01)
 
         assert time.monotonic() - started < 10
         assert proc.wait(timeout=10) is not None

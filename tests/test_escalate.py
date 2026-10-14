@@ -538,7 +538,7 @@ async def test_last_escalation_status_is_the_newest_sessions_status(database, ru
             result_path=str(run_dirs.logs / "s1.json"),
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s1", "needs_context"))
+    await database.write(lambda c: store.session_exited(c, "s1", "needs_context", work_item_id=wid))
     assert escalate.last_escalation_status(database, wid) == "needs_context"
 
 

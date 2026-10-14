@@ -2062,6 +2062,7 @@ async def finish_session(
     result_path: Path,
     *,
     session_id: str,
+    work_item_id: str,
     status: str,
     log: str,
     findings: list[dict] | None = None,
@@ -2110,7 +2111,7 @@ async def finish_session(
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a
         # missing time column is cosmetic, not a reason to fail the node.
         logger.warning("no log time sidecar for session %s", session_id)
-    await db.write(lambda c: store.session_exited(c, session_id, status))
+    await db.write(lambda c: store.session_exited(c, session_id, status, work_item_id=work_item_id))
     return status
 
 
@@ -2148,7 +2149,13 @@ async def _record_done(
         repository=repository,
     )
     return await finish_session(
-        db, log_path, result_path, session_id=session_id, status=status, log=log
+        db,
+        log_path,
+        result_path,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        status=status,
+        log=log,
     )
 
 

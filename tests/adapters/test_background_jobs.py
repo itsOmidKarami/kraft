@@ -235,7 +235,7 @@ async def test_a_session_adopted_after_a_restart_is_held_to_the_same_rule(
     proc = subprocess.Popen(["true"])
     proc.wait()
 
-    await reattach._adopt(database, "s1", proc.pid, poll_s=0.01)
+    await reattach._adopt(database, "s1", proc.pid, work_item_id=it.id, poll_s=0.01)
 
     assert it.sessions()[0]["status"] == "failed"
     assert [e["payload"]["jobs"] for e in it.events(SessionEvent.BACKGROUND_JOBS_ABANDONED)] == [

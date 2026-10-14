@@ -723,8 +723,9 @@ def end_work_item(
     now = _now()
     for sid in session_ids or []:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
     node_id = conn.execute(
@@ -853,8 +854,9 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     events.append(conn, work_item_id, WorkItemEvent.PAUSE_REQUESTED, {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 

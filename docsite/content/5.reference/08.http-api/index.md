@@ -39,7 +39,7 @@ The answer carries:
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
-| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. |
+| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `unknown` entry is `<work item id>/<session id>`, since a session id is unique only within its work item. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 

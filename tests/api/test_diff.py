@@ -276,7 +276,7 @@ def _item_with_a_live_session(client, tmp_path, sandboxed: bool) -> str:
                 result_path=str(tmp_path / "live.json"),
             )
         )
-        await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0))
+        await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0, work_item_id=wid))
 
     client.portal.call(seed)
     return wid

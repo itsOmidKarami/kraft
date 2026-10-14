@@ -152,7 +152,11 @@ async def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(datab
 
     for sid, status in (("older", "failed"), ("asked", "needs_context")):
         await session(sid)
-        await database.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
+        await database.write(
+            lambda c, sid=sid, status=status: store.session_exited(
+                c, sid, status, work_item_id="wh"
+            )
+        )
     await database.write(
         lambda c: store.mark_needs_human(
             c, "wh", "verify", "needs_context: which db?", kind="question"

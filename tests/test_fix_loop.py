@@ -243,7 +243,7 @@ async def test_resume_mid_fix_loop_reenters_and_continues_budget(
             result_path="/r",
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s-m0", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s-m0", "failed", work_item_id=wid))
     cap = policy.resolve_cap(pol, "verify.fix_loop")
     n0, started0, _ = await database.write(
         lambda c: store.bump_counter(c, wid, "verify.fix_loop", cap)

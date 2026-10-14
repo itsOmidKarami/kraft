@@ -7,7 +7,6 @@ import logging
 import shlex
 import sqlite3
 import traceback
-import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -294,6 +293,7 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
         log_path,
         result_path,
         session_id=common["session_id"],
+        work_item_id=common["work_item_id"],
         status=CONFIG_ERROR,
         log=log,
     )
@@ -309,6 +309,7 @@ async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str
         log_path,
         result_path,
         session_id=common["session_id"],
+        work_item_id=common["work_item_id"],
         status="capped_out",
         log=f"not started: {hit.reason}\n",
     )
@@ -567,6 +568,7 @@ async def _run_changed_test_scopes(
             log_path,
             result_path,
             session_id=common["session_id"],
+            work_item_id=common["work_item_id"],
             status="done",
             log=f'{work_item_row["repo"]} declares test_command: "" (no tests) — nothing to run\n',
         )
@@ -592,7 +594,12 @@ async def _run_changed_test_scopes(
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
-            **{**common, "session_id": uuid.uuid4().hex},
+            **{
+                **common,
+                "session_id": db.read(
+                    lambda c, w=common["work_item_id"]: store.new_session_id(c, w)
+                ),
+            },
         )
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
@@ -953,7 +960,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         sid, log_path, result_path = await _builtins.start_session(
             db,
             run_dirs,
-            session_id=uuid.uuid4().hex,
+            session_id=db.read(lambda c: store.new_session_id(c, work_item_row["id"])),
             work_item_id=work_item_row["id"],
             node_id=node.id,
             hook_point=task.path,
@@ -968,6 +975,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
             Path(r["log_path"]),
             Path(r["result_path"]),
             session_id=r["id"],
+            work_item_id=work_item_row["id"],
             status=status,
             log=log,
             reused=True,
@@ -1038,7 +1046,7 @@ async def _dispatch_task(
                     break
             return status
     task_policy = scope_policy(work_item_row, task, repository)
-    session_id = uuid.uuid4().hex
+    session_id = db.read(lambda c: store.new_session_id(c, work_item_row["id"]))
     # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
     # dispatch: a sha read later would be whatever HEAD moved to while the task
     # ran, which is the opposite of the question the gate asks. `git_read`
@@ -1388,7 +1396,12 @@ async def _dispatch_task(
             if await over_budget():
                 await tried.flush()
                 return BUDGET
-            common = {**common, "session_id": uuid.uuid4().hex}
+            common = {
+                **common,
+                "session_id": db.read(
+                    lambda c, w=common["work_item_id"]: store.new_session_id(c, w)
+                ),
+            }
         await tried.launching(here, common["session_id"])
         status, final = await _launch_agent(
             db,

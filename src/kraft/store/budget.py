@@ -47,9 +47,9 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
     ).fetchall()
-    timed_out = wait_timed_out_sessions(conn, [work_item_id])
+    timed_out = {sid for _w, sid in wait_timed_out_sessions(conn, [work_item_id])}
     # A time cap's stop is its own outcome too (Ruling 194), never a loop's cap.
-    time_capped = _caps.time_capped_sessions(conn, [work_item_id])
+    time_capped = {sid for _w, sid in _caps.time_capped_sessions(conn, [work_item_id])}
     by_node: dict[str, dict] = {}
     rounds: dict[str, set[int]] = {}
     for r in rows:

@@ -2283,7 +2283,9 @@ async def stop_escalation(wid: str, request: Request):
     if running is None:
         raise HTTPException(409, "no escalation turn is running")
     row = st.db.read(
-        lambda c: c.execute("SELECT pid FROM worker_sessions WHERE id = ?", (running,)).fetchone()
+        lambda c: c.execute(
+            "SELECT pid FROM worker_sessions WHERE work_item_id = ? AND id = ?", (wid, running)
+        ).fetchone()
     )
     await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
     _terminate(row["pid"] if row else None)

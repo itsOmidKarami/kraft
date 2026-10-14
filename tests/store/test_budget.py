@@ -99,11 +99,11 @@ async def test_budget_spend_includes_a_running_sessions_estimate(database):
             result_path="/tmp/r",
         )
     )
-    await database.write(lambda c: store.session_running(c, sid, 1, 1.0))
+    await database.write(lambda c: store.session_running(c, sid, 1, 1.0, work_item_id=wid))
     # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
     # round $2.00.
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await database.write(lambda c: store.session_progress(c, sid, live))
+    await database.write(lambda c: store.session_progress(c, sid, live, work_item_id=wid))
 
     item_usd, daily_usd = database.read(lambda c: store.budget_spend(c, wid))
     assert item_usd == pytest.approx(2.0)

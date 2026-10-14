@@ -583,19 +583,19 @@ def reason_of(conn, work_item_id: str) -> str:
     return json.loads(row["payload"])["reason"] if row else "a time cap was reached"
 
 
-def time_capped_sessions(conn, work_item_ids) -> set[str]:
-    """The sessions a time cap stopped or refused: they exit `capped_out`, the
-    status a fix loop's cap writes, and `LimitEvent.TIME_CAP_REACHED` tells them
-    apart."""
+def time_capped_sessions(conn, work_item_ids) -> set[tuple[str, str]]:
+    """The sessions a time cap stopped or refused, as `(work_item_id,
+    session_id)` pairs: they exit `capped_out`, the status a fix loop's cap
+    writes, and `LimitEvent.TIME_CAP_REACHED` tells them apart."""
     ids = list(work_item_ids)
     if not ids:
         return set()
     rows = conn.execute(
-        "SELECT json_extract(payload, '$.session_id') AS sid FROM events "
+        "SELECT work_item_id, json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) AND type = ?",
         (*ids, LimitEvent.TIME_CAP_REACHED),
     ).fetchall()
-    return {r["sid"] for r in rows if r["sid"]}
+    return {(r["work_item_id"], r["sid"]) for r in rows if r["sid"]}
 
 
 #: What closes a pending gate (`kraft.vocab.GATE_CLOSED`), and a cap's own

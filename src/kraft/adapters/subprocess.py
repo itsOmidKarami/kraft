@@ -59,7 +59,9 @@ _flush_sleep = asyncio.sleep
 _JOB_NAME_MAX = 200
 
 
-async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, reader) -> str:
+async def fail_abandoned_jobs(
+    db, session_id: str, log_path: Path, status: str, reader, *, work_item_id: str
+) -> str:
     """`status`, or `failed` when the agent's turn ended with a background job
     still running (Kraft-xvugd): the session ends with its turn, so nothing
     would ever read that job's result. The prose in `agent._CTX` alone did not
@@ -87,7 +89,8 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
 
     def _record(c):
         row = c.execute(
-            "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (session_id,)
+            "SELECT work_item_id, node_id FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (work_item_id, session_id),
         ).fetchone()
         payload = {"session_id": session_id, "node_id": row["node_id"], "jobs": jobs}
         events.append(
@@ -411,7 +414,9 @@ async def record_oom_kill(
     leave their callers before any of them asks. Such a session keeps
     `status`, and nothing is recorded."""
     if not oom.confirmed and await db.write(
-        lambda c: store.session_status(c, session_id) == SessionStatus.PAUSED
+        lambda c: (
+            store.session_status(c, session_id, work_item_id=work_item_id) == SessionStatus.PAUSED
+        )
     ):
         return status
     with open(log_path, "a") as fh:
@@ -589,7 +594,9 @@ async def open_egress(
             # read them again; absent, the daemon's own (no repo entry).
             if repo is not None:
                 egress["repo"] = repo
-        await db.write(lambda c: store.set_session_egress(c, session_id, egress))
+        await db.write(
+            lambda c: store.set_session_egress(c, session_id, egress, work_item_id=work_item_id)
+        )
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:
         raise _sandbox.SandboxNotReady(
@@ -775,7 +782,11 @@ async def run_task(
                 f"kraft: this sandboxed launch was not given the checkout of workspace "
                 f"members {', '.join(unmounted)} to mount, so it does not start\n"
             )
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         # Before anything below writes one of them.
         if problem := await backend.owner_refusal(
@@ -788,7 +799,11 @@ async def run_task(
             rw_dirs=rw_dirs,
         ):
             log_path.write_text(f"kraft: {problem}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         # The container writes its result and summary here, each mounted
         # read-write into it by name -- docker can only bind-mount a file
@@ -818,7 +833,11 @@ async def run_task(
             )
         except (OSError, RuntimeError) as exc:
             log_path.write_text(f"kraft: could not prepare the sandbox's ref store: {exc}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         if problem := await backend.probe(
             sandbox,
@@ -829,7 +848,11 @@ async def run_task(
             else None,
         ):
             log_path.write_text(f"kraft: {problem}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         try:
             # The Kraft CA joins the bundle only when a credential is managed.
@@ -837,7 +860,11 @@ async def run_task(
             ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             log_path.write_text(f"kraft: {exc}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         proxy_env: dict[str, str] = {}
         if network:
@@ -863,7 +890,11 @@ async def run_task(
                 if not isinstance(exc, _sandbox.SandboxNotReady):
                     raise
                 log_path.write_text(f"kraft: {exc}\n")
-                await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+                await db.write(
+                    lambda c: store.session_exited(
+                        c, session_id, "config_error", work_item_id=work_item_id
+                    )
+                )
                 return "config_error"
     # From here until the process is launched, whatever ends this call --
     # an early return, an exception, a cancel -- closes a route it opened;
@@ -921,7 +952,9 @@ async def run_task(
         # worktree the caller believes is idle. One read, right before the one
         # place that can actually refuse the launch, covers every caller that
         # marks a row stopped: no log file is opened and no process is started.
-        current_status = await db.write(lambda c: store.session_status(c, session_id))
+        current_status = await db.write(
+            lambda c: store.session_status(c, session_id, work_item_id=work_item_id)
+        )
         if current_status != SessionStatus.PENDING:
             return current_status
         if backend is None:
@@ -978,7 +1011,11 @@ async def run_task(
                 # problem, and reporting it as a task failure opens a fix cycle no
                 # agent can win by editing source (Kraft-579). The caller
                 # short-circuits this straight to needs_human.
-                await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+                await db.write(
+                    lambda c: store.session_exited(
+                        c, session_id, "config_error", work_item_id=work_item_id
+                    )
+                )
                 if backend is not None:
                     await backend.close(session_id)
                 return "config_error"
@@ -1008,7 +1045,11 @@ async def run_task(
             pid_start_time = psutil.Process(proc.pid).create_time()
         except psutil.Error:
             pid_start_time = None
-        await db.write(lambda c: store.session_running(c, session_id, proc.pid, pid_start_time))
+        await db.write(
+            lambda c: store.session_running(
+                c, session_id, proc.pid, pid_start_time, work_item_id=work_item_id
+            )
+        )
 
         # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
         # uncancellable, so on SIGTERM the executor task's cancel() could not
@@ -1041,7 +1082,11 @@ async def run_task(
             try:
                 log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
                 if live is not None:
-                    await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+                    await db.write(
+                        lambda c, u=live: store.session_progress(
+                            c, session_id, u, work_item_id=work_item_id
+                        )
+                    )
             except Exception:
                 logger.exception("usage progress tick failed for session %s", session_id)
     finally:
@@ -1069,7 +1114,8 @@ async def run_task(
         # snapshot may predate the pause -- which would skip the flush wait
         # and lose exactly the cost this fix exists to keep.
         paused = (
-            await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED
+            await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
+            == SessionStatus.PAUSED
         )
         if paused and flush_grace:
             await _flush_sleep(flush_grace)
@@ -1112,7 +1158,11 @@ async def run_task(
             # both are guarded on the row still being paused.
             await db.write(
                 lambda c: store.record_pause_usage(
-                    c, session_id, _usage.read(log_path, result_path, reader), reader
+                    c,
+                    session_id,
+                    _usage.read(log_path, result_path, reader),
+                    reader,
+                    work_item_id=work_item_id,
                 )
             )
     if capped:
@@ -1126,6 +1176,7 @@ async def run_task(
                 None,
                 _usage.read(log_path, result_path, reader),
                 reader=reader,
+                work_item_id=work_item_id,
             )
             events.append(
                 c,
@@ -1158,7 +1209,9 @@ async def run_task(
     if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
         status = "failed"
     if require_result_file:
-        status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
+        status = await fail_abandoned_jobs(
+            db, session_id, log_path, status, reader, work_item_id=work_item_id
+        )
     rate_limit = _rate_limit_rejection(log_path, reader=reader)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this
@@ -1177,7 +1230,10 @@ async def run_task(
         status = post_resolve(status, log_path, returncode)
     # A human pausing the item SIGTERMs this child, so a non-zero rc here may mean
     # "stopped on purpose" rather than "failed". The row is the authority.
-    if await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED:
+    if (
+        await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
+        == SessionStatus.PAUSED
+    ):
         return "paused"
     if oom is not None:
         status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)
@@ -1195,6 +1251,7 @@ async def run_task(
             concerns=fields["concerns"],
             question=fields["question"],
             reader=reader,
+            work_item_id=work_item_id,
         )
     )
     return status

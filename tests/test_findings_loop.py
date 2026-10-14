@@ -332,7 +332,9 @@ def test_diagnosis_bundle_skips_the_judges_own_concerns(tmp_path, monkeypatch):
                     )
                 )
                 await database.write(
-                    lambda c: store.session_exited(c, session_id, "done", concerns=concerns)
+                    lambda c: store.session_exited(
+                        c, session_id, "done", concerns=concerns, work_item_id=wid
+                    )
                 )
 
             node = v1_resolved([_loop_node("verify", _reviewer())]).nodes[0]

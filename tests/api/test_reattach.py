@@ -157,5 +157,5 @@ def test_reattach_pending_session_is_unknown(tmp_path):
 
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
         health = srv.client.get("/api/health").json()
-        assert "s-seed" in health["reattach_summary"]["unknown"]
+        assert "w-seed/s-seed" in health["reattach_summary"]["unknown"]
         assert srv.client.get("/api/work-items/w-seed").json()["status"] == "needs_human"

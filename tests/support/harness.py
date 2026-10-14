@@ -625,9 +625,13 @@ class Item:
             )
         )
         if running is not None:
-            await self.database.write(lambda c: store.session_running(c, sid, *running))
+            await self.database.write(
+                lambda c: store.session_running(c, sid, *running, work_item_id=self.id)
+            )
         if status is not None:
-            await self.database.write(lambda c: store.session_exited(c, sid, status))
+            await self.database.write(
+                lambda c: store.session_exited(c, sid, status, work_item_id=self.id)
+            )
         return created
 
 

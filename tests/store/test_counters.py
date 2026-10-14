@@ -70,7 +70,7 @@ async def test_mark_sessions_capped_out_leaves_a_waiting_session_alone(database)
     """A ci_fix_loop cap breach must not steal a live on.ci.poll wait episode
     out from under the separate ci_wait cap that already governs it."""
     await _session(database, "poll", node_id="mr_checks", hook_point="on.ci.poll")
-    await database.write(lambda c: store.session_exited(c, "poll", "waiting"))
+    await database.write(lambda c: store.session_exited(c, "poll", "waiting", work_item_id="w1"))
     await database.write(
         lambda c: store.mark_sessions_capped_out(c, "w1", "mr_checks", ["on.ci.poll"])
     )
@@ -82,7 +82,9 @@ async def test_done_with_concerns_is_not_capped_out_by_a_sibling_breach(database
     only the still-pending sibling that actually breached becomes capped_out."""
     await _session(database, "concerns")
     await _session(database, "pending")
-    await database.write(lambda c: store.session_exited(c, "concerns", "done_with_concerns"))
+    await database.write(
+        lambda c: store.session_exited(c, "concerns", "done_with_concerns", work_item_id="w1")
+    )
     await database.write(
         lambda c: store.mark_sessions_capped_out(c, "w1", "verify", ["on.test.run"])
     )

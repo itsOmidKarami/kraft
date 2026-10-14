@@ -508,7 +508,9 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     live = (os.getpid(), psutil.Process().create_time())
     await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
     deny_all = {"phase": "runtime", "allow": [], "deny": ["**"]}
-    await database.write(lambda c: store.set_session_egress(c, "s1", deny_all))
+    await database.write(
+        lambda c: store.set_session_egress(c, "s1", deny_all, work_item_id=item.id)
+    )
     # A dead session's directory, which no adopted session owns.
     dead = channels.socket_path("gone-session").parent
     dead.mkdir(parents=True)
@@ -572,7 +574,7 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     rule |= {"sentinel": "sk-sentinel", "format": "%s"}
     egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
     egress |= {"credentials": [rule]} | ({"repo": launched_in} if launched_in else {})
-    await database.write(lambda c: store.set_session_egress(c, "s1", egress))
+    await database.write(lambda c: store.set_session_egress(c, "s1", egress, work_item_id=item.id))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-daemon")
     monkeypatch.setenv("MY_KEY", "sk-passthrough")
     resolved = _Unreadable() if entry == "unreadable" else entry and entry_of(entry)
@@ -617,7 +619,9 @@ async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(
     await item.session("s1", "implementation.main.implement", running=DEAD, sandbox="remote")
     await item.session("s2", "implementation.main.implement", running=DEAD, sandbox="remote")
     await database.write(
-        lambda c: store.set_session_egress(c, "s1", {"phase": "runtime", "allow": [], "deny": []})
+        lambda c: store.set_session_egress(
+            c, "s1", {"phase": "runtime", "allow": [], "deny": []}, work_item_id=item.id
+        )
     )
 
     await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)

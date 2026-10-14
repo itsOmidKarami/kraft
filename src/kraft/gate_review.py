@@ -14,10 +14,9 @@ so that a human's escalation agent *can* act.
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 
-from kraft import caps, events, executor, item_paths
+from kraft import caps, events, executor, item_paths, store
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -200,7 +199,7 @@ async def review(
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
 
-    session_id = uuid.uuid4().hex
+    session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
     rel = executor.gate_artifact(run_dirs, row, gate)
     task_instruction = _PROMPT.format(
         gate=gate,

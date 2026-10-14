@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
-import uuid
 from pathlib import Path
 
 from kraft import caps, events, executor, item_paths, store
@@ -248,7 +247,7 @@ def last_escalation_status(db, work_item_id: str) -> str | None:
     return row["status"] if row else None
 
 
-def session_status(db, session_id: str) -> str | None:
+def session_status(db, session_id: str, *, work_item_id: str) -> str | None:
     """The status of a single `worker_sessions` row by its own id, or None if
     no such session exists. `gates._current_run_escalation_session_id`'s
     counterpart: that picks out *which* session id belongs to the current
@@ -257,7 +256,8 @@ def session_status(db, session_id: str) -> str | None:
     unscoped "newest ever" (Kraft-b52cm)."""
     row = db.read(
         lambda c: c.execute(
-            "SELECT status FROM worker_sessions WHERE id = ?", (session_id,)
+            "SELECT status FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (work_item_id, session_id),
         ).fetchone()
     )
     return row["status"] if row else None
@@ -336,7 +336,13 @@ async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
         round=0,
     )
     return await _builtins.finish_session(
-        db, log_path, result_path, session_id=session_id, status=CONFIG_ERROR, log=log
+        db,
+        log_path,
+        result_path,
+        session_id=session_id,
+        work_item_id=row["id"],
+        status=CONFIG_ERROR,
+        log=log,
     )
 
 
@@ -419,7 +425,7 @@ async def dispatch(
     resume_session_id = None if new_thread else row["escalation_session_id"]
     turn = db.read(lambda c: store.escalation_thread_turn_count(c, work_item_id, thread)) + 1
 
-    session_id = uuid.uuid4().hex
+    session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
     worktree = run_dirs.worktrees / work_item_id
 
     # Node-scoped (Kraft-l8ype, `stuck-escalation-is-an-exec-node-control`):
