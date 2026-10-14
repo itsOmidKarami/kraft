@@ -951,7 +951,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         lambda c: c.execute(
             "SELECT id, status, log_path, result_path FROM worker_sessions "
             "WHERE work_item_id = ? AND hook_point = ? AND (rowid > ? OR "
-            "(status = 'waiting' AND node_id = ? AND round = ?))",
+            "(status = 'waiting' AND node_id = ? AND round = ?)) ORDER BY rowid",
             (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
         ).fetchall()
     )
@@ -2446,7 +2446,7 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
     rows = db.read(
         lambda c: c.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            f"AND hook_point IN ({','.join('?' * len(paths))}) ORDER BY created_at",
+            f"AND hook_point IN ({','.join('?' * len(paths))}) ORDER BY created_at, rowid",
             (work_item_id, node.id, *paths),
         ).fetchall()
     )
@@ -2609,7 +2609,7 @@ def judge_history(
             lambda c: c.execute(
                 "SELECT round, result_path FROM worker_sessions WHERE work_item_id = ? "
                 f"AND node_id = ? AND hook_point IN ({','.join('?' * len(fix_paths))}) "
-                "ORDER BY round",
+                "ORDER BY round, rowid",
                 (work_item_id, node_id, *fix_paths),
             ).fetchall()
         )

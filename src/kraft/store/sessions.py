@@ -79,7 +79,7 @@ def create_session(
         existing = conn.execute(
             "SELECT id, log_path, result_path FROM worker_sessions WHERE work_item_id = ? "
             "AND node_id = ? AND hook_point = ? AND round = ? AND status = ? "
-            "ORDER BY created_at DESC LIMIT 1",
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (work_item_id, node_id, hook_point, round, SessionStatus.WAITING),
         ).fetchone()
         if existing is not None:
@@ -211,7 +211,7 @@ def escalation_threads(conn: sqlite3.Connection, work_item_id: str) -> list[dict
     can render thread headers without scanning every session/event itself."""
     rows = conn.execute(
         "SELECT * FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-        "ORDER BY thread, created_at",
+        "ORDER BY thread, created_at, rowid",
         (work_item_id,),
     ).fetchall()
     threads: dict[int, list[sqlite3.Row]] = {}
@@ -396,7 +396,7 @@ def reusable_session(
         "  AND sibling.head_sha = worker_sessions.head_sha "
         "  AND sibling.status != 'done'"
         ") "
-        "ORDER BY created_at DESC LIMIT 1",
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (
             work_item_id,
             node_id,
@@ -952,7 +952,7 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     return conn.execute(
         "SELECT s.id, s.pid FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
         f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
-        "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
+        "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') ORDER BY s.rowid",
         (work_item_id,),
     ).fetchall()
 
@@ -964,7 +964,7 @@ def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
         r["id"]
         for r in conn.execute(
             "SELECT id FROM worker_sessions WHERE work_item_id = ? "
-            f"AND status IN ({in_list(LIVE)})",
+            f"AND status IN ({in_list(LIVE)}) ORDER BY rowid",
             (work_item_id,),
         ).fetchall()
     ]
@@ -1026,7 +1026,7 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
     return conn.execute(
         "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
         f"AND status IN ({in_list(LIVE)}) "
-        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?) ORDER BY rowid",
         (work_item_id, path, path + ".", path + "."),
     ).fetchall()
 

@@ -228,7 +228,7 @@ class _Timeline:
             )
             for r in conn.execute(
                 "SELECT id, node_id, hook_point, created_at, started_at, exited_at "
-                "FROM worker_sessions WHERE work_item_id = ? AND created_at >= ?",
+                "FROM worker_sessions WHERE work_item_id = ? AND created_at >= ? ORDER BY rowid",
                 (work_item_id, self.since),
             ).fetchall()
             if r["hook_point"] not in skip

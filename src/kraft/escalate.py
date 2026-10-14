@@ -240,7 +240,7 @@ def last_escalation_status(db, work_item_id: str) -> str | None:
     row = db.read(
         lambda c: c.execute(
             "SELECT status FROM worker_sessions WHERE work_item_id = ? "
-            "AND hook_point = 'escalation' ORDER BY created_at DESC LIMIT 1",
+            "AND hook_point = 'escalation' ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (work_item_id,),
         ).fetchone()
     )

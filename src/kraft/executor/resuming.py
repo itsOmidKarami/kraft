@@ -33,7 +33,8 @@ async def reconcile_current_node(
     node_id = node.id
     sessions = db.read(
         lambda c: c.execute(
-            "SELECT id, status FROM worker_sessions WHERE work_item_id = ? AND node_id = ?",
+            "SELECT id, status FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "ORDER BY rowid",
             (work_item_id, node_id),
         ).fetchall()
     )

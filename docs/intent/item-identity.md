@@ -87,4 +87,4 @@ origin: src/kraft/db.py §worker_sessions
 ## REQ a-session-is-looked-up-with-its-item
 WHEN the system reads or writes a session it holds the work item of, it SHALL find it by its work item id and its session id together.
 enforced-by: tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[exited], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[running], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[unknown], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[escalation-stopped], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[item-paused], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[egress], tests/api/test_board_stop.py::test_each_item_reads_its_own_escalation_turn_of_a_shared_session_id
-origin: src/kraft/store/sessions.py, src/kraft/api/routes/board.py §_stop_episode
+origin: src/kraft/store/sessions.py §session_status, src/kraft/api/routes/board.py §_stop_episode

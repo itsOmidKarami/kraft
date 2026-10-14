@@ -209,7 +209,8 @@ def skip_node(
     """
     now = _now()
     parked = conn.execute(
-        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ?",
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ? "
+        "ORDER BY rowid",
         (work_item_id, node_id, SessionStatus.WAITING),
     ).fetchall()
     if not write_status(
@@ -255,7 +256,7 @@ def skip_scope(
     now = _now()
     parked = conn.execute(
         "SELECT id FROM worker_sessions WHERE work_item_id = ? AND status = ? "
-        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?) ORDER BY rowid",
         (work_item_id, SessionStatus.WAITING, path, path + ".", path + "."),
     ).fetchall()
     for sid in [*(session_ids or []), *(r[0] for r in parked)]:
