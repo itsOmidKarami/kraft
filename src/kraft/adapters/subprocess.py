@@ -438,7 +438,9 @@ def _resolve_exit_file(path: Path) -> str | None:
     one. Writing a result file for every subprocess task would erase it.
     """
     try:
-        raw = path.read_text().strip()
+        # No link followed, no wait on a FIFO: the exit file sits where a
+        # worker may write (an older escalation thread's, beside `results/`).
+        raw = read_no_follow(Path(path)).decode().strip()
     except (OSError, UnicodeDecodeError):
         return None
     if not raw.lstrip("-").isdigit():

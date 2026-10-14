@@ -21,6 +21,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+#: The most of a worker-written file Kraft reads whole: a result file, an exit
+#: code, a summary, a document for the index. Sixteen times the 1 MB a gate,
+#: a prompt or the board takes of a document, and far past any result file
+#: an agent writes; a larger file is a mistake of scale, or a worker filling
+#: the disk, and reads as unreadable, as a file that is not regular does.
+READ_MAX_BYTES = 16_000_000
+
 
 @dataclass(frozen=True)
 class WorktreeRead:
@@ -91,10 +98,14 @@ def read_no_follow(path: Path) -> bytes:
     worker writes into a folder Kraft made, such as its result file, whose
     folder the worker cannot replace but whose name it can. Raises `OSError`,
     `FileNotFoundError` when nothing is there, for anything it will not
-    read."""
+    read, a file larger than `READ_MAX_BYTES` included (read no further
+    than one byte past it)."""
     fd = open_no_symlinks(path.parent, path.name)
     with os.fdopen(fd, "rb") as fh:
-        return fh.read()
+        data = fh.read(READ_MAX_BYTES + 1)
+    if len(data) > READ_MAX_BYTES:
+        raise OSError(errno.EFBIG, f"larger than {READ_MAX_BYTES} bytes: {path}")
+    return data
 
 
 def worktree_file_path(root: Path, rel: str) -> Path | None:

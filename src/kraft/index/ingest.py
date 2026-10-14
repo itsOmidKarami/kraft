@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import yaml
 
 from kraft.events import _now
 from kraft.index.chunk import chunk_markdown
+from kraft.worker.worktree_read import READ_MAX_BYTES
 
 _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _ATX_HEADING = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
@@ -156,7 +158,9 @@ def read_inside(repo: Path, rel: str) -> str | None:
     index, and search would serve it. Every symlink is skipped, one pointing
     inside the repo too: it can name an untracked, ignored file such as
     `.env`. A symlinked directory on the way is the same thing one level up.
-    A FIFO would hold the scan forever and a device is no document."""
+    A FIFO would hold the scan forever and a device is no document, and a
+    file larger than `READ_MAX_BYTES` is not read past it: a worker can
+    write a summary of any size."""
     path = repo / rel
     try:
         if os.path.realpath(path) != os.path.join(os.path.realpath(repo), rel):
@@ -164,13 +168,18 @@ def read_inside(repo: Path, rel: str) -> str | None:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
-    with os.fdopen(fd) as f:
+    with os.fdopen(fd, "rb") as f:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         try:
-            return f.read()
+            data = f.read(READ_MAX_BYTES + 1)
         except OSError:
             return None
+    if len(data) > READ_MAX_BYTES:
+        return None
+    # Decoded as the text-mode read before it did: the locale's encoding,
+    # universal newlines.
+    return io.TextIOWrapper(io.BytesIO(data)).read()
 
 
 def _timestamps(repo: Path, rel: str) -> tuple[str | None, str | None]:

@@ -497,3 +497,14 @@ def test_embedder_failure_still_keeps_the_document_and_chunks(conn):
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
+
+
+def test_an_oversized_document_is_not_read(tmp_path, monkeypatch):
+    """A worker can write a summary of any size, and the index reads it
+    whole: past the cap it is skipped, as a file that is not regular is."""
+    monkeypatch.setattr(ingest, "READ_MAX_BYTES", 8)
+    (tmp_path / "small.md").write_text("# sm\r\n")
+    (tmp_path / "big.md").write_text("# too big\n")
+
+    assert ingest.read_inside(tmp_path, "small.md") == "# sm\n"
+    assert ingest.read_inside(tmp_path, "big.md") is None

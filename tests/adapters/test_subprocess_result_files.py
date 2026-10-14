@@ -2,6 +2,7 @@
 files -- no child process. `run_task` itself is test_subprocess.py."""
 
 import json
+import os
 import subprocess
 import sys
 
@@ -238,9 +239,22 @@ def test_exit_wrapper_records_the_code_and_propagates_it(tmp_path, code, expecte
     assert sp._resolve_exit_file(exit_path) == expected
 
 
-@pytest.mark.parametrize("content", [None, "not a number"], ids=["missing", "garbage"])
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "content",
+    [None, "not a number", "symlink", "fifo"],
+    ids=["missing", "garbage", "symlink-is-unreadable", "fifo-is-unreadable"],
+)
 def test_resolve_exit_file_missing_or_garbage_is_none(tmp_path, content):
+    """An older escalation thread's exit file is beside `results/`, which its
+    codex turns may write: a link there is not followed, and a FIFO does not
+    hold the server."""
     path = tmp_path / "s.exit"
-    if content is not None:
+    if content == "symlink":
+        (tmp_path / "elsewhere").write_text("0")
+        path.symlink_to(tmp_path / "elsewhere")
+    elif content == "fifo":
+        os.mkfifo(path)
+    elif content is not None:
         path.write_text(content)
     assert sp._resolve_exit_file(path) is None

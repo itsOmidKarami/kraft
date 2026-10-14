@@ -79,6 +79,7 @@ from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 from kraft.worker.env import TEST_ENV
+from kraft.worker.worktree_read import read_no_follow
 
 logger = logging.getLogger(__name__)
 
@@ -887,8 +888,12 @@ def _exit_code(row) -> int | None:
     writes (`subprocess._wrap_with_exit_file`, `item_paths.exit_file`), or
     None when there is none to read."""
     try:
+        # No link followed, no wait on a FIFO: an older escalation thread's
+        # exit file is beside `results/`, which its codex turns may write.
         raw = (
-            item_paths.exit_file(row["log_path"], row["result_path"]).read_text().strip()
+            read_no_follow(item_paths.exit_file(row["log_path"], row["result_path"]))
+            .decode()
+            .strip()
             if row["result_path"]
             else ""
         )
