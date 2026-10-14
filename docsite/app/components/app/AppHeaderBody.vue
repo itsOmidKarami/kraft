@@ -4,7 +4,7 @@
 // docs/DocsAsideLeftBody.vue.
 // package.json pins docus to exactly 5.13.0 for this copy: on a bump, copy the
 // new release's file again and reapply the exactNavigation() wrap, the
-// default-open and the reveal.
+// default-open, the reveal and the nav label.
 import type { ContentNavigationItem } from '@nuxt/content'
 import { getFirstPagePath } from 'docus/app/composables/useSubNavigation'
 
@@ -32,6 +32,7 @@ useFoldedNavigation(root)
 <template>
   <div ref="root">
     <UContentNavigation
+      aria-label="Docs"
       default-open
       :highlight="contentNavVariants.highlight ?? true"
       :highlight-color="contentNavVariants.highlightColor"

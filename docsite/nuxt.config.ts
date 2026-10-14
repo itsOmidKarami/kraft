@@ -50,6 +50,37 @@ function forwardingPage(from: string, to: string): string {
 `
 }
 
+// What 404.html shows before the app has loaded. Nuxt writes 404.html as a
+// client-only shell (an empty #__nuxt), so a missing page painted blank until
+// the JavaScript arrived, and with it off or failing stayed blank. This goes
+// inside #__nuxt and is replaced when the app mounts, with error.vue's page,
+// which says the same. GitHub Pages serves this one file for a missing path
+// under / and under /next/ alike, so it cannot know which docs the reader
+// wanted and links to both. Styled inline, in the site's own colour tokens
+// (entry.css is linked in the head), so it does not need the build's
+// utility classes.
+const missingPage = `<style>
+.nf{box-sizing:border-box;min-height:100vh;padding:1.5rem;display:flex;flex-direction:column;background:var(--ui-bg,#fff);color:var(--ui-text,#334155);font-family:'IBM Plex Sans',system-ui,sans-serif}
+.nf a{color:var(--ui-primary,#7c3aed);text-underline-offset:4px}
+.nf header{font:600 1.125rem/1.5rem 'IBM Plex Mono',ui-monospace,monospace}
+.nf header a{color:var(--ui-text-highlighted,#0f172a);text-decoration:none}
+.nf header a::before{content:"› ";color:var(--ui-primary,#7c3aed)}
+.nf main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.75rem}
+.nf p{margin:0}
+.nf .code{font:600 1rem/1.5rem 'IBM Plex Mono',ui-monospace,monospace;color:var(--ui-primary,#7c3aed)}
+.nf h1{margin:0;font-weight:700;font-size:2.25rem;line-height:2.5rem;color:var(--ui-text-highlighted,#0f172a)}
+.nf .links{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem 1.5rem;margin-top:.75rem}
+</style>
+<div class="nf">
+<header><a href="${withBase('/')}">kraft</a></header>
+<main id="main-content" tabindex="-1">
+<p class="code">404</p>
+<h1>No page at this address</h1>
+<p>It may have been renamed or moved.</p>
+<p class="links"><a href="${withBase('/')}">Release docs</a> <a href="/next/">Next docs, for unreleased main</a></p>
+</main>
+</div>`
+
 // A browser breaks a line after a space or a hyphen and after nothing else in
 // `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
 // (and the phone contents bar's) was cut inside a word ("approv" / "e": 267
@@ -78,7 +109,7 @@ export default defineNuxtConfig({
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
@@ -175,6 +206,9 @@ export default defineNuxtConfig({
       'prerender:generate'(route) {
         const moved = movedPages.find(([from]) => from === route.route)
         if (moved) route.contents = forwardingPage(...moved)
+        if (route.route === '/404.html' && typeof route.contents === 'string') {
+          route.contents = route.contents.replace(/(<div id="__nuxt"[^>]*>)<\/div>/, (_, open) => `${open}${missingPage}</div>`)
+        }
       },
     },
     prerender: {

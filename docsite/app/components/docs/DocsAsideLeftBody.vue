@@ -5,7 +5,7 @@
 // down.
 // package.json pins docus to exactly 5.13.0 for this copy: on a bump, copy the
 // new release's file again and reapply the exactNavigation() wrap, the
-// default-open, the key and the reveal below.
+// default-open, the key, the reveal and the nav label below.
 const { sidebarNavigation } = useSubNavigation()
 
 const contentNavVariants = useUIConfig('contentNavigation')
@@ -23,6 +23,7 @@ const listKey = useFoldedNavigation(root)
          for when the key gives it a fresh start. -->
     <UContentNavigation
       :key="listKey"
+      aria-label="Docs"
       default-open
       :highlight="contentNavVariants.highlight ?? true"
       :highlight-color="contentNavVariants.highlightColor"

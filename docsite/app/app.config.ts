@@ -54,6 +54,16 @@ export default defineAppConfig({
         linkText: 'whitespace-normal! break-words',
       },
     },
+    // The "or" between "Edit this page" and "Report an issue" is a separator
+    // that holds two links, and a separator's role takes no interactive child
+    // (axe nested-interactive). Every separator on the site is a rule or a
+    // word beside one, so all are decorative: Reka then gives them role=none
+    // and the text stays in the reading order.
+    separator: {
+      defaultVariants: {
+        decorative: true,
+      },
+    },
     // A search result is one line, cut with an ellipsis: on a 390px phone
     // "Events > Chain and nodes ...ished.node_id node_skipped" ended before
     // the word that was searched for. Two lines.

@@ -1,0 +1,47 @@
+/* Keyboard focus. The browser's own ring is 1px and Nuxt UI draws a different
+   one per component (a 2px ring on a solid button, none on a ghost one), so a
+   focused control was hard to find, thinnest on the version banner's buttons.
+   One ring for everything: 2px, set off from the edge, in the primary colour.
+   Unlayered, so it wins over Nuxt UI's utility classes (@layer utilities). It
+   is violet-600 on white (6.1:1) and violet-400 on the dark page (6.1:1), and
+   on the banner's amber it is above 3:1, the bar for a UI component. */
+:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+/* A block the skip link jumps to takes focus (tabindex=-1) so the next Tab
+   starts inside the content; it is not a control, so it draws no ring. */
+#main-content:focus-visible {
+  outline: none;
+}
+
+/* "Skip to content": the first stop in the tab order (server/plugins/
+   skip-link.ts puts it before the page), out of sight until it has focus, then
+   a button-sized chip in the top left corner over the header. */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.375rem;
+  background: var(--ui-bg);
+  color: var(--ui-text-highlighted);
+  font: 500 0.875rem/1.25rem var(--font-mono);
+  text-decoration: none;
+  box-shadow: 0 0 0 1px var(--ui-border-accented), 0 4px 12px rgb(0 0 0 / 0.15);
+  transform: translateY(calc(-100% - 2rem));
+}
+.skip-link:focus {
+  transform: none;
+}
+.skip-link::before {
+  content: "› ";
+  color: var(--ui-primary);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skip-link {
+    transition: transform 0.12s ease-out;
+  }
+}

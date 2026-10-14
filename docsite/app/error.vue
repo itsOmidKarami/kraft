@@ -4,7 +4,9 @@
 // Pages answers a missing page anywhere, /next/ included, with the stable
 // build's 404.html, so "Back to home" goes to the home of the channel in the
 // URL rather than the router's /, and a 404 offers the same page in the other
-// channel: a page can exist in only one of them.
+// channel: a page can exist in only one of them. The 404 copy is Kraft's own,
+// and the same words as the markup nuxt.config.ts bakes into 404.html, which
+// is all a reader sees until this page has loaded.
 import type { NuxtError } from '#app'
 import type { ContentNavigationItem, PageCollections } from '@nuxt/content'
 import * as nuxtUiLocales from '@nuxt/ui/locale'
@@ -29,11 +31,13 @@ useHead({
   },
 })
 
+const missing = computed(() => props.error.statusCode === 404)
+
 const localizedError = computed(() => {
   return {
     ...props.error,
-    statusMessage: t('common.error.title'),
-    message: t('common.error.description'),
+    statusMessage: missing.value ? 'No page at this address' : t('common.error.title'),
+    message: missing.value ? 'It may have been renamed or moved.' : t('common.error.description'),
   }
 })
 
@@ -45,8 +49,8 @@ const other = computed(() => {
 })
 
 useSeoMeta({
-  title: () => t('common.error.title'),
-  description: () => t('common.error.description'),
+  title: () => localizedError.value.statusMessage,
+  description: () => localizedError.value.message,
 })
 
 const collectionName = computed(() => isEnabled.value ? `docs_${locale.value}` : 'docs')
@@ -63,17 +67,19 @@ provide('navigation', navigation)
   <UApp :locale="nuxtUiLocale">
     <AppHeader />
 
-    <UError :error="localizedError" :clear="!at.channel">
-      <template #message>
-        {{ localizedError.message }}
-        <span v-if="other" class="block mt-2">
-          It may exist only in <a :href="other.href" class="text-primary underline underline-offset-4">{{ other.label }}</a>.
-        </span>
-      </template>
-      <template v-if="at.channel" #links>
-        <UButton size="lg" :label="nuxtUiLocale.messages.error.clear" :to="at.home" external />
-      </template>
-    </UError>
+    <main id="main-content" tabindex="-1">
+      <UError :error="localizedError" :clear="!at.channel">
+        <template #message>
+          {{ localizedError.message }}
+          <span v-if="other" class="block mt-2">
+            It may exist only in <a :href="other.href" class="text-primary underline underline-offset-4">{{ other.label }}</a>.
+          </span>
+        </template>
+        <template v-if="at.channel" #links>
+          <UButton size="lg" :label="nuxtUiLocale.messages.error.clear" :to="at.home" external />
+        </template>
+      </UError>
+    </main>
 
     <AppFooter />
 
