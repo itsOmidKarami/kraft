@@ -145,7 +145,8 @@ A worker's own session travels in the `X-Kraft-Session-Id` header as
 A bare ID is a session from before then, so it is accepted only at that
 session's 32 characters. Any other value, a bare 6-character session ID
 included, answers `400`. A sandboxed worker's channel admits only its own session's
-`permission` and `permission-hook` routes, by both whole IDs.
+`permission` and `permission-hook` routes, by both whole IDs. It admits the
+older routes only for a session from before then, by its whole 32-character ID.
 
 ## Routes the pages document
 

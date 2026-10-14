@@ -129,6 +129,11 @@ IF a sandboxed session's channel is asked for a nested session route naming anot
 enforced-by: tests/worker/test_callback.py::test_a_nested_session_route_is_allowed_for_the_session_itself_only[/api/work-items/{}/sessions/{}/permission], tests/worker/test_callback.py::test_a_nested_session_route_is_allowed_for_the_session_itself_only[/api/work-items/{}/sessions/{}/permission-hook], tests/worker/test_egress_worker_api.py::test_a_verb_is_its_api_call_made_as_the_channel_session[hook]
 origin: src/kraft/worker/callback.py §allowed, src/kraft/worker/egress.py §_caller
 
+## REQ the-channel-admits-a-flat-session-route-only-for-an-older-session
+IF a sandboxed session minted with a per-item id asks its channel for a `/worker-sessions/{sid}/...` route, THEN the system SHALL refuse it, even when `{sid}` is its own id.
+enforced-by: tests/worker/test_callback.py::test_a_session_route_is_allowed_for_the_session_itself_only[per-item-session-permission], tests/worker/test_callback.py::test_a_session_route_is_allowed_for_the_session_itself_only[per-item-session-permission-hook]
+origin: src/kraft/worker/callback.py §allowed
+
 ## REQ container-names-carry-the-item
 WHEN the system names a container or volume for a session minted with a per-item id, it SHALL include the session's work item id and session id.
 enforced-by: tests/worker/backends/test_docker_names.py::test_a_session_s_docker_names_carry_its_item[container], tests/worker/backends/test_docker_names.py::test_a_session_s_docker_names_carry_its_item[relay], tests/worker/backends/test_docker_names.py::test_a_session_s_docker_names_carry_its_item[relay-b], tests/worker/backends/test_docker_names.py::test_a_session_s_docker_names_carry_its_item[volume], tests/worker/backends/test_docker_names.py::test_a_launch_runs_and_joins_the_names_its_session_has[per-item-session], tests/worker/backends/test_docker_relay.py::test_sweep_keeps_a_live_sessions_relays_volume_and_certificate[per-item-session], tests/worker/test_reattach_oom.py::test_an_adopted_session_is_found_under_the_name_it_started_with[per-item-session]

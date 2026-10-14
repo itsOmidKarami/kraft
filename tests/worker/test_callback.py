@@ -22,9 +22,13 @@ _OWN_ITEM = [
     ("POST", "/api/work-items/{}/progress"),
     ("POST", "/api/work-items/{}/retry"),
 ]
+#: A session launched before per-item ids, which the flat routes are kept for.
+_OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 _OWN_SESSION = [
-    ("POST", "/api/worker-sessions/{}/permission"),
-    ("POST", "/api/worker-sessions/{}/permission-hook"),
+    ("POST", "/api/worker-sessions/{}/permission", _OLD, True),
+    ("POST", "/api/worker-sessions/{}/permission-hook", _OLD, True),
+    ("POST", "/api/worker-sessions/{}/permission", "p3n8w2", False),
+    ("POST", "/api/worker-sessions/{}/permission-hook", "p3n8w2", False),
 ]
 
 
@@ -34,10 +38,24 @@ def test_an_item_route_is_allowed_for_the_session_own_item_only(method, path):
     assert not _allowed(method, path.format("w-other"))
 
 
-@pytest.mark.parametrize(("method", "path"), _OWN_SESSION, ids=[p for _, p in _OWN_SESSION])
-def test_a_session_route_is_allowed_for_the_session_itself_only(method, path):
-    assert _allowed(method, path.format("s-own"))
-    assert not _allowed(method, path.format("s-other"))
+@pytest.mark.parametrize(
+    ("method", "path", "sid", "own"),
+    _OWN_SESSION,
+    ids=[
+        "/api/worker-sessions/{}/permission",
+        "/api/worker-sessions/{}/permission-hook",
+        "per-item-session-permission",
+        "per-item-session-permission-hook",
+    ],
+)
+def test_a_session_route_is_allowed_for_the_session_itself_only(method, path, sid, own):
+    """The flat route names a session by its id alone, so it is a session's
+    own only for one launched before per-item ids, whose 32 characters are
+    unique; a per-item session's id is another item's too, and its channel
+    asks under its item instead."""
+    scope = callback.SessionScope(sid, "w-own")
+    assert callback.allowed(scope, method, path.format(sid), thread_owner=_THREADS.get) is own
+    assert not callback.allowed(scope, method, path.format("s-other"), thread_owner=_THREADS.get)
 
 
 _OWN_NESTED = [

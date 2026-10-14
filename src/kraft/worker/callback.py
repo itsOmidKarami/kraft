@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from kraft import ids
+
 if TYPE_CHECKING:
     from kraft.worker.egress import EgressSession
 
@@ -54,8 +56,9 @@ _P = r"(?P<p>[^/]+)"
 _W = r"(?P<w>[^/]+)"
 
 #: (method, path, what its parameter must be). "item": the session's own
-#: work item; "session": the session itself, by its bare id (a flat route,
-#: kept for a session launched before per-item ids); "item-session": the
+#: work item; "session": the session itself, by its bare id, and only a
+#: session launched before per-item ids (a flat route kept for it: a
+#: per-item id is not unique on its own); "item-session": the
 #: session itself under its own item, both segments matched whole; "thread":
 #: a review thread of its own item; "channel": no parameter, the channel's
 #: session is the scope (the MCP endpoint: its tools must act as that
@@ -99,7 +102,7 @@ def allowed(
         if kind == "item":
             return value == scope.work_item_id
         if kind == "session":
-            return value == scope.session_id
+            return len(scope.session_id) == ids.LEGACY_LENGTH and value == scope.session_id
         if kind == "item-session":
             # Never a start of the item's id: the daemon would resolve one
             # (`api.item_ids`), and this list holds a session to its own.
