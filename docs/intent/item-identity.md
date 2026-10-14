@@ -48,3 +48,23 @@ origin: src/kraft/ids.py §mint
 IF ten candidate ids in a row are taken, THEN the system SHALL refuse to create the item or session with an error that says ten candidates were taken.
 enforced-by: tests/test_ids.py::test_ten_taken_candidates_in_a_row_give_up_and_say_why
 origin: src/kraft/ids.py §mint
+
+## REQ work-item-id-is-eight-characters
+WHEN intake files a work item, the system SHALL give it an id of 8 characters.
+enforced-by: tests/executor/test_entry_ids.py::test_intake_gives_a_new_item_an_8_character_id
+origin: src/kraft/executor/entry.py §intake
+
+## REQ a-work-item-id-is-not-the-start-of-another
+IF a candidate work item id equals an existing item's id or is the start of one, THEN the system SHALL draw another.
+enforced-by: tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[equal-id], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[longer-id-it-starts]
+origin: src/kraft/store/work_items.py §work_item_id_taken
+
+## REQ a-work-item-id-names-no-leftover-folder
+IF a folder `run/items/<c>`, `run/worktrees/<c>`, `run/attachments/<c>` or `run/sandbox-home/<c>` exists for a candidate work item id `c`, THEN the system SHALL draw another.
+enforced-by: tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[item-folder], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[worktree-folder], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[attachments-folder], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[sandbox-home-folder]
+origin: src/kraft/executor/entry.py §work_item_id_taken_on_disk
+
+## REQ a-work-item-id-ends-no-kraft-branch
+IF a ref under `refs/heads/kraft/` or `refs/remotes/origin/kraft/` in the item's repo is named a candidate work item id or ends in `-` and that id, THEN the system SHALL draw another.
+enforced-by: tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[plain-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[titled-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[remote-branch], tests/executor/test_entry_ids.py::test_intake_draws_again_when_the_first_id_is_taken[titled-remote-branch], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[longer-name], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[outside-kraft], tests/executor/test_entry_ids.py::test_intake_keeps_an_id_no_kraft_branch_ends_with[a-tag]
+origin: src/kraft/executor/entry.py §work_item_id_taken_on_disk
