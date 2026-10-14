@@ -112,8 +112,8 @@ async def test_a_worker_api_call_acts_as_the_session_whose_socket_it_came_in_on(
     finally:
         await reg.close_all()
     assert seen == [
-        ("session-A-000000", "/api/work-items/wA"),
-        ("session-B-000000", "/api/work-items/wB"),
+        ("wA/session-A-000000", "/api/work-items/wA"),
+        ("wB/session-B-000000", "/api/work-items/wB"),
     ]
 
 

@@ -153,7 +153,7 @@ def _record_where_reads_run(monkeypatch) -> list[bool]:
 
     monkeypatch.setattr(logs.Tail, "read", read)
     monkeypatch.setattr(
-        sessions, "_session_row", lambda st, sid: {"status": "done", "log_path": None}
+        sessions, "_session_row", lambda st, wid, sid: {"status": "done", "log_path": None}
     )
     return on_loop
 
@@ -165,7 +165,7 @@ def test_the_sse_tail_reads_off_the_event_loop(tmp_path, monkeypatch):
     on_loop = _record_where_reads_run(monkeypatch)
 
     async def drain():
-        return [frame async for frame in sessions._tail(None, "s", log, poll_s=0)]
+        return [frame async for frame in sessions._tail(None, "w", "s", log, poll_s=0)]
 
     frames = asyncio.run(drain())
     assert '"text": "one"' in frames[0] and frames[-1].startswith("event: end")
@@ -177,10 +177,17 @@ def test_the_backlog_endpoint_reads_off_the_event_loop(tmp_path, monkeypatch):
     log.write_text("one\n")
     on_loop = _record_where_reads_run(monkeypatch)
     monkeypatch.setattr(
-        sessions, "_session_row", lambda st, sid: {"status": "done", "log_path": str(log)}
+        sessions,
+        "_session_row",
+        lambda st, wid, sid: {
+            "work_item_id": wid,
+            "id": sid,
+            "status": "done",
+            "log_path": str(log),
+        },
     )
     request = SimpleNamespace(app=SimpleNamespace(state=None))
-    body = asyncio.run(sessions.get_log("s", request, format="jsonl"))
+    body = asyncio.run(sessions.get_log("w", "s", request, format="jsonl"))
     assert [r["text"] for r in body["lines"]] == ["one"]
     assert on_loop and not any(on_loop), "a log read ran on the event loop"
 
@@ -191,8 +198,15 @@ def test_the_backlog_payload_says_where_the_next_line_starts(tmp_path, monkeypat
     log = tmp_path / "s.log"
     log.write_text("one\ntwo\n")
     monkeypatch.setattr(
-        sessions, "_session_row", lambda st, sid: {"status": "running", "log_path": str(log)}
+        sessions,
+        "_session_row",
+        lambda st, wid, sid: {
+            "work_item_id": wid,
+            "id": sid,
+            "status": "running",
+            "log_path": str(log),
+        },
     )
     request = SimpleNamespace(app=SimpleNamespace(state=None))
-    body = asyncio.run(sessions.get_log("s", request, format="jsonl"))
+    body = asyncio.run(sessions.get_log("w", "s", request, format="jsonl"))
     assert body["next_line"] == 2
