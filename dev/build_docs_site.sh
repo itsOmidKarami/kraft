@@ -2,8 +2,9 @@
 # Build the published docs site into OUT_DIR: the latest stable release's text
 # at the root (/) and main's at /next/. Both builds use this
 # checkout's site code (theme, components, config), so a site fix reaches the
-# release docs without a release; only docsite/content and .github/assets come
-# from the tag. Needs docsite/node_modules (npm ci) and the repo's tags.
+# release docs without a release; only docsite/content and .github/assets (and
+# an older release's diagram images) come from the tag. Needs
+# docsite/node_modules (npm ci) and the repo's tags.
 #
 #   dev/build_docs_site.sh OUT_DIR
 #   KRAFT_DOCS_STABLE_TAG=v1.0.8 dev/build_docs_site.sh OUT_DIR   # pick the tag
@@ -47,6 +48,12 @@ mkdir -p "$TMP/docsite" "$TMP/frontend/public"
   --exclude ./.nuxt --exclude ./.output --exclude ./.data --exclude ./dist-site .) | tar -xf - -C "$TMP/docsite"
 cp "$ROOT/frontend/public/icon.svg" "$TMP/frontend/public/"
 git -C "$ROOT" archive "$TAG" docsite/content .github/assets | tar -xf - -C "$TMP"
+# A release up to v2.0.0 shows its diagrams as images from public/diagrams/,
+# which main no longer has (its diagrams are markup: the Diagram*.vue
+# components), so they come from the tag with its pages.
+if git -C "$ROOT" cat-file -e "$TAG:docsite/public/diagrams" 2>/dev/null; then
+  git -C "$ROOT" archive "$TAG" docsite/public/diagrams | tar -xf - -C "$TMP"
+fi
 ln -s "$ROOT/docsite/node_modules" "$TMP/docsite/node_modules"
 # The root 404.html comes from here, so GitHub Pages answers a missing path
 # anywhere, /next/ included, with the release's 404 page.

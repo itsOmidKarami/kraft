@@ -21,7 +21,11 @@
 //    (assets/css/prose.css), with a caption under it that says so. The caption
 //    is for the eye (aria-hidden): the picture's alt text is what a screen
 //    reader reads, once, and it cannot swipe. structure.svg and portrait/ fit
-//    a phone and have neither.
+//    a phone and have neither. Only a release's pages up to v2.0.0 still show
+//    their diagrams as images (dev/build_docs_site.sh takes them from the tag):
+//    main's are markup (Diagram*.vue). Drop this change, the `landscapeDiagram`
+//    line and prose.css's `.diagram-scroll img` and dark-card rules once the
+//    stable release is one whose pages have no /diagrams/ image.
 import theme from "#build/ui/prose/img";
 </script>
 

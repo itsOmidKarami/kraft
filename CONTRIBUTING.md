@@ -321,6 +321,17 @@ Page rules:
   `content/5.reference/03.configuration/03.policy.md` is served at
   `/reference/configuration/policy`. A folder's `index.md` is its landing
   page, and its `.navigation.yml` sets its sidebar title.
+- A diagram is markup, not an image: a `::diagram-flow` (stages in order,
+  with branches, loops and groups), `::diagram-graph` (things and the edges
+  that leave each, such as the status state machine) or `::diagram-sequence`
+  (numbered messages), its content in the block's YAML and its `caption`
+  saying in words what it shows. The components are
+  `docsite/app/components/Diagram*.vue`; each one's comment has the fields,
+  and an existing page (`2.concepts/1.how-a-work-item-runs.md`) is the
+  example. They draw the site's one chain language: Plex Mono, `→` between
+  stages, a gate (`gate: you approve`) as the violet chip, a loop as `↻`.
+  Run `npx nuxt dev` in `docsite/` and look at it in both colour modes and
+  at a phone's width.
 - A nested MDC component block needs one more `:` per level of nesting
   (`::` then `:::` then `::::`), or the parser closes the wrong block.
 - No walls of text: a paragraph or list item is at most 80 words and a
