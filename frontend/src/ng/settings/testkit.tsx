@@ -27,9 +27,9 @@ export function storageUsage(over: Partial<StorageUsage> = {}): StorageUsage {
     reclaimable_bytes: 3 * GB,
     categories: { worktrees: 11 * GB, sandboxes: GB, logs: 200 * 1024 ** 2, results: 0, databases: 50 * 1024 ** 2, attachments: 0, other: 0 },
     items: [
-      { id: "w3", title: "Rate limiter", status: "active", archived: false, bytes: 6 * GB, updated_at: new Date(Date.now() - DAY).toISOString(), reclaimable: false },
-      { id: "w1", title: "Cache embeddings", status: "completed", archived: false, bytes: 2 * GB, updated_at: new Date(Date.now() - 3 * DAY).toISOString(), reclaimable: true },
-      { id: "w4", title: "Old spike", status: "abandoned", archived: false, bytes: GB, updated_at: new Date(Date.now() - 9 * DAY).toISOString(), reclaimable: true },
+      { id: "w3", title: "Rate limiter", status: "active", archived: false, bytes: 6 * GB, documents_bytes: 0, updated_at: new Date(Date.now() - DAY).toISOString(), reclaimable: false },
+      { id: "w1", title: "Cache embeddings", status: "completed", archived: false, bytes: 2 * GB, documents_bytes: 512 * 1024 ** 2, updated_at: new Date(Date.now() - 3 * DAY).toISOString(), reclaimable: true },
+      { id: "w4", title: "Old spike", status: "abandoned", archived: false, bytes: GB, documents_bytes: 0, updated_at: new Date(Date.now() - 9 * DAY).toISOString(), reclaimable: true },
     ],
     orphans: [{ name: "7f3a", bytes: 512 * 1024 ** 2 }],
     ...over,

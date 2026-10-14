@@ -90,7 +90,10 @@ export interface StorageItem {
   title: string;
   status: string;
   archived: boolean;
+  /** Its worktree and sandbox home: what archiving frees. */
   bytes: number;
+  /** Its documents and session output: governed, kept by archiving, removed by abandoning. */
+  documents_bytes: number;
   updated_at: string;
   /** Completed or abandoned, and not archived: what a clean-up may take. */
   reclaimable: boolean;

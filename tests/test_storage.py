@@ -85,6 +85,7 @@ def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path, items):
     assert used.items["w1"] == used.categories["sandboxes"]
     assert MB <= used.items["w1"] < 2 * MB
     assert 4 * MB <= used.categories["documents"] < 5 * MB
+    assert used.documents == {"w1": used.categories["documents"]}
     assert 2 * 4096 <= used.categories["attachments"] < MB
     assert 4096 <= used.categories["logs"] < MB
     assert used.categories["other"] == 0
@@ -357,6 +358,34 @@ async def test_tick_over_limit_archives_oldest_first_down_to_quota(
     assert (payload["by"], payload["reason"]) == ("auto", "storage")
 
 
+async def test_tick_archives_only_down_to_what_archiving_can_free(
+    tmp_path, repo, stub_app, monkeypatch, caplog
+):
+    """Items' documents are governed, but archiving keeps them: a worker that
+    filled its `docs/` must not have every finished item archived without
+    the figure coming down. Archiving stops once what it can free is under
+    quota, and the log names the item whose documents hold the rest."""
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    old, mid, new = await _three(app, repo)
+    monkeypatch.setattr(
+        storage,
+        "measure",
+        lambda base, stop=None: storage.Usage(
+            "2026-01-01T00:00:00+00:00",
+            140,
+            {"old": 20, "mid": 20, "new": 20},
+            {"worktrees": 60, "documents": 80},
+            {"mid": 80},
+        ),
+    )
+
+    assert await storage.tick(app) == ["old"]
+
+    assert not old.exists() and mid.exists() and new.exists()
+    assert storage.usage(app.state).governed == 120
+    assert "mid" in caplog.text and "abandon" in caplog.text
+
+
 async def test_tick_never_takes_an_item_newer_than_min_age(tmp_path, repo, stub_app, monkeypatch):
     app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=60 * 3600))
     old, mid, new = await _three(app, repo)
@@ -497,31 +526,41 @@ def test_refusal_says_why_an_item_cannot_be_archived(row, why):
 
 
 def test_report_joins_the_measurement_to_the_work_items():
+    """Each item with its worktree and home (`bytes`, what archiving frees)
+    and its documents (kept by archiving), so the page can name the item
+    whose documents hold the space, an archived one included."""
     used = storage.Usage(
         "2026-01-01T00:00:00+00:00",
-        155,
+        199,
         {"done": 30, "live": 50, "old": 5, "ghost": 70},
-        {"worktrees": 155, "sandboxes": 0},
+        {"worktrees": 155, "sandboxes": 0, "documents": 44},
+        {"done": 4, "kept": 40},
     )
     rows = {
         "done": _row("completed", title="Done one"),
         "live": _row("active", title="Live one"),
         "old": _row("completed", "2026-01-02T00:00:00+00:00"),
+        "kept": _row("completed", "2026-01-02T00:00:00+00:00"),
     }
 
     got = storage.report(_policy(150, 120), used, rows)
 
-    assert [(i["id"], i["bytes"], i["reclaimable"], i["archived"]) for i in got["items"]] == [
-        ("live", 50, False, False),
-        ("done", 30, True, False),
-        ("old", 5, False, True),
+    assert [
+        (i["id"], i["bytes"], i["documents_bytes"], i["reclaimable"], i["archived"])
+        for i in got["items"]
+    ] == [
+        ("live", 50, 0, False, False),
+        ("kept", 0, 40, False, True),
+        ("done", 30, 4, True, False),
+        ("old", 5, 0, False, True),
     ]
-    assert got["items"][1] == {
+    assert got["items"][2] == {
         "id": "done",
         "title": "Done one",
         "status": "completed",
         "archived": False,
         "bytes": 30,
+        "documents_bytes": 4,
         "updated_at": "2026-01-01T00:00:00+00:00",
         "reclaimable": True,
     }
@@ -531,7 +570,7 @@ def test_report_joins_the_measurement_to_the_work_items():
     assert (got["measured_at"], got["state"], got["used_bytes"]) == (
         "2026-01-01T00:00:00+00:00",
         "held",
-        155,
+        199,
     )
     assert (got["quota_bytes"], got["limit_bytes"]) == (120, 150)
 

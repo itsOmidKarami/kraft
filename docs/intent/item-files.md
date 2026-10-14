@@ -189,7 +189,7 @@ origin: src/kraft/item_paths.py §keep_version -- a worker writes `docs/` at any
 
 The system SHALL count every item's `docs/` and every session's `out/` in the
 governed storage figure.
-enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-folder]
+enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-folder], tests/test_storage.py::test_report_joins_the_measurement_to_the_work_items, tests/api/test_abandon_item_folder.py::test_abandoning_takes_the_item_s_documents_off_the_storage_figure
 origin: src/kraft/storage.py §measure -- both are a worker's to write at any size outside its worktree, so the quota and limit must see them.
 
 ## REQ an-oversized-worker-file-reads-as-unreadable
@@ -206,3 +206,11 @@ number of open descriptors however deep the folder nests, and count what is
 at the bottom.
 enforced-by: tests/test_storage.py::test_a_deep_tree_is_counted_within_a_low_open_file_limit
 origin: src/kraft/storage.py §_Folders -- a worker can nest folders far deeper than the daemon's open-file limit; one descriptor per level starves the daemon's sockets, database and logs, and skips what lies below.
+
+## REQ auto-cleanup-archives-only-for-what-archiving-frees
+
+WHILE `auto_cleanup` archives items to make room, the system SHALL stop once
+the part of usage archiving can free is at or under the quota, and SHALL name
+in its log the items whose documents keep usage over the limit.
+enforced-by: tests/test_storage.py::test_tick_archives_only_down_to_what_archiving_can_free
+origin: src/kraft/storage.py §tick -- items' documents are governed but archiving keeps them, so a worker that filled its `docs/` would otherwise have every finished item archived without the figure coming down.

@@ -15,7 +15,7 @@ import logging
 import os
 import stat
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -78,10 +78,17 @@ class Usage:
     # shortcut: a sandboxed item's ref store (`sandbox-git/`) is in `governed`
     # but not here, so archiving frees a little more than this says; attribute
     # it through `worker.refstore` if the Storage page's rows must be exact.
-    # An item's `documents` are in `governed` and not here either: archiving
-    # keeps them.
     items: dict[str, int]
     categories: dict[str, int]
+    #: Bytes per work item id of its `documents` (its `docs/` and sessions'
+    #: `out/`): governed, and kept by archiving, so apart from `items`.
+    documents: dict[str, int] = field(default_factory=dict)
+
+
+def archivable(used: Usage) -> int:
+    """The part of the governed figure archiving can free: all of it but the
+    items' `documents`, which archiving keeps and only abandoning removes."""
+    return used.governed - used.categories.get("documents", 0)
 
 
 def _children(path: Path) -> list[os.DirEntry]:
@@ -258,6 +265,7 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
     # large on a big instance, and freed when the walk returns.
     seen: set[tuple[int, int]] = set()
     items: dict[str, int] = {}
+    documents: dict[str, int] = {}
     categories = dict.fromkeys(CATEGORIES, 0)
     for top in _children(base):
         category = _CATEGORY.get(top.name) or ("databases" if ".db" in top.name else "other")
@@ -271,6 +279,8 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
                     categories[kind] += size
                     if kind == "sandboxes":
                         items[item.name] = items.get(item.name, 0) + size
+                    elif kind == "documents" and size:
+                        documents[item.name] = documents.get(item.name, 0) + size
         elif top.name in _PER_ITEM:
             for child in _children(Path(top.path)):
                 size = _bytes(child.path, seen, stop)
@@ -279,7 +289,7 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
         else:
             categories[category] += _bytes(top.path, seen, stop)
     governed = sum(categories[c] for c in GOVERNED)
-    return Usage(_now(), governed, items, categories)
+    return Usage(_now(), governed, items, categories, documents)
 
 
 def usage(st) -> Usage | None:
@@ -328,13 +338,14 @@ def figures(st) -> dict:
 
 
 def forget(st, wid: str) -> None:
-    """Take a removed item's bytes off the cache, so an archive or abandon is
-    seen without a walk, off `categories` too (worktrees first, then sandboxes,
-    so the two still add up to `governed`). The next walk reconciles."""
+    """Take an archived or abandoned item's worktree and sandbox home
+    (`items`) off the cache, so the change is seen without a walk: off
+    `worktrees` first, then `sandboxes`, and off `governed`. Its `documents`
+    stay: archiving keeps them (`forget_documents` is the abandon's). The
+    next walk reconciles."""
     used = usage(st)
     if used is None or wid not in used.items:
         return
-    items = {k: v for k, v in used.items.items() if k != wid}
     categories = dict(used.categories)
     left = used.items[wid]
     for key in ("worktrees", "sandboxes"):
@@ -343,7 +354,27 @@ def forget(st, wid: str) -> None:
             categories[key] -= take
             left -= take
     st.storage_usage = dataclasses.replace(
-        used, governed=max(0, used.governed - used.items[wid]), items=items, categories=categories
+        used,
+        governed=max(0, used.governed - used.items[wid]),
+        items={k: v for k, v in used.items.items() if k != wid},
+        categories=categories,
+    )
+
+
+def forget_documents(st, wid: str) -> None:
+    """Take an abandoned item's `documents` off the cache, off `governed`
+    too: abandoning removes its folder. The next walk reconciles."""
+    used = usage(st)
+    if used is None or wid not in used.documents:
+        return
+    size = used.documents[wid]
+    categories = dict(used.categories)
+    categories["documents"] = max(0, categories.get("documents", 0) - size)
+    st.storage_usage = dataclasses.replace(
+        used,
+        governed=max(0, used.governed - size),
+        categories=categories,
+        documents={k: v for k, v in used.documents.items() if k != wid},
     )
 
 
@@ -376,7 +407,13 @@ _INTERVAL_S = 600
 async def tick(app) -> list[str]:
     """Measure, when a limit is set. Over the limit with `auto_cleanup` set,
     archive finished items that ended at least `min_age` ago, oldest first,
-    until usage is back at or under quota. Returns the ids archived."""
+    until the part of usage archiving can free (`archivable`) is back at or
+    under quota. Returns the ids archived.
+
+    Items' `documents` are governed but archiving keeps them, so they are no
+    reason to archive: a worker that filled its `docs/` would otherwise have
+    every finished item archived without the figure ever coming down. Those
+    are named in the log, for a person to abandon the item."""
     st = app.state
     st.storage_too_recent = 0
     if st.policy is None or st.policy.storage_limit_bytes is None:
@@ -400,7 +437,7 @@ async def tick(app) -> list[str]:
     archived: list[str] = []
     stuck = 0
     for n, row in enumerate(finished):
-        if usage(st).governed <= quota:
+        if archivable(usage(st)) <= quota:
             break
         if row["updated_at"] > cutoff:
             # Ordered by `updated_at`: every row after this one is newer still.
@@ -425,9 +462,17 @@ async def tick(app) -> list[str]:
             break
     if archived:
         logger.info(
-            "storage: over limit, archived %s; worktrees now use %s",
+            "storage: over limit, archived %s; usage is now %s",
             ", ".join(archived),
             render.human_size(usage(st).governed),
+        )
+    if state_of(st.policy, usage(st)) == "held" and usage(st).documents:
+        heaviest = sorted(usage(st).documents.items(), key=lambda kv: -kv[1])[:3]
+        logger.warning(
+            "storage: still over the limit; items' documents, which archiving keeps, "
+            "use %s (largest: %s): abandon an item to remove its documents",
+            render.human_size(usage(st).categories.get("documents", 0)),
+            ", ".join(f"{wid} {render.human_size(size)}" for wid, size in heaviest),
         )
     return archived
 
@@ -486,20 +531,22 @@ def report(policy, used: Usage, rows: dict) -> dict:
     """`GET /storage`'s answer: the cached measurement joined to the work item
     `rows` (by id). An id with a row is an item, largest first; an id without
     one is an orphan, which the page lists read-only."""
+    measured = dict.fromkeys([*used.items, *used.documents])
     items = [
         {
             "id": wid,
             "title": row["title"],
             "status": row["status"],
             "archived": bool(row["archived_at"]),
-            "bytes": size,
+            "bytes": used.items.get(wid, 0),
+            "documents_bytes": used.documents.get(wid, 0),
             "updated_at": row["updated_at"],
-            "reclaimable": reclaimable(row),
+            "reclaimable": reclaimable(row) and wid in used.items,
         }
-        for wid, size in used.items.items()
+        for wid in measured
         if (row := rows.get(wid)) is not None
     ]
-    items.sort(key=lambda item: -item["bytes"])
+    items.sort(key=lambda item: -(item["bytes"] + item["documents_bytes"]))
     return {
         "measured_at": used.measured_at,
         "state": state_of(policy, used),
@@ -509,11 +556,14 @@ def report(policy, used: Usage, rows: dict) -> dict:
         "reclaimable_bytes": sum(item["bytes"] for item in items if item["reclaimable"]),
         "categories": used.categories,
         "items": items,
-        "orphans": [
-            {"name": name, "bytes": size}
-            for name, size in sorted(used.items.items(), key=lambda kv: -kv[1])
-            if name not in rows
-        ],
+        "orphans": sorted(
+            (
+                {"name": name, "bytes": used.items.get(name, 0) + used.documents.get(name, 0)}
+                for name in measured
+                if name not in rows
+            ),
+            key=lambda orphan: -orphan["bytes"],
+        ),
     }
 
 

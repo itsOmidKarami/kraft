@@ -56,3 +56,23 @@ def test_abandoning_removes_the_item_s_folder_off_the_event_loop(client, repo, m
     assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
     assert on_loop == []
     assert not (Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid).exists()
+
+
+def test_abandoning_takes_the_item_s_documents_off_the_storage_figure(client, repo):
+    """Archiving keeps an item's documents, abandoning removes them: the
+    cached figure drops at once, without waiting for the next walk."""
+    from kraft import storage
+
+    wid = _paused(client, repo)
+    client.app.state.storage_usage = storage.Usage(
+        "2026-01-01T00:00:00+00:00",
+        100,
+        {},
+        {"documents": 100},
+        {wid: 60, "other": 40},
+    )
+
+    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+
+    used = storage.usage(client.app.state)
+    assert (used.governed, used.categories["documents"], used.documents) == (40, 40, {"other": 40})

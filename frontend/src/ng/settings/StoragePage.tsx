@@ -151,6 +151,7 @@ export function StoragePage() {
                     <th scope="col">Work item</th>
                     <th scope="col">Status</th>
                     <th scope="col" className="is-num">Size</th>
+                    <th scope="col" className="is-num" title="Kept by archiving; removed by abandoning the item">Documents</th>
                     <th scope="col">Updated</th>
                   </tr>
                 </thead>
@@ -161,6 +162,7 @@ export function StoragePage() {
                       <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
                       <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> reclaimable</span>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>
+                      <td className="is-num">{i.documents_bytes ? humanSize(i.documents_bytes) : ""}</td>
                       <td>{ago(i.updated_at)}</td>
                     </tr>
                   ))}
@@ -170,6 +172,7 @@ export function StoragePage() {
                       <td className="set-mono">{o.name}</td>
                       <td>no work item</td>
                       <td className="is-num">{humanSize(o.bytes)}</td>
+                      <td />
                       <td />
                     </tr>
                   ))}

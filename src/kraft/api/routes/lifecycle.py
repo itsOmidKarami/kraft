@@ -489,6 +489,7 @@ async def abandon_work_item(wid: str, request: Request):
     # a state the board cannot show. In a thread: a large folder must not hold
     # the event loop.
     await asyncio.to_thread(_remove_item_files, st.run_dirs, wid)
+    storage.forget_documents(st, wid)
     return {"id": wid, "status": "abandoned", **removed}
 
 
