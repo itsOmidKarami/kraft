@@ -11,14 +11,13 @@ import httpx2
 import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from support.permissions import events_of, seed_session, templates
+from support.permissions import (
+    events_of,
+    seed_session,
+    templates_dir,  # noqa: F401 -- the fixture
+)
 
 from kraft.worker.egress import EgressSession, PhaseLists
-
-
-@pytest.fixture
-def templates_dir(tmp_path, monkeypatch):
-    return templates(tmp_path, monkeypatch)
 
 
 @pytest.mark.api_client(host="0.0.0.0")

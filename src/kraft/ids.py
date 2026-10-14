@@ -45,8 +45,14 @@ def session_ref(work_item_id: str, session_id: str) -> str:
 
 def parse_session_ref(value: str) -> tuple[str | None, str]:
     """`(work item id, session id)`. A value with no `/` is a session from
-    before per-item ids, unique on its own, so its item is None."""
-    wid, sep, sid = value.rpartition("/")
+    before per-item ids, unique on its own, so its item is None.
+
+    `ValueError` for anything else: an empty value, an empty half, or a
+    second `/`. Such a value names no session, and a caller refuses it rather
+    than guess which one it meant."""
+    wid, sep, sid = value.partition("/")
+    if not value or (sep and (not wid or not sid or "/" in sid)):
+        raise ValueError(f"not a session reference: {value!r}")
     return (wid, sid) if sep else (None, value)
 
 

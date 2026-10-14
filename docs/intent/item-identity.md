@@ -88,3 +88,43 @@ origin: src/kraft/db.py §worker_sessions
 WHEN the system reads or writes a session it holds the work item of, it SHALL find it by its work item id and its session id together.
 enforced-by: tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[exited], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[running], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[unknown], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[escalation-stopped], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[item-paused], tests/store/test_session_ids.py::test_a_lookup_finds_only_its_own_item_s_session[egress], tests/api/test_board_stop.py::test_each_item_reads_its_own_escalation_turn_of_a_shared_session_id
 origin: src/kraft/store/sessions.py §session_status, src/kraft/api/routes/board.py §_stop_episode
+
+## REQ a-session-is-told-its-qualified-reference
+WHEN the system launches an agent session, it SHALL set `KRAFT_SESSION_ID` to `<wid>/<sid>`, its work item id and its session id.
+enforced-by: tests/adapters/test_agent.py::test_identify_as_worker_sets_the_work_item_env_var[a-worker-by-default], tests/adapters/test_agent.py::test_identify_as_worker_sets_the_work_item_env_var[an-escalation-turn-is-not-a-worker], tests/test_worker_identity.py::test_the_session_environment_carries_the_session_id
+origin: src/kraft/adapters/agent.py §run_agent_task
+
+## REQ the-caller-session-is-qualified
+WHEN the system reads the calling session from `X-Kraft-Session-Id`, it SHALL read a value `<wid>/<sid>` as session `sid` of work item `wid`, both matched whole.
+enforced-by: tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[own-item-s-session], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[same-id-other-item], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[other-item-s-session], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[own-item-named-by-its-start], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[pre-upgrade-qualified], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[header-item-by-its-start-names-no-session], tests/api/test_retry_paths.py::test_an_escalation_retrying_its_own_item_is_told_apart_by_item_and_id[qualified], tests/api/test_retry_paths.py::test_an_escalation_retrying_its_own_item_is_told_apart_by_item_and_id[same-id-other-item]
+origin: src/kraft/api/deps.py §caller_sessions, src/kraft/api/routes/lifecycle.py §_retry
+
+## REQ a-bare-caller-session-is-a-pre-upgrade-one
+WHEN `X-Kraft-Session-Id` is a bare session id, the system SHALL read it as every session with that id, and the self-action guard SHALL refuse the action if any of them belongs to the target work item.
+enforced-by: tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[pre-upgrade-bare], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[bare-id-two-items-share], tests/api/test_retry_paths.py::test_an_escalation_retrying_its_own_item_is_told_apart_by_item_and_id[bare], tests/client/test_permission_request.py::test_the_ask_goes_to_the_session_kraft_session_id_names[pre-upgrade-bare]
+origin: src/kraft/api/deps.py §caller_sessions, src/kraft/api/deps.py §forbid_self_action
+
+## REQ a-malformed-caller-session-is-refused
+IF `X-Kraft-Session-Id` is neither a session id nor `<wid>/<sid>` with both halves present, THEN the system SHALL refuse the request.
+enforced-by: tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[malformed-no-session], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[malformed-no-item], tests/api/test_deps_session_ref.py::test_the_calling_session_is_read_with_its_item[malformed-a-second-slash], tests/test_ids.py::test_a_malformed_session_reference_names_no_session[empty], tests/test_ids.py::test_a_malformed_session_reference_names_no_session[no-session], tests/test_ids.py::test_a_malformed_session_reference_names_no_session[no-item], tests/test_ids.py::test_a_malformed_session_reference_names_no_session[a-second-slash], tests/test_ids.py::test_a_malformed_session_reference_names_no_session[an-empty-segment], tests/client/test_permission_request.py::test_the_ask_goes_to_the_session_kraft_session_id_names[malformed]
+origin: src/kraft/ids.py §parse_session_ref, src/kraft/api/deps.py §caller_ref
+
+## REQ nested-session-routes-name-the-item
+The system SHALL serve a session's log, permission and permission-hook routes at `/work-items/{wid}/sessions/{sid}/...`, where `{wid}` may be a start of the item's id and `{sid}` is matched whole.
+enforced-by: tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-other-item], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-wrong-item], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-item-by-its-start], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-session-never-by-its-start], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-permission], tests/api/test_session_routes.py::test_a_session_route_names_one_session[nested-permission-hook], tests/cli/test_watching.py::test_logs_of_a_named_session_read_it_under_its_item[under-the-item], tests/client/test_permission_request.py::test_the_ask_goes_to_the_session_kraft_session_id_names[under-its-item]
+origin: src/kraft/api/routes/sessions.py §_session_row, src/kraft/client/reads.py §permission_request, src/kraft/cli/view.py §_cmd_logs
+
+## REQ flat-session-routes-answer-a-unique-id
+WHEN a `/worker-sessions/{sid}/...` route is given an id exactly one session has, the system SHALL answer as the nested route would.
+enforced-by: tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-unique], tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-unique-permission], tests/cli/test_watching.py::test_logs_of_a_named_session_read_it_under_its_item[no-item-to-name]
+origin: src/kraft/api/routes/sessions.py §_flat_session_row
+
+## REQ flat-session-routes-refuse-an-ambiguous-id
+IF a `/worker-sessions/{sid}/...` route is given an id no session or more than one session has, THEN the system SHALL answer 404 naming the nested route.
+enforced-by: tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-ambiguous], tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-ambiguous-permission], tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-ambiguous-permission-hook], tests/api/test_session_routes.py::test_a_session_route_names_one_session[flat-unknown]
+origin: src/kraft/api/routes/sessions.py §_flat_session_row
+
+## REQ the-channel-admits-only-its-own-session
+IF a sandboxed session's channel is asked for a nested session route naming another work item or another session, THEN the system SHALL refuse it.
+enforced-by: tests/worker/test_callback.py::test_a_nested_session_route_is_allowed_for_the_session_itself_only[/api/work-items/{}/sessions/{}/permission], tests/worker/test_callback.py::test_a_nested_session_route_is_allowed_for_the_session_itself_only[/api/work-items/{}/sessions/{}/permission-hook], tests/worker/test_egress_worker_api.py::test_a_verb_is_its_api_call_made_as_the_channel_session[hook]
+origin: src/kraft/worker/callback.py §allowed, src/kraft/worker/egress.py §_caller

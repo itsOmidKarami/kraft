@@ -59,6 +59,17 @@ def test_a_session_reference_names_its_item(value, parsed):
 
 
 @pytest.mark.parametrize(
+    "value",
+    ["", "k7m2x9qa/", "/p3n8w2", "k7m2x9qa/p3n8w2/x", "k7m2x9qa//p3n8w2"],
+    ids=["empty", "no-session", "no-item", "a-second-slash", "an-empty-segment"],
+)
+def test_a_malformed_session_reference_names_no_session(value):
+    """Refused whole, never split some way that happens to find a session."""
+    with pytest.raises(ValueError, match="not a session reference"):
+        ids.parse_session_ref(value)
+
+
+@pytest.mark.parametrize(
     ("wid", "sid", "name"),
     [
         ("k7m2x9qa", "p3n8w2", "k7m2x9qa-p3n8w2"),

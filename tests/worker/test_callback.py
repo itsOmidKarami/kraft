@@ -40,6 +40,24 @@ def test_a_session_route_is_allowed_for_the_session_itself_only(method, path):
     assert not _allowed(method, path.format("s-other"))
 
 
+_OWN_NESTED = [
+    ("POST", "/api/work-items/{}/sessions/{}/permission"),
+    ("POST", "/api/work-items/{}/sessions/{}/permission-hook"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _OWN_NESTED, ids=[p for _, p in _OWN_NESTED])
+def test_a_nested_session_route_is_allowed_for_the_session_itself_only(method, path):
+    """Both segments, each matched whole: another item's session with the
+    same id, another session of its own item, and a start of either id (the
+    daemon would resolve an item's) are all someone else's."""
+    assert _allowed(method, path.format("w-own", "s-own"))
+    assert not _allowed(method, path.format("w-other", "s-own"))
+    assert not _allowed(method, path.format("w-own", "s-other"))
+    assert not _allowed(method, path.format("w-o", "s-own"))
+    assert not _allowed(method, path.format("w-own", "s-o"))
+
+
 @pytest.mark.parametrize(
     ("thread", "expected"),
     [("t-own", True), ("t-other", False), ("t-gone", False)],
@@ -72,6 +90,9 @@ def test_the_mcp_endpoint_is_the_channel_session_own(method):
         ("POST", "/api/work-items"),
         ("GET", "/api/work-items"),
         ("GET", "/api/worker-sessions/s-own/log"),
+        ("GET", "/api/work-items/w-own/sessions/s-own/log"),
+        ("POST", "/api/work-items/w-own/sessions/s-own/permission/extra"),
+        ("POST", "/api/work-items/w-own/sessions/w-own%2Fs-own/permission"),
         ("POST", "/api/threads/t-own/comments"),
         # Host git on a live sandboxed worktree is refused anyway (D16).
         ("GET", "/api/work-items/w-own/diff"),

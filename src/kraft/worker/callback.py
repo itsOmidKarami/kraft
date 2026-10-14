@@ -51,11 +51,15 @@ def reachable(sandbox: dict | None) -> bool:
 # One path segment. What it may be is then decided by equality with an id
 # the server made (the scope's, or a thread's own), never by its shape.
 _P = r"(?P<p>[^/]+)"
+_W = r"(?P<w>[^/]+)"
 
 #: (method, path, what its parameter must be). "item": the session's own
-#: work item; "session": the session itself; "thread": a review thread of
-#: its own item; "channel": no parameter, the channel's session is the
-#: scope (the MCP endpoint: its tools must act as that session alone).
+#: work item; "session": the session itself, by its bare id (a flat route,
+#: kept for a session launched before per-item ids); "item-session": the
+#: session itself under its own item, both segments matched whole; "thread":
+#: a review thread of its own item; "channel": no parameter, the channel's
+#: session is the scope (the MCP endpoint: its tools must act as that
+#: session alone).
 ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
     (method, re.compile(path), kind)
     for method, path, kind in (
@@ -66,6 +70,8 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         # The escalation self-retry keeps its server-side carve-out.
         ("POST", rf"/api/work-items/{_P}/retry", "item"),
         ("POST", rf"/api/threads/{_P}/replies", "thread"),
+        ("POST", rf"/api/work-items/{_W}/sessions/{_P}/permission", "item-session"),
+        ("POST", rf"/api/work-items/{_W}/sessions/{_P}/permission-hook", "item-session"),
         ("POST", rf"/api/worker-sessions/{_P}/permission", "session"),
         ("POST", rf"/api/worker-sessions/{_P}/permission-hook", "session"),
         # Streamable HTTP: POST a message, GET the event stream, DELETE to end.
@@ -94,5 +100,9 @@ def allowed(
             return value == scope.work_item_id
         if kind == "session":
             return value == scope.session_id
+        if kind == "item-session":
+            # Never a start of the item's id: the daemon would resolve one
+            # (`api.item_ids`), and this list holds a session to its own.
+            return found["w"] == scope.work_item_id and value == scope.session_id
         return thread_owner(value) == scope.work_item_id
     return False

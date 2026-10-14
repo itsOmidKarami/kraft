@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
-from kraft import executor, store
+from kraft import executor, ids, store
 from kraft.adapters.forge import git as forge_git
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
@@ -270,6 +270,43 @@ def caller_headers(request) -> dict[str, str]:
     return {h: v for h in CALLER_HEADERS if (v := request.headers.get(h))}
 
 
+def caller_ref(request) -> tuple[str | None, str] | None:
+    """The calling session as `X-Kraft-Session-Id` names it
+    (`ids.parse_session_ref`): `(work item id, session id)` for a
+    `<wid>/<sid>` reference, `(None, id)` for a bare id from a session started
+    before per-item ids, None with no header. A value that is neither is a
+    400: it is never split some other way, or matched by a prefix, to find a
+    session."""
+    value = request.headers.get("x-kraft-session-id")
+    if not value:
+        return None
+    try:
+        return ids.parse_session_ref(value)
+    except ValueError:
+        raise HTTPException(
+            400,
+            f"X-Kraft-Session-Id {value!r} is neither a session id nor <work item id>/<session id>",
+        ) from None
+
+
+def caller_sessions(st, request) -> list:
+    """The calling session's rows (`work_item_id`, `id`, `node_id`,
+    `hook_point`): the one session a `<wid>/<sid>` reference names, matched
+    whole on both; for a bare id, every session with that id. That is one for
+    an id minted before per-item ids, but a caller decides as if it could be
+    several: the self-action guard refuses if any of them is the target's."""
+    ref = caller_ref(request)
+    if ref is None:
+        return []
+    wid, sid = ref
+    cols = "SELECT work_item_id, id, node_id, hook_point FROM worker_sessions"
+    if wid is None:
+        sql, args = f"{cols} WHERE id = ?", (sid,)
+    else:
+        sql, args = f"{cols} WHERE work_item_id = ? AND id = ?", (wid, sid)
+    return st.db.read(lambda c: c.execute(sql, args).fetchall())
+
+
 def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) -> None:
     """403 when the caller names a worker session of `wid` itself: design §6
     rule 2, a worker does not approve, reject, pause, resume, skip, abandon,
@@ -295,24 +332,15 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
     worker's retry of its own item while its escalation's self-retry passes,
     since the channel does not tell the two apart (Kraft-9efnk.14).
     """
-    sid = request.headers.get("x-kraft-session-id")
-    if not sid:
-        return
-    session = st.db.read(
-        lambda c: c.execute(
-            "SELECT work_item_id, hook_point FROM worker_sessions WHERE id = ?", (sid,)
-        ).fetchone()
-    )
-    if (
-        session is not None
-        and session["work_item_id"] == wid
-        and (not escalation_may or session["hook_point"] != executor.ESCALATION_HOOK)
-    ):
-        raise HTTPException(
-            403,
-            f"a worker session cannot act on its own work item ({wid}). "
-            "Gates are where a human decides; report what you found instead.",
-        )
+    for session in caller_sessions(st, request):
+        if session["work_item_id"] == wid and (
+            not escalation_may or session["hook_point"] != executor.ESCALATION_HOOK
+        ):
+            raise HTTPException(
+                403,
+                f"a worker session cannot act on its own work item ({wid}). "
+                "Gates are where a human decides; report what you found instead.",
+            )
 
 
 def _begin_reload(st) -> bool:

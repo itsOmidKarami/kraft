@@ -3,7 +3,12 @@
 
 import asyncio
 
+import pytest
+
 from kraft.client import reads
+
+#: A session id minted before per-item ids.
+_OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 
 
 def test_enforce_without_a_session_is_unavailable(monkeypatch):
@@ -26,3 +31,29 @@ def test_enforce_with_the_server_down_is_unavailable(monkeypatch):
     monkeypatch.setattr(reads.transport, "_post", down)
     got = asyncio.run(reads.permission_request("Bash", {}, mode="enforce"))
     assert got["behavior"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("ref", "path"),
+    [
+        ("k7m2x9qa/p3n8w2", "/work-items/k7m2x9qa/sessions/p3n8w2/permission"),
+        (_OLD, f"/worker-sessions/{_OLD}/permission"),
+        ("k7m2x9qa/", None),
+    ],
+    ids=["under-its-item", "pre-upgrade-bare", "malformed"],
+)
+def test_the_ask_goes_to_the_session_kraft_session_id_names(monkeypatch, ref, path):
+    """`<wid>/<sid>` is asked under its item; a bare id, from a session
+    launched before per-item ids, by the flat route that still answers it;
+    anything else is denied without asking."""
+    monkeypatch.setenv("KRAFT_SESSION_ID", ref)
+    asked = []
+
+    async def post(p, body, **kw):
+        asked.append(p)
+        return 200, {"behavior": "allow", "updatedInput": {}}
+
+    monkeypatch.setattr(reads.transport, "_post", post)
+    got = asyncio.run(reads.permission_request("Bash", {}))
+    assert asked == ([path] if path else [])
+    assert got["behavior"] == ("allow" if path else "deny")

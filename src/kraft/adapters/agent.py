@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import item_paths, store
+from kraft import ids, item_paths, store
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -1220,7 +1220,9 @@ async def run_agent_task(
         # make this adapter vendor-aware, against conceptual model §1.2.
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
-            "KRAFT_SESSION_ID": session_id,
+            # `<wid>/<sid>`: a session id is unique only within its item, and
+            # an escalation turn has no KRAFT_WORK_ITEM_ID to say which.
+            "KRAFT_SESSION_ID": ids.session_ref(work_item_id, session_id),
             # Where its documents go: a sandbox mounts this folder read-write.
             "KRAFT_DOCS_DIR": str(item_paths.docs_dir(run_dirs, work_item_id)),
             **(

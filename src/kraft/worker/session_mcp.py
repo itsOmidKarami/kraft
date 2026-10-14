@@ -19,9 +19,10 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
-#: `(session id, the permission ask's JSON)` -> `(status, reply body)`: the
-#: daemon's own `POST /api/worker-sessions/{sid}/permission`, the gate the
-#: host's MCP tool asks too.
+#: `(the session's reference, the permission ask's JSON)` -> `(status, reply
+#: body)`: the daemon's own `POST /api/work-items/{wid}/sessions/{sid}/permission`,
+#: the gate the host's MCP tool asks too. The reference is the
+#: `X-Kraft-Session-Id` the proxy set, `<wid>/<sid>`, passed on unchanged.
 Ask = Callable[[str, dict], Awaitable[tuple[int, object]]]
 
 

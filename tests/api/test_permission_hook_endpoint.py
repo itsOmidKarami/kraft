@@ -10,17 +10,17 @@ import json
 from urllib.parse import urlencode
 
 import pytest
-from support.permissions import PATH, events_of, seed_session, templates
+from support.permissions import (
+    PATH,
+    events_of,
+    seed_session,
+    templates_dir,  # noqa: F401 -- the fixture
+)
 
 from kraft.worker.egress import EgressSession, PhaseLists
 
 _CURSOR_SHELL = {"tool_name": "Shell", "tool_input": {"command": "ls"}, "tool_use_id": "u1"}
 _CODEX_BASH = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/work"}
-
-
-@pytest.fixture
-def templates_dir(tmp_path, monkeypatch):
-    return templates(tmp_path, monkeypatch)
 
 
 def _hook(client, harness, stdin, sid="s1"):

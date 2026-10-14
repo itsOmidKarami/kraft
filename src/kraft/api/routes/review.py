@@ -593,16 +593,9 @@ async def agent_reply(tid: str, body: ReplyIn, request: Request):
     """The one door an agent speaks through. Author and item come from its
     session, never from the request body."""
     st = request.app.state
-    sid = request.headers.get("x-kraft-session-id")
-    session = (
-        st.db.read(
-            lambda c: c.execute(
-                "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (sid,)
-            ).fetchone()
-        )
-        if sid
-        else None
-    )
+    # One session or none: a bare id two items' sessions share names neither.
+    callers = deps.caller_sessions(st, request)
+    session = callers[0] if len(callers) == 1 else None
     if session is None:
         raise HTTPException(403, "only a Kraft worker session can reply to a thread")
     row = _thread_or_404(st, tid)
