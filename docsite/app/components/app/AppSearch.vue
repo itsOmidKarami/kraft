@@ -10,7 +10,7 @@
 <script setup lang="ts">
 import type { ContentNavigationItem } from '@nuxt/content'
 
-defineProps<{
+const props = defineProps<{
   navigation?: ContentNavigationItem[]
 }>()
 
@@ -28,22 +28,46 @@ const { data: files } = useLazyAsyncData('search_docs', async () => {
 // Reference pages are the best match for nearly any word that is also the
 // name of a route or a verb ("raise budget" found POST .../budget/raise
 // first and the guide ninth), so a Reference hit is ranked as if it scored
-// REFERENCE_PENALTY worse (Fuse: 0 is exact, 1 is none; the guide that should
-// lead scored about 0.64 where that route scored 0.17), which lets a good hit
-// elsewhere lead but not hide it. A query that is itself a route, a flag or a
-// verb (it has a / - _ or .) is a search for the reference, so it gets none.
-// The match limit counts hits across every section before they are grouped,
-// so at the default 12 a dozen reference rows left no room for the guide.
+// REFERENCE_PENALTY worse, which lets a good hit elsewhere lead but not hide
+// it. A query that is itself a route, a flag or a verb (it has a / - _ or .)
+// is a search for the reference, so it gets none of what follows either.
+// The CLI verbs (utils/searchSections.ts, titled "kraft item approve") are
+// exempt, because "approve" should find the command.
+// Fuse's own score hardly tells hits apart (every page that has the word
+// scores near 0, ties go to the earlier page, and "approve" listed Overview
+// first), so it counts for FUSE_WEIGHT of the rank and the rest is how much
+// of the query is in the hit's title (more for a verb) and in its text, with a
+// page-level hit ahead of its own subsections. The match limit counts hits
+// across every section, so at the default 12 a dozen reference rows left no
+// room for the guide.
 // Fuse is handed the page's path as one more, near-weightless key, because
 // that is the only way its sort function can see which page a hit is: the
-// path is the first value of its `item` (Nuxt UI merges these options with
-// defu, which puts our keys ahead of its own: a Nuxt UI upgrade that changes
-// that merge moves the path, and every hit then counts as a Reference hit or none).
+// path, then the title and the text, are the first values of its `item` (Nuxt
+// UI merges these options with defu, which puts our keys ahead of its own: a
+// Nuxt UI upgrade that changes that merge moves them, and every hit then
+// counts as a Reference hit or none).
 const REFERENCE_PENALTY = 0.55
+const FUSE_WEIGHT = 0.3
+const TITLE_BONUS = 0.2
+const VERB_BONUS = 0.1
+const BODY_BONUS = 0.05
+const PAGE_BONUS = 0.25
+const SECTION_PENALTY = 0.15
 const term = ref('')
 type Hit = { score: number, idx: number, item: Record<number, { v: string }> }
-const rank = (hit: Hit) => hit.score
-  + (!/[/\-_.]/.test(term.value) && hit.item[0]!.v.startsWith('/reference') ? REFERENCE_PENALTY : 0)
+// The fraction of the query's words that appear in some text.
+const covers = (text: string, words: string[]) => words.filter(word => text.includes(word)).length / words.length
+const rank = (hit: Hit) => {
+  const [to, label = '', body = ''] = [0, 1, 2].map(i => String(hit.item[i]?.v ?? ''))
+  const query = term.value.toLowerCase()
+  const words = query.split(/\s+/).filter(Boolean)
+  const verb = label.startsWith(VERB_TITLE)
+  const reference = /[/\-_.]/.test(query)
+  return FUSE_WEIGHT * hit.score
+    + (!reference && to.startsWith('/reference') && !verb ? REFERENCE_PENALTY : 0)
+    + (reference ? 0 : to.includes('#') ? SECTION_PENALTY : -PAGE_BONUS)
+    - (words.length ? (TITLE_BONUS + (verb ? VERB_BONUS : 0)) * covers(label.toLowerCase(), words) + BODY_BONUS * covers(body.toLowerCase(), words) : 0)
+}
 const fuse = {
   resultLimit: 40,
   fuseOptions: {
@@ -52,6 +76,15 @@ const fuse = {
   },
 }
 
+// Nuxt UI shows results one group per top-level section of the navigation
+// (Guides, Concepts, Reference), each group in rank order and the groups in the
+// order of their best hit, so a guide's six subsections all came before the
+// Reference verb that was the second-best hit. Wrapped in one parent they are
+// a single group, in rank order (each hit still says its section in front).
+const searchNavigation = computed(() => props.navigation?.length
+  ? [{ title: '', path: '/__results', children: props.navigation }] as ContentNavigationItem[]
+  : props.navigation)
+
 const stableOnNext = computed(() => at.value.channel === 'next' && docs.channel !== 'next')
 const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`)
 </script>
@@ -59,7 +92,7 @@ const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`
 <template>
   <LazyUContentSearch
     :files="files"
-    :navigation="navigation"
+    :navigation="searchNavigation"
     :fuse="fuse"
     v-model:search-term="term"
     :color-mode="!forcedColorMode"
