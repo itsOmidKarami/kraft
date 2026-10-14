@@ -7,7 +7,7 @@ from pathlib import Path
 
 from support.harness import isolated_bd, v1_named_chain, v1_seeded_chain
 
-from kraft import builtins, events, executor, store
+from kraft import builtins, events, executor, ids, store
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
@@ -292,7 +292,8 @@ async def test_resume_awaits_adopted_task_before_reading_status(tmp_path, databa
         database,
         run_dirs,
         work_item_id=wid,
-        adopted={sid: task},
+        # Keyed as `reattach` keys them, by the session's item and id.
+        adopted={ids.qualified(wid, sid): task},
         bd_cwd=str(tracker),
     )
     assert result == "completed"

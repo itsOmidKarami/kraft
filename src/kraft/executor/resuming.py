@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kraft import node_runs, store
+from kraft import ids, node_runs, store
 from kraft import policy as _policy
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
@@ -39,7 +39,8 @@ async def reconcile_current_node(
         ).fetchall()
     )
     for s in sessions:
-        task = adopted.get(s["id"])
+        # Keyed as `reattach` keys them: a session id is unique only within its item.
+        task = adopted.get(ids.qualified(work_item_id, s["id"]))
         if task is not None:
             await task
     exec_node = node.node if isinstance(node.node, ExecNode) else None
