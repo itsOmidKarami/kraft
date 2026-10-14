@@ -21,6 +21,8 @@ from kraft.worker.sandbox import SandboxNotReady
 
 POLICED = {"kind": "docker", "image": "img", "network": {"runtime": {"allow": ["a.io"]}}}
 SOCK = Path("/run/sn/0123456789abcdef/s.sock")
+#: A session id minted before per-item ids.
+OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 
 
 @pytest.fixture
@@ -47,10 +49,12 @@ def test_a_launch_under_network_joins_its_relay_and_mounts_the_shim(monkeypatch)
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:3128")
     backend = docker.DockerBackend()
 
-    policed = backend.wrap(["true"], "/w", POLICED, None, session_id="s1")
-    open_ = backend.wrap(["true"], "/w", {"kind": "docker", "image": "img"}, None, session_id="s1")
+    policed = backend.wrap(["true"], "/w", POLICED, None, session_id="s1", work_item_id="w1")
+    open_ = backend.wrap(
+        ["true"], "/w", {"kind": "docker", "image": "img"}, None, session_id="s1", work_item_id="w1"
+    )
 
-    assert "--network=container:kraft-relay-s1" in policed
+    assert "--network=container:kraft-relay-w1-s1" in policed
     assert "HTTPS_PROXY" not in policed
     assert policed[policed.index(f"{shim.HOST_DIR}:/opt/kraft/bin:ro") - 1] == "-v"
     assert not any(a.startswith("--network") for a in open_)
@@ -75,10 +79,10 @@ async def test_the_shim_goes_first_on_the_image_own_path(calls, monkeypatch, ans
     calls.answers["image"] = answer
     if path is None:
         with pytest.raises(SandboxNotReady, match="PATH"):
-            await docker.DockerBackend().open_session("s1", POLICED, SOCK)
+            await docker.DockerBackend().open_session("s1", POLICED, SOCK, work_item_id="w1")
         assert [c[0] for c in calls.made] == ["image"]
     else:
-        env = await docker.DockerBackend().open_session("s1", POLICED, SOCK)
+        env = await docker.DockerBackend().open_session("s1", POLICED, SOCK, work_item_id="w1")
         assert env["PATH"] == path
     assert calls.made[0] == ("image", "inspect", "--format", "{{json .Config.Env}}", "img")
 
@@ -121,19 +125,24 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
     monkeypatch.setattr(docker, "socket_channel", lambda image: True)
     backend = docker.DockerBackend()
 
-    assert await backend.open_session("s1", {"kind": "docker", "image": "img"}, SOCK) == {}
+    assert (
+        await backend.open_session(
+            "s1", {"kind": "docker", "image": "img"}, SOCK, work_item_id="w1"
+        )
+        == {}
+    )
     assert calls.made == []
 
-    env = await backend.open_session("s1", POLICED, SOCK)
-    await backend.close_session("s1")
+    env = await backend.open_session("s1", POLICED, SOCK, work_item_id="w1")
+    await backend.close_session("s1", work_item_id="w1")
 
     assert env == {**docker.RELAY_PROXY_ENV, "PATH": "/opt/kraft/bin:/img/bin"}
     assert env["HTTPS_PROXY"] == env["http_proxy"] == "http://127.0.0.1:3128"
     assert env["NO_PROXY"] == env["no_proxy"] == ""
-    assert calls.made[1][:4] == ("run", "-d", "--name", "kraft-relay-s1")
+    assert calls.made[1][:4] == ("run", "-d", "--name", "kraft-relay-w1-s1")
     assert calls.made[2:] == [
-        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
-        ("volume", "rm", "-f", "kraft-egress-s1"),
+        ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
+        ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]
 
 
@@ -176,10 +185,10 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
     run_dirs = docker._run_dirs()
     run_dirs.ca.mkdir(parents=True)
     (run_dirs.ca / "tls-port").write_text("40123\n")
-    certs = ca.session_dir(run_dirs, "s1")
+    certs = ca.session_dir(run_dirs, "w1-s1")
     backend = docker.DockerBackend()
 
-    assert await backend.open_session("s1", POLICED, None) == {
+    assert await backend.open_session("s1", POLICED, None, work_item_id="w1") == {
         **docker.RELAY_PROXY_ENV,
         "PATH": "/opt/kraft/bin:/img/bin",
     }
@@ -187,12 +196,12 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
     _, create, relay_b, relay = calls.made
     assert create == (
         "volume", "create", "--label", docker.home_label(),
-        "--label", docker.VOLUME_LABEL, "kraft-egress-s1",
+        "--label", docker.VOLUME_LABEL, "kraft-egress-w1-s1",
     )  # fmt: skip
-    assert relay_b[:4] == ("run", "-d", "--name", "kraft-relay-b-s1")
+    assert relay_b[:4] == ("run", "-d", "--name", "kraft-relay-b-w1-s1")
     assert not any(a.startswith("--network") for a in relay_b)
     assert [relay_b[i + 1] for i, a in enumerate(relay_b) if a == "-v"] == [
-        "kraft-egress-s1:/tmp",
+        "kraft-egress-w1-s1:/tmp",
         f"{certs}:/c:ro",
     ]
     assert relay_b[-2:] == (
@@ -200,22 +209,22 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
         f"OPENSSL:{gateway}:40123,cert=/c/client.pem,key=/c/key.pem,cafile=/c/ca.pem,verify=1",
     )
     assert (certs / "client.pem").is_file()
-    assert relay[:4] == ("run", "-d", "--name", "kraft-relay-s1")
+    assert relay[:4] == ("run", "-d", "--name", "kraft-relay-w1-s1")
     assert "--network=none" in relay
-    assert relay[relay.index("-v") + 1] == "kraft-egress-s1:/tmp"
+    assert relay[relay.index("-v") + 1] == "kraft-egress-w1-s1:/tmp"
     assert relay[-1] == "UNIX-CONNECT:/tmp/s.sock"
 
-    await backend.close_session("s1")
+    await backend.close_session("s1", work_item_id="w1")
     assert calls.made[4:] == [
-        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
-        ("volume", "rm", "-f", "kraft-egress-s1"),
+        ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
+        ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]
     assert not certs.exists()
 
 
 async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls):
     with pytest.raises(SandboxNotReady, match="TLS listener has not started"):
-        await docker.DockerBackend().open_session("s1", POLICED, None)
+        await docker.DockerBackend().open_session("s1", POLICED, None, work_item_id="w1")
     assert [c[0] for c in calls.made] == ["image"]
 
 
@@ -226,25 +235,36 @@ async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock):
     (run_dirs.ca / "tls-port").write_text("40123\n")
     calls.answers["run"] = (125, "")
     with pytest.raises(SandboxNotReady, match="could not start the sandbox's egress relay"):
-        await docker.DockerBackend().open_session("s1", POLICED, sock)
+        await docker.DockerBackend().open_session("s1", POLICED, sock, work_item_id="w1")
     assert calls.made[-2:] == [
-        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
-        ("volume", "rm", "-f", "kraft-egress-s1"),
+        ("rm", "-f", "kraft-relay-w1-s1", "kraft-relay-b-w1-s1"),
+        ("volume", "rm", "-f", "kraft-egress-w1-s1"),
     ]
-    assert not ca.session_dir(run_dirs, "s1").exists()
+    assert not ca.session_dir(run_dirs, "w1-s1").exists()
 
 
-async def test_sweep_keeps_a_live_sessions_relays_volume_and_certificate(calls):
-    listed = ("kraft-live", "kraft-relay-live", "kraft-relay-b-live", "kraft-relay-gone")
+@pytest.mark.parametrize(
+    ("keep", "live"),
+    [(("k7m2x9qa", "p3n8w2"), "k7m2x9qa-p3n8w2"), (("k7m2x9qa", OLD), OLD)],
+    ids=["per-item-session", "older-session"],
+)
+async def test_sweep_keeps_a_live_sessions_relays_volume_and_certificate(calls, keep, live):
+    """Kept by the names the session started under: its item and its id, or
+    a session's from before per-item ids, its id alone. Another item's
+    session with the same id is not this one."""
+    gone = "b4t1z8re-p3n8w2"
+    listed = (f"kraft-{live}", f"kraft-relay-{live}", f"kraft-relay-b-{live}", f"kraft-{gone}")
     calls.answers["ps"] = (0, "\n".join(listed))
-    calls.answers["volume"] = (0, "kraft-egress-live\nkraft-egress-gone\n")
+    calls.answers["volume"] = (0, f"kraft-egress-{live}\nkraft-egress-{gone}\n")
     run_dirs = docker._run_dirs()
-    for sid in ("live", "gone"):
-        ca.mint_session_cert(run_dirs, sid)
+    for name in (live, gone):
+        ca.mint_session_cert(run_dirs, name)
 
-    assert await docker.DockerBackend().sweep(["live"]) == ["kraft-relay-gone", "kraft-egress-gone"]
-    assert calls.made[-1] == ("volume", "rm", "-f", "kraft-egress-gone")
-    assert [d.name for d in (run_dirs.ca / "sessions").iterdir()] == ["live"]
+    swept = await docker.DockerBackend().sweep([keep])
+
+    assert swept == [f"kraft-{gone}", f"kraft-egress-{gone}"]
+    assert calls.made[-1] == ("volume", "rm", "-f", f"kraft-egress-{gone}")
+    assert [d.name for d in (run_dirs.ca / "sessions").iterdir()] == [live]
 
 
 def test_the_socket_probe_is_kept_until_doctor_refreshes(monkeypatch):

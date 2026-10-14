@@ -546,7 +546,7 @@ async def test_run_task_runs_sandboxed_through_docker_and_removes_the_container_
 
     assert status == "done"
     assert (tmp_path / "docker-was-called").exists()
-    assert docker.read_text().splitlines() == ["kraft-s-sandbox"]
+    assert docker.read_text().splitlines() == ["kraft-w1-s-sandbox"]
 
 
 @pytest.mark.parametrize("host_moved", [False, True], ids=["published", "host-moved"])
@@ -666,8 +666,8 @@ async def test_a_sandbox_client_runs_outside_the_worktree(run, docker, tmp_path,
     status, _ = await run(["true"], "s-cwd", sandbox=DOCKER)
 
     assert status == "done"
-    assert str(docker_backend.client_dir("s-cwd")) in started and str(tmp_path) not in started
-    assert not docker_backend.client_dir("s-cwd").exists()
+    assert str(docker_backend.client_dir("w1-s-cwd")) in started and str(tmp_path) not in started
+    assert not docker_backend.client_dir("w1-s-cwd").exists()
 
 
 async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
@@ -700,7 +700,7 @@ async def test_run_task_tears_down_the_container_on_cancel(run, docker, database
         await asyncio.sleep(0.02)
     await _cancelled(task)
 
-    assert docker.read_text().splitlines() == ["kraft-s-sandbox-cancel"]
+    assert docker.read_text().splitlines() == ["kraft-w1-s-sandbox-cancel"]
 
 
 async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypatch, run_dirs):

@@ -597,7 +597,9 @@ async def open_egress(
         await db.write(
             lambda c: store.set_session_egress(c, session_id, egress, work_item_id=work_item_id)
         )
-    proxy_env = await backend.open_session(session_id, sandbox, sock_path)
+    proxy_env = await backend.open_session(
+        session_id, sandbox, sock_path, work_item_id=work_item_id
+    )
     if not proxy_env:
         raise _sandbox.SandboxNotReady(
             f"the {backend.kind} sandbox gave its session no egress route for `network:`"
@@ -605,13 +607,13 @@ async def open_egress(
     return proxy_env
 
 
-async def close_egress(backend, session_id: str) -> None:
+async def close_egress(backend, session_id: str, *, work_item_id: str) -> None:
     """Undo `open_egress`: the backend's route, then the channel."""
     try:
-        await backend.close_session(session_id)
+        await backend.close_session(session_id, work_item_id=work_item_id)
     finally:
         if (channels := _channel.current()) is not None:
-            await channels.close(session_id)
+            await channels.close(session_id, work_item_id=work_item_id)
 
 
 async def _item_identity(db, work_item_id: str) -> dict[str, str]:
@@ -886,7 +888,7 @@ async def run_task(
                 )
             except BaseException as exc:
                 # Whatever part of the route did open, closed.
-                await close_egress(backend, session_id)
+                await close_egress(backend, session_id, work_item_id=work_item_id)
                 if not isinstance(exc, _sandbox.SandboxNotReady):
                     raise
                 log_path.write_text(f"kraft: {exc}\n")
@@ -929,6 +931,7 @@ async def run_task(
                     **proxy_env,
                 },
                 session_id=session_id,
+                work_item_id=work_item_id,
                 result_path=result_path,
                 rw_files=rw_files,
                 rw_dirs=rw_dirs,
@@ -972,7 +975,11 @@ async def run_task(
                 d.mkdir(parents=True, exist_ok=True)
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
-        client_cwd = backend.client_cwd(session_id) if backend is not None else None
+        client_cwd = (
+            backend.client_cwd(session_id, work_item_id=work_item_id)
+            if backend is not None
+            else None
+        )
         log = open(log_path, "w", opener=private)
         try:
             try:
@@ -1017,13 +1024,13 @@ async def run_task(
                     )
                 )
                 if backend is not None:
-                    await backend.close(session_id)
+                    await backend.close(session_id, work_item_id=work_item_id)
                 return "config_error"
         finally:
             log.close()  # the child holds its own dup'd fd
     finally:
         if network and not launched:
-            await close_egress(backend, session_id)
+            await close_egress(backend, session_id, work_item_id=work_item_id)
     # The child owns the log fd, so it keeps writing across a Kraft restart — which
     # is the whole premise of reattach. A watcher thread therefore *tails the file*
     # rather than draining a pipe: piping through the parent would give the
@@ -1139,15 +1146,15 @@ async def run_task(
                     # before the sandbox holding it goes -- and whether its
                     # memory limit killed the session, which goes with it.
                     try:
-                        await backend.collect(session_id, result_path)
-                        oom = await backend.oom_killed(session_id)
+                        await backend.collect(session_id, result_path, work_item_id=work_item_id)
+                        oom = await backend.oom_killed(session_id, work_item_id=work_item_id)
                     finally:
                         # The worker, then its route out (spec §4).
                         try:
-                            await backend.close(session_id)
+                            await backend.close(session_id, work_item_id=work_item_id)
                         finally:
                             if network:
-                                await close_egress(backend, session_id)
+                                await close_egress(backend, session_id, work_item_id=work_item_id)
             finally:
                 if refs:
                     await _sync_refs(db, backend, refs, work_item_id, session_id)

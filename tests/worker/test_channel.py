@@ -17,14 +17,18 @@ import pytest
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from support.schema import insert_item
 
-from kraft import events, store
+from kraft import events, ids, store
 from kraft.paths import RunDirs
 from kraft.vocab import SandboxEvent
 from kraft.worker import ca, channel, egress
 from kraft.worker.sandbox import SandboxNotReady
 
 _DENY_ALL = egress.PhaseLists("runtime", (), ("**",))
+#: Ids minted before per-item ids: a work item's, and two sessions'.
+OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
+OLD_A, OLD_B = "0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcde2"
 
 
 @pytest.fixture
@@ -74,7 +78,7 @@ async def _ask(path, request: bytes) -> bytes:
 async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
     registry, database, short_run
 ):
-    path = await registry.open("0123456789abcdef0123", "w1", _DENY_ALL)
+    path = await registry.open(OLD_A, "w1", _DENY_ALL)
     assert path == short_run.base / "sn" / "0123456789abcdef" / "s.sock"
     # Only the daemon's user may reach a session's socket, or its directory.
     assert [stat.S_IMODE(d.stat().st_mode) for d in (short_run.sockets, path.parent)] == [
@@ -87,7 +91,28 @@ async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
     assert answer.startswith(b"HTTP/1.1 403 ")
     rows = database.read(lambda c: events.read_after(c, 0, "w1"))
     refused = [r for r in rows if r["type"] == SandboxEvent.EGRESS_REFUSED]
-    assert [r["payload"]["session_id"] for r in refused] == ["0123456789abcdef0123"]
+    assert [r["payload"]["session_id"] for r in refused] == [OLD_A]
+
+
+@pytest.mark.parametrize(
+    ("sessions", "folders"),
+    [
+        ([("k7m2x9qa", "abc123"), ("b4t1z8re", "abc123")], None),
+        ([(OLD, "abc123"), (OLD, "def456")], None),
+        ([("k7m2x9qa", OLD_A)], [OLD_A[:16]]),
+    ],
+    ids=["same-id-two-items", "two-sessions-of-an-old-item", "older-session"],
+)
+async def test_each_session_listens_in_a_socket_folder_of_its_own(registry, sessions, folders):
+    """A session id is unique only within its item, and an old item's id
+    alone fills the 16 characters a folder name has room for: a new
+    session's folder is named by a hash of both. A session from before
+    per-item ids keeps the start of its id, where its relay already looks."""
+    paths = [await registry.open(sid, wid, _DENY_ALL) for wid, sid in sessions]
+
+    assert len({p.parent for p in paths}) == len(sessions)
+    if folders is not None:
+        assert [p.parent.name for p in paths] == folders
 
 
 async def test_a_worker_api_call_acts_as_the_session_whose_socket_it_came_in_on(
@@ -119,13 +144,13 @@ async def test_a_worker_api_call_acts_as_the_session_whose_socket_it_came_in_on(
 
 async def test_close_stops_the_listener_and_removes_its_directory(registry):
     path = await registry.open("0123456789abcdef0123", "w1", _DENY_ALL)
-    await registry.close("0123456789abcdef0123")
+    await registry.close("0123456789abcdef0123", work_item_id="w1")
 
     assert not path.parent.exists()
     with pytest.raises(OSError):
         await asyncio.open_unix_connection(str(path))
     # Closing what is not open is a no-op, as every teardown path expects.
-    await registry.close("0123456789abcdef0123")
+    await registry.close("0123456789abcdef0123", work_item_id="w1")
 
 
 async def test_shutdown_keeps_the_directory_a_live_relay_mounts(registry):
@@ -157,14 +182,15 @@ async def listener(registry, short_run):
     await tls.close()
 
 
-async def _ask_tls(run_dirs, session_id: str | None, request: bytes) -> bytes:
-    """Dial the listener as a relay B would, presenting `session_id`'s
-    certificate (none for None), and send `request` if any: sending into a
+async def _ask_tls(run_dirs, cn: str | None, request: bytes) -> bytes:
+    """Dial the listener as a relay B would, presenting a session
+    certificate whose CN is `cn` (none for None), and send `request` if any:
+    sending into a
     refused connection races its alert with a reset. A blocking socket, in a thread: asyncio's
     streams read the server's refusal alert as a plain EOF."""
     context = ssl.create_default_context(cafile=ca.ensure_ca(run_dirs)[0])
-    if session_id is not None:
-        context.load_cert_chain(*ca.mint_session_cert(run_dirs, session_id))
+    if cn is not None:
+        context.load_cert_chain(*ca.mint_session_cert(run_dirs, cn))
     port = int((run_dirs.ca / "tls-port").read_text())
 
     def ask() -> bytes:
@@ -181,23 +207,36 @@ async def _ask_tls(run_dirs, session_id: str | None, request: bytes) -> bytes:
     return await asyncio.to_thread(ask)
 
 
+@pytest.mark.parametrize(
+    ("opened", "cn"),
+    [([("w1", "abc123"), ("w2", "abc123")], "w2-abc123"), ([("w1", OLD_A), ("w2", OLD_B)], OLD_B)],
+    ids=["same-id-other-item", "older-session"],
+)
 async def test_a_session_certificate_reaches_its_own_session_over_tls(
-    registry, listener, database, short_run
+    registry, listener, database, short_run, opened, cn
 ):
-    for sid in ("01JSESSION0000000000000001", "01JSESSION0000000000000002"):
+    """The CN is the session's item and id, so one item's certificate never
+    reaches another item's session with the same id; a relay from before
+    per-item ids presents its bare id, and still reaches its own."""
+    await database.write(lambda c: insert_item(c, wid="w2"))
+    for wid, sid in opened:
         # Registered for the TLS transport: no socket made for it.
-        assert await registry.open(sid, "w1", _DENY_ALL, transport="tls") is None
+        assert await registry.open(sid, wid, _DENY_ALL, transport="tls") is None
     assert not short_run.sockets.exists()
     assert listener._server.sockets[0].getsockname()[0] == "127.0.0.1"
 
-    answer = await _ask_tls(
-        short_run, "01JSESSION0000000000000002", b"CONNECT a.io:443 HTTP/1.1\r\n\r\n"
-    )
+    answer = await _ask_tls(short_run, cn, b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
 
     assert answer.startswith(b"HTTP/1.1 403 ")
-    rows = database.read(lambda c: events.read_after(c, 0, "w1"))
-    refused = [r for r in rows if r["type"] == SandboxEvent.EGRESS_REFUSED]
-    assert [r["payload"]["session_id"] for r in refused] == ["01JSESSION0000000000000002"]
+    refused = {
+        wid: [
+            r["payload"]["session_id"]
+            for r in database.read(lambda c, w=wid: events.read_after(c, 0, w))
+            if r["type"] == SandboxEvent.EGRESS_REFUSED
+        ]
+        for wid in ("w1", "w2")
+    }
+    assert refused == {"w1": [], "w2": [opened[1][1]]}
 
 
 @pytest.mark.parametrize("state", ["never-opened", "closed", "unix-channel"])
@@ -206,15 +245,16 @@ async def test_a_certificate_naming_no_open_tls_session_gets_nothing(
 ):
     """The certificate chains to the CA, so the handshake succeeds; then the
     connection closes with not one byte, not even a 403."""
-    sid = "0123456789abcdef0123"
+    sid = "abc123"
     if state != "never-opened":
         await registry.open(
             sid, "w1", _DENY_ALL, transport="unix" if state == "unix-channel" else "tls"
         )
     if state == "closed":
-        await registry.close(sid)
+        await registry.close(sid, work_item_id="w1")
 
-    assert await _ask_tls(short_run, sid, b"CONNECT a.io:443 HTTP/1.1\r\n\r\n") == b""
+    answer = await _ask_tls(short_run, "w1-abc123", b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
+    assert answer == b""
 
 
 async def test_a_client_without_a_certificate_is_refused_at_the_handshake(
@@ -296,7 +336,7 @@ async def test_closing_a_session_ends_the_tunnels_it_already_has(
         reader, writer = await asyncio.open_unix_connection(str(path))
     else:
         context = ssl.create_default_context(cafile=ca.ensure_ca(short_run)[0])
-        context.load_cert_chain(*ca.mint_session_cert(short_run, sid))
+        context.load_cert_chain(*ca.mint_session_cert(short_run, ids.qualified("w1", sid)))
         reader, writer = await asyncio.open_connection(
             "127.0.0.1", await tls.start(), ssl=context, server_hostname="127.0.0.1"
         )
@@ -305,7 +345,7 @@ async def test_closing_a_session_ends_the_tunnels_it_already_has(
         assert (await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)).startswith(
             b"HTTP/1.1 200"
         )
-        await reg.close(sid)
+        await reg.close(sid, work_item_id="w1")
         try:
             ended = await asyncio.wait_for(reader.read(), 5) == b""
         except OSError:  # SSLError and ConnectionError

@@ -242,8 +242,8 @@ async def test_the_kill_reaches_a_sandboxs_container(item_on, run_dirs, monkeypa
     path tears it down, whichever way the run ends."""
     torn_down = []
 
-    async def teardown(session_id):
-        torn_down.append(session_id)
+    async def teardown(name):
+        torn_down.append(name)
 
     monkeypatch.setattr(docker_backend, "docker_argv", lambda cmd, *a, **kw: cmd)
     monkeypatch.setattr(docker_backend, "teardown", teardown)
@@ -265,7 +265,7 @@ async def test_the_kill_reaches_a_sandboxs_container(item_on, run_dirs, monkeypa
     )
 
     assert status == caps.TIME_CAPPED
-    assert torn_down == ["s1"]
+    assert torn_down == [f"{it.id}-s1"]
     assert it.sessions()[0]["status"] == "capped_out"
 
 

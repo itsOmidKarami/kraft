@@ -95,12 +95,12 @@ async def test_a_memory_hog_is_killed_by_its_limit_and_recorded(
     )
     # Asked, then removed by name: nothing is left behind without `--rm`.
     gone = subprocess.run(
-        [runtime.cli, "inspect", docker.container_name("s-hog")], capture_output=True
+        [runtime.cli, "inspect", docker.container_name("w1", "s-hog")], capture_output=True
     )
     assert gone.returncode != 0
     # Podman on cgroup v1 leaves an `oom` file where its client ran: never the
     # worktree, and gone with the session.
-    assert not (work / "oom").exists() and not docker.client_dir("s-hog").exists()
+    assert not (work / "oom").exists() and not docker.client_dir("w1-s-hog").exists()
 
 
 @pytest.mark.parametrize(("pids", "forks"), [(16, False), (256, True)], ids=["bites", "room"])

@@ -19,6 +19,8 @@ _CHAIN = """
   tasks: [{id: implement, kind: agent, harness: fake, prompt: p}]
 """
 IMPLEMENT = "implementation.main.implement"
+#: A session id minted before per-item ids.
+OLD = "8cbfe6e27c1044b3e445c0f0d726357d"
 #: A definitely-dead pid, with a start time.
 DEAD = (2_000_000_000, 123.0)
 
@@ -33,7 +35,7 @@ def oom_killed(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
     # Listed by the startup sweep, as real docker lists an exited container.
     listed = tmp_path / "ps"
-    listed.write_text("kraft-s1\n")
+    listed.write_text("kraft-w1-s1\n")
     monkeypatch.setenv("FAKE_DOCKER_PS", str(listed))
 
 
@@ -89,7 +91,7 @@ async def test_an_adopted_session_its_limit_killed_stops_naming_the_limit(
             sandbox="docker",
         )
         _, adopted = await reattach.reattach(database, run_dirs)
-        assert list(adopted) == ["s1"]
+        assert list(adopted) == ["w1-s1"]
         if paused:
             await database.write(
                 lambda c: c.execute("UPDATE worker_sessions SET status = 'paused'")
@@ -97,8 +99,46 @@ async def test_an_adopted_session_its_limit_killed_stops_naming_the_limit(
     finally:
         proc.stdin.close()
         proc.wait()
-    await adopted["s1"]
+    await adopted["w1-s1"]
 
     recorded = {"session_id": "s1", "memory": "32m", "confirmed": confirmed}
     assert _killed(item) == ([] if confirmed is None else [recorded])
     assert item.sessions()[0]["status"] == ("paused" if paused else "config_error")
+
+
+@pytest.mark.parametrize(
+    ("sid", "container"),
+    [("p3n8w2", "kraft-w1-p3n8w2"), (OLD, f"kraft-{OLD}")],
+    ids=["per-item-session", "older-session"],
+)
+async def test_an_adopted_session_is_found_under_the_name_it_started_with(
+    item_on, database, run_dirs, oom_killed, tmp_path, monkeypatch, sid, container
+):
+    """A restart across the upgrade: the startup sweep keeps the container
+    a live session started under, the OOM check asks it and the close
+    removes it -- its item and its id, or a session's from before per-item
+    ids, its id alone. Another item's session with the same id is not it."""
+    other = "kraft-b4t1z8re-p3n8w2"
+    (tmp_path / "ps").write_text(f"{container}\n{other}\n")
+    calls = tmp_path / "calls"
+    monkeypatch.setenv("FAKE_DOCKER_CALLS", str(calls))
+    item = await item_on(_CHAIN, "implementation")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        start_new_session=True,
+        stdin=subprocess.PIPE,
+    )
+    try:
+        live = (proc.pid, psutil.Process(proc.pid).create_time())
+        await item.session(sid, IMPLEMENT, running=live, sandbox="docker")
+        _, adopted = await reattach.reattach(database, run_dirs)
+        assert list(adopted) == [container.removeprefix("kraft-")]
+    finally:
+        proc.stdin.close()
+        proc.wait()
+    await adopted[container.removeprefix("kraft-")]
+
+    made = calls.read_text().splitlines()
+    removed = [c.removeprefix("rm -f ") for c in made if c.startswith("rm -f ")]
+    assert removed == [other, container]
+    assert any(c.startswith("inspect ") and c.endswith(f" {container}") for c in made)

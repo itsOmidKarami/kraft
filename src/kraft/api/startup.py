@@ -194,11 +194,13 @@ async def lifespan(app: FastAPI):
         on_approve=deps._on_approve(app.state),
     )
     # Not `.update(adopted)` alone: unlike `deps.spawn`'s tasks, nothing else
-    # ever pops a session_id-keyed entry, so an adopted task would sit in
-    # app.state.tasks forever, live or dead (Kraft-mjwz).
-    for sid, task in adopted.items():
-        app.state.tasks[sid] = task
-        task.add_done_callback(lambda _t, sid=sid: app.state.tasks.pop(sid, None))
+    # ever pops a session-keyed entry, so an adopted task would sit in
+    # app.state.tasks forever, live or dead (Kraft-mjwz). Keyed by the
+    # session's `ids.qualified` name, never its bare id: that is unique only
+    # within its item.
+    for name, task in adopted.items():
+        app.state.tasks[name] = task
+        task.add_done_callback(lambda _t, name=name: app.state.tasks.pop(name, None))
     for wid in summary.resumed_work_items:
         repo_row = database.read(
             lambda c, wid=wid: c.execute(

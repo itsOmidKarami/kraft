@@ -462,7 +462,10 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
             sandboxed=row["sandbox"] is not None,
         )
     except Exception:  # noqa: BLE001 -- never at the cost of the adoption itself
-        logger.exception("straggler sweep after re-adopted session %s failed", row["id"])
+        logger.exception(
+            "straggler sweep after re-adopted session %s failed",
+            ids.session_ref(row["work_item_id"], row["id"]),
+        )
 
 
 async def _adopt(
@@ -522,16 +525,19 @@ async def _adopt(
                     )
                 )
         except Exception:
-            logger.exception("usage progress tick failed for adopted session %s", session_id)
+            logger.exception(
+                "usage progress tick failed for adopted session %s",
+                ids.session_ref(work_item_id, session_id),
+            )
     # What the session started into its own process group can outlive it and
     # still be writing the worktree when the sweep commits it, as `run_task`
     # ends it for a session it launched (R11E-03). Sessions start with
     # `start_new_session=True`, so the pid is the group's id.
     await _kill_group(pid, _KILL_GRACE_S, reap=lambda: _reap(pid))
     for backend in _backends.for_session(row["sandbox"]):
-        await backend.collect(session_id, result_path)
+        await backend.collect(session_id, result_path, work_item_id=work_item_id)
     # Before `_guarded_adopt`'s `finally` closes the sandbox, which removes it.
-    oom = await _oom_killed(row["sandbox"], session_id)
+    oom = await _oom_killed(row["sandbox"], work_item_id, session_id)
     if run_dirs is not None:
         # Before the exit is resolved: what runs next reads the item branch.
         await _sync_item_refs(db, run_dirs, row["work_item_id"])
@@ -636,7 +642,7 @@ async def _guarded_adopt(
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.exception("adopted session %s crashed", session_id)
+        logger.exception("adopted session %s crashed", ids.session_ref(work_item_id, session_id))
         reason = f"reattach crashed: {exc!r}"
         try:
             await db.write(
@@ -654,7 +660,7 @@ async def _guarded_adopt(
         # that was never sandboxed, which is why this does not first work out
         # whether this one was: deciding that per call path is how the third
         # path got missed twice.
-        await asyncio.shield(_close_sandbox(sandbox, session_id, egress=egress))
+        await asyncio.shield(_close_sandbox(sandbox, work_item_id, session_id, egress=egress))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
     # After the sandbox is closed, as dispatch sweeps once its launch is over;
@@ -669,23 +675,31 @@ async def _guarded_adopt(
         await _sweep_after(db, run_dirs, row, launch_factory)
 
 
-async def _oom_killed(kind: str | None, session_id: str) -> _backends.OomKill | None:
+async def _oom_killed(
+    kind: str | None, work_item_id: str, session_id: str
+) -> _backends.OomKill | None:
     """Whether a session row's sandbox was killed under its memory limit, or None."""
     for backend in _backends.for_session(kind):
-        if (oom := await backend.oom_killed(session_id)) is not None:
+        oom = await backend.oom_killed(session_id, work_item_id=work_item_id)
+        if oom is not None:
             return oom
     return None
 
 
-async def _close_sandbox(kind: str | None, session_id: str, *, egress: bool = False) -> None:
+async def _close_sandbox(
+    kind: str | None, work_item_id: str, session_id: str, *, egress: bool = False
+) -> None:
     """Close the sandbox a session row ran in (`worker_sessions.sandbox`),
-    and under `network:` its route out after it: relay, then channel."""
+    and under `network:` its route out after it: relay, then channel. Each
+    is found by the names the backend builds from `ids.qualified`, so a
+    session started before per-item ids is closed under the names it
+    started with."""
     for backend in _backends.for_session(kind):
         try:
-            await backend.close(session_id)
+            await backend.close(session_id, work_item_id=work_item_id)
         finally:
             if egress:
-                await close_egress(backend, session_id)
+                await close_egress(backend, session_id, work_item_id=work_item_id)
 
 
 def _launch_environ(row: dict, launch_factory) -> dict[str, str]:
@@ -713,7 +727,10 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str, launch
     route out: it fails closed, and this says why."""
     channels = _channel.current()
     if channels is None:
-        logger.warning("adopted session %s: no egress channel to re-open", session_id)
+        logger.warning(
+            "adopted session %s: no egress channel to re-open",
+            ids.session_ref(work_item_id, session_id),
+        )
         return
     try:
         row = json.loads(egress)
@@ -728,7 +745,11 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str, launch
             credentials=tuple(InjectRule.from_json(r, environ) for r in row.get("credentials", ())),
         )
     except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
-        logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)
+        logger.warning(
+            "adopted session %s: egress channel not re-opened: %s",
+            ids.session_ref(work_item_id, session_id),
+            exc,
+        )
 
 
 async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
@@ -769,6 +790,8 @@ async def reattach(
         ).fetchall()
     )
     summary = ReattachSummary(scanned=len(rows))
+    #: By `ids.qualified`: a session id is unique only within its item, and
+    #: the caller merges these into `app.state.tasks` beside other items'.
     adopted_tasks: dict[str, asyncio.Task] = {}
     pending_escalation_resumes: list[dict] = []
 
@@ -781,7 +804,7 @@ async def reattach(
     # Resolved for every row up front, once each, so the grace retry below can
     # be a single sleep for the whole scan.
     adopt = {
-        r["id"]: (
+        (r["work_item_id"], r["id"]): (
             r["status"] != SessionStatus.PENDING
             and r["pid"] is not None
             and _identity_ok(r["pid"], r["pid_start_time"])
@@ -810,7 +833,7 @@ async def reattach(
     grace = [
         r
         for r in rows
-        if not adopt[r["id"]]
+        if not adopt[(r["work_item_id"], r["id"])]
         and r["status"] != SessionStatus.PENDING
         and r["pid"] is not None
         and _is_young(r["started_at"])
@@ -818,7 +841,7 @@ async def reattach(
     if grace:
         await asyncio.sleep(grace_retry_delay_s)
         for r in grace:
-            adopt[r["id"]] = _identity_ok(r["pid"], r["pid_start_time"])
+            adopt[(r["work_item_id"], r["id"])] = _identity_ok(r["pid"], r["pid_start_time"])
 
     # A container whose teardown failed or timed out before this start is
     # still writing its worktree, and no row names it any more. Swept before
@@ -827,7 +850,7 @@ async def reattach(
     # Every row's container is kept too, not only an adopted one's: the loop
     # below closes each in turn, after asking whether its memory limit
     # killed it -- which the sweep would otherwise have removed first.
-    keep = {r["id"] for r in rows}
+    keep = {(r["work_item_id"], r["id"]) for r in rows}
     for backend in _backends.every():
         if orphans := await backend.sweep(keep):
             logger.warning(
@@ -836,13 +859,15 @@ async def reattach(
 
     for r in rows:
         sid = r["id"]
-        adopting = adopt[sid]
+        adopting = adopt[(r["work_item_id"], sid)]
         oom = None
         if not adopting:
             # Asked before the close below removes the evidence.
             if r["status"] != SessionStatus.PENDING:
-                oom = await _oom_killed(r["sandbox"], sid)
-            await _close_sandbox(r["sandbox"], sid, egress=r["egress"] is not None)
+                oom = await _oom_killed(r["sandbox"], r["work_item_id"], sid)
+            await _close_sandbox(
+                r["sandbox"], r["work_item_id"], sid, egress=r["egress"] is not None
+            )
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == SessionStatus.PENDING:
             await db.write(
@@ -871,7 +896,7 @@ async def reattach(
                     c, sid, work_item_id=r["work_item_id"]
                 )
             )
-            adopted_tasks[sid] = asyncio.create_task(
+            adopted_tasks[ids.qualified(r["work_item_id"], sid)] = asyncio.create_task(
                 _guarded_adopt(
                     db,
                     sid,
@@ -963,7 +988,7 @@ async def reattach(
 
     for pending in pending_escalation_resumes:
         sid = pending["session_id"]
-        adopted_tasks[sid] = asyncio.create_task(
+        adopted_tasks[ids.qualified(pending["work_item_id"], sid)] = asyncio.create_task(
             _guarded_resume_adopted_escalation(
                 db,
                 run_dirs,

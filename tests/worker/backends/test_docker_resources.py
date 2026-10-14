@@ -217,7 +217,7 @@ async def test_an_oom_kill_is_read_off_the_runtime_never_the_exit_code(inspect, 
     limit a retry would hit again."""
     if answer is not None:
         inspect(answer)
-    got = await docker.DockerBackend().oom_killed("s1")
+    got = await docker.DockerBackend().oom_killed("s1", work_item_id="w1")
     assert got == (None if memory is None else docker.OomKill(memory, True))
 
 
@@ -230,13 +230,13 @@ async def test_podmans_oom_file_is_its_word_on_cgroup_v1(inspect, monkeypatch, e
     monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime("docker", engine=engine))
     inspect("false 33554432\n")
     backend = docker.DockerBackend()
-    (backend.client_cwd("s1") / "oom").touch()
+    (backend.client_cwd("s1", work_item_id="w1") / "oom").touch()
 
-    assert await backend.oom_killed("s1") == (
+    assert await backend.oom_killed("s1", work_item_id="w1") == (
         docker.OomKill("32m", True) if engine == "podman" else None
     )
-    await backend.close("s1")
-    assert not docker.client_dir("s1").exists()
+    await backend.close("s1", work_item_id="w1")
+    assert not docker.client_dir("w1-s1").exists()
 
 
 @pytest.mark.parametrize(
@@ -265,6 +265,6 @@ async def test_a_sigkilled_limited_container_gets_a_moment_for_its_oom_flag(
         return 0, answers[min(len(calls), len(answers)) - 1] + "\n"
 
     monkeypatch.setattr(docker, "docker_call", fake_call)
-    assert await docker.oom_killed("s1") == oom
+    assert await docker.oom_killed("w1-s1") == oom
     if asked is not None:
         assert len(calls) == asked
