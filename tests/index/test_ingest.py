@@ -19,7 +19,7 @@ def _reconcile(*args, **kwargs):
 
 # ---- split_front_matter ----
 
-#: Nine levels of ten aliases each: about 550 bytes that build 10**9 nodes.
+#: Nine levels of ten aliases each: about 550 bytes that expand to 10**9 nodes.
 _ALIAS_BOMB = "a0: &a0 [x]\n" + "".join(
     f"a{n}: &a{n} [{', '.join([f'*a{n - 1}'] * 10)}]\n" for n in range(1, 10)
 )
@@ -38,20 +38,32 @@ def test_split_front_matter_present():
         ("---\n: : not : valid :\n---\nbody\n", "body\n"),
         ("---\njust a string\n---\nbody\n", "body\n"),
         ("---\n" + _ALIAS_BOMB + "---\nbody\n", "body\n"),
+        ("---\na: &x v\nb: *x\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "t" * 70_000 + "\n---\nbody\n", "body\n"),
         ("---\ndate: 2026-02-30\n---\nbody\n", "body\n"),
+        ("---\nx: 1:" + "0:" * 200 + "0.5\n---\nbody\n", "body\n"),
         ("---\na: " + "[" * 5_000 + "]" * 5_000 + "\n---\nbody\n", "body\n"),
     ],
     ids=[
         "absent",
         "malformed-yaml-ignored",
         "scalar-not-dict",
-        "aliases-expanding-past-the-budget",
+        "aliases-expanding",
+        "any-alias",
+        "longer-than-the-cap",
         "impossible-date",
+        "float-overflow",
         "nested-past-the-parser",
     ],
 )
 def test_split_front_matter_without_a_mapping_yields_none(text, body):
     assert ingest.split_front_matter(text) == ({}, body)
+
+
+def test_metadata_too_large_to_write_as_json_is_stored_as_none():
+    """`0x` and thousands of hex digits builds an int no JSON can write."""
+    fm, _ = ingest.split_front_matter("---\nn: 0x" + "f" * 5_000 + "\n---\nbody\n")
+    assert ingest._meta_json(fm) == "{}"
 
 
 # ---- derive_kind / derive_title ----

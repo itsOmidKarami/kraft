@@ -15,7 +15,6 @@ from pathlib import Path
 
 import yaml
 
-from kraft.config import bounded_yaml
 from kraft.events import _now
 from kraft.index.chunk import chunk_markdown
 from kraft.worker.worktree_read import READ_MAX_BYTES
@@ -71,24 +70,38 @@ class ReconcileStats:
     deleted: int = 0
 
 
-#: Nodes a document's front matter may hold, every use of an alias counted
-#: again (`bounded_yaml`): a handful of keys and short lists in practice.
-FRONT_MATTER_NODES = 2_000
+#: The longest front matter read: a handful of keys and short lists in
+#: practice. Past it a worker's document reads as having none, before any
+#: YAML is parsed (a long sexagesimal number alone parses in quadratic time).
+FRONT_MATTER_MAX_BYTES = 64 * 1024
+
+
+class _FrontMatterLoader(yaml.SafeLoader):
+    """A SafeLoader that refuses any alias: front matter never needs one, and
+    an anchor on a long value used two thousand times is gigabytes once the
+    metadata is serialised."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.YAMLError("front matter uses an alias")
+        return super().compose_node(parent, index)
 
 
 def split_front_matter(text: str) -> tuple[dict, str]:
     """A document's YAML front matter and its body. A worker writes the
-    document, so the front matter is read bounded: aliases that would expand
-    past `FRONT_MATTER_NODES` (a few hundred bytes can expand to gigabytes),
-    nesting the parser recurses through, and a value YAML cannot build (an
-    impossible date) all read as no front matter."""
+    document, so the front matter is read bounded: longer than
+    `FRONT_MATTER_MAX_BYTES`, using an alias, or anything YAML cannot build
+    (an impossible date, a number too large for a float, nesting the parser
+    recurses through) reads as no front matter."""
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
     body = text[m.end() :]
+    if len(m.group(1)) > FRONT_MATTER_MAX_BYTES:
+        return {}, body
     try:
-        data = bounded_yaml(m.group(1), [FRONT_MATTER_NODES])
-    except (yaml.YAMLError, ValueError, RecursionError):
+        data = yaml.load(m.group(1), _FrontMatterLoader)  # noqa: S506 -- a SafeLoader
+    except Exception:  # untrusted, and only ever displayed or matched
         return {}, body
     return (data, body) if isinstance(data, dict) else ({}, body)
 
@@ -260,7 +273,12 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
 def _meta_json(metadata: dict) -> str:
     # default=str: YAML front-matter can yield dates / other non-JSON scalars;
     # metadata_json is for display, so stringify rather than fail ingestion.
-    return json.dumps(metadata, sort_keys=True, default=str)
+    # An int past Python's digit limit (a hex literal builds as one) cannot be
+    # written at all: the document is stored with none rather than refused.
+    try:
+        return json.dumps(metadata, sort_keys=True, default=str)
+    except (ValueError, OverflowError, RecursionError):
+        return "{}"
 
 
 def replace_links(conn, document_id: str, links) -> None:
