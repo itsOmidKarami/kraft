@@ -509,7 +509,7 @@ async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
         with _child(["bash", "-c", f"sleep 30 & echo $! > {pidfile}; sleep 2"]) as (proc, pst):
             await item.session("s1", IMPLEMENT, running=(proc.pid, pst))
             for _ in range(50):
-                if pidfile.exists():
+                if pidfile.exists() and pidfile.read_text().strip():  # written, not just created
                     break
                 await asyncio.sleep(0.1)
             grandchild = int(pidfile.read_text().strip())
