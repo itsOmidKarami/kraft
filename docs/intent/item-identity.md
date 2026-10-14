@@ -38,3 +38,13 @@ origin: src/kraft/api/__init__.py
 IF a worker names its own work item by a start of its id, THEN the system SHALL refuse the action as it refuses the whole id.
 enforced-by: tests/api/test_item_ids.py::test_a_worker_naming_its_own_item_by_its_start_is_refused, tests/client/test_guard.py::test_a_worker_cannot_act_on_its_own_item[eight], tests/client/test_guard.py::test_a_worker_cannot_act_on_its_own_item[four]
 origin: src/kraft/api/item_ids.py §whole_work_item_id, src/kraft/client/context.py §_forbid_self_action
+
+## REQ an-id-is-drawn-from-lowercase-crockford-base32
+WHEN the system draws a work item or session id, it SHALL draw every character from `0123456789abcdefghjkmnpqrstvwxyz`.
+enforced-by: tests/test_ids.py::test_an_id_is_drawn_from_lowercase_crockford_base32[work-item], tests/test_ids.py::test_an_id_is_drawn_from_lowercase_crockford_base32[session]
+origin: src/kraft/ids.py §mint
+
+## REQ id-minting-gives-up-loudly
+IF ten candidate ids in a row are taken, THEN the system SHALL refuse to create the item or session with an error that says ten candidates were taken.
+enforced-by: tests/test_ids.py::test_ten_taken_candidates_in_a_row_give_up_and_say_why
+origin: src/kraft/ids.py §mint
