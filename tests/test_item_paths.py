@@ -6,12 +6,10 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from support.deep_tree import deep_chain
+from support.deep_tree import deep_chain, opens_during
 from support.harness import write
 from support.unprivileged import run_unprivileged
 
@@ -637,20 +635,10 @@ def test_a_mode_0_folder_is_left_where_no_descriptor_can_unlock_it(run_dirs, tmp
                 left.chmod(0o755)
 
 
-_DEEP_REMOVE = """
-import os, resource, sys
+_LOW_LIMIT = """
+import resource
 from kraft import item_paths
-
-real_open, opens = os.open, []
-
-def counting_open(*a, **kw):
-    opens.append(a[0])
-    return real_open(*a, **kw)
-
-os.open = counting_open
 resource.setrlimit(resource.RLIMIT_NOFILE, (64, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
-item_paths.remove_tree(sys.argv[1])
-print(len(opens))
 """
 
 
@@ -660,18 +648,12 @@ def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
     goes back up by `..` rather than reopening from the top (about two opens
     a folder, where reopening would take some 12.5 million for 5,000), and
     removes the item's folder whole. Counted, not timed, so a loaded machine
-    cannot fail it."""
+    cannot fail it, and by the audit hook, which sees every open however
+    the walk binds `os.open`."""
     item = item_paths.item_dir(run_dirs, "w1")
     deep_chain(item / "docs", 5000, leaf=b"x")
 
-    done = subprocess.run(
-        [sys.executable, "-c", _DEEP_REMOVE, str(item)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+    opens, _ = opens_during(_LOW_LIMIT, f"item_paths.remove_tree({str(item)!r})")
 
-    assert done.returncode == 0, done.stderr
     assert not os.path.lexists(item)
-    assert int(done.stdout) < 3 * 5000
+    assert 5000 <= opens < 10 * 5000

@@ -7,7 +7,10 @@ make one at almost no cost: what a walk of a worker's folder must survive.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -30,3 +33,35 @@ def deep_chain(base: Path, depth: int, *, leaf: bytes = b"") -> None:
             os.close(big)
     finally:
         os.close(folder)
+
+
+# Counts every `open` audit event (`os.open`, `open`), raised from C however
+# the caller bound the function, from the moment `setup` has run.
+_COUNTING = """
+import json, sys
+exec(sys.argv[1])
+opens = []
+sys.addaudithook(lambda event, args: opens.append(1) if event == "open" else None)
+result = eval(sys.argv[2])
+print(json.dumps({"opens": len(opens), "result": result}))
+"""
+
+
+def opens_during(setup: str, call: str) -> tuple[int, object]:
+    """Run `setup`, then evaluate `call`, in a fresh Python; how many files
+    and folders `call` opened, and what it returned (as JSON). In a child,
+    so neither the count nor what `setup` changes touches the test's own
+    process.
+
+        opens, used = opens_during("from kraft import storage", "storage.measure('run').items")
+    """
+    done = subprocess.run(
+        [sys.executable, "-c", _COUNTING, setup, call],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert done.returncode == 0, done.stderr
+    seen = json.loads(done.stdout)
+    return seen["opens"], seen["result"]

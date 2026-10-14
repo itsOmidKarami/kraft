@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.archive import days_ago, seed_completed_item
-from support.deep_tree import deep_chain
+from support.deep_tree import deep_chain, opens_during
 
 from kraft import item_paths, policy, storage
 
@@ -176,30 +176,24 @@ def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
     assert seen["a"] >= 4 * MB
 
 
-def test_a_deep_tree_is_counted_in_time_linear_in_its_folders(tmp_path, monkeypatch):
+def test_a_deep_tree_is_counted_with_opens_linear_in_its_folders(tmp_path):
     """Folders deeper than the walk holds descriptors for are gone back up to
     by `..`, not reopened from the top each time: reopening made 2,000 levels
     take 2.6 seconds and 50,000 half an hour, and a worker makes either at
     almost no cost. 5,000 levels take about two opens a folder, where
     reopening took some 12.5 million. Counted, not timed, so a loaded
-    machine cannot fail it."""
+    machine cannot fail it, and by the audit hook, which sees every open
+    however the walk binds `os.open`."""
     run = tmp_path / "run"
     deep_chain(run / "worktrees" / "a", 5000, leaf=os.urandom(MB))
-    real, opens = os.open, []
-
-    def counting_open(*a, **kw):
-        opens.append(a[0])
-        return real(*a, **kw)
-
-    monkeypatch.setattr(os, "open", counting_open)
     try:
-        used = storage.measure(run)
-        monkeypatch.undo()
+        opens, items = opens_during(
+            "from kraft import storage", f"storage.measure({str(run)!r}).items"
+        )
 
-        assert used.items["a"] >= MB
-        assert len(opens) < 3 * 5000
+        assert items["a"] >= MB
+        assert 5000 <= opens < 10 * 5000
     finally:
-        monkeypatch.undo()
         item_paths.remove_tree(run)
 
 
