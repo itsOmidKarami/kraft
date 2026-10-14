@@ -50,7 +50,9 @@ const { data: files } = useLazyAsyncData('search_docs', async () => {
 // so at the default 12 a dozen reference rows left no room for the guide.
 // Fuse is handed the page's path as one more, near-weightless key, because
 // that is the only way its sort function can see which page a hit is: the
-// path is the first value of its `item`.
+// path is the first value of its `item` (Nuxt UI merges these options with
+// defu, which puts our keys ahead of its own: a Nuxt UI upgrade that changes
+// that merge moves the path, and every hit then counts as a Reference hit or none).
 const REFERENCE_PENALTY = 0.55
 const term = ref('')
 type Hit = { score: number, idx: number, item: Record<number, { v: string }> }
