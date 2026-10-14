@@ -490,7 +490,7 @@ def _envelope_is_error(
         return _base_status
     try:
         envelope = json.loads(lines[-1])
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         return _base_status
     if isinstance(envelope, dict) and envelope.get("is_error") is True:
         return "failed"

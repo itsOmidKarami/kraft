@@ -58,7 +58,7 @@ def _decode(line: str) -> dict | None:
         return None
     try:
         obj = json.loads(stripped)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         return None
     return obj if isinstance(obj, dict) else None
 

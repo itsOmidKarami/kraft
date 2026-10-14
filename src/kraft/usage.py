@@ -351,7 +351,7 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage], *, live: bool = Tr
             continue
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
         if not isinstance(obj, dict):
             continue
@@ -472,7 +472,7 @@ def read_envelope(log_path: Path) -> dict | None:
     for line in lines:
         try:
             envelope = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
         if not isinstance(envelope, dict):
             continue
@@ -526,7 +526,7 @@ def _rate_limit_claude(log_path: Path) -> RateLimitInfo | None:
     for line in lines:
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
         if not isinstance(obj, dict) or obj.get("type") != "rate_limit_event":
             continue
@@ -555,7 +555,7 @@ def _cumulative(log_path: Path, cli: str) -> Usage | None:
             for line in fh:
                 try:
                     obj = json.loads(line)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):
                     continue
                 if isinstance(obj, dict) and obj.get("type") == "result":
                     last = obj if obj.get("session_id") in (cli, None) else last
@@ -639,7 +639,7 @@ def _session_id_claude(log_path: Path) -> str | None:
             for line in fh:
                 try:
                     obj = json.loads(line)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):
                     continue
                 if (
                     isinstance(obj, dict)
@@ -680,7 +680,7 @@ def _unfinished_jobs_claude(log_path: Path) -> list[str]:
     for line in lines:
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
         if not isinstance(obj, dict):
             continue
@@ -715,7 +715,7 @@ def _json_lines(lines: Iterable[str]) -> Iterable[dict]:
     for line in lines:
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
         if isinstance(obj, dict):
             yield obj

@@ -3,7 +3,7 @@
 
 import json
 
-from kraft.logs import summary
+from kraft.logs import classify, summary
 
 
 def test_known_kind_still_summarises_normally():
@@ -19,3 +19,10 @@ def test_unknown_kind_falls_back_to_bare_type_not_raw_json():
 
 def test_non_json_line_falls_back_to_the_line_itself():
     assert summary(None, "plain stdout, not JSON") == "plain stdout, not JSON"
+
+
+def test_a_line_nested_past_the_parser_reads_as_plain_stdout():
+    """The worker can print to the log: a line deeper than `json.loads`
+    recurses must not break the log view."""
+    deep = '{"a": ' + "[" * 100_000 + "]" * 100_000 + "}"
+    assert classify(deep) == ("stdout", None)
