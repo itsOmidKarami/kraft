@@ -53,7 +53,7 @@ async def test_every_agent_is_told_where_its_item_s_documents_are(
     it = await item_on(_CHAIN, attachments=attachments)
     if where is not None:
         rel = where.format(w=it.id)
-        write(item_paths.base_for(run_dirs, it.id, rel), rel, "# spec\n")
+        write(*item_paths.locate(run_dirs, it.id, rel), "# spec\n")
 
     note = agent.documents_note(run_dirs, it.row(), worktree=it.worktree)
 

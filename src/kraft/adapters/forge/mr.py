@@ -99,8 +99,7 @@ def read_mr_meta(worktree: Path, work_item_id: str, run_dirs) -> MRMeta:
     name = item_paths.document(run_dirs, work_item_id, "mr_meta", worktree=worktree)
     result, _reason = (
         read_worktree_file(
-            item_paths.base_for(run_dirs, work_item_id, name, worktree=worktree),
-            name,
+            *item_paths.locate(run_dirs, work_item_id, name, worktree=worktree),
             _META_READ_MAX_BYTES,
         )
         if name is not None

@@ -313,7 +313,11 @@ def discard_attachments(run_dirs, work_item_id: str, drop: list[dict], keep: lis
     kept = {a.get("source") for a in keep}
     for a in drop:
         source = a.get("source")
-        if source and source not in kept and item_paths.filed_copy(run_dirs, work_item_id, source):
+        if (
+            source
+            and source not in kept
+            and item_paths.is_filed_copy(run_dirs, work_item_id, source)
+        ):
             Path(source).unlink(missing_ok=True)
 
 

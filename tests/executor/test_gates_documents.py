@@ -36,7 +36,7 @@ async def test_the_gate_names_the_document_where_it_is(item_on, run_dirs, writte
     it = await item_on(_CHAIN, "spec_approval")
     for each in written:
         rel = each.format(w=it.id)
-        write(item_paths.base_for(run_dirs, it.id, rel), rel, "# spec\n")
+        write(*item_paths.locate(run_dirs, it.id, rel), "# spec\n")
 
     want = name.format(w=it.id) if name else None
     assert gates.gate_artifact(run_dirs, it.row(), "spec_approval") == want

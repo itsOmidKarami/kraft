@@ -1895,10 +1895,7 @@ class DockerBackend:
         # made after the upgrade, so this leaves no home behind either way.
         # `rmtree` refuses a link at the top and removes one inside without
         # following it, so nothing a worker planted reaches past the home.
-        for home in (
-            run_dirs.base / "sandbox-home" / work_item_id,
-            item_paths.item_dir(run_dirs, work_item_id) / "sandbox-home",
-        ):
+        for home in item_paths.sandbox_homes(run_dirs, work_item_id):
             shutil.rmtree(home, ignore_errors=True)
 
     async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:

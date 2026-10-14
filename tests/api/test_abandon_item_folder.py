@@ -5,6 +5,7 @@ budget (`dev/check_tests.py`)."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -29,3 +30,29 @@ def test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
     assert r.status_code == 200, r.text
     assert not folder.exists()
     assert victim.read_text() == "untouched"
+
+
+def test_abandoning_removes_the_item_s_folder_off_the_event_loop(client, repo, monkeypatch):
+    """A large folder takes a while to delete, and the server answers every
+    request on one event loop."""
+    from kraft.api.routes import lifecycle
+
+    wid = _paused(client, repo)
+    write(Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid, "docs/spec.md", "x")
+    real = lifecycle.shutil.rmtree
+    on_loop = []
+
+    def rmtree(path, *a, **kw):
+        if Path(path).name == wid:
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(path)
+            except RuntimeError:
+                pass
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(lifecycle.shutil, "rmtree", rmtree)
+
+    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+    assert on_loop == []
+    assert not (Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid).exists()

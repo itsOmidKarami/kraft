@@ -297,6 +297,7 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         ("# Attached plan\nbody\n", "# As filed\nbody\n", "Attached plan"),
         ("", "# As filed\nbody\n", None),
         (None, "# Attached plan\nbody\n", "Attached plan"),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
     ],
     ids=[
         "worktree",
@@ -304,6 +305,7 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         "worktree-over-stored",
         "gone-from-worktree",
         "stored-before-the-upgrade",
+        "stored-under-a-moved-run-dir",
     ],
 )
 async def test_documents_for_work_item_shows_an_unindexed_attachment(
@@ -328,6 +330,8 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
         folder.mkdir(parents=True)
         (folder / "plan.md").write_text(stored)
         attachment["source"] = str(folder / "plan.md")
+        if request.node.callspec.id == "stored-under-a-moved-run-dir":
+            attachment["source"] = "/old/kraft/run/attachments/w1/plan.md"
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "

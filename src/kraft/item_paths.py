@@ -20,21 +20,26 @@ Nothing is moved at upgrade: an older item's files stay in `run/logs/`,
 - a sandbox home: the old one while it exists, else the new one.
 
 A document is named by its path relative to where it lives, so the name says
-which base it is under (`base_for`): `items/<id>/...` under the run folder,
-anything else under the worktree the caller is working in.
+which base it is under: `items/<id>/...` under the run folder, anything else
+under the worktree the caller is working in. `locate` turns a name into the
+folder a read starts at and the part of the name walked from there.
 
 `docs/`, a session's `out/` and the worktree are writable by a worker, so
 nothing here trusts a name in them. Every read goes through
-`worker.worktree_read`, which follows no symlink at any component and does not
-block on a FIFO; every write opens its folder through `open_dir_no_symlinks`
-and its file with `O_CREAT | O_EXCL | O_NOFOLLOW`, so a name a worker planted
-is neither followed nor replaced.
+`worker.worktree_read`, which follows no symlink at any component below where
+it starts and does not block on a FIFO; every write opens its folder through
+`open_dir_no_symlinks` and its file with `O_CREAT | O_EXCL | O_NOFOLLOW`, so a
+name a worker planted is neither followed nor replaced. A walk into an item's
+folder starts at `item_dir`, opened as any path is: `run/items` and the item's
+own folder are Kraft's, and may be links (a `run/items` moved to another
+disk), and only what is below them is a worker's to plant a link in.
 """
 
 from __future__ import annotations
 
 import contextlib
 import errno
+import logging
 import os
 import re
 import stat
@@ -42,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from kraft.worker.worktree_read import open_dir_no_symlinks, open_no_symlinks, read_worktree_file
+
+logger = logging.getLogger(__name__)
 
 ITEMS = "items"
 #: The most of a document Kraft reads into a prompt or onto the board, as the
@@ -89,17 +96,31 @@ def filed_dirs(run_dirs, wid: str) -> tuple[Path, Path]:
 
 
 def filed_copy(run_dirs, wid: str, source: str | None) -> tuple[Path, str] | None:
-    """The folder and file name of an attachment copy intake stored, by the
-    `source` its row records, when that is directly inside one of the item's
-    `filed_dirs`; None for anything else, so a reader never opens a path a
-    row names outside Kraft's own copies. The caller reads the name inside
-    the folder with no symlink followed."""
+    """The folder and file name of the attachment copy intake stored, found
+    by the file name of the `source` its row records: in `filed/` first, then
+    in `run/attachments/<id>/` for an item filed before the upgrade. Only the
+    name is taken from the row, never its folder, so a `KRAFT_RUN_DIR` moved
+    or spelled another way since filing still finds the copy, and a row can
+    name nothing outside Kraft's own copies. None when neither folder holds
+    a file by that name. The caller reads the name inside the folder with no
+    symlink followed."""
     if not source:
         return None
-    path = Path(source)
-    if path.parent in filed_dirs(run_dirs, wid):
-        return path.parent, path.name
+    name = PurePosixPath(source).name
+    if name in ("", ".", ".."):
+        return None
+    for folder in filed_dirs(run_dirs, wid):
+        if os.path.lexists(folder / name):
+            return folder, name
     return None
+
+
+def is_filed_copy(run_dirs, wid: str, source: str | None) -> bool:
+    """Whether `source` names a file directly inside one of the item's
+    `filed_dirs`, as this Kraft spells them: the test for deleting a copy,
+    which, unlike reading one, must not reach a file the row only shares a
+    name with."""
+    return bool(source) and Path(source).parent in filed_dirs(run_dirs, wid)
 
 
 def document_name(wid: str, kind: str) -> str:
@@ -112,22 +133,26 @@ def legacy_document_name(wid: str, kind: str) -> str:
     return f".engineering/{_component(kind, 'kind')}s/{_component(wid, 'work item id')}.md"
 
 
-def base_for(run_dirs, wid: str, name: str, *, worktree: Path | None = None) -> Path:
-    """The folder `name` is relative to: the run folder for a name under this
-    item's `items/<id>/`, else the worktree the caller is working in (the
-    item's own when it gives none). A name under another item's folder is
-    not this item's, so it resolves inside the worktree, where it reaches
-    nothing of the run folder."""
+def locate(run_dirs, wid: str, name: str, *, worktree: Path | None = None) -> tuple[Path, str]:
+    """`name` as `(root, rel)`: the folder a no-follow read starts at, and the
+    part of the name walked from there. A name under this item's
+    `items/<id>/` starts at `item_dir`, which is Kraft's and is opened as any
+    path is (a link there, such as a `run/items` moved to another disk, is
+    followed), and walks the rest; any other name starts at the worktree the
+    caller is working in (the item's own when it gives none). A name under
+    another item's folder is not this item's, so it resolves inside the
+    worktree, where it reaches nothing of the run folder."""
     parts = PurePosixPath(name).parts
     if len(parts) > 2 and parts[0] == ITEMS and parts[1] == wid:
-        return run_dirs.base
-    return Path(worktree) if worktree is not None else run_dirs.worktrees / wid
+        return item_dir(run_dirs, wid), PurePosixPath(*parts[2:]).as_posix()
+    return (Path(worktree) if worktree is not None else run_dirs.worktrees / wid), name
 
 
 def path_of(run_dirs, wid: str, name: str, *, worktree: Path | None = None) -> Path:
-    """`name` as an absolute path, under the base `base_for` picks. For
-    handing on (to an agent's prompt); a read goes through `read_document`."""
-    return base_for(run_dirs, wid, name, worktree=worktree) / name
+    """`name` as an absolute path, where `locate` finds it. For handing on
+    (to an agent's prompt); a read goes through `read_document`."""
+    root, rel = locate(run_dirs, wid, name, worktree=worktree)
+    return root / rel
 
 
 def _regular_size(base: Path, name: str) -> int | None:
@@ -149,7 +174,7 @@ def document(run_dirs, wid: str, kind: str, *, worktree: Path | None = None) -> 
     first: a newer revision is only ever written there. A symlink, a FIFO or
     anything else not a regular file is no document."""
     for name in (document_name(wid, kind), legacy_document_name(wid, kind)):
-        if _regular_size(base_for(run_dirs, wid, name, worktree=worktree), name) is not None:
+        if _regular_size(*locate(run_dirs, wid, name, worktree=worktree)) is not None:
             return name
     return None
 
@@ -159,9 +184,7 @@ def read_document(
 ) -> str | None:
     """A document's text, at most `limit` bytes of it, read with no symlink
     followed; None when it cannot be read that way."""
-    result, _reason = read_worktree_file(
-        base_for(run_dirs, wid, name, worktree=worktree), name, limit
-    )
+    result, _reason = read_worktree_file(*locate(run_dirs, wid, name, worktree=worktree), limit)
     return result.text if result is not None else None
 
 
@@ -229,39 +252,92 @@ def exit_file(log_path: str | os.PathLike[str], result_path: str | os.PathLike[s
     return Path(result_path).with_suffix(".exit")
 
 
+def sandbox_homes(run_dirs, wid: str) -> tuple[Path, Path]:
+    """Both places an item's sandbox home can be: the old
+    `run/sandbox-home/<id>/` and `items/<id>/sandbox-home/`. Archiving and
+    abandoning remove both; `sandbox_home` picks the one in use."""
+    return (
+        run_dirs.base / "sandbox-home" / _component(wid, "work item id"),
+        item_dir(run_dirs, wid) / "sandbox-home",
+    )
+
+
 def sandbox_home(run_dirs, wid: str) -> Path:
     """The `HOME` an item's sandboxes share: the old `run/sandbox-home/<id>/`
     while it exists (it holds the agent CLI's chats a paused session resumes
     from), else `items/<id>/sandbox-home/`. The old one is never created after
     the upgrade, so the two never both exist. Only a real folder counts as
     the old one: a symlink there is not followed."""
-    old = run_dirs.base / "sandbox-home" / _component(wid, "work item id")
+    old, new = sandbox_homes(run_dirs, wid)
     try:
         is_old = stat.S_ISDIR(old.lstat().st_mode)
     except OSError:
         is_old = False
-    return old if is_old else item_dir(run_dirs, wid) / "sandbox-home"
+    return old if is_old else new
+
+
+def thread_folder(thread: int | str) -> str:
+    """The session-folder name an escalation thread's turns share."""
+    return _component(f"escalation-{thread}", "thread")
+
+
+def thread_out(run_dirs, wid: str, thread: int | str) -> Path:
+    """`items/<id>/sessions/escalation-<thread>/out/`: the result file and
+    summary every turn of a thread started after the upgrade writes."""
+    return item_dir(run_dirs, wid) / "sessions" / thread_folder(thread) / "out"
+
+
+def legacy_thread_files(run_dirs, wid: str, thread: int | str) -> tuple[Path, Path]:
+    """`(result, summary)` of an escalation thread started before the
+    upgrade, where every turn of it keeps writing:
+    `results/escalation-<id>-<thread>.json` and the worktree's
+    `.engineering/sessions/escalation-<id>-<thread>.md`."""
+    name = f"escalation-{_component(wid, 'work item id')}-{thread}"
+    return (
+        run_dirs.results / f"{name}.json",
+        run_dirs.worktrees / wid / ".engineering" / "sessions" / f"{name}.md",
+    )
 
 
 def recorded_summary(run_dirs, wid: str, files: SessionFiles) -> str | None:
     """The summary Kraft asked this session for, by the name it is recorded
-    under, when the worker wrote one: a regular, non-empty file reached with
-    no symlink. Kraft creates it empty, to mount it, so empty means none.
+    under (`items/<id>/sessions/<folder>/out/summary.md`, relative to the run
+    folder), when the worker wrote one: a regular, non-empty file in this
+    item's folder reached with no symlink below it. Kraft creates it empty,
+    to mount it, so empty means none.
 
-    A summary in the item's folder is named relative to the run folder
-    (`items/<id>/sessions/<folder>/out/summary.md`); an older escalation
-    thread's, in the item's worktree, relative to the worktree, as it always
-    was. A summary in neither place is not one Kraft asked for."""
-    if files.summary.is_relative_to(item_dir(run_dirs, wid)):
-        base = run_dirs.base
-    else:
-        base = run_dirs.worktrees / wid
+    Only a summary in this item's folder is Kraft's to record. An older
+    escalation thread's sits in the worktree, where every turn shares it and
+    one turn's is still there when the next turn writes none, so the
+    worker's own ref decides there, as it did before the upgrade
+    (`subprocess.read_result_fields`)."""
+    root = item_dir(run_dirs, wid)
     try:
-        name = files.summary.relative_to(base).as_posix()
+        rel = files.summary.relative_to(root).as_posix()
     except ValueError:
         return None
-    size = _regular_size(base, name)
-    return name if size else None
+    return f"{ITEMS}/{wid}/{rel}" if _regular_size(root, rel) else None
+
+
+def remove_entry(path: Path) -> None:
+    """Remove whatever is at `path`, if anything, never following a link: a
+    file or a link is unlinked, and a folder a worker planted where a file
+    belongs is removed with everything under it (`shutil.rmtree`, whose walk
+    follows no link inside)."""
+    import shutil
+
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        try:
+            is_dir = stat.S_ISDIR(os.lstat(path).st_mode)
+        except OSError:
+            return
+        if not is_dir:
+            raise
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:
@@ -298,14 +374,20 @@ def copy_in(source_base: Path, source_name: str, dest_base: Path, dest_name: str
     with no symlink followed at any component below `source_base`
     (`open_no_symlinks`, which takes only a regular file), the destination
     created as `_copy_fd` does. False, leaving the destination as it was,
-    when the source is not a regular file reached that way, the destination
-    name is taken (a name a worker planted, or an earlier copy), a folder on
-    the way to it is a link, or the write fails."""
+    when the source is not a regular file reached that way, is larger than
+    `DOC_MAX_BYTES` (a worker's file is not copied at any size), the
+    destination name is taken (a name a worker planted, or an earlier copy),
+    a folder on the way to it is a link, or the write fails."""
     try:
         src = open_no_symlinks(source_base, source_name)
     except (OSError, ValueError, IndexError):
         return False
     try:
+        if os.fstat(src).st_size > DOC_MAX_BYTES:
+            logger.warning(
+                "not copying %s: larger than %d bytes", source_base / source_name, DOC_MAX_BYTES
+            )
+            return False
         _copy_fd(src, dest_base, dest_name)
     except (OSError, ValueError):
         return False
@@ -334,24 +416,47 @@ def keep_version(run_dirs, wid: str, kind: str, *, worktree: Path | None = None)
     An old document, in the worktree's `.engineering/`, is also seeded into
     `docs/`, so the revise note and the "write to" path name the same file;
     a name a worker already planted there is left alone. None, writing
-    nothing, when there is no document."""
+    nothing, when there is no document.
+
+    A convenience, never a reason to stop a dispatch: a document larger than
+    `DOC_MAX_BYTES` (a worker's to write at any size, and copied again on
+    every retry) is not kept, and any failure to read or write is logged and
+    leaves None."""
+    try:
+        return _keep_version(run_dirs, wid, kind, worktree)
+    except (OSError, ValueError) as exc:
+        logger.warning("could not keep a version of %s's %s: %s", wid, kind, exc)
+        return None
+
+
+def _keep_version(run_dirs, wid: str, kind: str, worktree: Path | None) -> Path | None:
     name = document(run_dirs, wid, kind, worktree=worktree)
     if name is None:
         return None
-    base = base_for(run_dirs, wid, name, worktree=worktree)
     try:
-        src = open_no_symlinks(base, name)
+        src = open_no_symlinks(*locate(run_dirs, wid, name, worktree=worktree))
     except (OSError, ValueError, IndexError):
         return None  # gone, or swapped for a link, since `document` looked
     try:
+        size = os.fstat(src).st_size
+        if size > DOC_MAX_BYTES:
+            logger.warning(
+                "not keeping a version of %s's %s: %d bytes, over %d",
+                wid,
+                kind,
+                size,
+                DOC_MAX_BYTES,
+            )
+            return None
+        root = item_dir(run_dirs, wid)
+        root.mkdir(parents=True, exist_ok=True)  # Kraft's own; may be reached by a link
         history = history_dir(run_dirs, wid)
-        rel_history = history.relative_to(run_dirs.base).as_posix()
         kept = None
         n = _next_version(history, kind)
         for candidate in range(n, n + _VERSION_TRIES):
             try:
                 os.lseek(src, 0, os.SEEK_SET)
-                _copy_fd(src, run_dirs.base, f"{rel_history}/{kind}.{candidate}.md")
+                _copy_fd(src, root, f"history/{kind}.{candidate}.md")
             except FileExistsError:
                 continue  # another dispatch took this number first
             kept = history / f"{kind}.{candidate}.md"
@@ -361,7 +466,7 @@ def keep_version(run_dirs, wid: str, kind: str, *, worktree: Path | None = None)
             # A convenience: whatever already holds the name, a planted link
             # included, is left as it is and the revise note names it anyway.
             with contextlib.suppress(OSError):
-                _copy_fd(src, run_dirs.base, document_name(wid, kind))
+                _copy_fd(src, root, f"docs/{_component(kind, 'kind')}.md")
         return kept
     finally:
         os.close(src)

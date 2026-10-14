@@ -129,7 +129,7 @@ def artifact_path(run_dirs, kind: str, work_item_id: str) -> Path:
     its document at `item_paths.legacy_document_name`, in its worktree; the
     dispatch seeds `docs/` from it before a revision (`item_paths.keep_version`).
     """
-    return run_dirs.base / item_paths.document_name(work_item_id, kind)
+    return item_paths.path_of(run_dirs, work_item_id, item_paths.document_name(work_item_id, kind))
 
 
 #: The contract a hook with an `artifact:` binding is held to. Not part of the

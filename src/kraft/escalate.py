@@ -697,30 +697,28 @@ def thread_files(
     )
     own = item_paths.session_files(run_dirs, work_item_id, session_id)
     if first is not None and item_paths.is_legacy_log(first["log_path"]):
-        name = f"escalation-{work_item_id}-{thread}"
-        return dataclasses.replace(
-            own,
-            result=run_dirs.results / f"{name}.json",
-            summary=run_dirs.worktrees / work_item_id / _SESSIONS / f"{name}.md",
-            writable=run_dirs.results,
-        )
-    shared = item_paths.item_dir(run_dirs, work_item_id) / "sessions" / f"escalation-{thread}"
-    out = shared / "out"
+        result, summary = item_paths.legacy_thread_files(run_dirs, work_item_id, thread)
+        return dataclasses.replace(own, result=result, summary=summary, writable=run_dirs.results)
+    out = item_paths.thread_out(run_dirs, work_item_id, thread)
     return dataclasses.replace(
         own, result=out / "result.json", summary=out / "summary.md", writable=out
     )
 
 
-def _summary_place(run_dirs, work_item_id: str, summary: Path) -> tuple[Path, str]:
-    """`summary` as `(base, name)`: under the run folder for one in the
-    item's folder, under the worktree for an older thread's, the name being
-    what a row records as its `session_summary_ref`."""
-    base = (
-        run_dirs.base
-        if summary.is_relative_to(item_paths.item_dir(run_dirs, work_item_id))
-        else run_dirs.worktrees / work_item_id
-    )
-    return base, summary.relative_to(base).as_posix()
+def _summary_place(run_dirs, work_item_id: str, summary: Path) -> tuple[Path, str, str]:
+    """`summary` as `(base, name, ref)`: the folder a no-follow read of it
+    starts at, the name walked from there, and the `session_summary_ref` a
+    row records for it. A thread folder's starts at the item's folder
+    (`item_paths.locate`'s root, so a `run/items` that is a link still
+    reads) and is recorded relative to the run folder; an older thread's is
+    under the worktree, named as it always was."""
+    item = item_paths.item_dir(run_dirs, work_item_id)
+    if summary.is_relative_to(item):
+        name = summary.relative_to(item).as_posix()
+        return item, name, f"{item_paths.ITEMS}/{work_item_id}/{name}"
+    base = run_dirs.worktrees / work_item_id
+    name = summary.relative_to(base).as_posix()
+    return base, name, name
 
 
 async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.SessionFiles):
@@ -728,17 +726,21 @@ async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.
     writes, so this turn starts with no result file or summary to be
     mistaken for its own, and the last turn's stay readable from its row.
 
-    A turn with a session folder gets its result moved into its own `out/`
-    and its summary copied there, neither following a link, and its row
-    records both: the summary as Kraft names it (`recorded_summary`). A turn
-    from before the upgrade gets its result family (`.json` and its
+    A turn with a session folder gets its result moved into its own `out/`;
+    a turn from before the upgrade gets its result family (`.json` and its
     `.exit`/`.cid` sidecars) back under its session id in `results/`, as it
-    always did. An older thread's shared summary is copied, never moved: it
-    sits in the worktree, where a repo that does not ignore `.engineering/`
-    may track it. A thread folder's is removed once copied, so the next turn
-    starts with an empty one.
+    always did. Its row records where.
+
+    The summary goes by the thread. A thread folder's is copied into the
+    turn's own `out/`, never following a link, recorded as Kraft names it
+    (`recorded_summary`), and removed, so the next turn starts with an empty
+    one. An older thread's, in the worktree, is the worker's to name: when
+    the turn's ref is the shared name it is copied to
+    `.engineering/sessions/<id>.md` and the ref follows, as before the
+    upgrade. It is copied, never moved: a repo that does not ignore
+    `.engineering/` may track it.
     """
-    shared_base, shared_name = _summary_place(run_dirs, work_item_id, files.summary)
+    shared_base, shared_name, shared_ref = _summary_place(run_dirs, work_item_id, files.summary)
     legacy_thread = files.writable == run_dirs.results
     last = db.read(
         lambda c: c.execute(
@@ -749,29 +751,29 @@ async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.
     )
     if last is not None:
         ref = last["session_summary_ref"]
+        own = item_paths.session_files(run_dirs, work_item_id, last["id"])
         if item_paths.is_legacy_log(last["log_path"]):
             result = run_dirs.results / f"{last['id']}.json"
             for suffix in (".json", ".exit", ".cid"):
                 if files.result.with_suffix(suffix).exists():
                     files.result.with_suffix(suffix).replace(result.with_suffix(suffix))
-            kept = f"{_SESSIONS}/{last['id']}.md"
-            if ref == shared_name and item_paths.copy_in(shared_base, ref, shared_base, kept):
-                ref = kept
         else:
-            own = item_paths.session_files(run_dirs, work_item_id, last["id"])
             result = own.result
             if os.path.lexists(files.result):
                 own.writable.mkdir(parents=True, exist_ok=True)
                 # Both folders are Kraft's to name: the move follows nothing.
                 os.replace(files.result, own.result)
+        if legacy_thread:
+            kept = f"{_SESSIONS}/{last['id']}.md"
+            if ref == shared_ref and item_paths.copy_in(shared_base, ref, shared_base, kept):
+                ref = kept
+        else:
+            item = item_paths.item_dir(run_dirs, work_item_id)
             item_paths.copy_in(
-                shared_base,
-                shared_name,
-                run_dirs.base,
-                own.summary.relative_to(run_dirs.base).as_posix(),
+                shared_base, shared_name, item, own.summary.relative_to(item).as_posix()
             )
             ref = item_paths.recorded_summary(run_dirs, work_item_id, own) or (
-                None if ref == shared_name else ref
+                None if ref == shared_ref else ref
             )
         await db.write(
             lambda c: c.execute(
@@ -781,12 +783,13 @@ async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.
             )
         )
     # A turn that never got a row (refused before launch) owns nothing here.
-    files.result.unlink(missing_ok=True)
+    # `remove_entry`, not `unlink`: a worker can plant a folder at either name.
+    item_paths.remove_entry(files.result)
     if legacy_thread:
         for suffix in (".exit", ".cid"):
             files.result.with_suffix(suffix).unlink(missing_ok=True)
     else:
-        files.summary.unlink(missing_ok=True)
+        item_paths.remove_entry(files.summary)
 
 
 def _node_policy(row) -> _policy.InstancePolicy | None:

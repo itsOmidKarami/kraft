@@ -15,7 +15,9 @@ def seed_work_item(db, repo: str, wid: str = "w1"):
     )
 
 
-def seed_session(db, sid, wid, ref, node="implementation", hook="on.implementation.start"):
+def seed_session(
+    db, sid, wid, ref, node="implementation", hook="on.implementation.start", thread=None
+):
     from kraft import store
 
     return db.write(
@@ -29,6 +31,10 @@ def seed_session(db, sid, wid, ref, node="implementation", hook="on.implementati
                 log_path="/dev/null",
                 result_path="/dev/null",
             ),
-            c.execute("UPDATE worker_sessions SET session_summary_ref=? WHERE id=?", (ref, sid)),
+            c.execute(
+                "UPDATE worker_sessions SET session_summary_ref=?, thread=COALESCE(?, thread) "
+                "WHERE id=?",
+                (ref, thread, sid),
+            ),
         )
     )

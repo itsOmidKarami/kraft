@@ -331,24 +331,30 @@ def test_an_attachment_reads_from_the_snapshot_and_follows_a_revision(client, re
     assert client.get(f"/api/work-items/{wid}/attachments/plan").json()["title"] == "Plan two"
 
 
-@pytest.mark.parametrize("stored", ["filed", "older-attachments"])
+@pytest.mark.parametrize("stored", ["filed", "older-attachments", "run-dir-spelled-otherwise"])
 def test_an_attachment_reads_from_where_it_was_stored(client, repo, stored):
-    """A copy is read where its row says it is, as long as that is one of the
+    """A copy is found by the file name its row records, in one of the
     item's own copy folders: `filed/`, or `attachments/<id>/` for an item
-    filed before the upgrade, whose copy was never moved."""
+    filed before the upgrade, whose copy was never moved. The row's folder
+    is not compared, so a `KRAFT_RUN_DIR` moved or spelled another way since
+    filing still finds it."""
     wid = _file(client, repo, attachments=[{"kind": "spec", "path": _doc(repo, "s.md", "# s\n")}])
+    [a] = _item(client, wid)["attachments"]
+    source = a["source"]
     if stored == "older-attachments":
-        [a] = _item(client, wid)["attachments"]
-        older = client.app.state.run_dirs.attachments / wid / Path(a["source"]).name
+        older = client.app.state.run_dirs.attachments / wid / Path(source).name
         older.parent.mkdir(parents=True)
-        Path(a["source"]).rename(older)
-        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-        conn.execute(
-            "UPDATE work_items SET attachments = ? WHERE id = ?",
-            (json.dumps([{**a, "source": str(older)}]), wid),
-        )
-        conn.commit()
-        conn.close()
+        Path(source).rename(older)
+        source = str(older)
+    elif stored == "run-dir-spelled-otherwise":
+        source = f"/old/kraft/run/attachments/{wid}/{Path(source).name}"
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute(
+        "UPDATE work_items SET attachments = ? WHERE id = ?",
+        (json.dumps([{**a, "source": source}]), wid),
+    )
+    conn.commit()
+    conn.close()
 
     got = client.get(f"/api/work-items/{wid}/attachments/spec")
 

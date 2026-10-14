@@ -24,27 +24,33 @@ def _plant_link(link, target):
 
 
 @pytest.mark.parametrize(
-    ("name", "worktree", "base"),
+    ("name", "worktree", "base", "rel"),
     [
-        ("items/w1/docs/spec.md", None, "run"),
-        (OLD_SPEC, None, "own-worktree"),
-        (OLD_SPEC, "member", "member"),
-        ("items/w2/docs/spec.md", None, "own-worktree"),
+        ("items/w1/docs/spec.md", None, "item", "docs/spec.md"),
+        (OLD_SPEC, None, "own-worktree", OLD_SPEC),
+        (OLD_SPEC, "member", "member", OLD_SPEC),
+        ("items/w2/docs/spec.md", None, "own-worktree", "items/w2/docs/spec.md"),
     ],
     ids=["new-name", "old-name", "old-name-in-a-member", "another-item-s-name"],
 )
-def test_a_document_is_named_relative_to_where_it_lives(run_dirs, tmp_path, name, worktree, base):
-    """A name under this item's `items/<id>/` is relative to the run folder;
-    anything else, another item's folder included, to the worktree the caller
-    works in."""
+def test_a_document_is_named_relative_to_where_it_lives(
+    run_dirs, tmp_path, name, worktree, base, rel
+):
+    """A name under this item's `items/<id>/` is relative to the run folder,
+    and a read of it starts at the item's own folder; anything else, another
+    item's folder included, is relative to the worktree the caller works in."""
     member = tmp_path / "member"
-    want = {"run": run_dirs.base, "own-worktree": run_dirs.worktrees / "w1", "member": member}[base]
+    want = {
+        "item": run_dirs.base / "items" / "w1",
+        "own-worktree": run_dirs.worktrees / "w1",
+        "member": member,
+    }[base]
 
-    got = item_paths.base_for(run_dirs, "w1", name, worktree=member if worktree else None)
+    got = item_paths.locate(run_dirs, "w1", name, worktree=member if worktree else None)
 
-    assert got == want
+    assert got == (want, rel)
     assert item_paths.path_of(run_dirs, "w1", name, worktree=member if worktree else None) == (
-        want / name
+        want / rel
     )
     assert item_paths.document_name("w1", "spec") == "items/w1/docs/spec.md"
     assert item_paths.legacy_document_name("w1", "spec") == OLD_SPEC
@@ -210,7 +216,7 @@ def _older_thread(run_dirs):
         (None, "own", None),
         (None, "symlink", None),
         (None, "fifo", None),
-        ("# done", "older-thread", ".engineering/sessions/escalation-w1-1.md"),
+        ("# done", "older-thread", None),
         ("# done", "elsewhere", None),
     ],
     ids=["written", "left-empty", "absent", "symlink", "fifo", "older-thread", "elsewhere"],
@@ -327,3 +333,69 @@ def test_keeping_a_version_of_nothing_writes_nothing(run_dirs):
     assert item_paths.keep_version(run_dirs, "w1", "spec") is None
     assert not (run_dirs.base / "items/w1/history").exists()
     assert not (run_dirs.base / "items/w1/docs").exists()
+
+
+def test_a_run_items_folder_that_is_a_link_is_followed(run_dirs, tmp_path):
+    """`run/items` is Kraft's, and may be moved to another disk and linked:
+    every read and write of an item's files starts at the item's folder, so
+    the link is followed there, and only the worker's part below it is
+    walked without following one."""
+    run_dirs.items.rmdir()
+    (tmp_path / "elsewhere").mkdir()
+    run_dirs.items.symlink_to(tmp_path / "elsewhere")
+    write(item_paths.docs_dir(run_dirs, "w1"), "spec.md", "v1")
+    f = item_paths.session_files(run_dirs, "w1", "s1")
+    write(f.writable, "summary.md", "# done")
+
+    name = item_paths.document(run_dirs, "w1", "spec")
+    kept = item_paths.keep_version(run_dirs, "w1", "spec")
+    copied = item_paths.copy_in(
+        item_paths.item_dir(run_dirs, "w1"),
+        "sessions/s1/out/summary.md",
+        item_paths.item_dir(run_dirs, "w1"),
+        "sessions/s2/out/summary.md",
+    )
+
+    assert name == "items/w1/docs/spec.md"
+    assert item_paths.read_document(run_dirs, "w1", name) == "v1"
+    assert kept is not None and kept.read_text() == "v1"
+    assert item_paths.recorded_summary(run_dirs, "w1", f) == "items/w1/sessions/s1/out/summary.md"
+    assert copied is True
+    assert (tmp_path / "elsewhere/w1/sessions/s2/out/summary.md").read_text() == "# done"
+
+
+@pytest.mark.parametrize("trouble", ["oversized", "history-not-a-folder", "item-not-writable"])
+def test_keeping_a_version_is_never_a_reason_to_stop(run_dirs, monkeypatch, trouble):
+    """A convenience: a worker can write a document of any size, and it would
+    be copied again on every retry, and a failure to keep one must not fail
+    the dispatch. Each leaves no version and raises nothing."""
+    write(item_paths.docs_dir(run_dirs, "w1"), "spec.md", "x" * 64)
+    history = item_paths.history_dir(run_dirs, "w1")
+    if trouble == "oversized":
+        monkeypatch.setattr(item_paths, "DOC_MAX_BYTES", 32)
+    elif trouble == "history-not-a-folder":
+        history.write_text("not a folder")
+    else:
+
+        def refuse(*a, **kw):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(item_paths, "_copy_fd", refuse)
+
+    assert item_paths.keep_version(run_dirs, "w1", "spec") is None
+    assert not history.is_dir()
+
+
+def test_an_oversized_worker_file_is_not_copied(run_dirs, monkeypatch):
+    """A summary a worker wrote is copied into each turn's own folder: not at
+    any size."""
+    write(item_paths.session_files(run_dirs, "w1", "s1").writable, "summary.md", "x" * 64)
+    monkeypatch.setattr(item_paths, "DOC_MAX_BYTES", 32)
+    root = item_paths.item_dir(run_dirs, "w1")
+
+    copied = item_paths.copy_in(
+        root, "sessions/s1/out/summary.md", root, "sessions/s2/out/summary.md"
+    )
+
+    assert copied is False
+    assert not (root / "sessions/s2").exists()

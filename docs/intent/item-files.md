@@ -24,7 +24,7 @@ origin: src/kraft/adapters/subprocess.py §run_task -- a session's log, exit cod
 
 WHEN intake copies an attachment, the system SHALL copy it into
 `run/items/<id>/filed/`.
-enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[filed], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[older-attachments]
+enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[filed], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[older-attachments], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[run-dir-spelled-otherwise], tests/index/test_service.py::test_documents_for_work_item_shows_an_unindexed_attachment[stored-under-a-moved-run-dir]
 origin: src/kraft/executor/entry.py §_store_attachments -- outside `docs/`, which a sandbox mounts read-write, so a worker cannot rewrite what a person filed; an older item's copy stays in `attachments/<id>/` and is read there.
 
 ## REQ a-document-is-read-from-the-new-place-first
@@ -67,7 +67,7 @@ origin: src/kraft/adapters/subprocess.py §read_result_fields -- Kraft creates t
 
 IF a worker reports a summary ref under `items/`, THEN the system SHALL NOT
 record it.
-enforced-by: tests/adapters/test_subprocess_result_files.py::test_read_result_fields_is_the_one_place_the_field_list_lives[worker-ref-under-items-refused], tests/adapters/test_subprocess_result_files.py::test_read_result_fields_is_the_one_place_the_field_list_lives[absolute-refused], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[another-session-s], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[another-item-s], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[items-ref-in-the-worktree], tests/worker/test_reattach_summaries.py::test_a_session_resolved_after_a_restart_records_the_summary_kraft_asked_for[worker-ref-under-items-refused]
+enforced-by: tests/adapters/test_subprocess_result_files.py::test_read_result_fields_is_the_one_place_the_field_list_lives[worker-ref-under-items-refused], tests/adapters/test_subprocess_result_files.py::test_read_result_fields_is_the_one_place_the_field_list_lives[absolute-refused], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[another-session-s], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[another-item-s], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[items-ref-in-the-worktree], tests/worker/test_reattach_summaries.py::test_a_session_resolved_after_a_restart_records_the_summary_kraft_asked_for[worker-ref-under-items-refused], tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[another-thread-s]
 origin: src/kraft/index/service.py §_read_summary -- `session_summary_ref` is reported by the worker, and the index reads what it names into a search every repo's agents can query.
 
 ## REQ the-session-folder-is-not-mounted
@@ -89,7 +89,8 @@ origin: src/kraft/adapters/subprocess.py §run_task -- each file a single-file b
 
 WHEN the system names the folders a harness may write outside its worktree, it
 SHALL name only the session's `out/` folder, its item's `docs/` and the
-repository's git folder.
+repository's git folder. An escalation thread started before the upgrade
+keeps the grant it started with, the shared `results/` folder, until it ends.
 enforced-by: tests/adapters/test_agent_writable_dirs.py::test_a_codex_worktree_launch_may_write_its_results_and_its_git_dir, tests/adapters/test_agent_writable_dirs.py::test_outside_a_repo_only_the_results_dir_is_granted
 origin: src/kraft/adapters/agent.py §_writable_dirs -- for codex this is a real OS sandbox's writable roots, so granting the session folder would let even an unsandboxed worker plant a link where the host writes.
 
@@ -97,14 +98,14 @@ origin: src/kraft/adapters/agent.py §_writable_dirs -- for codex this is a real
 
 WHEN the system reads a file in a folder a worker can write, it SHALL NOT
 follow a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[fifo], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_refuses_a_symlink_out_of_the_worktree[docs], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[pending-gate], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[produced], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-sandbox-home], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-docs]
+enforced-by: tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[symlink-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[fifo-is-none], tests/test_item_paths.py::test_a_document_is_read_from_the_new_place_first[old-folder-symlink-is-none], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[symlink], tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[fifo], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[source-folder-symlink], tests/adapters/test_subprocess_result_files.py::test_resolve_reads_the_result_file_over_the_exit_code[symlink-is-unreadable], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[symlink], tests/index/test_service_summaries.py::test_a_summary_in_an_item_folder_is_never_read_through_a_link[folder-symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[symlink], tests/test_progress.py::test_read_tasks_without_a_plan_file_is_empty[fifo], tests/adapters/forge/test_mr_meta.py::test_read_mr_meta_refuses_a_symlink_out_of_the_worktree[docs], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[pending-gate], tests/api/test_artifact.py::test_a_symlink_out_of_the_worktree_is_a_404[produced], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-sandbox-home], tests/test_storage.py::test_measure_does_not_follow_a_symlink[item-docs], tests/test_storage.py::test_measure_counts_what_a_folder_held_when_it_was_opened
 origin: src/kraft/item_paths.py -- every read goes through `worker.worktree_read`, which opens one component at a time with `O_NOFOLLOW` and opens the file non-blocking, so a planted FIFO cannot hang the server either.
 
 ## REQ no-write-into-a-worker-folder-follows-a-link
 
 WHEN the system writes into a folder a worker can write, it SHALL NOT follow or
 replace a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[harness-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-file], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[temporary-file], tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
+enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[harness-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-file], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[temporary-file], tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/test_escalation_thread_files.py::test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn
 origin: src/kraft/item_paths.py §copy_in -- each folder on the way is opened with `open_dir_no_symlinks` and the file with `O_CREAT | O_EXCL | O_NOFOLLOW` relative to it, so a name already there is refused rather than written through.
 
 ## REQ history-and-filed-are-not-mounted
@@ -144,14 +145,14 @@ origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes
 ## REQ abandoning-removes-the-items-folder
 
 WHEN a work item is abandoned, the system SHALL remove `run/items/<id>/`.
-enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage
+enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage, tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_off_the_event_loop
 origin: src/kraft/api/routes/lifecycle.py §abandon_work_item -- `shutil.rmtree` walks by folder handle and removes a link without following it, so a link a worker planted in `docs/` or the sandbox home takes nothing outside with it.
 
 ## REQ storage-counts-item-sandbox-homes
 
 The system SHALL count every `run/items/*/sandbox-home` in the governed
 storage figure, under its item.
-enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item, tests/test_storage.py::test_refresh_drops_an_item_removed_while_it_walked[item-sandbox-home]
+enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-folder], tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-is-a-link], tests/test_storage.py::test_refresh_drops_an_item_removed_while_it_walked[item-sandbox-home]
 origin: src/kraft/storage.py §measure -- only the sandbox home is governed, since archiving removes it; `docs/`, `history/` and `filed/` count as attachments and `sessions/` as logs, so the Storage page still adds up.
 
 ## REQ doctor-counts-worktrees-with-old-documents
@@ -160,3 +161,33 @@ WHEN `kraft admin doctor` runs, the system SHALL report how many worktrees
 hold a `.engineering/` folder.
 enforced-by: tests/test_doctor_documents.py::test_doctor_counts_worktrees_with_old_documents[none], tests/test_doctor_documents.py::test_doctor_counts_worktrees_with_old_documents[two], tests/cli/test_doctor.py::test_doctor_on_a_live_instance_reaches_every_check
 origin: src/kraft/doctor.py §_old_documents_check -- a warning, never a failure: the documents are read where they are, and the count reaching zero is when the `.engineering/` fallbacks can go.
+
+## REQ an-items-folder-that-is-a-link-is-followed
+
+WHILE `run/items` is a symbolic link, the system SHALL read, write and measure
+each item's files through it, and follow no link below the item's own folder.
+enforced-by: tests/test_item_paths.py::test_a_run_items_folder_that_is_a_link_is_followed, tests/index/test_service_summaries.py::test_a_summary_is_read_only_from_its_own_session_s_folder[run-items-is-a-link], tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-is-a-link]
+origin: src/kraft/item_paths.py §locate -- `run/items` and an item's folder are Kraft's, and may be moved to another disk; only what is below an item's folder is a worker's to plant a link in, so a no-follow walk starts there.
+
+## REQ an-older-thread-s-summary-is-the-worker-s-to-name
+
+WHILE an escalation thread started before the upgrade continues, the system
+SHALL NOT record the thread's shared summary for a turn whose worker reported
+none.
+enforced-by: tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[older-thread], tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last[before-upgrade]
+origin: src/kraft/item_paths.py §recorded_summary -- an older thread's summary stays in the worktree for every turn, so one turn's is still there when the next writes none.
+
+## REQ keeping-a-version-never-stops-a-dispatch
+
+IF a document cannot be kept in `history/`, or is larger than the most Kraft
+reads of a document, THEN the system SHALL dispatch the task without keeping a
+version.
+enforced-by: tests/test_item_paths.py::test_keeping_a_version_is_never_a_reason_to_stop[oversized], tests/test_item_paths.py::test_keeping_a_version_is_never_a_reason_to_stop[history-not-a-folder], tests/test_item_paths.py::test_keeping_a_version_is_never_a_reason_to_stop[item-not-writable], tests/test_item_paths.py::test_an_oversized_worker_file_is_not_copied
+origin: src/kraft/item_paths.py §keep_version -- a worker writes `docs/` at any size, and a version is copied again on every retry; keeping one is a convenience.
+
+## REQ storage-governs-what-a-worker-writes
+
+The system SHALL count every item's `docs/` and every session's `out/` in the
+governed storage figure.
+enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-folder]
+origin: src/kraft/storage.py §measure -- both are a worker's to write at any size outside its worktree, so the quota and limit must see them.

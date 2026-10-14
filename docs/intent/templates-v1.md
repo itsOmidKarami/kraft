@@ -440,7 +440,7 @@ WHEN an escalation turn resumes a thread, the system SHALL give it the same
 result file and session summary paths every earlier turn of that thread had,
 SHALL start it with no result file left by an earlier turn, and SHALL keep each
 earlier turn's result and summary readable from that turn's own session row.
-enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
+enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last[after-upgrade], tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
 origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b): a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
 
 ## REQ an-escalation-turn-hands-a-skip-to-the-person

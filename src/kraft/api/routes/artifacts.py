@@ -313,16 +313,14 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
 
 async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:
     """Safely read the document `rel` names -- under the run folder for one in
-    the item's `docs/`, else out of `wid`'s worktree (`item_paths.base_for`) --
+    the item's `docs/`, else out of `wid`'s worktree (`item_paths.locate`) --
     via `worktree_read.read_worktree_file` (resolve, check containment, open
     with no symlink followed anywhere along the path, cap the read at
     `DIFF_MAX_BYTES`), and record why via `_refuse_artifact` on any failure --
     shared by the reviewer-facing read and gate-approval ingestion
     (`approve_gate`) so both trust the exact same containment walk.
     """
-    result, reason = read_worktree_file(
-        item_paths.base_for(st.run_dirs, wid, rel), rel, DIFF_MAX_BYTES
-    )
+    result, reason = read_worktree_file(*item_paths.locate(st.run_dirs, wid, rel), DIFF_MAX_BYTES)
     if result is None:
         await _refused(st, wid, rel, reason)
         return None
@@ -440,7 +438,7 @@ def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, mi
     st = request.app.state
     row = deps._work_item_row(st, wid)
     rel = rel_of(st, row)
-    path = worktree_file_path(item_paths.base_for(st.run_dirs, wid, rel), rel) if rel else None
+    path = worktree_file_path(*item_paths.locate(st.run_dirs, wid, rel)) if rel else None
     if path is None:
         raise HTTPException(404, missing)
     return {"work_item_id": wid, **_launch_editor(request, editor, path)}
@@ -493,9 +491,7 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
     rel = _produced_path(st, row, kind)
-    result, reason = read_worktree_file(
-        item_paths.base_for(st.run_dirs, wid, rel), rel, DIFF_MAX_BYTES
-    )
+    result, reason = read_worktree_file(*item_paths.locate(st.run_dirs, wid, rel), DIFF_MAX_BYTES)
     if result is not None:
         body = None
         if kind == revision.CHAIN_REVISION:

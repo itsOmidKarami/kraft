@@ -31,12 +31,13 @@ def _run(tmp_path: Path) -> RunDirs:
     "rel", [OLD, item_paths.document_name(WID, "mr_meta")], ids=["older-worktree", "docs"]
 )
 def test_read_mr_meta_reads_every_field(tmp_path, rel):
+    root, under = item_paths.locate(_run(tmp_path), WID, rel, worktree=tmp_path)
     _meta(
-        item_paths.base_for(_run(tmp_path), WID, rel, worktree=tmp_path),
+        root,
         "work_item_ids: [x]\ntitle: Publish auto-escalate controls\n"
         "labels: [release::minor, area::ui]\nassignees: [omid]\nreviewers: [ada, grace]\n",
         "## What this introduces\n\nTwo forms and a CLI door.\n",
-        rel,
+        under,
     )
     meta = mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path))
     assert meta.title == "Publish auto-escalate controls"

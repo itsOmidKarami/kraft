@@ -34,7 +34,7 @@ async def test_a_re_dispatch_keeps_the_version_it_revises(
     it = await item_on([_exec("spec", _agent("write", produces="spec"))])
     rel = where.format(w=it.id)
     # `_dispatch_each_node` dispatches in `it.repo`, the worktree here.
-    write(item_paths.base_for(run_dirs, it.id, rel, worktree=it.repo), rel, "v1\n")
+    write(*item_paths.locate(run_dirs, it.id, rel, worktree=it.repo), "v1\n")
     current = item_paths.docs_dir(run_dirs, it.id) / "spec.md"
     seen = {}
 

@@ -486,13 +486,19 @@ async def abandon_work_item(wid: str, request: Request):
         storage.forget(st, wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
-    # a state the board cannot show.
-    # `rmtree` opens each folder relative to its parent without following a
-    # link (its fd-based walk), so a link a worker planted in `docs/` or the
-    # sandbox home is removed, never what it points at.
-    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
-    shutil.rmtree(item_paths.item_dir(st.run_dirs, wid), ignore_errors=True)
+    # a state the board cannot show. In a thread: a large folder must not hold
+    # the event loop.
+    await asyncio.to_thread(_remove_item_files, st.run_dirs, wid)
     return {"id": wid, "status": "abandoned", **removed}
+
+
+def _remove_item_files(run_dirs, wid: str) -> None:
+    """An abandoned item's own folder and an older item's attachment copies.
+    `rmtree` opens each folder relative to its parent without following a
+    link (its fd-based walk), so a link a worker planted in `docs/` or the
+    sandbox home is removed, never what it points at."""
+    shutil.rmtree(item_paths.item_dir(run_dirs, wid), ignore_errors=True)
+    shutil.rmtree(item_paths.filed_dirs(run_dirs, wid)[1], ignore_errors=True)
 
 
 def _archive_lock(st) -> asyncio.Lock:

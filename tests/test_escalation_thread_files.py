@@ -113,20 +113,46 @@ async def test_a_resumed_turn_that_writes_where_it_remembers_is_done(turns, run_
     assert "--resume cli-1" in played[1]["argv"]
 
 
-async def test_a_turn_starts_with_no_result_file_from_the_last(turns, database, run_dirs):
+@pytest.mark.parametrize("started", ["after-upgrade", "before-upgrade"])
+async def test_a_turn_starts_with_no_result_file_from_the_last(turns, database, run_dirs, started):
     """The shared name must not hand a turn that wrote nothing the last
     turn's result: it ends `failed`, as a turn with no result file does. Nor
-    the last turn's summary: it records none."""
+    the last turn's summary: it records none. An older thread's summary stays
+    in the worktree for every turn, so there Kraft records none itself, and
+    the worker's own ref decides, as before the upgrade."""
     summary = run_dirs.base / _THREAD / "summary.md"
+    legacy_result, legacy_summary = item_paths.legacy_thread_files(run_dirs, "w1", 1)
+    shared_ref = legacy_summary.relative_to(run_dirs.worktrees / "w1").as_posix()
+
+    async def make_turn_one_old(i, played):
+        if i == 0 and started == "before-upgrade":
+            sid = played[0]["session_id"]
+            legacy_summary.write_text("# one\n")
+            legacy_result.write_text(json.dumps({"status": "done"}))
+            await database.write(
+                lambda c: c.execute(
+                    "UPDATE worker_sessions SET log_path = ?, result_path = ?, "
+                    "session_summary_ref = ? WHERE id = ?",
+                    (str(run_dirs.logs / f"{sid}.log"), str(legacy_result), shared_ref, sid),
+                )
+            )
+
     played = await turns(
-        f'echo "# one" > {summary}; echo \'{{"status":"done"}}\' > "$KRAFT_RESULT_PATH"', "true"
+        f'echo "# one" > {summary}; echo \'{{"status":"done"}}\' > "$KRAFT_RESULT_PATH"',
+        "true",
+        between=make_turn_one_old,
     )
 
     assert [t["status"] for t in played] == ["done", "failed"]
-    assert [_row(database, t["session_id"])["session_summary_ref"] for t in played] == [
-        item_paths.session_files(run_dirs, "w1", played[0]["session_id"])
+    first = (
+        f".engineering/sessions/{played[0]['session_id']}.md"
+        if started == "before-upgrade"
+        else item_paths.session_files(run_dirs, "w1", played[0]["session_id"])
         .summary.relative_to(run_dirs.base)
-        .as_posix(),
+        .as_posix()
+    )
+    assert [_row(database, t["session_id"])["session_summary_ref"] for t in played] == [
+        first,
         None,
     ]
 
@@ -201,3 +227,17 @@ async def test_a_thread_keeps_its_first_turn_s_paths_for_every_turn(
         not item_paths.is_legacy_log(_row(database, p["session_id"])["log_path"])
         for p in played[1:]
     )
+
+
+async def test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn(
+    turns, run_dirs
+):
+    """A worker can leave a folder where the thread's summary belongs. The
+    next turn starts with the name cleared, as it would a file."""
+    summary = run_dirs.base / _THREAD / "summary.md"
+    plant = f'rm -f {summary}; mkdir -p {summary}/x; echo {_DONE} > "$KRAFT_RESULT_PATH"'
+
+    played = await turns(plant, f'echo {_DONE} > "$KRAFT_RESULT_PATH"')
+
+    assert [t["status"] for t in played] == ["done", "done"]
+    assert summary.is_file() and not summary.is_symlink()

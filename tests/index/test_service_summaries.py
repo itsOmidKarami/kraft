@@ -23,6 +23,8 @@ from kraft.paths import RunDirs
         ("items/w2/sessions/s1/out/summary.md", "run", False),
         ("items/w1/docs/spec.md", "run", False),
         ("items/w1/sessions/s1/out/summary.md", "worktree", False),
+        ("items/w1/sessions/escalation-2/out/summary.md", "run", False),
+        ("items/w1/sessions/s1/out/summary.md", "linked-items", True),
     ],
     ids=[
         "own-folder",
@@ -32,6 +34,8 @@ from kraft.paths import RunDirs
         "another-item-s",
         "not-a-summary",
         "items-ref-in-the-worktree",
+        "another-thread-s",
+        "run-items-is-a-link",
     ],
 )
 async def test_a_summary_is_read_only_from_its_own_session_s_folder(
@@ -39,9 +43,14 @@ async def test_a_summary_is_read_only_from_its_own_session_s_folder(
 ):
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
     await seed_work_item(database, str(repo))
-    await seed_session(database, "s1", "w1", ref)
+    await seed_session(database, "s1", "w1", ref, hook="escalation", thread=1)
     rd = RunDirs(tmp_path / "run").ensure()
-    path = (rd.base if where == "run" else rd.worktrees / "w1") / ref
+    if where == "linked-items":
+        # `run/items` moved to another disk: Kraft's own folder, followed.
+        rd.items.rmdir()
+        (tmp_path / "elsewhere").mkdir()
+        rd.items.symlink_to(tmp_path / "elsewhere")
+    path = (rd.worktrees / "w1" if where == "worktree" else rd.base) / ref
     path.parent.mkdir(parents=True)
     path.write_text("---\nkind: sessions\n---\n# done\nthe summary body\n")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)

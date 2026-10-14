@@ -79,7 +79,7 @@ def gate_artifact(run_dirs, row, gate: str | None) -> str | None:
     document (`item_paths.document`): `items/<id>/docs/<kind>.md`, relative to
     the run folder, or for an item that ran before the upgrade
     `.engineering/<kind>s/<id>.md`, relative to its worktree. The name says
-    which (`item_paths.base_for`). It is not stored and nothing goes stale
+    which (`item_paths.locate`). It is not stored and nothing goes stale
     when a re-run revises the same file.
 
     Replaces a scan of the *preceding* node's hook bindings for an `artifact:`
@@ -323,7 +323,7 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
     if node.node.artifact == revision.CHAIN_REVISION and run_dirs is not None:
         rel = item_paths.document(run_dirs, work_item_id, revision.CHAIN_REVISION)
         why = (
-            revision.unchanged(item_paths.base_for(run_dirs, work_item_id, rel), rel)
+            revision.unchanged(*item_paths.locate(run_dirs, work_item_id, rel))
             if rel is not None
             else None
         )
@@ -367,7 +367,7 @@ def _chain_revision_seen(
     if chain is None:
         return None
     result, _reason = read_worktree_file(
-        item_paths.base_for(run_dirs, row["id"], rel), rel, _ARTIFACT_MAX_BYTES
+        *item_paths.locate(run_dirs, row["id"], rel), _ARTIFACT_MAX_BYTES
     )
     if result is None:
         return None
