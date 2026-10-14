@@ -2,9 +2,8 @@
      full-text index), plus sections made by utils/searchSections.ts (a table
      cell or list item ends in " · " so snippets do not run them together, and
      a page's syntax-highlighting <style>, which showed up in result snippets
-     as Shiki's CSS, is left out). The
-     index keeps the HTML entities of the page's text (&lt; &gt; &#39;), which
-     the results would show literally, so decode them. On a /next/ URL answered
+     as Shiki's CSS, is left out), and the page's HTML entities are decoded
+     there too. On a /next/ URL answered
      by the stable build's root 404.html this searches the release docs, so the
      dialog says so. A Reference hit is ranked lower (below), so "raise budget"
      opens on the guide and not on the HTTP route. -->
@@ -19,22 +18,9 @@ const { forced: forcedColorMode } = useDocusColorMode()
 const docs = useRuntimeConfig().public.docs
 const at = useDocsChannel()
 
-const entities: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: '\'' }
-// One pass, so `&amp;lt;` becomes `&lt;` and no further.
-const decode = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|amp|quot|apos);/gi, (match, name: string) => {
-  if (name[0] !== '#') return entities[name.toLowerCase()] ?? match
-  const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
-  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match
-})
-
 const { data: files } = useLazyAsyncData('search_docs', async () => {
   const pages = await queryCollection('docs').where('extension', '=', 'md').select('path', 'title', 'description', 'body').all()
-  return searchSections(pages as never).map(section => ({
-    ...section,
-    title: decode(section.title),
-    titles: section.titles?.map(decode),
-    content: decode(section.content),
-  }))
+  return searchSections(pages as never)
 }, {
   server: false,
 })

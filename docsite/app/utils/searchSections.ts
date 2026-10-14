@@ -16,6 +16,21 @@ const LINK_LISTS = ['Related', 'Next steps', 'See also', 'In this section']
 // A page's syntax-highlighting <style> is not text anyone wrote.
 const IGNORED = ['style']
 
+// The index keeps the page's HTML entities (&lt; &gt; &#39;), which a result
+// would show literally, so they are decoded here, once: `&amp;lt;` becomes
+// `&lt;` and no further. An apostrophe then becomes a typographic one (’),
+// because Nuxt UI escapes a snippet back to HTML before it shortens it, and
+// its cut can land inside the five-character &#39; (Kraft-w49rs: "...#39;s
+// own"); ’ is not escaped. shortcut: a cut can still split &quot; &amp; &lt;
+// or &gt;, much rarer in prose; a fix for those has to replace Nuxt UI's
+// highlight (utils/search.js truncateHTMLFromStart).
+const entities: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: '\'' }
+const plain = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|amp|quot|apos);/gi, (match, name: string) => {
+  if (name[0] !== '#') return entities[name.toLowerCase()] ?? match
+  const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
+  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match
+}).replaceAll('\'', '’')
+
 const textOf = (node: MinimarkNode): string => {
   if (typeof node === 'string') return node
   const [tag, , ...children] = node
@@ -46,6 +61,6 @@ export function searchSections(pages: Page[]): SearchSection[] {
         current.content = `${current.content} ${textOf(node).trim()}`.trim()
       }
     }
-    return sections
+    return sections.map(section => ({ ...section, title: plain(section.title), titles: section.titles.map(plain), content: plain(section.content) }))
   })
 }

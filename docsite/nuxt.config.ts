@@ -69,7 +69,7 @@ const missingPage = `<style>
 .nf main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.75rem}
 .nf p{margin:0}
 .nf .code{font:600 1rem/1.5rem 'IBM Plex Mono',ui-monospace,monospace;color:var(--ui-primary,#7c3aed)}
-.nf h1{margin:0;font-weight:600;font-size:2.25rem;line-height:2.5rem;color:var(--ui-text-highlighted,#0f172a)}
+.nf h1{margin:0;font-family:'IBM Plex Mono',ui-monospace,monospace;letter-spacing:-0.02em;font-weight:600;font-size:2.25rem;line-height:2.5rem;color:var(--ui-text-highlighted,#0f172a)}
 .nf .links{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem 1.5rem;margin-top:.75rem}
 </style>
 <div class="nf">

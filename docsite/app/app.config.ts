@@ -72,6 +72,16 @@ export default defineAppConfig({
         itemLabel: 'line-clamp-2 whitespace-normal! break-words',
       },
     },
+    // The error page's title was in sans beside the mono h1 of every docs
+    // page (and drawn at 700, which type.css's .font-bold rule now caps).
+    // Mono like that h1, and the status code in mono like the 404.html
+    // nuxt.config.ts bakes.
+    error: {
+      slots: {
+        statusCode: 'font-mono',
+        statusMessage: 'font-mono tracking-tight',
+      },
+    },
     // The page body is a size container, so a table can ask how wide the text
     // column is (prose.css) instead of how wide the window is: the sidebar and
     // the contents column take 400px of a 1024px window.

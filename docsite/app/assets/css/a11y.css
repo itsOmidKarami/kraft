@@ -10,6 +10,13 @@
   outline-offset: 2px;
 }
 
+/* The header's version pill clips its two halves to its rounded border
+   (AppHeaderCTA.vue), and that clipped the ring set off outside its link to a
+   violet bar between the halves. Inside the link instead. */
+[aria-label='Docs version'] a:focus-visible {
+  outline-offset: -2px;
+}
+
 /* A block the skip link jumps to takes focus (tabindex=-1) so the next Tab
    starts inside the content; it is not a control, so it draws no ring. */
 #main-content:focus-visible {
