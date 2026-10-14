@@ -30,8 +30,11 @@ export default defineAppConfig({
     // groups never fold. A slot string here replaces Docus's, it does not
     // merge, and that is what brings the chevron back: ms-auto is the theme's
     // own value for the slot.
+    // A group's name is in IBM Plex Mono (assets/css/type.css says why), at
+    // 13px: at 14px "Customize and automate", one level down, wrapped.
     contentNavigation: {
       slots: {
+        trigger: 'font-mono font-medium text-[0.8125rem]',
         linkTitle: 'whitespace-normal!',
         listWithChildren: 'ms-2.5',
         linkTrailing: 'ms-auto',

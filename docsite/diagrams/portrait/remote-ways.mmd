@@ -5,6 +5,6 @@ flowchart LR
   p4["Behind a reverse<br/>proxy you run:<br/>phone"] --> m4["Your proxy: https<br/>to the phone,<br/>Host passed<br/>through, plain<br/>http on"] --> k4["Kraft on 0.0.0.0<br/>password, name in<br/>allowed_hosts,<br/>port firewalled<br/>by you"]
   p5["Webhook proxy:<br/>the sender"] --> m5["Your proxy on this<br/>machine: Host<br/>localhost, sets<br/>X-Forwarded-For<br/>itself"] --> k5["Kraft on 127.0.0.1<br/>every API call but<br/>health and login<br/>needs a session<br/>or a token"]
 
-  classDef box fill:#eef0f3,stroke:#7b8494,color:#1d1d1f
+  classDef box fill:#f1f5f9,stroke:#64748b,color:#0f172a
   class p1,m1,k1,p2,m2,k2,p3,m3,k3,p4,m4,k4,p5,m5,k5 box
-  linkStyle default stroke:#7b8494
+  linkStyle default stroke:#64748b

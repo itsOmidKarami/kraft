@@ -1,0 +1,110 @@
+/* Kraft's type on every page: IBM Plex, the family the landing page and the
+   StageStrip chain already use, in place of the system font. Plex Sans is
+   the reading face (paragraphs, lists, the sidebar's pages); Plex Mono is
+   what a reader types or looks up, and the names of things: code, the
+   wordmark (AppHeaderLogo.vue), page titles and section headings, the
+   sidebar's group names and the page's own group above its title, "On this
+   page", and table headers. h3 and below stay in Plex Sans: a page of
+   short mono headings at every level reads as a listing, not a page.
+   Nuxt UI and Tailwind declare these variables inside a cascade layer; these
+   declarations are outside one, so they win without !important, and every
+   font-sans and font-mono utility (code blocks, inline code, the search box)
+   follows them. nuxt.config.ts loads the weights used here. */
+:root {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Mono is wider than sans at the same size, so the titles are a step
+   smaller than Nuxt UI's (30 to 36px for h1, 24px for h2), and smaller
+   still on a phone, where an h1 of 45 characters took three lines. Weight
+   600 throughout: Plex Mono and Plex Sans are loaded up to 600, and bold
+   (700) would be drawn as a smeared fake. Only on a docs page (docs-page:
+   layouts/docs.vue): the landing pages set their own titles (hero.css),
+   and the release docs' older landing page has a hero title these sizes
+   would shrink. */
+main .docs-page h1 {
+  font-family: var(--font-mono);
+  font-size: clamp(1.625rem, 1.3rem + 1.4vw, 2.25rem);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  word-spacing: -0.15em;
+  text-wrap: balance;
+}
+
+main .docs-page h2 {
+  font-family: var(--font-mono);
+  font-size: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  word-spacing: -0.15em;
+  text-wrap: balance;
+}
+
+/* A mono space is as wide as a letter, so a heading's words sat a letter
+   apart and read as separate tokens: word-spacing takes a quarter of it
+   back (both rules above). */
+
+/* A code span in a heading is drawn bold by Nuxt UI; in a mono heading it
+   is the same face, so it takes the heading's weight. */
+main .docs-page :is(h1, h2, h3, h4) code {
+  font-weight: inherit;
+}
+
+/* h3 sits under a mono h2 at nearly its size on a phone, so it is one step
+   smaller there (18px), and h4 one more. */
+main .docs-page h3 {
+  font-size: clamp(1.125rem, 1.05rem + 0.3vw, 1.25rem);
+  font-weight: 600;
+}
+
+main .docs-page h4 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+/* Inline code in a paragraph at Nuxt UI's 500 was the heaviest thing in
+   the line: Plex Mono is darker than Plex Sans at the same weight. */
+main :not(pre) > code {
+  font-weight: 400;
+}
+
+/* Every page: Plex Sans is loaded up to 600 (see above). */
+:is(strong, b) {
+  font-weight: 600;
+}
+
+/* The page's group ("Concepts") above its title: the same name, in the same
+   face, as the group in the sidebar. */
+main .docs-page [data-slot='headline'] {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+/* "On this page", in the contents column and on a phone's contents bar. */
+nav [data-slot='trigger'] [data-slot='title'] {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+/* Column headers name what is under them, like the head of `kraft view
+   list`. 13px: mono at 14px made "What it does" and its kind wider than
+   the short column under them. */
+main th {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* A code block's file name (```yaml [config/policy.yaml]) is a path. */
+main [data-slot='filename'] {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+/* Selected text in the brand colour, in place of the browser's blue. */
+::selection {
+  background: color-mix(in oklab, var(--ui-primary) 25%, transparent);
+}
