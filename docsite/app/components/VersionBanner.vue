@@ -1,21 +1,30 @@
 <!-- On the /next/ docs only. Links to the same page in the release docs; a
      page that does not exist there yet gets the site's 404 page. The link is
      external because a router path would resolve inside this build
-     (/next/kraft/). The title wraps rather than truncating, which on a
-     phone cut it before "unreleased". The text is dark in both color modes:
-     Nuxt UI's white on the light-mode amber measured 1.9:1. -->
+     (/next/kraft/). A thin neutral strip with a small amber mark, not a
+     saturated slab: a full-width warning on every page trains readers to
+     ignore warnings, and the real switch is in the header (AppHeaderCTA.vue).
+     The text is the default text color, which passes AA on the elevated
+     surface in both modes; amber text on it did not. The text wraps rather
+     than truncating, which on a phone cut it before "unreleased". -->
 <script setup lang="ts">
 const docs = useRuntimeConfig().public.docs
 const at = useDocsChannel()
+const stable = computed(() => docs.stableVersion || 'release')
 </script>
 
 <template>
-  <UBanner
+  <div
     v-if="at.channel === 'next'"
-    color="warning"
-    :ui="{ container: 'h-auto min-h-12 py-2', title: 'whitespace-normal text-neutral-900', icon: 'text-neutral-900' }"
-    icon="i-lucide-flask-conical"
-    :title="`You're reading docs for unreleased main.`"
-    :actions="[{ label: `Docs for ${docs.stableVersion || 'the release'} →`, to: at.samePage(docs.stableBase), external: true, color: 'neutral', variant: 'outline' }]"
-  />
+    class="border-b border-default bg-elevated text-xs text-default"
+  >
+    <div class="mx-auto flex min-h-8 max-w-(--ui-container) items-center gap-2 px-4 py-1 sm:px-6 lg:px-8">
+      <span aria-hidden="true" class="h-3.5 w-1 shrink-0 rounded-full bg-warning-500" />
+      <p>
+        <span>Docs for unreleased main</span>
+        <span aria-hidden="true" class="mx-1">·</span>
+        <a :href="at.samePage(docs.stableBase)" class="font-medium underline underline-offset-2 hover:text-highlighted">Switch to {{ stable }} docs →</a>
+      </p>
+    </div>
+  </div>
 </template>
