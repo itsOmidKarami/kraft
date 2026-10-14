@@ -35,6 +35,11 @@ class LinkRow:
     node_id: str | None = None
     hook_point: str | None = None
     worker_session_id: str | None = None
+    #: The item `worker_session_id` belongs to, from the session's own
+    #: database row, never from front matter: a session id is unique only
+    #: within its item. None when unknown (a summary git scanned, or a link
+    #: written before the column), looked up by the session id alone.
+    session_work_item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -241,7 +246,7 @@ def replace_links(conn, document_id: str, links) -> None:
     for link in links:
         conn.execute(
             "INSERT INTO document_links (id, document_id, work_item_id, node_id, "
-            "hook_point, worker_session_id) VALUES (?,?,?,?,?,?)",
+            "hook_point, worker_session_id, session_work_item_id) VALUES (?,?,?,?,?,?,?)",
             (
                 uuid.uuid4().hex,
                 document_id,
@@ -249,6 +254,7 @@ def replace_links(conn, document_id: str, links) -> None:
                 link.node_id,
                 link.hook_point,
                 link.worker_session_id,
+                link.session_work_item_id,
             ),
         )
 

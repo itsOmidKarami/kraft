@@ -143,3 +143,13 @@ origin: src/kraft/worker/channel.py §socket_path, src/kraft/worker/channel.py �
 WHILE a session minted before per-item ids runs, the system SHALL name its containers, volume, certificate and socket folder as it did when it started.
 enforced-by: tests/worker/backends/test_docker_names.py::test_a_session_s_docker_names_carry_its_item[container], tests/worker/backends/test_docker_names.py::test_a_launch_runs_and_joins_the_names_its_session_has[older-session], tests/worker/backends/test_docker_relay.py::test_sweep_keeps_a_live_sessions_relays_volume_and_certificate[older-session], tests/worker/test_channel.py::test_each_session_listens_in_a_socket_folder_of_its_own[older-session], tests/worker/test_channel.py::test_a_session_certificate_reaches_its_own_session_over_tls[older-session], tests/worker/test_reattach_oom.py::test_an_adopted_session_is_found_under_the_name_it_started_with[older-session], tests/adapters/test_agent_permission_rules.py::test_an_amp_launch_gets_its_own_settings_file[older-session]
 origin: src/kraft/ids.py §qualified, src/kraft/worker/channel.py §socket_path
+
+## REQ a-summary-carries-its-own-item-s-session
+WHEN the system lists a work item's documents, it SHALL give each session summary the run of the session that wrote it, found by that session's work item and session id.
+enforced-by: tests/index/test_service_session_links.py::test_a_summary_is_listed_once_with_its_own_item_s_session, frontend/src/ng/item/panes/TaskPane.test.tsx::task pane › lists only this attempt's documents under the result
+origin: src/kraft/index/service.py §ingest_session_summary, src/kraft/index/service.py §_session_runs
+
+## REQ a-summary-linked-before-the-upgrade-is-found-by-id
+WHILE a session summary's index link records no work item for its session, the system SHALL find that session by its id alone, and SHALL give the summary no run when more than one session has that id.
+enforced-by: tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[pre-upgrade-id], tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[an-id-two-items-share], tests/index/test_db.py::test_v3_index_migrates_forward_keeping_its_links_with_no_session_item
+origin: src/kraft/index/service.py §_session_runs, src/kraft/index/db.py §_MIGRATIONS
