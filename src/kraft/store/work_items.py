@@ -506,20 +506,31 @@ def match_ids(candidates: Iterable[str], given: str) -> list[str]:
     return sorted(i for i in ids if i.startswith(given))
 
 
+#: The ids that start with a value, as a range the primary key's index
+#: answers rather than a scan of every row: a `[0-9a-z]` start is at or below
+#: each of them, and the start followed by `~` above each, since every id
+#: Kraft mints is lowercase hex or base32 and `~` sorts after all of those.
+#: Case-sensitive, unlike `LIKE`, and no character is a wildcard.
+_STARTING_WITH = "id >= ? AND id < ?"
+
+
+def _starting_with(start: str) -> tuple[str, str]:
+    return start, start + "~"
+
+
 def match_work_item_ids(conn: sqlite3.Connection, given: str) -> list[str]:
     """The ids `given` names: its own when an item has exactly that id, else
     every id it is the start of, when it may be a prefix (`MIN_PREFIX`
     characters or more, from `[0-9a-z]`). An exact id wins over a longer id it
-    is also the start of. `substr` rather than `LIKE`: case-sensitive, and no
-    character in `given` is a wildcard."""
+    is also the start of. Asked on every request that names an item, so by a
+    range of the primary key (`_STARTING_WITH`)."""
     exact = conn.execute("SELECT id FROM work_items WHERE id = ?", (given,)).fetchone()
     if exact is not None:
         return [exact["id"]]
     if not _may_be_a_prefix(given):
         return []
     rows = conn.execute(
-        "SELECT id FROM work_items WHERE substr(id, 1, ?) = ? ORDER BY id",
-        (len(given), given),
+        f"SELECT id FROM work_items WHERE {_STARTING_WITH} ORDER BY id", _starting_with(given)
     ).fetchall()
     return [r["id"] for r in rows]
 
@@ -527,10 +538,10 @@ def match_work_item_ids(conn: sqlite3.Connection, given: str) -> list[str]:
 def work_item_id_taken(conn: sqlite3.Connection, candidate: str) -> bool:
     """Whether an item has the id `candidate`, or an older, longer id that
     starts with it: that item would stop answering to `candidate` as a prefix
-    (`match_work_item_ids`) the moment a new item took it."""
+    (`match_work_item_ids`) the moment a new item took it. `candidate` is a
+    minted id, so made of the characters `_STARTING_WITH` relies on."""
     row = conn.execute(
-        "SELECT 1 FROM work_items WHERE substr(id, 1, ?) = ? LIMIT 1",
-        (len(candidate), candidate),
+        f"SELECT 1 FROM work_items WHERE {_STARTING_WITH} LIMIT 1", _starting_with(candidate)
     ).fetchone()
     return row is not None
 
