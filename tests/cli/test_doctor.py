@@ -49,6 +49,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "shell completion",
         "bd",
         "worktrees",
+        "old documents",
     ):
         assert name in _names(rows)
 

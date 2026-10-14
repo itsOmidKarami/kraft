@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import commit_all, entry_of, git, make_repo, v1_chain, write
+from support.harness import commit_all, entry_of, git, make_repo, own_files, v1_chain, write
 
 from kraft import builtins as kraft_builtins
 from kraft.config import base_ignore_args, git_read
@@ -443,7 +443,7 @@ async def test_the_pre_mr_rebase_onto_a_vanished_base_is_a_config_stop(database,
     )
 
     assert status == "config_error"
-    assert "base branch 'release'" in (run_dirs.logs / "s1.log").read_text()
+    assert "base branch 'release'" in own_files(run_dirs, "s1").log.read_text()
 
 
 def test_an_unnamed_base_still_falls_back_to_the_checkout_with_no_origin(repo):

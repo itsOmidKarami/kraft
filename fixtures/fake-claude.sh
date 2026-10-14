@@ -80,12 +80,13 @@ while [ "$#" -gt 0 ]; do
 done
 field() { printf '%s\n' "$ctx" | sed -n "s/^$1: //p" | head -1; }
 
-summary_ref=""
+# The summary goes where the context says; Kraft records it itself, so the
+# result file reports no session_summary_ref.
 session="$(field 'Worker session')"
-if [ -n "$session" ]; then
-  summary_ref=".engineering/sessions/${session}.md"
-  mkdir -p .engineering/sessions
-  cat > "$summary_ref" <<EOF
+summary_path="$(printf '%s\n' "$ctx" | sed -n 's/.*session summary to \([^ ]*\), starting.*/\1/p' | head -1)"
+if [ -n "$session" ] && [ -n "$summary_path" ]; then
+  mkdir -p "$(dirname "$summary_path")"
+  cat > "$summary_path" <<EOF
 ---
 work_item_ids: [$(field 'Work item')]
 node_id: $(field 'Node')
@@ -97,9 +98,10 @@ fake-claude session
 EOF
 fi
 
-# A task that `produces:` a document is contractually required to write and
-# commit it. Honour that, so the gate, the artifact endpoint and the indexer all
-# see the real inputs.
+# A task that `produces:` a document is contractually required to write it,
+# where the contract says: its item's docs/, outside the repository, so there
+# is nothing to commit. Honour that, so the gate, the artifact endpoint and the
+# indexer all see the real inputs.
 hook="$(field 'Hook point')"
 item="$(field 'Work item')"
 
@@ -111,6 +113,7 @@ item="$(field 'Work item')"
 # attached spec puts `.engineering/specs/` into the *plan* author's context
 # too, and that read wrote the plan author a spec.
 kind="$(printf '%s\n' "$ctx" | sed -n 's/.*Write your \([a-z_]*\) to .*/\1/p' | head -1)"
+doc_path="$(printf '%s\n' "$ctx" | sed -n 's/.*Write your [a-z_]* to \([^ ]*\), creating that directory.*/\1/p' | head -1)"
 # Only on a status that advances the chain (executor._ADVANCING), mirroring
 # tests/support/fake_agent.py. A real worker that reports needs_context or a
 # failure has written nothing, and `agent._resolve_status` holds only a claim of
@@ -136,9 +139,9 @@ body="fake ${kind} body"
 if [ "$kind" = chain_revision ]; then
   body="$(printf '%s\n%s\n%s' '```json' '{"rationale": "fake: the chain fits the plan"}' '```')"
 fi
-if [ -n "$kind" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
-  mkdir -p ".engineering/${kind}s"
-  cat > ".engineering/${kind}s/${item}.md" <<EOF
+if [ -n "$kind" ] && [ -n "$doc_path" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
+  mkdir -p "$(dirname "$doc_path")"
+  cat > "$doc_path" <<EOF
 ---
 work_item_ids: [${item}]
 node_id: $(field 'Node')
@@ -149,15 +152,12 @@ ${labels}title: fake ${kind}
 
 ${body}
 EOF
-  git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
-  git -c user.name=fake -c user.email=fake@kraft \
-      commit -q -m "fake ${kind}" -- ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
 fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   rtmp="$(mktemp)"
-  # ponytail: no JSON-string escaping on these values, same as the pre-existing
-  # summary_ref line below -- test-controlled inputs only. Add escaping (or a
+  # ponytail: no JSON-string escaping on these values -- test-controlled
+  # inputs only. Add escaping (or a
   # `python -c` json.dumps helper) if a caller ever needs a quote/backslash in
   # KRAFT_FAKE_CLAUDE_CONCERNS/_QUESTION.
   json="{\"status\": \"$status\""
@@ -166,9 +166,6 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   fi
   if [ -n "${KRAFT_FAKE_CLAUDE_QUESTION:-}" ]; then
     json="$json, \"question\": \"${KRAFT_FAKE_CLAUDE_QUESTION}\""
-  fi
-  if [ -n "$summary_ref" ]; then
-    json="$json, \"session_summary_ref\": \"${summary_ref}\""
   fi
   json="$json}"
   printf '%s' "$json" > "$rtmp"

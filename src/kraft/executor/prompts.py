@@ -4,10 +4,10 @@ import sqlite3
 from pathlib import Path
 
 from kraft import findings as _findings
+from kraft import item_paths
 from kraft import progress as _progress
 from kraft import review as _review
 from kraft import store as _store
-from kraft.adapters import agent as _agent
 from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
 from kraft.vocab import ADVANCING
@@ -131,7 +131,14 @@ SUGGEST_ACTION = (
 )
 
 
-def task_failure_note(task: str, status: str, session=None) -> str:
+def summary_at(ref: str, run_dirs) -> str:
+    """Where a session's recorded summary is, for a prompt: an absolute path
+    for one in its item's folder (`items/...`, relative to the run folder),
+    else the ref as it is, relative to the worktree as it always was."""
+    return str(run_dirs.base / ref) if Path(ref).parts[:1] == (item_paths.ITEMS,) else ref
+
+
+def task_failure_note(task: str, status: str, session=None, *, run_dirs) -> str:
     """What a task-level recovery (`TaskBase.on_failure`,
     `task-recovery-retries-only-the-task`) is told about the task it repairs:
     which task, how it ended, and where its own output is. Without it the
@@ -148,7 +155,8 @@ def task_failure_note(task: str, status: str, session=None) -> str:
             f"and its result at {session['result_path']}"
         )
         if session["session_summary_ref"]:
-            note += f", with a session summary at {session['session_summary_ref']}"
+            summary = summary_at(session["session_summary_ref"], run_dirs)
+            note += f", with a session summary at {summary}"
         note += "."
     return note
 
@@ -287,7 +295,13 @@ _SOURCE_PROMPTS = {"seeded": _SEEDED_PROMPT, "gate_review": _GATE_REVIEW_PROMPT}
 
 
 def steer_prefix(
-    artifact_kind: str | None, work_item_row, worktree, note: str, *, source: str = "human"
+    artifact_kind: str | None,
+    work_item_row,
+    worktree,
+    note: str,
+    *,
+    run_dirs,
+    source: str = "human",
 ) -> str:
     """What a steered agent launch leads with.
 
@@ -301,9 +315,15 @@ def steer_prefix(
     template = _SOURCE_PROMPTS.get(source)
     if template is not None:
         return template.format(note=note)
-    rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
-    if rel and (Path(worktree) / rel).is_file():
-        return _REVISE_PROMPT.format(path=rel, steer=note)
+    wid = work_item_row["id"]
+    name = (
+        item_paths.document(run_dirs, wid, artifact_kind, worktree=worktree)
+        if artifact_kind
+        else None
+    )
+    if name is not None:
+        path = item_paths.path_of(run_dirs, wid, name, worktree=worktree)
+        return _REVISE_PROMPT.format(path=path, steer=note)
     return _STEER_PROMPT.format(steer=note)
 
 
@@ -392,7 +412,9 @@ _PROGRESS_NOTE_NO_CHANNEL = (
 )
 
 
-def progress_note(task: AgentTask, work_item_row, worktree, db=None, sandbox=None) -> str:
+def progress_note(
+    task: AgentTask, work_item_row, worktree, db=None, sandbox=None, *, run_dirs
+) -> str:
     """Only for the task doing the work from the brief, and only for a plan with
     `## Task N` headings to count.
 
@@ -407,7 +429,7 @@ def progress_note(task: AgentTask, work_item_row, worktree, db=None, sandbox=Non
     if db is not None and _progress.rework_run(db, work_item_row):
         # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
-    tasks = _progress.tasks_for(work_item_row, Path(worktree))
+    tasks = _progress.tasks_for(work_item_row, Path(worktree), run_dirs)
     note = _PROGRESS_NOTE if _callback.reachable(sandbox) else _PROGRESS_NOTE_NO_CHANNEL
     return note.format(total=len(tasks)) if tasks else ""
 
@@ -561,7 +583,7 @@ _FIX_ATTEMPT = (
 _FIX_ATTEMPT_SUMMARY = ", and its session summary at {summary_ref}"
 
 
-def _session_note(row, template: str, summary_template: str) -> str:
+def _session_note(row, template: str, summary_template: str, *, run_dirs) -> str:
     """One session's artifacts, by path. "" for no row at all, and a missing
     `session_summary_ref` drops that clause rather than interpolating a path
     the agent would spend a tool call discovering does not exist."""
@@ -570,20 +592,20 @@ def _session_note(row, template: str, summary_template: str) -> str:
     ref = row["session_summary_ref"]
     return template.format(
         result_path=row["result_path"],
-        summary=summary_template.format(summary_ref=ref) if ref else "",
+        summary=summary_template.format(summary_ref=summary_at(ref, run_dirs)) if ref else "",
     )
 
 
-def previous_review_note(row) -> str:
+def previous_review_note(row, *, run_dirs) -> str:
     """The task's own last completed session, by path, for a task declaring
     `inputs: [previous_review]`; "" on its first session
     (`continuity-note-is-delivered-to-a-resumed-reviewer`)."""
-    return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
+    return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY, run_dirs=run_dirs)
 
 
-def fix_attempt_note(row) -> str:
+def fix_attempt_note(row, *, run_dirs) -> str:
     """**Parked:** no `AgentTask` input declares it, so nothing delivers it."""
-    return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
+    return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY, run_dirs=run_dirs)
 
 
 #: A review session that did not finish is not a head anything was reviewed at.
@@ -671,20 +693,23 @@ def review_package(
     if since and git_read(worktree, "rev-parse", "--verify", f"{since}^{{commit}}") is None:
         since = None
     path = _review.write_package(
-        run_dirs.results, worktree, row["base_ref"], session_id, since=since
+        item_paths.session_files(run_dirs, work_item_id, session_id).review,
+        worktree,
+        row["base_ref"],
+        since=since,
     )
     return str(path) if path else None
 
 
-def previous_attempt_note(previous_fix) -> str:
+def previous_attempt_note(previous_fix, *, run_dirs) -> str:
     """The fix-prompt addendum for `kraft.executor.walk`'s previous-fix lookup,
     or "" if there was no previous attempt. A plain function so the no-summary
     branch is testable without driving a session through the executor."""
     if previous_fix is None:
         return ""
     note = _FIX_PREVIOUS_RESULT.format(result_path=previous_fix["result_path"])
-    if previous_fix["session_summary_ref"]:
-        note += _FIX_PREVIOUS_SUMMARY.format(summary_ref=previous_fix["session_summary_ref"])
+    if ref := previous_fix["session_summary_ref"]:
+        note += _FIX_PREVIOUS_SUMMARY.format(summary_ref=summary_at(ref, run_dirs))
     return note
 
 

@@ -40,7 +40,7 @@ async def test_the_review_package_reaches_only_a_task_that_declares_it(
     [argv] = fake_agent.argv()
     assert ("$KRAFT_REVIEW_PACKAGE" in " ".join(argv)) is declared
     [session] = it.sessions("review")
-    assert (run_dirs.results / f"{session['id']}.review.md").is_file() is declared
+    assert it.files(session["id"]).review.is_file() is declared
 
 
 def test_the_seeded_fix_loop_judge_declares_the_package_and_its_method(fake_agent):
@@ -206,7 +206,7 @@ async def test_a_huge_carried_findings_list_cannot_break_the_launch(item_on, fak
     [prompt] = fake_agent.prompts()
     assert len(prompt.encode()) <= agent_mod.INSTRUCTION_MAX_BYTES + 1024
     [session] = it.sessions("review")
-    full = run_dirs.results / f"{session['id']}.instruction.md"
+    full = it.files(session["id"]).instruction
     assert str(full) in prompt
     assert "the last finding in the list" in full.read_text()
 

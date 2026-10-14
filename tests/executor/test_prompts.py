@@ -6,7 +6,7 @@ import pytest
 from support.harness import commit_all, entry_of, git, v1_named_chain, v1_task, write
 from support.store_fixtures import mk_item
 
-from kraft import store
+from kraft import item_paths, store
 from kraft.executor import prompts
 from kraft.findings import Finding, JobRef
 from kraft.templates.models import AgentTask
@@ -98,16 +98,13 @@ def test_the_implementer_has_no_skill_so_its_brief_stays_the_task(tmp_path):
 # -- steer_prefix: who a steer's note is attributed to ----------------------------
 
 
-def _plan_on_disk(worktree):
-    (worktree / ".engineering" / "plans").mkdir(parents=True)
-    (worktree / ".engineering" / "plans" / "w1.md").write_text("# the plan\n")
-
-
-def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_path):
+def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_path, run_dirs):
     """The branch fires on the document's existence, not on any gate name: a
     node whose artifact was never written has nothing to revise."""
-    with_artifact = prompts.steer_prefix("plan", {"id": "w1"}, tmp_path, "go left")
-    without = prompts.steer_prefix(None, {"id": "w1"}, tmp_path, "go left")
+    with_artifact = prompts.steer_prefix(
+        "plan", {"id": "w1"}, tmp_path, "go left", run_dirs=run_dirs
+    )
+    without = prompts.steer_prefix(None, {"id": "w1"}, tmp_path, "go left", run_dirs=run_dirs)
 
     assert with_artifact == without == "A human has steered this run: go left\n\n"
 
@@ -117,7 +114,7 @@ def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_pa
     [
         # Kraft-bol: a rejected plan cost a full re-plan because the dispatch
         # never mentioned the document the agent had already written.
-        ("human", [".engineering/plans/w1.md", "evise", "A human read"], ["A human has steered"]),
+        ("human", ["read {plan} and", "evise", "A human read"], ["A human has steered"]),
         # Kraft's own recap of the last review's unresolved findings
         # (Kraft-7sec) names no author it does not have.
         ("seeded", ["no human"], ["A human has steered", "A human read"]),
@@ -132,20 +129,20 @@ def test_a_steered_node_with_no_artifact_yet_keeps_the_plain_steer_prompt(tmp_pa
     ],
     ids=["a-humans-steer-over-an-artifact-is-a-revision", "kraft-seeded", "gate-reviewer"],
 )
-def test_steer_prefix_names_the_notes_author(tmp_path, source, present, absent):
+def test_steer_prefix_names_the_notes_author(tmp_path, run_dirs, source, present, absent):
     """Both human templates name an author: `_STEER_PROMPT` says "A human has
     steered this run", and over an existing artifact `_REVISE_PROMPT` says "A
     human read ... and sent it back with this note". A note Kraft or an agent
     wrote gets neither."""
-    _plan_on_disk(tmp_path)
+    plan = write(item_paths.docs_dir(run_dirs, "w1"), "plan.md", "# the plan\n")
     note = "Findings the last review of this node left unresolved:\n- [important] a.py:1 — x"
 
     # A human is the default: every caller that passes no source still means one.
     kwargs = {} if source == "human" else {"source": source}
-    out = prompts.steer_prefix("plan", {"id": "w1"}, tmp_path, note, **kwargs)
+    out = prompts.steer_prefix("plan", {"id": "w1"}, tmp_path, note, run_dirs=run_dirs, **kwargs)
 
     assert note in out
-    assert all(text in out for text in present), out
+    assert all(text.format(plan=plan) in out for text in present), out
     assert not any(text in out for text in absent), out
 
 
@@ -245,8 +242,8 @@ def test_a_worker_reports_progress_by_kraft_only_where_it_can_run_it(
 ):
     """A sandbox without `network:` has no route to Kraft: the commit tag,
     which Kraft reads when no report was made, is all it is asked for."""
-    monkeypatch.setattr(prompts._progress, "tasks_for", lambda row, worktree: ["a", "b"])
-    note = prompts.progress_note(WORKER, {"id": "w1"}, "/wt", sandbox=sandbox)
+    monkeypatch.setattr(prompts._progress, "tasks_for", lambda row, worktree, run_dirs: ["a", "b"])
+    note = prompts.progress_note(WORKER, {"id": "w1"}, "/wt", sandbox=sandbox, run_dirs=None)
     assert "This plan has 2 tasks." in note and "`(task K)`" in note
     assert ("kraft item progress" in note) is reachable
 

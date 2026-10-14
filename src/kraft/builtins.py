@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
-from kraft import events, logs, store
+from kraft import events, item_paths, logs, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -679,8 +679,14 @@ async def ensure_worktree(
     # Kraft-eqgn, so a missing one means Kraft lost it, and the gate it justified
     # is trimmed. A worktree made anyway would take the early return above on a
     # retry and run without the document (Kraft-s7c04.29).
-    for a in attachments or []:
-        src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
+    # Each read where it is now (`item_paths.stored_attachment`): a run folder
+    # moved since filing leaves the row naming the old place.
+    attachments = [
+        {**a, "source": str(item_paths.stored_attachment(run_dirs, work_item_id, a, repo))}
+        for a in attachments or []
+    ]
+    for a in attachments:
+        src = Path(a["source"])
         if not src.is_file():
             raise FileNotFoundError(
                 f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
@@ -2027,8 +2033,11 @@ async def start_session(
     returned id/paths are that row's, not `session_id`'s -- the caller must
     use the returned id, not `session_id`, for the rest of its work.
     """
-    log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = run_dirs.results / f"{session_id}.json"
+    files = item_paths.session_files(run_dirs, work_item_id, session_id)
+    # Its own `out/`, which holds the result file `finish_session` writes:
+    # nothing but Kraft writes there for an in-process task.
+    files.writable.mkdir(parents=True, exist_ok=True)
+    log_path, result_path = files.log, files.result
     actual_id, log_str, result_str = await db.write(
         lambda c: store.create_session(
             c,

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import caps, events, store
+from kraft import caps, events, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -171,7 +171,13 @@ def _reader_of(row) -> str | None:
 
 
 async def _exit_from_file(
-    db, session_id: str, log_path: Path, result_path: Path, status: str, reader: str | None
+    db,
+    session_id: str,
+    log_path: Path,
+    result_path: Path,
+    status: str,
+    reader: str | None,
+    summary: str | None = None,
 ) -> None:
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
@@ -182,8 +188,9 @@ async def _exit_from_file(
 
     `read_result_fields` is the one place that field list is spelled out
     (Kraft-k3d) — this and `adapters.subprocess.run_task` both call it rather
-    than each enumerating the fields by hand."""
-    fields = read_result_fields(result_path)
+    than each enumerating the fields by hand. `summary` is the summary Kraft
+    asked for and found written (`_asked_summary`), as `run_task` passes it."""
+    fields = read_result_fields(result_path, summary=summary)
     seen = _usage.read(log_path, result_path, reader)
     # The same reader, holding an adopted turn to `run_task`'s rule.
     status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
@@ -346,7 +353,25 @@ def _is_agent_hook(db, row) -> bool:
     return True
 
 
-def _adopted_status(result_path, *, is_agent: bool) -> str:
+def _asked_summary(db, run_dirs, row) -> str | None:
+    """The summary `row`'s session was told to write, by the name Kraft
+    records it under, when it wrote one (`item_paths.recorded_summary`):
+    what `run_task` passes `read_result_fields` on its own exit. None for a
+    session from before the upgrade, which reported its own ref, and with
+    no run folder to look in."""
+    if run_dirs is None or item_paths.is_legacy_log(row["log_path"]):
+        return None
+    wid = row["work_item_id"]
+    if row["hook_point"] == ESCALATION_HOOK:
+        from kraft.escalate import thread_files  # `escalate` reaches this module
+
+        files = thread_files(db, run_dirs, wid, row["thread"], row["id"])
+    else:
+        files = item_paths.session_files(run_dirs, wid, row["id"])
+    return item_paths.recorded_summary(run_dirs, wid, files)
+
+
+def _adopted_status(result_path, *, is_agent: bool, exit_path=None) -> str:
     """Result file, else the task's own recorded exit code, else `unknown`.
 
     Never `failed` on absent evidence: an adopted process cannot be reaped, so
@@ -361,19 +386,22 @@ def _adopted_status(result_path, *, is_agent: bool) -> str:
     which is the one direction that must never happen -- so a session whose
     task cannot be found in its item's chain is treated as an agent too.
     """
-    status = _evidenced_status(result_path, is_agent=is_agent)
+    status = _evidenced_status(result_path, is_agent=is_agent, exit_path=exit_path)
     if status is not None:
         return status
     return "failed" if is_agent else "unknown"
 
 
-def _evidenced_status(result_path, *, is_agent: bool) -> str | None:
+def _evidenced_status(result_path, *, is_agent: bool, exit_path=None) -> str | None:
     """What a session left on disk says it ended as, or None if nothing does:
     its result file, else -- never for an agent, see `_adopted_status` -- its
-    own recorded exit code."""
+    own recorded exit code, at `exit_path` (`item_paths.exit_file`; beside
+    the result file when not given)."""
     status = _resolve_result_file(Path(result_path))
     if status is None and not is_agent:
-        status = _resolve_exit_file(Path(result_path).with_suffix(".exit"))
+        status = _resolve_exit_file(
+            Path(exit_path) if exit_path is not None else Path(result_path).with_suffix(".exit")
+        )
     return status
 
 
@@ -483,10 +511,16 @@ async def _adopt(
     if run_dirs is not None:
         # Before the exit is resolved: what runs next reads the item branch.
         await _sync_item_refs(db, run_dirs, row["work_item_id"])
-    status = _adopted_status(result_path, is_agent=_is_agent_hook(db, row))
+    status = _adopted_status(
+        result_path,
+        is_agent=_is_agent_hook(db, row),
+        exit_path=item_paths.exit_file(log_path, result_path),
+    )
     if oom is not None:
         status = await record_oom_kill(db, row["work_item_id"], session_id, log_path, oom, status)
-    await _exit_from_file(db, session_id, log_path, result_path, status, reader)
+    await _exit_from_file(
+        db, session_id, log_path, result_path, status, reader, _asked_summary(db, run_dirs, row)
+    )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
             db,
@@ -819,7 +853,11 @@ async def reattach(
         # evidence: the exit sidecar, for a subprocess, as well as the result
         # file -- so a green run Kraft merely cannot confirm pages nobody
         # (Kraft-s7c04.38).
-        status = _evidenced_status(r["result_path"], is_agent=_is_agent_hook(db, r))
+        status = _evidenced_status(
+            r["result_path"],
+            is_agent=_is_agent_hook(db, r),
+            exit_path=item_paths.exit_file(r["log_path"], r["result_path"]),
+        )
         if oom is not None:
             # Killed by its limit is evidence too: the item stops naming it,
             # never as a session nobody can account for.
@@ -829,7 +867,13 @@ async def reattach(
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             await _exit_from_file(
-                db, sid, Path(r["log_path"]), Path(r["result_path"]), status, _reader_of(r)
+                db,
+                sid,
+                Path(r["log_path"]),
+                Path(r["result_path"]),
+                status,
+                _reader_of(r),
+                _asked_summary(db, run_dirs, r),
             )
             summary.resolved_from_file.append(sid)
             await _sweep_after(db, run_dirs, r, launch_factory)

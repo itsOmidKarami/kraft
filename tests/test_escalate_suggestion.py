@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import v1_chain, write_harness_profiles
+from support.harness import own_files, v1_chain, write_harness_profiles
 
 from kraft import escalate, executor, store
 
@@ -35,7 +35,7 @@ async def _instruction(monkeypatch, tmp_path, database, run_dirs, *, auto=False,
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
-        log = run_dirs.logs / f"{session_id}.log"
+        log = own_files(run_dirs, session_id, kw["work_item_id"]).log
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps({"type": "system", "subtype": "init", "session_id": "c"}) + "\n")
         return "done"

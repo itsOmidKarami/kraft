@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
-from kraft import events, review, store
-from kraft.adapters import agent as agent_mod
+from kraft import events, item_paths, review, store
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -314,14 +312,15 @@ async def _refuse_artifact(st, wid: str, rel: str, reason: str) -> None:
 
 
 async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | None:
-    """Safely read `rel` out of `wid`'s worktree via `worktree_read.read_worktree_file`
-    (resolve, check containment, open with no symlink followed anywhere along the
-    path, cap the read at `DIFF_MAX_BYTES`), and record why via `_refuse_artifact`
-    on any failure -- shared by the reviewer-facing read and gate-approval
-    ingestion (`approve_gate`) so both trust the exact same containment walk.
+    """Safely read the document `rel` names -- under the run folder for one in
+    the item's `docs/`, else out of `wid`'s worktree (`item_paths.locate`) --
+    via `worktree_read.read_worktree_file` (resolve, check containment, open
+    with no symlink followed anywhere along the path, cap the read at
+    `DIFF_MAX_BYTES`), and record why via `_refuse_artifact` on any failure --
+    shared by the reviewer-facing read and gate-approval ingestion
+    (`approve_gate`) so both trust the exact same containment walk.
     """
-    worktree = st.run_dirs.worktrees / wid
-    result, reason = read_worktree_file(worktree, rel, DIFF_MAX_BYTES)
+    result, reason = read_worktree_file(*item_paths.locate(st.run_dirs, wid, rel), DIFF_MAX_BYTES)
     if result is None:
         await _refused(st, wid, rel, reason)
         return None
@@ -343,7 +342,8 @@ async def get_work_item_attachment(wid: str, kind: str, request: Request):
 
     Before the item starts there is no worktree and nothing indexed, so this is
     the only way to read what was attached. It is the snapshot under
-    `run/attachments/<wid>/`, the one the worktree will get, read with the same
+    `run/items/<wid>/filed/` (`run/attachments/<wid>/` for an item filed
+    before that folder), the one the worktree will get, read with the same
     containment walk as a gate's artifact."""
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
@@ -353,12 +353,8 @@ async def get_work_item_attachment(wid: str, kind: str, request: Request):
     a = next((a for a in entry.attachments_of(row) if a.get("kind") == kind), None)
     if a is None:
         raise HTTPException(404, f"this work item has no {kind} attached")
-    source = a.get("source")
-    result = (
-        read_worktree_file(st.run_dirs.attachments / wid, Path(source).name, DIFF_MAX_BYTES)[0]
-        if source
-        else None
-    )
+    stored = item_paths.filed_copy(st.run_dirs, wid, a.get("source"))
+    result = read_worktree_file(*stored, DIFF_MAX_BYTES)[0] if stored else None
     if result is None:
         raise HTTPException(404, f"Kraft no longer has the copy of this work item's {kind}")
     fm, body = ingest_mod.split_front_matter(result.text)
@@ -421,7 +417,7 @@ def _worktree_document(st, wid: str, rel: str, text: str, truncated: bool, body=
         "work_item_id": wid,
         "path": rel,
         # Where the file is on this machine, for the viewer's Open in editor and Copy path.
-        "absolute_path": str(st.run_dirs.worktrees / wid / rel),
+        "absolute_path": str(item_paths.path_of(st.run_dirs, wid, rel)),
         "title": ingest_mod.derive_title(rel, fm, body),
         # Front matter stripped: it is the contract's plumbing, not the
         # document, and a reviewer reading a spec should not have to skip it.
@@ -431,7 +427,8 @@ def _worktree_document(st, wid: str, rel: str, text: str, truncated: bool, body=
 
 
 def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, missing: str) -> dict:
-    """Launch an editor on the file `rel_of(st, row)` names in `wid`'s worktree.
+    """Launch an editor on the document `rel_of(st, row)` names: in `wid`'s
+    folder, or in its worktree for an older one (`item_paths.locate`).
 
     The same loopback-only rule as `POST /documents/{id}/open`, checked first so a
     remote caller learns nothing about the item, and the walk the reads go
@@ -442,7 +439,7 @@ def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, mi
     st = request.app.state
     row = deps._work_item_row(st, wid)
     rel = rel_of(st, row)
-    path = worktree_file_path(st.run_dirs.worktrees / wid, rel) if rel else None
+    path = worktree_file_path(*item_paths.locate(st.run_dirs, wid, rel)) if rel else None
     if path is None:
         raise HTTPException(404, missing)
     return {"work_item_id": wid, **_launch_editor(request, editor, path)}
@@ -450,9 +447,8 @@ def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, mi
 
 @api_router.post("/work-items/{wid}/artifact/open")
 async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request):
-    """Launch an editor on the pending gate's document in the item's worktree. The
-    gate's artifact has no index row, so the path comes from the worktree the
-    way `GET /artifact` reads it."""
+    """Launch an editor on the pending gate's document. The gate's artifact
+    has no index row, so the path is found the way `GET /artifact` reads it."""
     return _open_in_worktree(
         request,
         wid,
@@ -462,19 +458,21 @@ async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request
     )
 
 
-def _produced_path(row, kind: str) -> str:
-    """Where a task with `produces: <kind>` wrote its document, or a 404 when the
-    item's chain names no such kind: no node produces it and no gate decides it
-    (its `artifact`). Checked against the chain rather than the kind's spelling:
-    only a kind the chain names reaches `artifact_path`, so nothing a caller
-    types becomes part of a path."""
+def _produced_path(st, row, kind: str) -> str:
+    """Where a task with `produces: <kind>` wrote its document
+    (`item_paths.document`, the new place first, else the new name), or a 404
+    when the item's chain names no such kind: no node produces it and no gate
+    decides it (its `artifact`). Checked against the chain rather than the
+    kind's spelling: only a kind the chain names becomes part of a path."""
     chain = store.materialized_chain_of(row)
     nodes = chain.chain.nodes if chain else ()
     kinds = {k for n in nodes for k in n.produces() if k}
     kinds |= {n.node.artifact for n in nodes if getattr(n.node, "artifact", None)}
     if kind not in kinds:
         raise HTTPException(404, f"no task of this work item produces {kind!r}")
-    return agent_mod.artifact_path(kind, row["id"])
+    return item_paths.document(st.run_dirs, row["id"], kind) or item_paths.document_name(
+        row["id"], kind
+    )
 
 
 @api_router.get("/work-items/{wid}/artifacts/{kind}")
@@ -492,8 +490,8 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
-    rel = _produced_path(row, kind)
-    result, reason = read_worktree_file(st.run_dirs.worktrees / wid, rel, DIFF_MAX_BYTES)
+    rel = _produced_path(st, row, kind)
+    result, reason = read_worktree_file(*item_paths.locate(st.run_dirs, wid, rel), DIFF_MAX_BYTES)
     if result is not None:
         body = None
         if kind == revision.CHAIN_REVISION:
@@ -508,14 +506,17 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
     if reason != "absent":
         await _refused(st, wid, rel, reason)
         raise HTTPException(404, f"this work item's {kind} could not be read: {reason}")
-    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] == rel), None)
+    # Indexed at approval under the name it had then: an item that ran before
+    # the upgrade wrote it in its worktree's `.engineering/`.
+    names = (rel, item_paths.legacy_document_name(wid, kind))
+    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] in names), None)
     doc = indexed and st.indexer.get_document(indexed["document_id"])
     if not doc:
         raise HTTPException(404, f"this work item has no {kind}")
     return {
         "work_item_id": wid,
         "kind": kind,
-        "path": rel,
+        "path": indexed["path"],
         "title": doc["title"],
         "content": doc["content"],
         "truncated": False,
@@ -526,13 +527,13 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
 
 @api_router.post("/work-items/{wid}/artifacts/{kind}/open")
 async def open_produced_artifact(wid: str, kind: str, body: OpenDocument, request: Request):
-    """Launch an editor on a task's produced document in the item's worktree."""
+    """Launch an editor on a task's produced document, where it is on disk."""
     return _open_in_worktree(
         request,
         wid,
         body.editor,
-        lambda _st, row: _produced_path(row, kind),
-        f"this work item has no {kind} in its worktree",
+        lambda st, row: _produced_path(st, row, kind),
+        f"this work item has no {kind} on disk",
     )
 
 
@@ -541,11 +542,12 @@ async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
 
     Approval, not the worktree's eventual removal, is the hook: it is the
     first moment the content is accepted rather than still being drafted, and
-    it is a point every artifact-carrying gate already passes through --
-    unlike worktree teardown, which today only happens on `abandon`. Nothing
-    Kraft wrote under `.engineering/` is committed
-    (`forge._work_product_pathspec`), so this is the artifact's only durable
-    copy once its worktree is eventually gone.
+    it is a point every artifact-carrying gate already passes through. The
+    document itself stays in the item's `docs/` until the item is abandoned
+    (an older item's, in its worktree's `.engineering/`, which is never
+    committed (`forge._work_product_pathspec`), goes with its worktree), so
+    this copy is what search finds, and what an older item has left once
+    archived.
 
     Best-effort end to end: a missing or unreadable artifact is
     `_read_worktree_artifact` recording why on the item's own timeline, and an

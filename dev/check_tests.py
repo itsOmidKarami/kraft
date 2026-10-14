@@ -107,7 +107,7 @@ LINE_BUDGET = 800
 #: held to LINE_BUDGET from the day it's added.
 LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/adapters/test_agent.py": 856,
-    "tests/executor/test_gates.py": 903,
+    "tests/executor/test_gates.py": 880,
     "tests/executor/test_dispatch.py": 898,
     "tests/executor/test_walk.py": 1287,
 }

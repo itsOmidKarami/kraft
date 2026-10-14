@@ -23,7 +23,7 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   const gate = page.getByRole("complementary", { name: "spec_approval pane" });
   await gate.getByRole("button", { name: /^Read / }).click();
   await expect(page.getByRole("dialog")).toContainText("fake spec body");
-  await expect(page.getByRole("dialog")).toContainText(`.engineering/specs/${id}.md`);
+  await expect(page.getByRole("dialog")).toContainText(`items/${id}/docs/spec.md`);
   await page.goto(`/work-items/${id}?sel=spec_approval`);
 
   // Reject with a note: the spec node re-runs and the item comes back to the

@@ -9,6 +9,7 @@ from support.addons import AGENT, accept_repo_library, chain, repo_library_files
 from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import make_repo_with_engineering
 
+from kraft import item_paths
 from kraft.api import deps
 
 # --- B3: duplicate ----------------------------------------------------------
@@ -121,7 +122,7 @@ def test_duplicate_carries_the_listed_fields_and_nothing_else(
     # Its own stored copy, not the source's -- re-snapshotted under the new id.
     assert dup["attachments"][0]["source"] != src["attachments"][0]["source"]
     assert Path(dup["attachments"][0]["source"]).is_relative_to(
-        client.app.state.run_dirs.attachments / new_id
+        item_paths.filed_dir(client.app.state.run_dirs, new_id)
     )
 
 

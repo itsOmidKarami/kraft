@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import psutil
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, own_files
 
 from kraft import builtins as kraft_builtins
 from kraft import events, store
@@ -197,8 +197,8 @@ async def test_a_path_someone_else_owns_stops_the_session_before_kraft_writes_it
     remote.foreign = "/x is owned by uid 7"
     monkeypatch.setattr(remote, "code_in", lambda *a, **kw: pytest.fail("code_in ran"))
     assert await _run_on_remote(database, run_dirs, tmp_path) == "config_error"
-    assert not sp.result_path_for(run_dirs, "s1").exists()
-    assert "/x is owned by uid 7" in (run_dirs.logs / "s1.log").read_text()
+    assert not own_files(run_dirs, "s1").result.exists()
+    assert "/x is owned by uid 7" in own_files(run_dirs, "s1").log.read_text()
 
 
 async def test_reattach_closes_a_dead_session_in_the_backend_it_ran_in(
@@ -285,7 +285,7 @@ async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
     remote.prepared = "image 'x' roots could not be read"
     assert await _run_on_remote(database, run_dirs, tmp_path) == "config_error"
     assert remote.wrapped_with == []
-    log = (run_dirs.logs / "s1.log").read_text()
+    log = own_files(run_dirs, "s1").log.read_text()
     assert "roots could not be read" in log
 
 
@@ -397,7 +397,7 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     recorded = json.loads(row["egress"])
     assert (recorded["credentials"], recorded["repo"]) == ([rule.to_json()], "/r")
     assert "sk-real-VALUE" not in row["egress"]
-    assert "key=unset" in (run_dirs.logs / "s1.log").read_text()
+    assert "key=unset" in own_files(run_dirs, "s1").log.read_text()
     assert remote.probed_env == {}  # the repo's `env:` literal, not even for the probe
 
 
@@ -425,7 +425,7 @@ async def test_an_install_only_credential_is_absent_from_an_agent_session(
     await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
 
     assert seen == {"sentinels": {}, "rules": ()}
-    assert "reg=unset" in (run_dirs.logs / "s1.log").read_text()
+    assert "reg=unset" in own_files(run_dirs, "s1").log.read_text()
     assert remote.probed_env == {}
 
 
@@ -455,7 +455,7 @@ async def test_a_bound_credentials_source_is_absent_from_an_agent_session(
 
     await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
 
-    assert "src=unset" in (run_dirs.logs / "s1.log").read_text()
+    assert "src=unset" in own_files(run_dirs, "s1").log.read_text()
 
 
 @pytest.mark.parametrize("missing", ["channel", "route"])
@@ -470,7 +470,7 @@ async def test_network_without_a_channel_or_a_route_never_launches(
         remote.route = {}
     assert await _run_on_remote(database, run_dirs, tmp_path, _POLICED) == "config_error"
     assert "wrap" not in remote.calls
-    assert "egress" in (run_dirs.logs / "s1.log").read_text()
+    assert "egress" in own_files(run_dirs, "s1").log.read_text()
 
 
 @pytest.mark.parametrize("broken", ["open_session", "wrap"])

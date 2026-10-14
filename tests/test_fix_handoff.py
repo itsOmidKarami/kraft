@@ -9,6 +9,7 @@ import shlex
 import sys
 from pathlib import Path
 
+import pytest
 from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
@@ -312,24 +313,32 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
 # --- the null-summary branch, direct on the pure helper -----------------------
 
 
-def test_previous_attempt_note_omits_the_summary_sentence_when_absent():
+def test_previous_attempt_note_omits_the_summary_sentence_when_absent(run_dirs):
     """A fix task that ran without writing a session summary (e.g. a
     subprocess-kind fix hook) must not leave a dangling summary sentence
     behind."""
     note = executor.previous_attempt_note(
-        {"result_path": "/r/cycle1.json", "session_summary_ref": None}
+        {"result_path": "/r/cycle1.json", "session_summary_ref": None}, run_dirs=run_dirs
     )
     assert "/r/cycle1.json" in note
     assert "session summary" not in note
 
 
-def test_previous_attempt_note_includes_the_summary_sentence_when_present():
+@pytest.mark.parametrize(
+    ("ref", "given"),
+    [
+        (".engineering/sessions/x.md", ".engineering/sessions/x.md"),
+        ("items/w1/sessions/x/out/summary.md", "{run}/items/w1/sessions/x/out/summary.md"),
+    ],
+    ids=["older-ref-as-it-is", "item-folder-ref-absolute"],
+)
+def test_previous_attempt_note_includes_the_summary_sentence_when_present(run_dirs, ref, given):
     note = executor.previous_attempt_note(
-        {"result_path": "/r/cycle1.json", "session_summary_ref": ".engineering/sessions/x.md"}
+        {"result_path": "/r/cycle1.json", "session_summary_ref": ref}, run_dirs=run_dirs
     )
     assert "/r/cycle1.json" in note
-    assert ".engineering/sessions/x.md" in note
+    assert f"summary is at {given.format(run=run_dirs.base)}." in note
 
 
-def test_previous_attempt_note_is_empty_with_no_previous_attempt():
-    assert executor.previous_attempt_note(None) == ""
+def test_previous_attempt_note_is_empty_with_no_previous_attempt(run_dirs):
+    assert executor.previous_attempt_note(None, run_dirs=run_dirs) == ""

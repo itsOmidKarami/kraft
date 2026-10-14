@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from kraft import item_paths
 from kraft.adapters.forge.models import (
     MR,
     ApprovalState,
@@ -85,18 +86,24 @@ def _clean_list(value) -> tuple[str, ...]:
     return tuple(cleaned[:_META_LIST_MAX])
 
 
-def read_mr_meta(worktree: Path, work_item_id: str) -> MRMeta:
-    """The `mr_meta` artifact this item's `on.mr.describe` session wrote.
+def read_mr_meta(worktree: Path, work_item_id: str, run_dirs) -> MRMeta:
+    """The `mr_meta` artifact this item's `on.mr.describe` session wrote: its
+    `docs/mr_meta.md`, else, for an item that ran before the upgrade, the one
+    in `worktree`'s `.engineering/` (`item_paths.document`).
 
-    Never raises and never partially fails: absent, outside the worktree,
-    unreadable, malformed front matter, or a field of the wrong shape each
-    cost exactly themselves. An MR must still open when the metadata is gone
-    (the rule session-summary stitching followed, before it was deleted).
+    Never raises and never partially fails: absent, a link, unreadable,
+    malformed front matter, or a field of the wrong shape each cost exactly
+    themselves. An MR must still open when the metadata is gone (the rule
+    session-summary stitching followed, before it was deleted).
     """
-    from kraft.adapters.agent import artifact_path
-
-    result, _reason = read_worktree_file(
-        worktree, artifact_path("mr_meta", work_item_id), _META_READ_MAX_BYTES
+    name = item_paths.document(run_dirs, work_item_id, "mr_meta", worktree=worktree)
+    result, _reason = (
+        read_worktree_file(
+            *item_paths.locate(run_dirs, work_item_id, name, worktree=worktree),
+            _META_READ_MAX_BYTES,
+        )
+        if name is not None
+        else (None, "absent")
     )
     if result is None:
         return MRMeta()

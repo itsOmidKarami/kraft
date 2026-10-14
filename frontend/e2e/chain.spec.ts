@@ -20,7 +20,7 @@ test("create a work item and watch it complete", async ({ page }) => {
   await pane.getByRole("tab", { name: "Overview" }).click();
   await pane.getByRole("button", { name: / sessions$/ }).click({ timeout: scaledTimeout(30_000) });
   const doc = page.getByRole("dialog");
-  await expect(doc).toContainText(".engineering/sessions/");
+  await expect(doc).toContainText(/items\/[0-9a-f]+\/sessions\/[^/]+\/out\/summary\.md/);
   await expect(doc).toContainText("implementation › implement › attempt 1");
 
   // Back on the board, the item sits in the Done group.

@@ -17,6 +17,7 @@ import subprocess
 
 import pytest
 from support.api import _client, _force_node
+from support.harness import own_files
 from support.permissions import PATH, seed_session, templates
 
 from kraft import events, store
@@ -95,7 +96,7 @@ def daemon(probed, runtime, short_run, monkeypatch):  # noqa: F811
                 return status, app.state.db.read(lambda c: events.read_after(c, 0, "w1"))
 
             status, evs = client.portal.call(launch)
-            log = run_dirs.logs / f"{sid}.log"
+            log = own_files(run_dirs, sid).log
             assert status != "config_error", log.read_text() if log.exists() else status
             out = work / "out"
             return (out.read_text() if out.exists() else ""), evs

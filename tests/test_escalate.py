@@ -88,7 +88,7 @@ async def test_an_escalation_restores_the_pinned_store(monkeypatch, database, ru
     escalation's launch puts the item's own version back."""
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(json.dumps({"type": "system", "session_id": "cli-abc"}) + "\n")
         return "done"
@@ -123,7 +123,7 @@ async def test_dispatch_on_a_paused_item_does_not_claim_needs_human_or_offer_ret
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
@@ -159,7 +159,7 @@ async def test_dispatch_sends_the_message_and_state_and_marks_the_session_non_wo
         seen["kwargs"] = kw
         seen["task_instruction"] = task_instruction
         seen["cwd"] = cwd
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
@@ -197,7 +197,7 @@ async def test_dispatch_resumes_an_existing_thread(monkeypatch, database, run_di
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, resume_session_id, **kw):
         seen["resume_session_id"] = resume_session_id
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -231,12 +231,12 @@ async def test_dispatch_default_continues_the_latest_thread(monkeypatch, databas
                 work_item_id=work_item_id,
                 node_id=node_id,
                 hook_point=hook_point,
-                log_path=str(run_dirs.logs / f"{session_id}.log"),
-                result_path=str(run_dirs.logs / f"{session_id}.json"),
+                log_path=str(kw["files"].log),
+                result_path=str(kw["files"].result),
                 thread=kw["thread"],
             )
         )
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-1"}) + "\n"
@@ -277,12 +277,12 @@ async def test_dispatch_new_thread_starts_fresh_and_bumps_thread_number(
                 work_item_id=work_item_id,
                 node_id=node_id,
                 hook_point=hook_point,
-                log_path=str(run_dirs.logs / f"{session_id}.log"),
-                result_path=str(run_dirs.logs / f"{session_id}.json"),
+                log_path=str(kw["files"].log),
+                result_path=str(kw["files"].result),
                 thread=kw["thread"],
             )
         )
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": f"cli-{session_id[:4]}"})
@@ -319,7 +319,7 @@ async def test_dispatch_new_thread_on_first_ever_escalation_is_still_thread_one(
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
         seen["kwargs"] = kw
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -339,7 +339,7 @@ async def test_dispatch_new_thread_on_first_ever_escalation_is_still_thread_one(
 
 async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, run_dirs):
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
@@ -370,7 +370,7 @@ async def test_dispatch_auto_uses_the_synthesized_message_and_auto_opening(
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -397,7 +397,7 @@ async def test_dispatch_manual_is_unchanged_by_the_auto_param(monkeypatch, datab
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -416,7 +416,7 @@ async def test_dispatch_manual_is_unchanged_by_the_auto_param(monkeypatch, datab
 
 async def test_dispatch_auto_tags_the_event(monkeypatch, database, run_dirs):
     async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -446,7 +446,7 @@ def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, sandbox, **kw):
         seen["sandbox"] = sandbox
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
@@ -548,7 +548,7 @@ def _dispatch_with(monkeypatch, tmp_path, seed_events):
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, cwd, task_instruction, **kw):
         seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"}) + "\n"
@@ -650,7 +650,7 @@ async def test_dispatch_resolves_its_agent_through_its_harness_profile(
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, command, harness, **kw):
         seen.update(command=command, harness=harness, model=kw["model"], effort=kw["effort"])
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -716,7 +716,7 @@ async def test_an_escalation_launch_carries_the_rule_only_when_the_repo_names_it
 
     async def _spawn(_db, run_dirs, *, cmd, session_id, **_kw):
         launched["argv"] = "\n".join(cmd)
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = _kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
         return "done"
@@ -764,7 +764,7 @@ async def test_a_resumed_escalation_keeps_its_original_runtime(
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
         launches.append(kw)
-        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path = kw["files"].log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"type": "system", "subtype": "init", "session_id": "cli-1"}) + "\n"

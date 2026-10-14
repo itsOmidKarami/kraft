@@ -440,7 +440,7 @@ WHEN an escalation turn resumes a thread, the system SHALL give it the same
 result file and session summary paths every earlier turn of that thread had,
 SHALL start it with no result file left by an earlier turn, and SHALL keep each
 earlier turn's result and summary readable from that turn's own session row.
-enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
+enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last[after-upgrade], tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
 origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b): a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
 
 ## REQ an-escalation-turn-hands-a-skip-to-the-person
@@ -1243,13 +1243,14 @@ origin: src/kraft/worker/backends/docker.py §Runtime -- sandbox Part 2, P1: roo
 
 ## REQ sandbox-sees-only-its-own-items-results
 
-A sandboxed launch SHALL mount, of the results folder, only files that belong
-to its own work item: the result file, review package and cut instruction of
-that item's sessions, taken from its session rows. It SHALL NOT mount the
-folder itself, nor any file of another work item, nor a path that is not an
-existing plain file. Every such file SHALL be read-only except the launching
-session's own result file. A launch that is no session SHALL mount none.
-enforced-by: tests/worker/backends/test_docker.py::test_docker_argv_mounts_only_this_session_s_result_file_read_write, tests/worker/backends/test_docker.py::test_docker_argv_refuses_the_results_folder_itself, tests/worker/backends/test_docker.py::test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir, tests/store/test_session_result_files.py::test_result_files_are_the_items_own_and_only_those_that_exist, tests/adapters/test_subprocess_sandbox_results.py::test_a_sandboxed_launch_mounts_only_its_own_items_results, tests/worker/backends/test_docker_results_e2e.py::test_a_sandboxed_session_sees_only_its_own_items_results[docker]
+A sandboxed launch SHALL mount, of the results folder and its item's session
+folders, only files that belong to its own work item: the result file,
+summary, review package and cut instruction of that item's sessions, taken
+from its session rows. It SHALL NOT mount either folder itself, nor any file
+of another work item, nor a path that is not an existing plain file. Every
+such file SHALL be read-only except the launching session's own result file
+and summary. A launch that is no session SHALL mount none.
+enforced-by: tests/worker/backends/test_docker.py::test_docker_argv_mounts_only_this_session_s_result_file_read_write, tests/worker/backends/test_docker.py::test_docker_argv_refuses_the_results_folder_itself, tests/worker/backends/test_docker.py::test_docker_argv_mounts_nothing_extra_for_a_plain_git_dir, tests/store/test_session_result_files.py::test_result_files_are_the_items_own_and_only_those_that_exist, tests/adapters/test_subprocess_sandbox_results.py::test_a_sandboxed_launch_mounts_only_its_own_items_results, tests/worker/backends/test_docker_results_e2e.py::test_a_sandboxed_session_sees_only_its_own_items_results[docker], tests/worker/backends/test_docker_session_files.py::test_a_session_writes_only_its_own_two_files_and_its_item_s_docs, tests/store/test_session_result_files.py::test_result_files_lists_older_files_and_session_folders
 origin: src/kraft/store/sessions.py §result_files -- Kraft-dni4n: the whole folder was mounted read-only, so a sandboxed worker on one repository could read the diffs and findings of every other work item.
 
 ## REQ sandbox-egress-is-deny-by-default-when-declared
@@ -1521,7 +1522,7 @@ CI. It SHALL say what the review found and what was done about it, what was
 deliberately left out, and what its author is unsure about, each only when
 there is something to say. It SHALL NOT contain the diff.
 enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[left-out], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unsure], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
-origin: src/kraft/skills/work-brief/SKILL.md -- Omid's decision. The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
+origin: src/kraft/skills/work-brief/SKILL.md -- Omid's decision. The artifact kind is `work_brief`, not `work_summary`, because an older item's document is `.engineering/<kind>s/<id>.md` (`item_paths.legacy_document_name`), which pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
 
 ## REQ work-brief-method-omits-what-was-not-found
 

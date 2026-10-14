@@ -415,7 +415,10 @@ one that reported no cost counts $0 toward the item and daily caps (with a
 ## Design documents
 
 Specs and implementation plans are not committed. `.engineering/` and
-`docs/superpowers/` are gitignored. `design/` and `docs/consolidated/` are
+`docs/superpowers/` are gitignored. Kraft itself writes a work item's
+documents under `$KRAFT_HOME/run/items/<id>/docs/`, outside the repository;
+`.engineering/` stays ignored for your own specs and for worktrees where an
+older Kraft wrote them. `design/` and `docs/consolidated/` are
 gitignored too.
 `docs/intent/` and `docs/templates-v1-design.md` are the exceptions: the
 first states intended behaviour as pinned requirements, the second is the

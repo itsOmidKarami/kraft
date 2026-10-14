@@ -11,16 +11,17 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
-import shutil
+import os
 import uuid
+from pathlib import Path
 
-from kraft import caps, events, executor, store
+from kraft import caps, events, executor, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
-from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, GateNode, TaskKind
 from kraft.vocab import LIVE, ChainEvent, EscalationEvent, GateEvent, LimitEvent, WorkItemEvent
@@ -619,8 +620,8 @@ async def dispatch(
         runtime,
         node_id=row["current_node_id"],
     )
-    files = thread_files(work_item_id, thread)
-    await _archive_last_turn(db, run_dirs, worktree, files)
+    files = thread_files(db, run_dirs, work_item_id, thread, session_id)
+    await _archive_last_turn(db, run_dirs, work_item_id, files)
     try:
         status = await _agent.run_agent_task(
             db,
@@ -660,64 +661,137 @@ async def dispatch(
     # ran on, the thread's original one when it resumed.
     provider = _harness.load(None).valid.get(inv.harness)
     reader = _agent.log_reader(provider) if provider is not None else None
-    cli_session_id = (
-        _usage.READERS[reader].session_id(run_dirs.logs / f"{session_id}.log") if reader else None
-    )
+    cli_session_id = _usage.READERS[reader].session_id(files.log) if reader else None
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))
     return status
 
 
-def thread_files(work_item_id: str, thread: int) -> str:
-    """The name every turn of one escalation thread writes its result file
-    and session summary under (Kraft-s7c04.54,
-    `a-resumed-escalation-turn-writes-where-it-remembers`).
+def thread_files(
+    db, run_dirs, work_item_id: str, thread: int, session_id: str
+) -> item_paths.SessionFiles:
+    """The result file and session summary every turn of one escalation
+    thread writes (Kraft-s7c04.54,
+    `a-resumed-escalation-turn-writes-where-it-remembers`); the log, exit code
+    and container id are always this turn's own (`session_id`'s).
 
     Per thread, not per turn: a `--resume`d conversation remembers the
     literal paths an earlier turn wrote to, and a model that trusts that
     memory over the fresh instruction wrote to the earlier turn's file
     (b5afe84c), which `require_result_file` then recorded as `failed`. With
-    one name per thread, the path it remembers is this turn's path.
-    """
-    return f"escalation-{work_item_id}-{thread}"
+    one place per thread, the path it remembers is this turn's path.
+
+    So a thread keeps the place its first turn was given. One from before
+    the upgrade, told by its first turn's log not being in a session folder
+    (`item_paths.is_legacy_log`), keeps `results/escalation-<id>-<thread>.json`
+    and the worktree's `.engineering/sessions/escalation-<id>-<thread>.md`.
+    The log, because nothing rewrites it: `_archive_last_turn` rewrites
+    `result_path`, so after one turn that no longer says where the thread
+    began. Every other thread uses `sessions/escalation-<thread>/out/` in the
+    item's folder."""
+    first = db.read(
+        lambda c: c.execute(
+            "SELECT log_path FROM worker_sessions WHERE work_item_id = ? "
+            "AND hook_point = 'escalation' AND thread = ? ORDER BY created_at, rowid LIMIT 1",
+            (work_item_id, thread),
+        ).fetchone()
+    )
+    own = item_paths.session_files(run_dirs, work_item_id, session_id)
+    if first is not None and item_paths.is_legacy_log(first["log_path"]):
+        result, summary = item_paths.legacy_thread_files(run_dirs, work_item_id, thread)
+        return dataclasses.replace(own, result=result, summary=summary, writable=run_dirs.results)
+    out = item_paths.thread_out(run_dirs, work_item_id, thread)
+    return dataclasses.replace(
+        own, result=out / "result.json", summary=out / "summary.md", writable=out
+    )
 
 
-async def _archive_last_turn(db, run_dirs, worktree, files: str) -> None:
-    """Give the thread's last turn its own names back before the next turn
-    writes, so this turn starts with no result file to be mistaken for its
-    own and the last turn's stays readable from its row.
+def _summary_place(run_dirs, work_item_id: str, summary: Path) -> tuple[Path, str, str]:
+    """`summary` as `(base, name, ref)`: the folder a no-follow read of it
+    starts at, the name walked from there, and the `session_summary_ref` a
+    row records for it. A thread folder's starts at the item's folder
+    (`item_paths.locate`'s root, so a `run/items` that is a link still
+    reads) and is recorded relative to the run folder; an older thread's is
+    under the worktree, named as it always was."""
+    item = item_paths.item_dir(run_dirs, work_item_id)
+    if summary.is_relative_to(item):
+        name = summary.relative_to(item).as_posix()
+        return item, name, f"{item_paths.ITEMS}/{work_item_id}/{name}"
+    base = run_dirs.worktrees / work_item_id
+    name = summary.relative_to(base).as_posix()
+    return base, name, name
 
-    The result family (`.json` and its `.exit`/`.cid` sidecars) moves to the
-    last turn's session id and its row follows. The summary is copied, not
-    moved: it sits in the worktree, where a repo that does not ignore
+
+async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.SessionFiles):
+    """Give the thread's last turn its own files back before the next turn
+    writes, so this turn starts with no result file or summary to be
+    mistaken for its own, and the last turn's stay readable from its row.
+
+    A turn with a session folder gets its result moved into its own `out/`;
+    a turn from before the upgrade gets its result family (`.json` and its
+    `.exit`/`.cid` sidecars) back under its session id in `results/`, as it
+    always did. Its row records where.
+
+    The summary goes by the thread. A thread folder's is copied into the
+    turn's own `out/`, never following a link, recorded as Kraft names it
+    (`recorded_summary`), and removed, so the next turn starts with an empty
+    one. An older thread's, in the worktree, is the worker's to name: when
+    the turn's ref is the shared name it is copied to
+    `.engineering/sessions/<id>.md` and the ref follows, as before the
+    upgrade. It is copied, never moved: a repo that does not ignore
     `.engineering/` may track it.
     """
-    shared = result_path_for(run_dirs, files)
-    summary = f"{_SESSIONS}/{files}.md"
+    shared_base, shared_name, shared_ref = _summary_place(run_dirs, work_item_id, files.summary)
+    legacy_thread = files.writable == run_dirs.results
     last = db.read(
         lambda c: c.execute(
-            "SELECT id, session_summary_ref FROM worker_sessions WHERE result_path = ?",
-            (str(shared),),
+            "SELECT id, log_path, session_summary_ref FROM worker_sessions "
+            "WHERE work_item_id = ? AND result_path = ?",
+            (work_item_id, str(files.result)),
         ).fetchone()
     )
     if last is not None:
-        own = result_path_for(run_dirs, last["id"])
-        for suffix in (".json", ".exit", ".cid"):
-            if shared.with_suffix(suffix).exists():
-                shared.with_suffix(suffix).replace(own.with_suffix(suffix))
         ref = last["session_summary_ref"]
-        if ref == summary and (worktree / summary).exists():
-            ref = f"{_SESSIONS}/{last['id']}.md"
-            shutil.copyfile(worktree / summary, worktree / ref)
+        own = item_paths.session_files(run_dirs, work_item_id, last["id"])
+        if item_paths.is_legacy_log(last["log_path"]):
+            result = run_dirs.results / f"{last['id']}.json"
+            for suffix in (".json", ".exit", ".cid"):
+                if files.result.with_suffix(suffix).exists():
+                    files.result.with_suffix(suffix).replace(result.with_suffix(suffix))
+        else:
+            result = own.result
+            if os.path.lexists(files.result):
+                own.writable.mkdir(parents=True, exist_ok=True)
+                # Both folders are Kraft's to name: the move follows nothing.
+                os.replace(files.result, own.result)
+        if legacy_thread:
+            kept = f"{_SESSIONS}/{last['id']}.md"
+            if ref == shared_ref and item_paths.copy_in(shared_base, ref, shared_base, kept):
+                ref = kept
+        else:
+            item = item_paths.item_dir(run_dirs, work_item_id)
+            item_paths.copy_in(
+                shared_base, shared_name, item, own.summary.relative_to(item).as_posix()
+            )
+            ref = item_paths.recorded_summary(run_dirs, work_item_id, own) or (
+                None if ref == shared_ref else ref
+            )
         await db.write(
             lambda c: c.execute(
-                "UPDATE worker_sessions SET result_path = ?, session_summary_ref = ? WHERE id = ?",
-                (str(own), ref, last["id"]),
+                "UPDATE worker_sessions SET result_path = ?, session_summary_ref = ? "
+                "WHERE work_item_id = ? AND id = ?",
+                (str(result), ref, work_item_id, last["id"]),
             )
         )
     # A turn that never got a row (refused before launch) owns nothing here.
-    for suffix in (".json", ".exit", ".cid"):
-        shared.with_suffix(suffix).unlink(missing_ok=True)
+    # `remove_entry`, not `unlink`: a worker can plant a folder at either name,
+    # and removing one is a walk, kept off the event loop.
+    await asyncio.to_thread(item_paths.remove_entry, files.result)
+    if legacy_thread:
+        for suffix in (".exit", ".cid"):
+            files.result.with_suffix(suffix).unlink(missing_ok=True)
+    else:
+        await asyncio.to_thread(item_paths.remove_entry, files.summary)
 
 
 def _node_policy(row) -> _policy.InstancePolicy | None:

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, harness_without, write_harness_profiles
+from support.harness import entry_of, harness_without, own_files, write, write_harness_profiles
 
 from kraft import skill, store
 from kraft.adapters import agent
@@ -85,16 +85,16 @@ async def test_agent_error_envelope_downgrades_to_failed(launch, monkeypatch):
     assert (status, row["status"]) == ("failed", "failed")
 
 
-async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, repo, monkeypatch):
-    """04 §6: the injected prompt carries the linkage fields, the worker writes
-    .engineering/sessions/<session>.md, and its ref lands on worker_sessions."""
+async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, run_dirs, monkeypatch):
+    """04 §6: the injected prompt carries the linkage fields and the path, the
+    worker writes its session's `out/summary.md`, and Kraft records it."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
 
     status, row = await launch("s3")
 
     assert (status, row["harness"]) == ("done", "claude")  # reattach's reader (Kraft-9elw1)
-    assert row["session_summary_ref"] == ".engineering/sessions/s3.md"
-    summary = (repo / ".engineering" / "sessions" / "s3.md").read_text()
+    assert row["session_summary_ref"] == "items/w1/sessions/s3/out/summary.md"
+    summary = own_files(run_dirs, "s3").summary.read_text()
     for line in (
         "work_item_ids: [w1]",
         "node_id: implementation",
@@ -157,15 +157,16 @@ async def test_agent_plan_scripts_status_per_invocation(launch, tmp_path, monkey
         # Kraft-7lu, work item 6363c65e: the spec worker was refused every
         # Write, wrote nothing, and still reported success -- the executor
         # opened `spec_approval` over an empty gate, $2.15 to approve nothing.
-        (False, {}, "failed"),
+        (None, {}, "failed"),
         # The guard must not fail a worker that did its job.
-        (True, {}, "done"),
+        ("new", {}, "done"),
+        ("old", {}, "done"),  # nor one re-adopted on instructions from before docs/
         # A worker that stopped to ask wrote no artifact *because* it stopped:
         # rewriting that to `failed` loses the question, and
         # `dispatch.needs_context_question` matches on the row's status, so
         # /steer and /resume would 409.
         (
-            False,
+            None,
             {
                 "KRAFT_FAKE_AGENT": "noop",
                 "KRAFT_FAKE_AGENT_STATUS": "needs_context",
@@ -174,23 +175,28 @@ async def test_agent_plan_scripts_status_per_invocation(launch, tmp_path, monkey
             "needs_context",
         ),
     ],
-    ids=["missing-fails-the-node", "written-stays-green", "needs-context-survives-the-guard"],
+    ids=[
+        "missing-fails-the-node",
+        "written-stays-green",
+        "written-to-the-old-place-stays-green",
+        "needs-context-survives-the-guard",
+    ],
 )
 async def test_a_declared_artifact_guards_the_node(
-    launch, repo, monkeypatch, prewritten, fake_env, expected
+    launch, repo, run_dirs, monkeypatch, prewritten, fake_env, expected
 ):
     monkeypatch.setenv("KRAFT_FAKE_AGENT_SKIP_ARTIFACT", "1")
     for k, v in fake_env.items():
         monkeypatch.setenv(k, v)
-    written = repo / agent.artifact_path("spec", "w1")
+    old = repo / ".engineering/specs/w1.md"
+    written = old if prewritten == "old" else agent.artifact_path(run_dirs, "spec", "w1")
     if prewritten:
-        written.parent.mkdir(parents=True)
-        written.write_text("# spec\n")
+        write(written.parent, written.name, "# spec\n")
 
     status, row = await launch(node_id="spec", hook_point="on.spec.requested", artifact="spec")
 
     assert (status, row["status"]) == (expected, expected)
-    assert written.exists() is prewritten
+    assert written.exists() is bool(prewritten)
     assert read_question(Path(row["result_path"])) == fake_env.get("KRAFT_FAKE_AGENT_QUESTION")
 
 
@@ -295,7 +301,7 @@ def test_default_profile_reproduces_todays_command_line(run):
         node_id="implementation",
         hook_point="on.implementation.start",
         session_id="s1",
-        summary_name="s1",
+        summary_path="/kraft/run/items/w1/sessions/s1/out/summary.md",
     )
 
     assert run()["cmd"] == [
@@ -484,13 +490,13 @@ def test_the_injected_context_says(run, phrases):
 @pytest.mark.parametrize(
     "overrides, in_order",
     [
-        # The exact path, not a directory to guess inside.
-        ({"artifact": "spec"}, (".engineering/specs/w1.md",)),
+        # The exact path, absolute, outside the repo: not a directory to guess.
+        ({"artifact": "spec"}, ("Write your spec to /kraft/run/items/w1/docs/spec.md,",)),
         # `on.mr.describe`'s artifact carries fields read straight into
         # `glab`/`gh` create arguments (spec §2): ask for them by name.
         (
             {"artifact": "mr_meta"},
-            (".engineering/mr_metas/", "title:", "labels:", "assignees:", "reviewers:"),
+            ("items/w1/docs/mr_meta.md", "title:", "labels:", "assignees:", "reviewers:"),
         ),
         # repo body before hook body -- resolve_invocation orders the tuple;
         # run_agent_task must not reorder or drop bodies.
@@ -498,7 +504,7 @@ def test_the_injected_context_says(run, phrases):
         # Spec §2.6: what to produce, then how to produce it.
         (
             {"artifact": "spec", "method_text": "Write it in one page."},
-            (".engineering/specs/w1.md", skill.HEADING + "Write it in one page."),
+            ("/kraft/run/items/w1/docs/spec.md", skill.HEADING + "Write it in one page."),
         ),
     ],
     ids=["artifact-path", "mr-meta-fields", "steering-order", "artifact-before-method"],
@@ -569,11 +575,6 @@ def test_prompt_channel_still_delivers_the_whole_contract():
         "Monitor tool is",
     ):
         assert required in ctx
-
-
-def test_artifact_path_is_the_kind_pluralised():
-    assert agent.artifact_path("spec", "w1") == ".engineering/specs/w1.md"
-    assert agent.artifact_path("plan", "w1") == ".engineering/plans/w1.md"
 
 
 def test_repo_agent_docs_do_not_forbid_a_kraft_worker_from_committing():

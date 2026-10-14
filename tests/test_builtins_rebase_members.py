@@ -10,7 +10,7 @@ source repository stands in as the member's origin."""
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, git, write
+from support.harness import commit_all, git, own_files, write
 from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import builtins as kraft_builtins
@@ -213,7 +213,7 @@ async def test_a_member_that_runs_past_the_time_cap_stops_before_the_root(
     )
     assert session["status"] == "capped_out"
     # The member's timeout, named -- not the root's own, run out of time after it.
-    log = (run_dirs.logs / "s1.log").read_text()
+    log = own_files(run_dirs, "s1").log.read_text()
     assert f"git rebase timed out after 1s for {member}" in log
     assert git_read(root, "rev-parse", "HEAD") == root_head
 

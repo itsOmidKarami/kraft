@@ -22,7 +22,7 @@ from support.api import (
     _wait_for_status,
 )
 
-from kraft.adapters.agent import artifact_path
+from kraft import item_paths
 
 _FAKE_REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
 
@@ -75,8 +75,7 @@ def _post(client, repo, chain_template):
 
 
 def _review_brief_path(client, wid):
-    run_dir = Path(client.app.state.run_dirs.base)
-    return run_dir / "worktrees" / wid / ".engineering" / "review_briefs" / f"{wid}.md"
+    return item_paths.docs_dir(client.app.state.run_dirs, wid) / "review_brief.md"
 
 
 def _create_running_session(wid: str, session_id: str, node_id: str, *, pid: int) -> None:
@@ -233,7 +232,7 @@ def _spec_required(tdir):
 def test_an_artifact_required_gate_refuses_approval_until_its_document_exists(client, repo):
     wid = _post_default(client, repo)
     _await_gate(client, wid, "spec_approval")
-    spec = Path(client.app.state.run_dirs.worktrees) / wid / artifact_path("spec", wid)
+    spec = item_paths.docs_dir(client.app.state.run_dirs, wid) / "spec.md"
     spec.unlink(missing_ok=True)
 
     r = _approve_gate(client, wid, "spec_approval")
