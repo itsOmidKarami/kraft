@@ -79,6 +79,12 @@ main a > code {
   color: var(--ui-primary);
 }
 
+/* Except in a heading: Nuxt UI wraps every heading in a link to itself, and
+   its code is not a link to follow. */
+main :is(h1, h2, h3, h4) a > code {
+  color: inherit;
+}
+
 /* Every page: Plex Sans is loaded up to 600 (see above). Nuxt UI's
    font-bold too (an unlayered rule beats the utility): the release docs'
    older landing page drew its hero title and section titles at 700, a

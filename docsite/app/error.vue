@@ -67,19 +67,19 @@ provide('navigation', navigation)
   <UApp :locale="nuxtUiLocale">
     <AppHeader />
 
-    <main id="main-content" tabindex="-1">
-      <UError :error="localizedError" :clear="!at.channel">
-        <template #message>
-          {{ localizedError.message }}
-          <span v-if="other" class="block mt-2">
-            It may exist only in <a :href="other.href" class="text-primary underline underline-offset-4">{{ other.label }}</a>.
-          </span>
-        </template>
-        <template v-if="at.channel" #links>
-          <UButton size="lg" :label="nuxtUiLocale.messages.error.clear" :to="at.home" external />
-        </template>
-      </UError>
-    </main>
+    <!-- UError renders its own <main>: the skip link's target goes on it, so
+         the page has one main landmark, not one inside another. -->
+    <UError id="main-content" tabindex="-1" :error="localizedError" :clear="!at.channel">
+      <template #message>
+        {{ localizedError.message }}
+        <span v-if="other" class="block mt-2">
+          It may exist only in <a :href="other.href" class="text-primary underline underline-offset-4">{{ other.label }}</a>.
+        </span>
+      </template>
+      <template v-if="at.channel" #links>
+        <UButton size="lg" :label="nuxtUiLocale.messages.error.clear" :to="at.home" external />
+      </template>
+    </UError>
 
     <AppFooter />
 

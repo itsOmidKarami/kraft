@@ -5,8 +5,10 @@
      saturated slab: a full-width warning on every page trains readers to
      ignore warnings, and the real switch is in the header (AppHeaderCTA.vue).
      The text is the default text color, which passes AA on the elevated
-     surface in both modes; amber text on it did not. The text wraps rather
-     than truncating, which on a phone cut it before "unreleased". -->
+     surface in both modes; amber text on it did not. It is a labelled region,
+     or it would be the one block of the page outside every landmark. The text
+     wraps rather than truncating, which on a phone cut it before
+     "unreleased". -->
 <script setup lang="ts">
 const docs = useRuntimeConfig().public.docs
 const at = useDocsChannel()
@@ -16,6 +18,8 @@ const stable = computed(() => docs.stableVersion || 'release')
 <template>
   <div
     v-if="at.channel === 'next'"
+    role="region"
+    aria-label="Version notice"
     class="border-b border-default bg-elevated text-xs text-default"
   >
     <div class="mx-auto flex min-h-8 max-w-(--ui-container) items-center gap-2 px-4 py-1 sm:px-6 lg:px-8">
