@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from kraft.config import bounded_yaml
 from kraft.events import _now
 from kraft.index.chunk import chunk_markdown
 from kraft.worker.worktree_read import READ_MAX_BYTES
@@ -70,14 +71,24 @@ class ReconcileStats:
     deleted: int = 0
 
 
+#: Nodes a document's front matter may hold, every use of an alias counted
+#: again (`bounded_yaml`): a handful of keys and short lists in practice.
+FRONT_MATTER_NODES = 2_000
+
+
 def split_front_matter(text: str) -> tuple[dict, str]:
+    """A document's YAML front matter and its body. A worker writes the
+    document, so the front matter is read bounded: aliases that would expand
+    past `FRONT_MATTER_NODES` (a few hundred bytes can expand to gigabytes),
+    nesting the parser recurses through, and a value YAML cannot build (an
+    impossible date) all read as no front matter."""
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
     body = text[m.end() :]
     try:
-        data = yaml.safe_load(m.group(1))
-    except yaml.YAMLError:
+        data = bounded_yaml(m.group(1), [FRONT_MATTER_NODES])
+    except (yaml.YAMLError, ValueError, RecursionError):
         return {}, body
     return (data, body) if isinstance(data, dict) else ({}, body)
 

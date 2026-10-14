@@ -198,7 +198,7 @@ def parse(text: str) -> ChangeSet:
         raise RevisionError("the body must be exactly one ```json fenced block and nothing else")
     try:
         data = json.loads(match[1], object_pairs_hook=_refuse_duplicates)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:  # a worker can nest past the parser
         raise RevisionError(f"the change set is not JSON: {exc}") from exc
     try:
         return ChangeSet.model_validate(data)

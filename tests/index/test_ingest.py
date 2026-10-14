@@ -19,6 +19,11 @@ def _reconcile(*args, **kwargs):
 
 # ---- split_front_matter ----
 
+#: Nine levels of ten aliases each: about 550 bytes that build 10**9 nodes.
+_ALIAS_BOMB = "a0: &a0 [x]\n" + "".join(
+    f"a{n}: &a{n} [{', '.join([f'*a{n - 1}'] * 10)}]\n" for n in range(1, 10)
+)
+
 
 def test_split_front_matter_present():
     fm, body = ingest.split_front_matter("---\ntitle: Hi\nkind: notes\n---\n# Body\ntext\n")
@@ -32,8 +37,18 @@ def test_split_front_matter_present():
         ("# Just a heading\nbody", "# Just a heading\nbody"),
         ("---\n: : not : valid :\n---\nbody\n", "body\n"),
         ("---\njust a string\n---\nbody\n", "body\n"),
+        ("---\n" + _ALIAS_BOMB + "---\nbody\n", "body\n"),
+        ("---\ndate: 2026-02-30\n---\nbody\n", "body\n"),
+        ("---\na: " + "[" * 5_000 + "]" * 5_000 + "\n---\nbody\n", "body\n"),
     ],
-    ids=["absent", "malformed-yaml-ignored", "scalar-not-dict"],
+    ids=[
+        "absent",
+        "malformed-yaml-ignored",
+        "scalar-not-dict",
+        "aliases-expanding-past-the-budget",
+        "impossible-date",
+        "nested-past-the-parser",
+    ],
 )
 def test_split_front_matter_without_a_mapping_yields_none(text, body):
     assert ingest.split_front_matter(text) == ({}, body)
