@@ -69,6 +69,18 @@ main .docs-page h4 {
    the line: Plex Mono is darker than Plex Sans at the same weight. */
 main :not(pre) > code {
   font-weight: 400;
+  /* A tint and no border: Nuxt UI's chip outline made a table cell or a line
+     of prose with four names in it look like four buttons. */
+  border: 0;
+}
+
+/* In a heading there is no chip at all, the name is plain mono in the
+   heading's colour (`GET /api/health` was a boxed chip inside an h2). */
+main .docs-page :is(h1, h2, h3, h4) code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
 }
 
 /* A code span that is a link (the CLI pages' verb index, a link to a flag or

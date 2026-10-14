@@ -396,8 +396,35 @@ main pre code {
   min-width: 100%;
   margin-inline-end: -1rem;
 }
-main div:not(:has(> div)) > pre code .line:first-child {
-  padding-inline-end: 3rem;
+@media (min-width: 1024px) {
+  main div:not(:has(> div)) > pre code .line:first-child {
+    padding-inline-end: 3rem;
+  }
+}
+
+/* Below 1024px the button is always showing (Nuxt UI hides it until hover from
+   there up), and over a block it covered the command: `curl -s
+   http://127.0.0.1:8765/api/health` was cut by it at 390px. Padding on the
+   first line only clears it once the line is scrolled to its end, so here the
+   button leaves the block: it sits on a row of its own above it, at the right,
+   with the block's own margin taken back so the pair is not taller than it
+   must be. A block with a title keeps it in the title bar. */
+@media (max-width: 1023px) {
+  main div:not(:has(> div)):has(> pre) > button {
+    position: static;
+    display: flex;
+    margin: 0 0 0.25rem auto;
+  }
+  main div:not(:has(> div)):has(> pre) {
+    margin-block-start: 0.75rem;
+  }
+}
+
+/* Reference tables are read by scanning down a column, and Nuxt UI's cell
+   padding (12px above and below) made a one-line row 51px tall. */
+main :is(td, th) {
+  padding-block: 0.375rem;
+  padding-inline: 0.75rem;
 }
 
 /* In a table that is a table, a name in the first
