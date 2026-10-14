@@ -205,7 +205,7 @@ def test_health_block_names_each_degraded_reason():
         "invalid_intake": "intake.yaml: 'interval_s': not a number",
         "reattach_summary": {
             "scanned": 2,
-            "adopted": ["s1"],
+            "adopted": ["w1/s1"],
             "resolved_from_file": [],
             "unknown": [],
             "resumed_work_items": [],

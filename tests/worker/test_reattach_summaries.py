@@ -56,7 +56,7 @@ async def test_a_session_resolved_after_a_restart_records_the_summary_kraft_aske
     for task in resumed.values():  # an escalation's resume, not under test here
         task.cancel()
 
-    assert summary_.resolved_from_file == ["s1"]
+    assert summary_.resolved_from_file == ["w1/s1"]
     row = database.read(
         lambda c: c.execute("SELECT * FROM worker_sessions WHERE id = 's1'").fetchone()
     )

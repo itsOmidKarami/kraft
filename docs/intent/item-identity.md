@@ -168,3 +168,8 @@ origin: src/kraft/index/ingest.py §links_from_front_matter
 WHILE more than one escalation session of a work item is pending or running, the system SHALL take the most recently created one as the item's running escalation, the one a retry from its session is told apart by.
 enforced-by: tests/test_escalate.py::test_escalation_running_reports_a_pending_or_running_session
 origin: src/kraft/escalate.py §escalation_running
+
+## REQ the-reattach-summary-names-each-session-with-its-item
+WHEN the system reports what startup found of the sessions that were running, it SHALL name each adopted, resolved and unconfirmed session `<wid>/<sid>`.
+enforced-by: tests/worker/test_reattach.py::test_live_pid_matching_identity_is_adopted, tests/worker/test_reattach.py::test_running_dead_pid_resolves_from_result_file, tests/worker/test_reattach.py::test_a_young_ambiguous_session_gets_one_retry[young-confirmed-on-retry], tests/worker/test_reattach.py::test_a_young_ambiguous_session_gets_one_retry[young-still-dead-after-retry], tests/api/test_reattach.py::test_reattach_adopts_running_agent
+origin: src/kraft/worker/reattach.py §reattach

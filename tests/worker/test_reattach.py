@@ -211,7 +211,7 @@ async def test_a_young_ambiguous_session_gets_one_retry(
         summary, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
         await asyncio.gather(*adopted.values(), return_exceptions=True)
 
-    assert getattr(summary, expected) == ["w1/s1" if expected == "unknown" else "s1"]
+    assert getattr(summary, expected) == ["w1/s1"]
     assert len(seen) == calls
 
 
@@ -252,7 +252,7 @@ async def test_running_dead_pid_resolves_from_result_file(item, database, run_di
     # resolve-from-file path, not Kraft-s7c04.51's retry.
     summary, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
 
-    assert (adopted, summary.resolved_from_file) == ({}, ["s1"])
+    assert (adopted, summary.resolved_from_file) == ({}, ["w1/s1"])
     (row,) = item.sessions()
     assert (row["status"], row["session_summary_ref"]) == ("done", ".engineering/sessions/s1.md")
     assert item.events("session_reattached") and item.events("worker_session_exited")
@@ -305,7 +305,7 @@ async def test_resolved_from_file_carries_concerns_question_and_usage(item, data
 
     summary, _ = await reattach.reattach(database, run_dirs)
 
-    assert summary.resolved_from_file == ["s1"]
+    assert summary.resolved_from_file == ["w1/s1"]
     assert _usage(item) == ("claude-opus-5", 100, 300, 20, 1.25)
     payload = item.events("worker_session_exited")[-1]["payload"]
     assert {
@@ -400,7 +400,7 @@ async def test_live_pid_matching_identity_is_adopted(item, database, run_dirs):
 
         summary, adopted = await reattach.reattach(database, run_dirs)
 
-        assert summary.adopted == ["s1"] and set(adopted) == {"w1-s1"}
+        assert summary.adopted == ["w1/s1"] and set(adopted) == {"w1-s1"}
         assert item.events("session_reattached")
         assert item.sessions()[0]["status"] == "running", "running until the child exits"
         await adopted["w1-s1"]
@@ -425,7 +425,7 @@ async def test_a_crashed_adopt_marks_the_work_item_needs_human(
     summary, adopted = await reattach.reattach(database, run_dirs)
     await asyncio.gather(*adopted.values(), return_exceptions=True)
 
-    assert summary.adopted == ["s1"]
+    assert summary.adopted == ["w1/s1"]
     assert item.status() == "needs_human"
     assert item.row()["stop_kind"] == "infra"
     reason = item.events("work_item_needs_human")[0]["payload"]["reason"]
@@ -442,7 +442,7 @@ async def test_an_adopted_session_records_its_usage(item, database, run_dirs):
         summary, adopted = await reattach.reattach(database, run_dirs)
         await adopted["w1-s1"]
 
-    assert summary.adopted == ["s1"]
+    assert summary.adopted == ["w1/s1"]
     assert _usage(item) == ("claude-opus-5", 100, 300, 20, 1.25)
 
 
@@ -516,7 +516,7 @@ async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
             summary, adopted = await reattach.reattach(database, run_dirs)
             os.kill(grandchild, 0)  # adopted, and still alive: no ProcessLookupError
             await adopted["w1-s1"]
-        assert summary.adopted == ["s1"]
+        assert summary.adopted == ["w1/s1"]
         assert not reattach._pid_alive(grandchild), "it ends with its session's group"
     finally:
         if grandchild:
@@ -600,7 +600,7 @@ async def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn
         )
         await adopted["w1-esc1"]
 
-    assert (summary.adopted if alive else summary.resolved_from_file) == ["esc1"]
+    assert (summary.adopted if alive else summary.resolved_from_file) == ["w1/esc1"]
     assert [kw["steer"] for kw in walk_calls] == ["fixed it"]
     # Retried and re-entered -- not needs_human on the already-fixed stop.
     types = [e["type"] for e in item.events()]
@@ -630,7 +630,7 @@ async def test_reattach_kills_the_container_of_a_session_it_does_not_adopt(
 
     summary, _ = await reattach.reattach(database, run_dirs)
 
-    assert summary.resolved_from_file == ["s1"]
+    assert summary.resolved_from_file == ["w1/s1"]
     assert docker_rm.read_text().split() == ["kraft-w1-s1"]
 
 

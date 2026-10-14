@@ -53,7 +53,7 @@ async def test_a_session_found_dead_after_its_limit_killed_it_stops_naming_the_l
 
     summary, _ = await reattach.reattach(database, run_dirs)
 
-    assert summary.resolved_from_file == ["s1"]
+    assert summary.resolved_from_file == ["w1/s1"]
     assert [r["status"] for r in item.sessions()] == ["config_error"]
     assert _killed(item) == [{"session_id": "s1", "memory": "32m", "confirmed": True}]
 

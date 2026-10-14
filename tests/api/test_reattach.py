@@ -91,7 +91,7 @@ def test_reattach_adopts_running_agent(tmp_path):
     with running_server(run_dir=run_dir, templates_dir=templates, env=slow_env) as srv:
         health = srv.client.get("/api/health").json()
         assert wid in health["reattach_summary"]["resumed_work_items"]
-        assert sess_id in health["reattach_summary"]["adopted"], (
+        assert f"{wid}/{sess_id}" in health["reattach_summary"]["adopted"], (
             f"expected {sess_id} adopted, got summary {health['reattach_summary']}"
         )
         evs = _poll(srv.client, wid, "session_reattached", timeout=40)

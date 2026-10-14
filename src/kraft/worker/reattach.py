@@ -67,6 +67,10 @@ _REATTACH_GRACE_RETRY_DELAY_S = 2.0
 
 @dataclass
 class ReattachSummary:
+    """What startup found of the sessions that were running. Every session
+    is named `<wid>/<sid>` (`ids.session_ref`): a session id is unique only
+    within its item."""
+
     scanned: int = 0
     adopted: list[str] = field(default_factory=list)
     resolved_from_file: list[str] = field(default_factory=list)
@@ -907,7 +911,7 @@ async def reattach(
                     egress=r["egress"] is not None,
                 )
             )
-            summary.adopted.append(sid)
+            summary.adopted.append(ids.session_ref(r["work_item_id"], sid))
             continue
 
         # A dead process whose identity cannot be confirmed still left its
@@ -941,7 +945,7 @@ async def reattach(
                 _asked_summary(db, run_dirs, r),
                 work_item_id=r["work_item_id"],
             )
-            summary.resolved_from_file.append(sid)
+            summary.resolved_from_file.append(ids.session_ref(r["work_item_id"], sid))
             await _sweep_after(db, run_dirs, r, launch_factory)
             if r["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
                 # Deferred: starting this task now would let its own
