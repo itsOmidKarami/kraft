@@ -385,6 +385,7 @@ ci-test:
     uv run python dev/check_docs_redirects.py
     uv run python dev/check_docs_landings.py
     uv run python dev/check_docs_shell.py
+    uv run python dev/check_docs_ledes.py
     uv run python dev/check_tests.py
     uv run pytest -m "not e2e" -n logical
     uv run python -m kraft.intent

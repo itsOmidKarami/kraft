@@ -191,7 +191,7 @@ the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
-| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only, or changes no Python | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14, 1/3 … 3/3)` *(code)* | the unit tier (`-m "not e2e"`) in three shards on each supported Python, with `python -m kraft.intent` in the first; on 3.14 alone when the pull request changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
@@ -327,6 +327,10 @@ Page rules:
   table cell at most 40. `dev/check_docs_walls.py` fails the `lint` job on
   a longer one; run it on a page with
   `uv run python dev/check_docs_walls.py PAGE.md`.
+- A page shows its `description` as the lede under the title, so the first
+  paragraph must carry on from it, not say it again. Delete a paragraph that
+  only restates it. `dev/check_docs_ledes.py` fails the `lint` job when the
+  paragraph's first sentence reuses 65% or more of the description's words.
 - When you move or rename a page, or a heading that something links to, add
   an entry to `docsite/content/redirects.yml` in the same pull request. The
   file shows the two forms: an old page to its new address, and an old
