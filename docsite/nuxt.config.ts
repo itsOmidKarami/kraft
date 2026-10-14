@@ -209,6 +209,10 @@ export default defineNuxtConfig({
         if (moved) route.contents = forwardingPage(...moved)
         if (route.route === '/404.html' && typeof route.contents === 'string') {
           route.contents = route.contents.replace(/(<div id="__nuxt"[^>]*>)<\/div>/, (_, open) => `${open}${missingPage}</div>`)
+          // The shell's <head> gets its title and the <html> its language from
+          // the app, which a reader without JavaScript never runs.
+          if (!/<title>/.test(route.contents)) route.contents = route.contents.replace('</head>', '<title>No page at this address - Kraft</title></head>')
+          if (!/<html[^>]*\slang=/.test(route.contents)) route.contents = route.contents.replace('<html', '<html lang="en"')
         }
       },
     },
