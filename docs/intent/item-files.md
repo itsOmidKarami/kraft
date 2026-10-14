@@ -105,7 +105,7 @@ origin: src/kraft/item_paths.py -- every read goes through `worker.worktree_read
 
 WHEN the system writes into a folder a worker can write, it SHALL NOT follow or
 replace a symbolic link.
-enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[harness-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-file], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[temporary-file], tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/test_escalation_thread_files.py::test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn
+enforced-by: tests/test_item_paths.py::test_a_planted_name_in_docs_is_neither_followed_nor_replaced, tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-symlink], tests/test_item_paths.py::test_copying_a_worker_s_file_follows_no_link[dest-folder-symlink], tests/adapters/test_subprocess_sandbox_results.py::test_a_worker_s_files_are_created_never_written_through_a_link[symlink-replaced], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[harness-folder], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[config-file], tests/adapters/test_agent_sandbox.py::test_a_link_in_the_sandbox_home_is_never_written_through[temporary-file], tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/test_escalation_thread_files.py::test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn, tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[planted-summary], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[worker-files]
 origin: src/kraft/item_paths.py §copy_in -- each folder on the way is opened with `open_dir_no_symlinks` and the file with `O_CREAT | O_EXCL | O_NOFOLLOW` relative to it, so a name already there is refused rather than written through.
 
 ## REQ history-and-filed-are-not-mounted
@@ -132,7 +132,7 @@ origin: src/kraft/item_paths.py §keep_version -- the document stays where it is
 ## REQ archiving-removes-the-sandbox-home
 
 WHEN a work item is archived, the system SHALL remove its sandbox home.
-enforced-by: tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home]
+enforced-by: tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[archived-home]
 origin: src/kraft/worker/backends/docker.py §release -- both places, since an older item's home is in `sandbox-home/<id>/`; the home is a cache of the agent CLI's, and the worktree it served is gone.
 
 ## REQ archiving-keeps-the-items-folder
@@ -145,7 +145,7 @@ origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes
 ## REQ abandoning-removes-the-items-folder
 
 WHEN a work item is abandoned, the system SHALL remove `run/items/<id>/`.
-enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage, tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_off_the_event_loop
+enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage, tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_off_the_event_loop, tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[abandoned-item]
 origin: src/kraft/api/routes/lifecycle.py §abandon_work_item -- `shutil.rmtree` walks by folder handle and removes a link without following it, so a link a worker planted in `docs/` or the sandbox home takes nothing outside with it.
 
 ## REQ storage-counts-item-sandbox-homes

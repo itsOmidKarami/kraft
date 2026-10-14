@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import write
+from support.unprivileged import run_unprivileged
 
 from kraft import item_paths
 
@@ -399,3 +400,65 @@ def test_an_oversized_worker_file_is_not_copied(run_dirs, monkeypatch):
 
     assert copied is False
     assert not (root / "sessions/s2").exists()
+
+
+_REMOVE = """
+import sys
+from pathlib import Path
+from kraft import item_paths
+from kraft.paths import RunDirs
+
+which, run_dirs = sys.argv[1], RunDirs(Path(sys.argv[2]))
+if which == "planted-summary":
+    item_paths.remove_entry(item_paths.session_files(run_dirs, "w1", "s1").summary)
+elif which == "worker-files":
+    from kraft.adapters.subprocess import _create_worker_files
+    _create_worker_files(item_paths.session_files(run_dirs, "w1", "s1"))
+elif which == "archived-home":
+    from kraft.worker.backends.docker import DockerBackend
+    DockerBackend().release(run_dirs, run_dirs.worktrees / "w1", "w1")
+else:
+    from kraft.api.routes.lifecycle import _remove_item_files
+    _remove_item_files(run_dirs, "w1")
+"""
+
+
+@pytest.mark.parametrize(
+    ("which", "tree"),
+    [
+        ("planted-summary", "sessions/s1/out/summary.md"),
+        ("worker-files", "sessions/s1/out/summary.md"),
+        ("archived-home", "sandbox-home/go/pkg/mod"),
+        ("abandoned-item", "docs/cache"),
+    ],
+    ids=["planted-summary", "worker-files", "archived-home", "abandoned-item"],
+)
+def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, which, tree):
+    """A worker, or a tool it ran (a Go module cache is read-only), can leave
+    a folder its owner cannot write or list. A daemon that is not root cannot
+    empty it as it is: Kraft gives its owner back write and search
+    permission and removes it, and never follows a link while doing so."""
+    root = item_paths.item_dir(run_dirs, "w1") / tree
+    write(root, "locked/f", "x")
+    write(root, "hidden/g", "x")
+    victim = write(tmp_path, "victim/keep.md", "untouched")
+    (root / "locked" / "link").symlink_to(victim.parent)
+    (root / "locked").chmod(0o555)
+    (root / "hidden").chmod(0o000)
+    try:
+        done = run_unprivileged(
+            _REMOVE, which, str(run_dirs.base), env={"KRAFT_HOME": str(tmp_path / "home")}
+        )
+
+        assert done.returncode == 0, done.stderr
+        if which == "worker-files":
+            assert root.is_file() and not root.is_symlink()
+        elif which == "abandoned-item":
+            assert not item_paths.item_dir(run_dirs, "w1").exists()
+        else:
+            assert not os.path.lexists(root)
+        assert victim.read_text() == "untouched"
+    finally:
+        for left in (root / "locked", root / "hidden"):
+            if left.is_dir() and not left.is_symlink():
+                left.chmod(0o755)

@@ -11,6 +11,7 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import os
 import uuid
@@ -783,13 +784,14 @@ async def _archive_last_turn(db, run_dirs, work_item_id: str, files: item_paths.
             )
         )
     # A turn that never got a row (refused before launch) owns nothing here.
-    # `remove_entry`, not `unlink`: a worker can plant a folder at either name.
-    item_paths.remove_entry(files.result)
+    # `remove_entry`, not `unlink`: a worker can plant a folder at either name,
+    # and removing one is a walk, kept off the event loop.
+    await asyncio.to_thread(item_paths.remove_entry, files.result)
     if legacy_thread:
         for suffix in (".exit", ".cid"):
             files.result.with_suffix(suffix).unlink(missing_ok=True)
     else:
-        item_paths.remove_entry(files.summary)
+        await asyncio.to_thread(item_paths.remove_entry, files.summary)
 
 
 def _node_policy(row) -> _policy.InstancePolicy | None:

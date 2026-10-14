@@ -5,6 +5,7 @@ shell script that plays the turn."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 from pathlib import Path
@@ -239,14 +240,29 @@ async def test_a_thread_keeps_its_first_turn_s_paths_for_every_turn(
 
 
 async def test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn(
-    turns, run_dirs
+    turns, run_dirs, monkeypatch
 ):
     """A worker can leave a folder where the thread's summary belongs. The
-    next turn starts with the name cleared, as it would a file."""
+    next turn starts with the name cleared, as it would a file, and the
+    removal, a walk of whatever the worker put there, runs off the event
+    loop."""
     summary = run_dirs.base / _THREAD / "summary.md"
     plant = f'rm -f {summary}; mkdir -p {summary}/x; echo {_DONE} > "$KRAFT_RESULT_PATH"'
+    real = item_paths.shutil.rmtree
+    on_loop = []
+
+    def rmtree(path, *a, **kw):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(path)
+        except RuntimeError:
+            pass
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(item_paths.shutil, "rmtree", rmtree)
 
     played = await turns(plant, f'echo {_DONE} > "$KRAFT_RESULT_PATH"')
 
     assert [t["status"] for t in played] == ["done", "done"]
     assert summary.is_file() and not summary.is_symlink()
+    assert on_loop == []

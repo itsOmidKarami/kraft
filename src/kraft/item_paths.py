@@ -42,6 +42,7 @@ import errno
 import logging
 import os
 import re
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -346,22 +347,66 @@ def recorded_summary(run_dirs, wid: str, files: SessionFiles) -> str | None:
 def remove_entry(path: Path) -> None:
     """Remove whatever is at `path`, if anything, never following a link: a
     file or a link is unlinked, and a folder a worker planted where a file
-    belongs is removed with everything under it (`shutil.rmtree`, whose walk
-    follows no link inside)."""
-    import shutil
-
+    belongs is removed with everything under it (`remove_tree`)."""
     try:
         os.unlink(path)
     except FileNotFoundError:
         return
     except OSError:
-        try:
-            is_dir = stat.S_ISDIR(os.lstat(path).st_mode)
-        except OSError:
-            return
-        if not is_dir:
+        if not _is_real_dir(path):
             raise
-        shutil.rmtree(path, ignore_errors=True)
+        remove_tree(path)
+
+
+def remove_tree(path: str | os.PathLike[str]) -> None:
+    """Remove the folder `path` and everything under it, best-effort, never
+    following a link: `shutil.rmtree`, whose walk opens each folder relative
+    to its parent and removes a link rather than what it points at, and
+    refuses a link at `path` itself.
+
+    A worker, or a tool it ran, can leave a folder its owner cannot write or
+    list (`chmod 555`, a Go module cache), which a daemon that is not root
+    cannot empty. Such a folder is given back its owner's read, write and
+    search permission and the removal retried; a folder Kraft cannot fix
+    that way (another user's) is left, as before."""
+    tried: set[str] = set()
+
+    def retry(func, failed, exc):
+        if isinstance(exc, FileNotFoundError):
+            return
+        failed = os.fspath(failed)
+        try:
+            if func in (os.unlink, os.rmdir, os.remove):
+                parent = os.path.dirname(failed)
+                if parent in tried or not _is_real_dir(parent):
+                    return
+                tried.add(parent)
+                _add_owner_rwx(parent)
+                func(failed)
+            elif failed not in tried and _is_real_dir(failed):
+                # It could not be opened or listed: fix it and remove it whole.
+                tried.add(failed)
+                _add_owner_rwx(failed)
+                shutil.rmtree(failed, onexc=retry)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onexc=retry)
+
+
+def _is_real_dir(path: str | os.PathLike[str]) -> bool:
+    """A folder, not a link to one."""
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _add_owner_rwx(path: str) -> None:
+    """Give the folder `path`'s owner read, write and search permission,
+    which a daemon may do to a folder it owns. Only a real folder: checked
+    with `lstat` just before, never a link."""
+    os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IRWXU)
 
 
 def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:

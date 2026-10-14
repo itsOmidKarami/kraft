@@ -1896,7 +1896,7 @@ class DockerBackend:
         # `rmtree` refuses a link at the top and removes one inside without
         # following it, so nothing a worker planted reaches past the home.
         for home in item_paths.sandbox_homes(run_dirs, work_item_id):
-            shutil.rmtree(home, ignore_errors=True)
+            item_paths.remove_tree(home)
 
     async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a

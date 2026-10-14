@@ -493,12 +493,13 @@ async def abandon_work_item(wid: str, request: Request):
 
 
 def _remove_item_files(run_dirs, wid: str) -> None:
-    """An abandoned item's own folder and an older item's attachment copies.
-    `rmtree` opens each folder relative to its parent without following a
-    link (its fd-based walk), so a link a worker planted in `docs/` or the
-    sandbox home is removed, never what it points at."""
-    shutil.rmtree(item_paths.item_dir(run_dirs, wid), ignore_errors=True)
-    shutil.rmtree(item_paths.filed_dirs(run_dirs, wid)[1], ignore_errors=True)
+    """An abandoned item's own folder and an older item's attachment copies
+    (`item_paths.remove_tree`: no link followed, so a link a worker planted
+    in `docs/` or the sandbox home is removed, never what it points at, and a
+    read-only folder a tool left, such as a Go module cache, is removed
+    too)."""
+    item_paths.remove_tree(item_paths.item_dir(run_dirs, wid))
+    item_paths.remove_tree(item_paths.filed_dirs(run_dirs, wid)[1])
 
 
 def _archive_lock(st) -> asyncio.Lock:

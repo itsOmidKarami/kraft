@@ -124,9 +124,9 @@ def _create_worker_files(files: item_paths.SessionFiles) -> None:
         except FileExistsError:
             if stat.S_ISREG(os.lstat(path).st_mode):
                 continue
-            # A link (or a FIFO) an earlier turn left: a sandbox would
-            # mount what it points at. The name goes, never its target.
-            os.unlink(path)
+            # A link, a FIFO or a folder an earlier turn left: a sandbox
+            # would mount what it points at. The name goes, never its target.
+            item_paths.remove_entry(path)
             os.close(os.open(path, flags, 0o644))
 
 
