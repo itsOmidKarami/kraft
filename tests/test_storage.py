@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -117,6 +119,57 @@ def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypa
 
     assert swapped, "the walk never listed the folder"
     assert used.categories["sandboxes"] < MB
+
+
+_DEEP_MEASURE = """
+import errno, json, os, resource, sys
+from pathlib import Path
+from kraft import storage
+
+real_open, emfile = os.open, []
+
+def counting_open(*a, **kw):
+    try:
+        return real_open(*a, **kw)
+    except OSError as exc:
+        if exc.errno == errno.EMFILE:
+            emfile.append(a[0])
+        raise
+
+os.open = counting_open
+resource.setrlimit(resource.RLIMIT_NOFILE, (64, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+used = storage.measure(Path(sys.argv[1]))
+print(json.dumps({"a": used.items.get("a", 0), "emfile": len(emfile)}))
+"""
+
+
+def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
+    """A worker can nest folders far deeper than the daemon's open-file limit
+    (256 under launchd). The walk holds a bounded number of descriptors, so
+    it never runs the daemon out of them, and counts the file at the bottom."""
+    folder = os.open(tmp_path, os.O_RDONLY)
+    for name in ("run", "worktrees", "a", *["d"] * 300):
+        os.mkdir(name, dir_fd=folder)
+        deeper = os.open(name, os.O_RDONLY, dir_fd=folder)
+        os.close(folder)
+        folder = deeper
+    big = os.open("big", os.O_WRONLY | os.O_CREAT, 0o644, dir_fd=folder)
+    os.write(big, os.urandom(4 * MB))
+    os.close(big)
+    os.close(folder)
+
+    done = subprocess.run(
+        [sys.executable, "-c", _DEEP_MEASURE, str(tmp_path / "run")],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    seen = json.loads(done.stdout)
+    assert seen["emfile"] == 0
+    assert seen["a"] >= 4 * MB
 
 
 def test_measure_counts_a_hard_linked_file_once(tmp_path):

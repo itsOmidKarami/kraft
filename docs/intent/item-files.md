@@ -198,3 +198,11 @@ IF a file a worker can write is larger than the most Kraft reads of one whole,
 THEN the system SHALL treat it as unreadable.
 enforced-by: tests/worker/test_worktree_read.py::test_an_oversized_worker_file_reads_as_unreadable, tests/index/test_ingest.py::test_an_oversized_document_is_not_read
 origin: src/kraft/worker/worktree_read.py §read_no_follow -- a result file or summary is read several times a session, and a worker can write one of any size; read no further than one byte past the cap.
+
+## REQ the-storage-walk-holds-few-descriptors
+
+WHEN the system measures a folder a worker can write, it SHALL hold a bounded
+number of open descriptors however deep the folder nests, and count what is
+at the bottom.
+enforced-by: tests/test_storage.py::test_a_deep_tree_is_counted_within_a_low_open_file_limit
+origin: src/kraft/storage.py §_Folders -- a worker can nest folders far deeper than the daemon's open-file limit; one descriptor per level starves the daemon's sockets, database and logs, and skips what lies below.
