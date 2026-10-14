@@ -20,6 +20,15 @@ that has one.
 enforced-by: tests/api/test_lifecycle_queue.py::test_a_new_start_over_the_storage_limit_is_queued_and_says_why, tests/api/test_lifecycle_queue.py::test_an_item_with_a_worktree_is_not_held_by_the_storage_limit
 origin: src/kraft/storage.py §holds
 
+## REQ documents-never-hold-a-start
+
+WHILE items' documents are what keeps governed usage over
+`storage.worktrees.limit`, the system SHALL NOT hold a start or archive an
+item for the limit, and SHALL tell a held start the figure it compared with
+the limit.
+enforced-by: tests/test_storage.py::test_state_reads_usage_against_quota_and_limit[documents-over-limit], tests/test_storage.py::test_state_reads_usage_against_quota_and_limit[reclaimable-over-limit], tests/test_storage.py::test_tick_archives_only_down_to_what_archiving_can_free[only-documents-over], tests/test_storage.py::test_a_held_start_is_told_the_figure_compared_with_the_limit
+origin: src/kraft/storage.py §state_of -- holding starts is there so archiving can win the space back, and archiving keeps documents: a worker filling its `docs/` would otherwise hold every start on the machine for good.
+
 ## REQ held-start-keeps-its-place
 
 WHILE a queued start is held for storage, the start queue SHALL skip it and

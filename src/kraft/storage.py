@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 #: Top-level run folders by the category the Storage page shows them under.
 #: Everything a worker can write (`worktrees`, `sandboxes`, and the
 #: `documents` and session output it writes outside its worktree) is the
-#: figure the quota and limit govern: what an agent can grow at will.
+#: figure the quota governs: what an agent can grow at will. The limit holds
+#: starts only for the part archiving frees (`archivable`).
 _CATEGORY = {
     "worktrees": "worktrees",
     "sandbox-git": "sandboxes",
@@ -226,10 +227,15 @@ def usage(st) -> Usage | None:
 
 def state_of(policy, used: Usage | None) -> str | None:
     """`ok`, `over_quota` or `held`; None without a limit or a measurement.
-    Read off the measurement alone, so a restart cannot change the answer."""
+    Read off the measurement alone, so a restart cannot change the answer.
+
+    The governed figure, documents included, is what passes the quota; only
+    what archiving frees (`archivable`) passing the limit holds starts."""
     if policy is None or policy.storage_limit_bytes is None or used is None:
         return None
-    if used.governed > policy.storage_limit_bytes:
+    # Holding starts is there so archiving can win the space back: documents,
+    # which archiving keeps, would hold every start on the machine for good.
+    if archivable(used) > policy.storage_limit_bytes:
         return "held"
     if used.governed > policy.storage_quota_bytes:
         return "over_quota"
@@ -260,8 +266,9 @@ def holds(st, wid: str) -> bool:
 
 
 def figures(st) -> dict:
-    """What a held start is told. Call only while `state_of` is not None."""
-    return {"used_bytes": usage(st).governed, "limit_bytes": st.policy.storage_limit_bytes}
+    """What a held start is told: the figure `state_of` compared with the
+    limit. Call only while `state_of` is not None."""
+    return {"used_bytes": archivable(usage(st)), "limit_bytes": st.policy.storage_limit_bytes}
 
 
 def forget(st, wid: str) -> None:
@@ -336,24 +343,46 @@ _INTERVAL_S = 600
 
 
 async def tick(app) -> list[str]:
-    """Measure, when a limit is set. Over the limit with `auto_cleanup` set,
-    archive finished items that ended at least `min_age` ago, oldest first,
-    until the part of usage archiving can free (`archivable`) is back at or
-    under quota. Returns the ids archived.
+    """Measure, when a limit is set. Held (`state_of`) with `auto_cleanup`
+    set, archive finished items that ended at least `min_age` ago, oldest
+    first, until the part of usage archiving can free (`archivable`) is back
+    at or under quota. Returns the ids archived.
 
     Items' `documents` are governed but archiving keeps them, so they are no
     reason to archive: a worker that filled its `docs/` would otherwise have
-    every finished item archived without the figure ever coming down. When
-    they are what keeps usage over the limit, the items holding the most are
-    named in the log, for a person to abandon one."""
+    every finished item archived without the figure ever coming down. They
+    hold no start either, so with `auto_cleanup` set, when they are what
+    keeps usage over the limit, the items holding the most are named in the
+    log, for a person to abandon one."""
     st = app.state
     st.storage_too_recent = 0
     if st.policy is None or st.policy.storage_limit_bytes is None:
         return []
     await refresh(app)
     min_age = st.policy.storage_auto_cleanup_min_age_s
-    if min_age is None or state_of(st.policy, usage(st)) != "held":
+    if min_age is None:
         return []
+    # Read once: a reload that drops the limit mid-tick must not change the target.
+    quota, limit = st.policy.storage_quota_bytes, st.policy.storage_limit_bytes
+    held = state_of(st.policy, usage(st)) == "held"
+    archived = await _clean_up(app, min_age, quota) if held else []
+    # Documents are named only when they are what keeps usage over the
+    # limit: with more than the limit left to archive, abandoning an item
+    # would not bring it under.
+    if usage(st).documents and archivable(usage(st)) <= limit < usage(st).governed:
+        heaviest = sorted(usage(st).documents.items(), key=lambda kv: -kv[1])[:3]
+        logger.warning(
+            "storage: over the limit; items' documents, which archiving keeps, "
+            "use %s (largest: %s): abandon an item to remove its documents",
+            render.human_size(usage(st).categories.get("documents", 0)),
+            ", ".join(f"{wid} {render.human_size(size)}" for wid, size in heaviest),
+        )
+    return archived
+
+
+async def _clean_up(app, min_age: int, quota: int) -> list[str]:
+    """`tick`'s archiving, oldest first, down to `quota`. Returns the ids archived."""
+    st = app.state
     from kraft.api.routes import lifecycle  # deferred: kraft.api starts this poller
 
     cutoff = (datetime.fromisoformat(_now()) - timedelta(seconds=min_age)).isoformat()
@@ -364,8 +393,6 @@ async def tick(app) -> list[str]:
         ).fetchall()
     )
     finished = [r for r in finished if (st.run_dirs.worktrees / r["id"]).is_dir()]
-    # Read once: a reload that drops the limit mid-loop must not change the target.
-    quota, limit = st.policy.storage_quota_bytes, st.policy.storage_limit_bytes
     archived: list[str] = []
     stuck = 0
     for n, row in enumerate(finished):
@@ -397,17 +424,6 @@ async def tick(app) -> list[str]:
             "storage: over limit, archived %s; usage is now %s",
             ", ".join(archived),
             render.human_size(usage(st).governed),
-        )
-    # Documents are named only when they are what keeps usage over the
-    # limit: with more than the limit left to archive, abandoning an item
-    # would not bring it under.
-    if usage(st).documents and archivable(usage(st)) <= limit < usage(st).governed:
-        heaviest = sorted(usage(st).documents.items(), key=lambda kv: -kv[1])[:3]
-        logger.warning(
-            "storage: still over the limit; items' documents, which archiving keeps, "
-            "use %s (largest: %s): abandon an item to remove its documents",
-            render.human_size(usage(st).categories.get("documents", 0)),
-            ", ".join(f"{wid} {render.human_size(size)}" for wid, size in heaviest),
         )
     return archived
 

@@ -229,12 +229,32 @@ def test_measure_skips_what_it_cannot_read(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("governed", "state"),
-    [(80, "ok"), (81, "over_quota"), (100, "over_quota"), (101, "held")],
-    ids=["at-quota", "over-quota", "at-limit", "over-limit"],
+    ("governed", "documents", "state"),
+    [
+        (80, 0, "ok"),
+        (81, 0, "over_quota"),
+        (100, 0, "over_quota"),
+        (101, 0, "held"),
+        (81, 81, "over_quota"),
+        (150, 50, "over_quota"),
+        (150, 49, "held"),
+    ],
+    ids=[
+        "at-quota",
+        "over-quota",
+        "at-limit",
+        "over-limit",
+        "documents-over-quota",
+        "documents-over-limit",
+        "reclaimable-over-limit",
+    ],
 )
-def test_state_reads_usage_against_quota_and_limit(governed, state):
-    assert storage.state_of(_policy(100, 80), _usage(governed)) == state
+def test_state_reads_usage_against_quota_and_limit(governed, documents, state):
+    """Documents count toward the quota, but archiving keeps them: only what
+    archiving frees over the limit holds starts, or one worker filling its
+    `docs/` would hold every start on the machine for good."""
+    used = _usage(governed, categories={"documents": documents})
+    assert storage.state_of(_policy(100, 80), used) == state
 
 
 def test_state_is_none_until_measured():
@@ -256,6 +276,13 @@ def test_only_a_start_that_would_make_a_worktree_is_held(tmp_path):
     assert storage.holds(st, "has") is False
     st.storage_usage = _usage(100)
     assert storage.holds(st, "new") is False
+
+
+def test_a_held_start_is_told_the_figure_compared_with_the_limit():
+    """Not the governed figure: the documents in it hold no start."""
+    st = SimpleNamespace(policy=_policy(100, 80), storage_usage=_usage(150, {}, {"documents": 40}))
+    assert storage.state_of(st.policy, st.storage_usage) == "held"
+    assert storage.figures(st) == {"used_bytes": 110, "limit_bytes": 100}
 
 
 def test_forget_takes_an_items_bytes_off_the_cache():
@@ -408,8 +435,12 @@ async def test_tick_over_limit_archives_oldest_first_down_to_quota(
 
 @pytest.mark.parametrize(
     ("worktrees", "documents", "archived", "named"),
-    [(60, 80, ["old"], True), (200, 100, ["old", "mid", "new"], False)],
-    ids=["documents-keep-it-over", "worktrees-keep-it-over"],
+    [
+        (110, 80, ["old", "mid"], True),
+        (200, 100, ["old", "mid", "new"], False),
+        (60, 80, [], True),
+    ],
+    ids=["documents-keep-it-over", "worktrees-keep-it-over", "only-documents-over"],
 )
 async def test_tick_archives_only_down_to_what_archiving_can_free(
     tmp_path, repo, stub_app, monkeypatch, caplog, worktrees, documents, archived, named
@@ -419,7 +450,8 @@ async def test_tick_archives_only_down_to_what_archiving_can_free(
     the figure coming down. Archiving stops once what it can free is under
     quota, and the log names the item whose documents hold the rest, but
     only when documents are what keeps usage over the limit: with more to
-    archive than the limit allows, abandoning would not bring it under."""
+    archive than the limit allows, abandoning would not bring it under.
+    Documents alone over the limit hold nothing, so nothing is archived."""
     app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
     old, mid, new = await _three(app, repo)
     # `mid` was archived, not abandoned: its folder, and so its documents, stay.
@@ -430,7 +462,7 @@ async def test_tick_archives_only_down_to_what_archiving_can_free(
         lambda base, stop=None: storage.Usage(
             "2026-01-01T00:00:00+00:00",
             worktrees + documents,
-            {"old": 20, "mid": 20, "new": 20},
+            {"old": 30, "mid": 30, "new": 30},
             {"worktrees": worktrees, "documents": documents},
             {"mid": documents},
         ),
@@ -439,7 +471,7 @@ async def test_tick_archives_only_down_to_what_archiving_can_free(
     assert await storage.tick(app) == archived
 
     assert [p.exists() for p in (old, mid, new)] == [wid not in archived for wid in _IDS]
-    assert storage.usage(app.state).governed == worktrees + documents - 20 * len(archived)
+    assert storage.usage(app.state).governed == worktrees + documents - 30 * len(archived)
     holders = [r.getMessage() for r in caplog.records if "archiving keeps" in r.getMessage()]
     assert len(holders) == named
     assert all("mid" in h and "abandon" in h for h in holders)

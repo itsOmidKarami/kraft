@@ -190,7 +190,7 @@ origin: src/kraft/item_paths.py §keep_version -- a worker writes `docs/` at any
 The system SHALL count every item's `docs/` and every session's `out/` in the
 governed storage figure.
 enforced-by: tests/test_storage.py::test_measure_counts_an_item_s_sandbox_home_under_the_item[items-folder], tests/test_storage.py::test_report_joins_the_measurement_to_the_work_items, tests/api/test_abandon_item_folder.py::test_abandoning_takes_the_item_s_documents_off_the_storage_figure, tests/test_storage.py::test_refresh_drops_the_documents_of_an_item_abandoned_while_it_walked[abandoned], tests/test_storage.py::test_refresh_drops_the_documents_of_an_item_abandoned_while_it_walked[archived]
-origin: src/kraft/storage.py §measure -- both are a worker's to write at any size outside its worktree, so the quota and limit must see them.
+origin: src/kraft/storage.py §measure -- both are a worker's to write at any size outside its worktree, so the quota must see them.
 
 ## REQ an-oversized-worker-file-reads-as-unreadable
 
