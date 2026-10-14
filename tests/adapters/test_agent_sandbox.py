@@ -6,6 +6,7 @@ import json
 import pytest
 
 from kraft import harness
+from kraft.adapters import agent
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
@@ -106,21 +107,26 @@ def test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own(run, tmp_path, home):
         (".kraft-harness-config", True),
         (".kraft-harness-config/cursor", True),
         (".kraft-harness-config/cursor/cli-config.json", False),
-        (".kraft-harness-config/cursor/.cli-config.json.w1-s1", False),
+        (".kraft-harness-config/cursor/.cli-config.json.planted", True),
     ],
     ids=["config-folder", "harness-folder", "config-file", "temporary-file"],
 )
-def test_a_link_in_the_sandbox_home_is_never_written_through(run, tmp_path, link, refused):
+def test_a_link_in_the_sandbox_home_is_never_written_through(
+    run, tmp_path, monkeypatch, link, refused
+):
     """The sandbox home is the worker's: a link it planted on the way to the
-    config folder refuses the launch, naming it, and one at a file's name is
-    replaced. What either points at is never written."""
+    config folder, or at the temporary file's name, refuses the launch,
+    naming the folder, and one at a file's name is replaced. What either
+    points at is never written."""
+    monkeypatch.setattr(agent.secrets, "token_hex", lambda _n: "planted")
     home = tmp_path / "items" / "w1" / "sandbox-home"
     victim = tmp_path / "victim"
     victim.mkdir()
     (victim / "cli-config.json").write_text("untouched")
     planted = home / link
     planted.parent.mkdir(parents=True, exist_ok=True)
-    planted.symlink_to(victim if refused else victim / "cli-config.json")
+    in_folder = link.startswith(".kraft-harness-config/cursor/")
+    planted.symlink_to(victim / "cli-config.json" if in_folder else victim)
     launch = dict(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path))
 
     if refused:

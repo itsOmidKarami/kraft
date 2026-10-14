@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import shlex
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -730,8 +731,8 @@ def _config_dir(
 ) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip). `name`
-    is the session's `ids.qualified` name, which tags each temporary file:
-    the shared directory is every item's, and a session id is unique only
+    is the session's `ids.qualified` name, which tags each temporary file in
+    the shared directory: it is every item's, and a session id is unique only
     within its item.
 
     One directory per harness under $KRAFT_HOME/run, not per launch: the CLI
@@ -767,7 +768,7 @@ def _config_dir(
         dir_fd = open_dir_no_symlinks(sandbox_home, (".kraft-harness-config", h.id), create=True)
         try:
             for file, text in h.config_files.items():
-                _replace_at(dir_fd, file, f".{file}.{name}", text)
+                _replace_at(dir_fd, file, text)
         finally:
             os.close(dir_fd)
     except OSError as exc:
@@ -779,18 +780,23 @@ def _config_dir(
     return {h.config_env: str(directory)}
 
 
-def _replace_at(dir_fd: int, name: str, tmp: str, text: str) -> None:
-    """Write `text` to `name` in the folder `dir_fd` by way of `tmp`, a rename
-    so a reader never sees half a file. `tmp` is created with `O_CREAT |
-    O_EXCL | O_NOFOLLOW` after removing whatever held its name (the name,
-    never what a link there points at), and the rename replaces a link at
-    `name` rather than writing through it."""
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(tmp, dir_fd=dir_fd)
+def _replace_at(dir_fd: int, name: str, text: str) -> None:
+    """Write `text` to `name` in the folder `dir_fd` by way of a temporary
+    file, a rename so a reader never sees half a file. The temporary file has
+    a random name, so two launches at once never share one, and is created
+    with `O_CREAT | O_EXCL | O_NOFOLLOW`, so a file or link already holding
+    that name refuses the write rather than being written through. The rename
+    replaces a link at `name` rather than writing through it."""
+    tmp = f".{name}.{secrets.token_hex(8)}"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp, dir_fd=dir_fd)
+        raise
 
 
 def _bounded_instruction(path: Path, task_instruction: str) -> str:
