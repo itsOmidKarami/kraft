@@ -71,6 +71,14 @@ main :not(pre) > code {
   font-weight: 400;
 }
 
+/* A code span that is a link (the CLI pages' verb index, a link to a flag or
+   a file) is drawn in the link colour: Nuxt UI drew it like any other code,
+   so nothing showed it could be followed. Violet-600 on the code background
+   is 5.6:1, violet-400 in dark mode 5.1:1. */
+main a > code {
+  color: var(--ui-primary);
+}
+
 /* Every page: Plex Sans is loaded up to 600 (see above). */
 :is(strong, b) {
   font-weight: 600;
