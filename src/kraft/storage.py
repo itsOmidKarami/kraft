@@ -132,6 +132,10 @@ def _bytes(path: str | os.PathLike[str], seen: set[tuple[int, int]], stop) -> in
                     total += _blocks(os.stat(name, dir_fd=here_fd, follow_symlinks=False), seen)
                 except OSError:
                     continue
+    except OSError:
+        # fwalk skips a folder below `path` it cannot open, but raises for
+        # `path` itself: count what was read, as for one below.
+        pass
     finally:
         walk.close()
     return total
