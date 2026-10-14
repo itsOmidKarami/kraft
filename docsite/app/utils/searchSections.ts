@@ -15,6 +15,11 @@ const ENDS_AN_ITEM = ['td', 'th', 'li']
 const LINK_LISTS = ['Related', 'Next steps', 'See also', 'In this section']
 // A page's syntax-highlighting <style> is not text anyone wrote.
 const IGNORED = ['style']
+// A CLI page's "Verbs at a glance" table has one row per verb, whose first
+// cell links to the section that explains it. Each row is also a section of
+// its own, titled as the command is typed, so "approve" finds `kraft item
+// approve` and not only the prose around it.
+const VERB_INDEX = 'Verbs at a glance'
 
 // The index keeps the page's HTML entities (&lt; &gt; &#39;), which a result
 // would show literally, so they are decoded here, once: `&amp;lt;` becomes
@@ -38,10 +43,33 @@ const textOf = (node: MinimarkNode): string => {
   return children.map(textOf).join('') + (ENDS_AN_ITEM.includes(tag) ? ' · ' : '')
 }
 
+const rowsOf = (node: MinimarkNode): MinimarkNode[] =>
+  typeof node === 'string' ? [] : node[0] === 'tr' ? [node] : node.slice(2).flatMap(child => rowsOf(child as MinimarkNode))
+
+const hrefOf = (node: MinimarkNode): string => {
+  if (typeof node === 'string') return ''
+  if (node[0] === 'a') return String(node[1].href ?? '')
+  return node.slice(2).map(child => hrefOf(child as MinimarkNode)).find(Boolean) ?? ''
+}
+
+// A section made for a verb carries this prefix in its title; the search
+// (components/app/AppSearch.vue) exempts it from the Reference penalty.
+export const VERB_TITLE = 'kraft '
+
+function verbSections(page: Page, table: MinimarkNode): SearchSection[] {
+  return rowsOf(table).flatMap((row) => {
+    const [, , first, second] = row as [string, unknown, MinimarkNode?, MinimarkNode?]
+    const href = first ? hrefOf(first) : ''
+    if (!first || !second || !href.startsWith('#')) return []
+    return [{ id: `${page.path}${href}`, title: VERB_TITLE + textOf(first).replace(/ · $/, '').trim(), titles: [page.title], content: textOf(second).replace(/ · $/, '').trim(), level: 2 }]
+  })
+}
+
 export function searchSections(pages: Page[]): SearchSection[] {
   return pages.flatMap((page) => {
     const sections: SearchSection[] = [{ id: page.path, title: page.title || '', titles: [], content: (page.description || '').trim(), level: 1 }]
     const trail: { level: number, title: string }[] = []
+    let inVerbIndex = false // the heading just read is a CLI page's verb index
     let skipFrom = 0 // the level of a link list being skipped, until a heading at or above it
     for (const node of page.body?.value ?? []) {
       const level = typeof node === 'string' ? 0 : Number(/^h([1-6])$/.exec(node[0])?.[1] ?? 0)
@@ -53,12 +81,14 @@ export function searchSections(pages: Page[]): SearchSection[] {
           skipFrom = level
           continue
         }
+        inVerbIndex = title === VERB_INDEX
         while (trail.length && trail[trail.length - 1]!.level >= level) trail.pop()
         sections.push({ id: `${page.path}#${(node as [string, Record<string, unknown>])[1].id}`, title, titles: [page.title, ...trail.map(t => t.title)], content: '', level })
         trail.push({ level, title })
       } else {
         const current = sections[sections.length - 1]!
         current.content = `${current.content} ${textOf(node).trim()}`.trim()
+        if (inVerbIndex && typeof node !== 'string' && node[0] === 'table') sections.push(...verbSections(page, node))
       }
     }
     return sections.map(section => ({ ...section, title: plain(section.title), titles: section.titles.map(plain), content: plain(section.content) }))
