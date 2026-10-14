@@ -213,6 +213,8 @@ def test_read_survives_missing_and_unparseable_files(tmp_path):
     (tmp_path / "bad.log").write_text("not json at all")
     (tmp_path / "bad.json").write_text("{{{")
     assert usage.read(tmp_path / "bad.log", tmp_path / "bad.json", "claude-stream-json") is None
+    (tmp_path / "deep.json").write_text("[" * 100_000)
+    assert usage.read(tmp_path / "bad.log", tmp_path / "deep.json", "claude-stream-json") is None
 
 
 def test_reader_none_reads_only_the_result_file(tmp_path):

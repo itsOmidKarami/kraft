@@ -169,7 +169,7 @@ def parse_counted(result_path: str | Path) -> tuple[list[Finding], int]:
     try:
         # A worker wrote it: no symlink is followed, no FIFO waited on.
         data = json.loads(read_no_follow(Path(result_path)))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # nested deeper than the parser recurses
         return [], 0
     if not isinstance(data, dict):
         return [], 0

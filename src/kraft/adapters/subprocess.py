@@ -158,7 +158,8 @@ def _resolve_result_file(path: Path) -> str | None:
         return None
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
+        # A worker can nest a result deeper than the parser recurses.
         return "failed"
     status = data.get("status") if isinstance(data, dict) else None
     # An unrecognized status still resolves to failed: an agent inventing a status
@@ -172,11 +173,12 @@ def _read_json(path: Path):
     Catches OSError, ValueError rather than json.JSONDecodeError alone: a
     non-UTF-8 result file raises UnicodeDecodeError, which is a ValueError,
     not caught by `except OSError`. That exact clause has been wrong three
-    times in this codebase already.
+    times in this codebase already. And RecursionError, which is neither: a
+    worker can nest a result deeper than the parser recurses.
     """
     try:
         return json.loads(_read_result(path))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
 
 

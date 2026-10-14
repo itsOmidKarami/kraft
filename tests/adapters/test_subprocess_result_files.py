@@ -38,6 +38,8 @@ _LINKED = "<symlink to a host file>"
         ("[]", 0, "failed"),
         # A link is unreadable, never the file it points at, which says done.
         (_LINKED, 0, "failed"),
+        # Deeper than the parser recurses: malformed, not a crashed exit.
+        ("[" * 100_000, 0, "failed"),
     ],
     ids=[
         "absent-rc0",
@@ -52,6 +54,7 @@ _LINKED = "<symlink to a host file>"
         "a-number",
         "a-list",
         "symlink-is-unreadable",
+        "too-deeply-nested",
     ],
 )
 def test_resolve_reads_the_result_file_over_the_exit_code(tmp_path, content, rc, expected):
@@ -143,8 +146,8 @@ def test_read_concerns_and_read_question_read_their_own_field(
 
 @pytest.mark.parametrize(
     "raw",
-    [None, b"not json", b"[1, 2, 3]", b'{"status": "done"}', b"\xff\xfe\x00\x01"],
-    ids=["missing", "not-json", "not-a-mapping", "key-absent", "not-utf8"],
+    [None, b"not json", b"[1, 2, 3]", b'{"status": "done"}', b"\xff\xfe\x00\x01", b"[" * 100_000],
+    ids=["missing", "not-json", "not-a-mapping", "key-absent", "not-utf8", "too-deeply-nested"],
 )
 @pytest.mark.parametrize(
     "reader", [sp.read_summary_ref, sp.read_concerns, sp.read_question, sp.read_verdict]

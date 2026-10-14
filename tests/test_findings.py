@@ -51,6 +51,7 @@ def test_parse_reads_a_finding(tmp_path):
         b"{not json",
         b"\xff\xfe\x00binary",
         b"[1, 2, 3]",
+        b'{"findings": ' + b"[" * 100_000,
     ],
     ids=[
         "missing-key",
@@ -59,6 +60,7 @@ def test_parse_reads_a_finding(tmp_path):
         "broken-json",
         "non-utf8",
         "top-level-list",
+        "too-deeply-nested",
     ],
 )
 def test_parse_an_unusable_result_file_yields_nothing(tmp_path, raw):

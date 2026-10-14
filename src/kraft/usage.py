@@ -1247,7 +1247,7 @@ def read(log_path: Path, result_path: Path, reader: str | None = None) -> Usage 
     try:
         # A worker wrote it: no symlink is followed, no FIFO waited on.
         result = json.loads(read_no_follow(Path(result_path)))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # nested deeper than the parser recurses
         result = None
     if isinstance(result, dict):
         u = from_envelope(result)
