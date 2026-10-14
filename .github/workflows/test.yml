@@ -164,7 +164,7 @@ jobs:
       - if: matrix.shard == 1
         run: uv run python -m kraft.intent
       - if: always() && matrix.python-version == '3.14'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-shard-${{ matrix.shard }}
           # .coverage.N is a dotfile, which the action leaves out by default.
@@ -203,7 +203,7 @@ jobs:
           pattern: test-shard-*
           merge-multiple: true
       # The name tools and people already download: every shard's junit.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports
           path: junit-*.xml
@@ -368,7 +368,7 @@ jobs:
         env:
           KRAFT_E2E_REQUIRE: bd,docker,podman
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-reports
           path: e2e-junit.xml
@@ -531,7 +531,7 @@ jobs:
       - run: npx playwright test -c e2e/contract/playwright.config.ts
         working-directory: frontend
       - if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-contract-failures
           path: frontend/test-results
