@@ -75,6 +75,25 @@ class ReconcileStats:
 #: YAML is parsed: parsing runs on the event loop, and a long sexagesimal
 #: number alone parses in quadratic time.
 FRONT_MATTER_MAX_BYTES = 16 * 1024
+#: The deepest `[`/`{` nesting read. PyYAML's scanner slows quadratically
+#: with flow nesting, whatever the length: 800 levels in under 2 KB took a
+#: third of a second. No front matter Kraft asks for nests past two.
+FRONT_MATTER_MAX_DEPTH = 64
+
+
+def _nests_too_deep(text: str) -> bool:
+    """Whether brackets in `text` nest past `FRONT_MATTER_MAX_DEPTH`, counted
+    in one pass and without regard to quoting, so a quoted run of brackets
+    counts too: no real front matter has one."""
+    depth = 0
+    for ch in text:
+        if ch in "[{":
+            depth += 1
+            if depth > FRONT_MATTER_MAX_DEPTH:
+                return True
+        elif ch in "]}":
+            depth = max(0, depth - 1)
+    return False
 
 
 class _FrontMatterLoader(yaml.SafeLoader):
@@ -91,20 +110,25 @@ class _FrontMatterLoader(yaml.SafeLoader):
 def split_front_matter(text: str) -> tuple[dict, str]:
     """A document's YAML front matter and its body. A worker writes the
     document, so the front matter is read bounded: longer than
-    `FRONT_MATTER_MAX_BYTES`, using an alias, anything YAML cannot build (an
-    impossible date, a number too large for a float, nesting the parser
-    recurses through), or anything that is not strict UTF-8 JSON once built
-    (a key that is not a string, a lone surrogate, infinity, an int past the
-    digit limit) reads as no front matter, so every reader of it, the index
-    and the API included, can store and send it as it is."""
+    `FRONT_MATTER_MAX_BYTES` in UTF-8, nesting brackets past
+    `FRONT_MATTER_MAX_DEPTH`, using an alias, anything YAML cannot build (an
+    impossible date, a number too large for a float), or anything that is not
+    strict UTF-8 JSON once built (keys of mixed types, a lone surrogate,
+    infinity, an int past the digit limit) reads as no front matter, so every
+    reader of it, the index and the API included, can store and send it as it
+    is."""
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
     body = text[m.end() :]
-    if len(m.group(1)) > FRONT_MATTER_MAX_BYTES:
+    raw = m.group(1)
+    # Characters first: a str no longer than the cap encodes cheaply.
+    if len(raw) > FRONT_MATTER_MAX_BYTES or len(raw.encode()) > FRONT_MATTER_MAX_BYTES:
+        return {}, body
+    if _nests_too_deep(raw):
         return {}, body
     try:
-        data = yaml.load(m.group(1), _FrontMatterLoader)  # noqa: S506 -- a SafeLoader
+        data = yaml.load(raw, _FrontMatterLoader)  # noqa: S506 -- a SafeLoader
         json.dumps(data, sort_keys=True, default=str, ensure_ascii=False, allow_nan=False).encode()
     except Exception:  # untrusted, and only ever displayed or matched
         return {}, body
