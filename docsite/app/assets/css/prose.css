@@ -18,8 +18,9 @@
    everything in diagrams/portrait/ are portrait, fit as they were, and have
    no box). The SVGs state no pixel width, so the overlay cannot show them
    larger than the screen; the tap is switched off, as the diagram is already
-   readable here. The diagrams have no background of their own, so they read
-   on the dark theme too (docs-diagrams in the justfile).
+   readable here. The diagrams have no background of their own (docs-diagrams
+   in the justfile); on the dark theme each is a white card (the rule after
+   this comment).
 
    Nothing showed that the diagram goes on to the right. The table's edge
    shadow (.scroll-hint) is a background of the scrolling box, and the
@@ -39,6 +40,17 @@
    and the caption is not shown. */
 .diagram-hint {
   display: none;
+}
+
+/* Dark mode: the diagram on a white card, drawn as on the light page. An
+   <img> SVG cannot see the site's .dark class, so its one set of colours is
+   for a light page: on the dark one a subgraph's title and a sequence
+   diagram's message labels read as outlined text (their 4px light halo), and
+   lines leaving a subgraph faded into the background (Kraft-z6nly). */
+.dark img[src*='/diagrams/'] {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: #fff;
 }
 @media (max-width: 639px) {
   @keyframes diagram-edge {
