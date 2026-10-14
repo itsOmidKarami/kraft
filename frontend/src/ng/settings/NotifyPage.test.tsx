@@ -251,11 +251,11 @@ describe("ng NotifyPage", () => {
     expect(within(pane).getByRole("img", { name: /a decision is waiting/ })).toBeInTheDocument();
   });
 
-  it("links the preview to a work item id in Kraft's own format, 32 hex characters", async () => {
+  it("links the preview to a work item id in Kraft's own format, 8 base32 characters", async () => {
     stubNotification("default");
     setup();
     const pane = await screen.findByRole("complementary", { name: "notifications pane" });
-    expect(within(pane).getByRole("img", { name: /a decision is waiting/ })).toHaveTextContent(/http:\/\/192\.168\.1\.20:8765\/work-items\/[0-9a-f]{32}$/);
+    expect(within(pane).getByRole("img", { name: /a decision is waiting/ })).toHaveTextContent(/http:\/\/192\.168\.1\.20:8765\/work-items\/[0-9abcdefghjkmnpqrstvwxyz]{8}$/);
   });
 
   it("clears the webhook URL only after a confirmation", async () => {

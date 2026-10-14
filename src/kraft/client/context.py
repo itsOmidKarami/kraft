@@ -98,8 +98,8 @@ def _forbid_self_action(work_item_id: str | None) -> str:
 
     A value the worker's own id starts with, `_MIN_PREFIX` characters or more,
     is its own item too: the server reads it as that id whenever no other id
-    starts the same way, and today's 32-character ids are never the start of
-    one another.
+    starts the same way, and no other id is the whole of it, since intake
+    refuses a new id that is the start of an existing one.
     """
     resolved, origin = resolve_context()
     target = work_item_id or resolved
