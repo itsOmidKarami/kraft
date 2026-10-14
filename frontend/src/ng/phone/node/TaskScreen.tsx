@@ -156,7 +156,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
             </Block>
           )
         )}
-        {tab === "log" && <TaskLog session={at} />}
+        {tab === "log" && <TaskLog workItemId={item.id} session={at} />}
         {tab === "config" && (
           <Facts rows={[
             ["path", <span key="p" className="ph-mono">{path}</span>],
@@ -171,10 +171,10 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   );
 }
 
-export function TaskLog({ session }: { session?: WorkerSession }) {
+export function TaskLog({ workItemId, session }: { workItemId: string; session?: WorkerSession }) {
   const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
   const running = session?.status === "running" || session?.status === "pending";
-  const { lines, error } = useLog(session?.id ?? null, !!running);
+  const { lines, error } = useLog(workItemId, session?.id ?? null, !!running);
   const shown = (lines ?? []).filter((l) => src === "all" || l.src === src);
   return (
     <>

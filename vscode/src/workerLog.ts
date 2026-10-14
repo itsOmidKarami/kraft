@@ -32,7 +32,7 @@ export function registerWorkerLog(context: vscode.ExtensionContext, store: Store
       const say = (s: string) => out.fire(`${s}\r\n`);
       const run = async () => {
         let lost = "";
-        const end = await followLog((signal) => api.streamLog(session.id, signal), (l) => say(formatLogLine(l)), me.abort.signal, {
+        const end = await followLog((signal) => api.streamLog(session.work_item_id, session.id, signal), (l) => say(formatLogLine(l)), me.abort.signal, {
           onLost: (d) => (lost = d),
         });
         if (end === "aborted") return;

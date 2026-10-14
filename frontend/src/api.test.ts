@@ -36,8 +36,8 @@ describe("api", () => {
     await expect(api.probeRepo("code/proj")).rejects.toThrow(/^path must be absolute, not 'code\/proj': resolve it where you stand$/);
   });
 
-  it("logUrl builds the log path", () => {
-    expect(api.logUrl("s9")).toBe("/worker-sessions/s9/log");
+  it("logUrl builds the log path under the session's item", () => {
+    expect(api.logUrl("k7m2x9qa", "s9")).toBe("/work-items/k7m2x9qa/sessions/s9/log");
   });
 
   it("search builds the query string and omits blank filters", async () => {

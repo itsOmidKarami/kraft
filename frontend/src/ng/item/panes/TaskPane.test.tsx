@@ -181,7 +181,7 @@ describe("task pane", () => {
     it("reads the attempt's log on the Log tab", async () => {
       mount(`${url}&tab=log`, reviewed);
       expect(within(pane("auto_review")).getByRole("tab", { name: "Log" })).toHaveAttribute("aria-selected", "true");
-      await waitFor(() => expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toContain("/api/worker-sessions/plan_approval.auto_review-2/log?format=jsonl"));
+      await waitFor(() => expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toContain("/api/work-items/w1/sessions/plan_approval.auto_review-2/log?format=jsonl"));
     });
 
     it("offers no Skip or Retry: /skip and /retry refuse a path under a gate", () => {

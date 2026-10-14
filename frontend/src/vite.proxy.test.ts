@@ -23,7 +23,7 @@ describe("the dev vite proxy", () => {
 
     expect(apiTs).toMatch(/fetch\(apiUrl\(path\)/); // req()
     // logStreamUrl, getLogText, logTextUrl
-    expect([...apiTs.matchAll(/apiUrl\(logUrl\(sessionId\)\)/g)]).toHaveLength(3);
+    expect([...apiTs.matchAll(/apiUrl\(logUrl\(workItemId, sessionId\)\)/g)]).toHaveLength(3);
     expect(wsTs).toMatch(/\/api\/ws\/events/);
     expect(viteConfig).toMatch(/["']\/api["']/);
   });
