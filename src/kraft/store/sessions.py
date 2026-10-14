@@ -979,7 +979,8 @@ def result_files(conn: sqlite3.Connection, run_dirs, work_item_id: str) -> list[
     From the item's session rows, never a name pattern. A newer session's
     files are in its own folder under `run/items/<id>/sessions/`; an older
     one's are in `run/results/`, named by its id, a folder every work item
-    shares. A row's `result_path` is taken as recorded (an escalation turn's
+    shares, and only an older session's names are looked for there. A row's
+    `result_path` is taken as recorded (an escalation turn's
     is its thread's while it runs), its summary beside it in its `out/`, and
     its own instruction and review package in its own folder. Anything
     outside those places, missing, or not a plain file is left out: docker
@@ -996,10 +997,17 @@ def result_files(conn: sqlite3.Connection, run_dirs, work_item_id: str) -> list[
     def named(r) -> tuple[Path, ...]:
         result = Path(r["result_path"])
         own = item_paths.session_files(run_dirs, work_item_id, r["id"])
+        # Only an older session ever wrote its own files to the shared folder.
+        # A newer one's name there is one another writer of that folder (an
+        # older escalation thread) could have planted for this item to mount.
+        shared = (
+            (results / f"{r['id']}.review.md", results / f"{r['id']}.instruction.md")
+            if len(r["id"]) == ids.LEGACY_LENGTH
+            else ()
+        )
         return (
             result,
-            results / f"{r['id']}.review.md",
-            results / f"{r['id']}.instruction.md",
+            *shared,
             own.review,
             own.instruction,
             *([result.parent / "summary.md"] if result.parent.parent.parent == sessions else []),

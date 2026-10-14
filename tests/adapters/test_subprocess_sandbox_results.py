@@ -52,7 +52,9 @@ async def test_a_sandboxed_launch_mounts_only_its_own_items_results(
 ):
     """The results folder holds every work item's diffs and findings, so a
     sandboxed session is handed its own item's files and never the folder:
-    an older session's under `results/`, a newer one's out of its folder."""
+    an older session's under `results/`, a newer one's out of its folder. A
+    file under `results/` named for a newer session is not its own: it never
+    writes there, so another writer of that shared folder planted it."""
     results = run_dirs.results
     await make_item(database, "/r")
     await make_item(database, "/other", "w2")
@@ -78,7 +80,6 @@ async def test_a_sandboxed_launch_mounts_only_its_own_items_results(
         s1.result,
         s1.summary,
         s2.result,
-        results / "s2.review.md",
         s2.summary,
     ]
     assert argv_seen[1]["result_path"] == s2.result
