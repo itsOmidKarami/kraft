@@ -19,6 +19,7 @@ describe("Settings › Storage, usage", () => {
   it.each([
     ["ok", 7 * GB, "is-ok", ""],
     ["over_quota", 9 * GB, "is-over_quota", "Over the quota: Kraft is warning; starts still go ahead."],
+    ["over_quota", 12 * GB, "is-over_quota", "Over the limit in items' documents, which archiving keeps: starts still go ahead. Abandoning an item removes its documents."],
     ["held", 12 * GB, "is-held", "Over the limit: starts are held until you make room."],
   ] as const)("%s: the bar takes the state's look and the page says what it means", async (state, used, cls, note) => {
     stubFetch({ "GET /storage": [200, storageUsage({ state, used_bytes: used })] });
@@ -50,7 +51,7 @@ describe("Settings › Storage, usage", () => {
     stubFetch({ "GET /storage": [200, storageUsage()] });
     mount();
     const totals = (await screen.findByText("Sandbox stores and homes")).closest("dl") as HTMLElement;
-    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
+    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Item documents and session output", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
     expect(within(totals).getByText("Worktrees").nextElementSibling).toHaveTextContent("11G");
     expect(within(totals).getByText("Logs").nextElementSibling).toHaveTextContent("200M");
     expect(screen.getByText("measured 2m ago")).toBeInTheDocument();
@@ -106,7 +107,9 @@ describe("Settings › Storage worktrees", () => {
     await screen.findByRole("table");
     expect(rows().map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["Rate limiter", "Cache embeddings", "Old spike", "7f3a"]);
     const [live, finished] = rows();
-    expect(within(live).getAllByRole("cell").map((c) => c.textContent)).toEqual(["", "Rate limiter", "active", "6G", "1d ago"]);
+    expect(within(live).getAllByRole("cell").map((c) => c.textContent)).toEqual(["", "Rate limiter", "active", "6G", "", "1d ago"]);
+    // An item's documents, kept by archiving, are named apart from what archiving frees.
+    expect(within(finished).getAllByRole("cell")[4]).toHaveTextContent("512M");
     expect(within(finished).getByText(/completed/)).toHaveTextContent(/completed.*reclaimable/);
     expect(screen.getByRole("link", { name: "Rate limiter" })).toHaveAttribute("href", "/work-items/w3");
   });

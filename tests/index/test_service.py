@@ -5,21 +5,11 @@ import os
 
 import pytest
 from support.harness import make_repo_with_engineering
+from support.index import seed_session as _seed_session
+from support.index import seed_work_item as _seed_work_item
 
-from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
-
-
-def _seed_work_item(db: Database, repo: str, wid: str = "w1"):
-    return db.write(
-        lambda c: c.execute(
-            "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
-            "chain_definition, status, created_at, updated_at) VALUES "
-            "(?, 'b1', 't', ?, 'quick-task', '{}', 'active', 'now', 'now')",
-            (wid, repo),
-        )
-    )
 
 
 async def test_repos_union_of_work_items_and_env(tmp_path, database, conn):
@@ -113,25 +103,6 @@ async def test_search_unparseable_query_falls_back_to_literal(database, conn):
     assert ix.search('"unterminated') == []
 
 
-def _seed_session(db, sid, wid, ref, node="implementation", hook="on.implementation.start"):
-    from kraft import store
-
-    return db.write(
-        lambda c: (
-            store.create_session(
-                c,
-                id=sid,
-                work_item_id=wid,
-                node_id=node,
-                hook_point=hook,
-                log_path="/dev/null",
-                result_path="/dev/null",
-            ),
-            c.execute("UPDATE worker_sessions SET session_summary_ref=? WHERE id=?", (ref, sid)),
-        )
-    )
-
-
 async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):
     from kraft.paths import RunDirs
 
@@ -148,7 +119,7 @@ async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):
     await _seed_session(database, "s1", "w1", ".engineering/sessions/s1.md")
 
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is True
+    assert await ix.ingest_session_summary("w1", "s1") is True
 
     hits = ix.search("adapter")
     assert [h["path"] for h in hits] == [".engineering/sessions/s1.md"]
@@ -170,7 +141,7 @@ async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):
     assert sorted(r["work_item_id"] for r in rows if r["work_item_id"]) == ["w1", "w2"]
 
     # idempotent
-    assert await ix.ingest_session_summary("s1") is True
+    assert await ix.ingest_session_summary("w1", "s1") is True
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     assert (
         conn.execute(
@@ -187,7 +158,7 @@ async def test_ingest_session_summary_missing_file_is_false(tmp_path, database, 
     await _seed_work_item(database, str(repo))
     await _seed_session(database, "s1", "w1", ".engineering/sessions/nope.md")
     ix = Indexer(conn, database, repos_env="", run_dirs=RunDirs(tmp_path / "run").ensure())
-    assert await ix.ingest_session_summary("s1") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
@@ -201,8 +172,8 @@ async def test_ingest_session_summary_rejects_path_escape(tmp_path, database, co
     await _seed_session(database, "s1", "w1", "../../secret.md")
     await _seed_session(database, "s2", "w1", "/etc/hosts")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is False
-    assert await ix.ingest_session_summary("s2") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
+    assert await ix.ingest_session_summary("w1", "s2") is False
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
@@ -244,7 +215,7 @@ async def test_a_summary_ref_reads_only_a_markdown_file_in_its_own_worktree(
     wt.mkdir()
     await _seed_session(database, "s1", "w1", plant(repo, wt))
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
     assert ix.search("ghp_x") == []
 
 
@@ -263,7 +234,7 @@ async def test_a_summary_swapped_for_a_fifo_is_skipped_at_once(tmp_path, databas
     await _seed_session(database, "s1", "w1", ".engineering/sessions/s1.md")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
     try:
-        assert await asyncio.wait_for(ix.ingest_session_summary("s1"), 5) is False
+        assert await asyncio.wait_for(ix.ingest_session_summary("w1", "s1"), 5) is False
     finally:  # free a blocked reader: a writer ends its wait
         os.close(os.open(fifo, os.O_RDWR | os.O_NONBLOCK))
 
@@ -281,7 +252,7 @@ async def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path, 
 
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
     await ix.startup_scan()
-    await ix.ingest_session_summary("s1")
+    await ix.ingest_session_summary("w1", "s1")
 
     hit = ix.search("linked")[0]
     assert {ln["work_item_id"] for ln in hit["links"] if ln["work_item_id"]} == {"w1"}
@@ -325,11 +296,20 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
         (None, "# Attached plan\nbody\n", "Attached plan"),
         ("# Attached plan\nbody\n", "# As filed\nbody\n", "Attached plan"),
         ("", "# As filed\nbody\n", None),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
     ],
-    ids=["worktree", "stored-before-start", "worktree-over-stored", "gone-from-worktree"],
+    ids=[
+        "worktree",
+        "stored-before-start",
+        "worktree-over-stored",
+        "gone-from-worktree",
+        "stored-before-the-upgrade",
+        "stored-under-a-moved-run-dir",
+    ],
 )
 async def test_documents_for_work_item_shows_an_unindexed_attachment(
-    tmp_path, database, conn, repo, in_worktree, stored, title
+    request, tmp_path, database, conn, repo, in_worktree, stored, title
 ):
     """The attachment is committed only on the item's own branch/worktree, not
     on the registered main checkout — `rescan_repo` never sees it, but the
@@ -344,9 +324,14 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
     rd = RunDirs(tmp_path / "run").ensure()
     attachment = {"kind": "plan", "path": ".engineering/plans/p.md"}
     if stored is not None:
-        (rd.attachments / "w1").mkdir(parents=True)
-        (rd.attachments / "w1" / "plan.md").write_text(stored)
-        attachment["source"] = str(rd.attachments / "w1" / "plan.md")
+        # An item filed before the upgrade keeps its copy in `attachments/`.
+        older = request.node.callspec.id == "stored-before-the-upgrade"
+        folder = rd.attachments / "w1" if older else rd.items / "w1" / "filed"
+        folder.mkdir(parents=True)
+        (folder / "plan.md").write_text(stored)
+        attachment["source"] = str(folder / "plan.md")
+        if request.node.callspec.id == "stored-under-a-moved-run-dir":
+            attachment["source"] = "/old/kraft/run/attachments/w1/plan.md"
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "

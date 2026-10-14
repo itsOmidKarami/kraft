@@ -125,9 +125,10 @@ export class Api {
   /** A session's log, tail first, until the server's `end` frame. No timeout: it
    *  lasts as long as the session. Throws `ApiError` on a refusal or a drop
    *  (status 0, so a stream that closes before `end` is a failure too); an
-   *  abort through `signal` just ends it. */
-  async *streamLog(sid: string, signal: AbortSignal): AsyncGenerator<LogLine> {
-    const path = `/worker-sessions/${encodeURIComponent(sid)}/log?format=jsonl&follow=true`;
+   *  abort through `signal` just ends it. Under its item: a session id is unique
+   *  only within one. */
+  async *streamLog(workItemId: string, sid: string, signal: AbortSignal): AsyncGenerator<LogLine> {
+    const path = `/work-items/${encodeURIComponent(workItemId)}/sessions/${encodeURIComponent(sid)}/log?format=jsonl&follow=true`;
     const why = (e: unknown) => (e as Error).message;
     let res: Response;
     try {

@@ -82,7 +82,7 @@ def _record_egress(tmp_path, monkeypatch) -> tuple[list, list]:
         opened.append(credentials)
         return {"HTTPS_PROXY": "http://127.0.0.1:3128"}
 
-    async def close_egress(backend, sid):
+    async def close_egress(backend, sid, *, work_item_id):
         pass
 
     async def prepare(image, *, kraft_ca=None):

@@ -422,8 +422,10 @@ def compute(
         node["wall_ms"] += wall
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
-        waited_out = s["id"] in timed_out
-        cut = s["id"] in time_capped
+        # A session id is unique only within its item: paired with it.
+        session = (s["work_item_id"], s["id"])
+        waited_out = session in timed_out
+        cut = session in time_capped
         capped = s["status"] == "capped_out" and not (waited_out or cut)
         node["capped_out"] += 1 if capped else 0
         node["wait_timed_out"] += 1 if waited_out else 0
@@ -439,7 +441,7 @@ def compute(
             totals["cost_estimated"] = True
             by_repo[repo_of[s["work_item_id"]]]["cost_estimated"] = True
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
-        if s["id"] not in waits:
+        if session not in waits:
             worked_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 

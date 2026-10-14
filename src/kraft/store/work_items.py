@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Iterable
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
@@ -30,9 +31,12 @@ def branch_name(title: str, work_item_id: str) -> str:
     """`kraft/<slug>-<id[:8]>` — readable, unique, always a legal git ref.
 
     The `[a-z0-9-]` charset is what makes the result legal by construction: no
-    `..`, no `@{`, no `.lock`, no control characters, no trailing dot. Two items
-    collide only if their ids share an 8-hex prefix, and then `git worktree add
-    -b` fails loudly rather than silently sharing a branch.
+    `..`, no `@{`, no `.lock`, no control characters, no trailing dot. An
+    8-character id is its own suffix whole, and intake draws again for an id a
+    `kraft/` branch already ends with (`entry.work_item_id_taken_on_disk`).
+    Two older 32-character ids collide only if they share an 8-hex prefix, and
+    then `git worktree add -b` fails loudly rather than silently sharing a
+    branch.
 
     A title that slugs to nothing — punctuation only, wholly non-ASCII, empty —
     falls back to `kraft/<id>`, which is what every branch looked like before
@@ -479,6 +483,69 @@ def dependency_problem(conn: sqlite3.Connection, ids: list[str]) -> str | None:
     return None
 
 
+#: Below this many characters a value names a work item only by being its
+#: whole id, so a one- or two-character typo cannot land on an arbitrary item.
+MIN_PREFIX = 4
+#: What a start of an id may be made of: every id Kraft mints is lowercase
+#: hex or lowercase base32. Anything else is matched only whole.
+_PREFIX_CHARS = re.compile(r"[0-9a-z]+")
+
+
+def _may_be_a_prefix(given: str) -> bool:
+    return len(given) >= MIN_PREFIX and _PREFIX_CHARS.fullmatch(given) is not None
+
+
+def match_ids(candidates: Iterable[str], given: str) -> list[str]:
+    """`match_work_item_ids` over ids already in hand (an item's own
+    dependencies)."""
+    ids = list(candidates)
+    if given in ids:
+        return [given]
+    if not _may_be_a_prefix(given):
+        return []
+    return sorted(i for i in ids if i.startswith(given))
+
+
+#: The ids that start with a value, as a range the primary key's index
+#: answers rather than a scan of every row: a `[0-9a-z]` start is at or below
+#: each of them, and the start followed by `~` above each, since every id
+#: Kraft mints is lowercase hex or base32 and `~` sorts after all of those.
+#: Case-sensitive, unlike `LIKE`, and no character is a wildcard.
+_STARTING_WITH = "id >= ? AND id < ?"
+
+
+def _starting_with(start: str) -> tuple[str, str]:
+    return start, start + "~"
+
+
+def match_work_item_ids(conn: sqlite3.Connection, given: str) -> list[str]:
+    """The ids `given` names: its own when an item has exactly that id, else
+    every id it is the start of, when it may be a prefix (`MIN_PREFIX`
+    characters or more, from `[0-9a-z]`). An exact id wins over a longer id it
+    is also the start of. Asked on every request that names an item, so by a
+    range of the primary key (`_STARTING_WITH`)."""
+    exact = conn.execute("SELECT id FROM work_items WHERE id = ?", (given,)).fetchone()
+    if exact is not None:
+        return [exact["id"]]
+    if not _may_be_a_prefix(given):
+        return []
+    rows = conn.execute(
+        f"SELECT id FROM work_items WHERE {_STARTING_WITH} ORDER BY id", _starting_with(given)
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+def work_item_id_taken(conn: sqlite3.Connection, candidate: str) -> bool:
+    """Whether an item has the id `candidate`, or an older, longer id that
+    starts with it: that item would stop answering to `candidate` as a prefix
+    (`match_work_item_ids`) the moment a new item took it. `candidate` is a
+    minted id, so made of the characters `_STARTING_WITH` relies on."""
+    row = conn.execute(
+        f"SELECT 1 FROM work_items WHERE {_STARTING_WITH} LIMIT 1", _starting_with(candidate)
+    ).fetchone()
+    return row is not None
+
+
 def any_unfinished(conn: sqlite3.Connection, ids: list[str]) -> bool:
     """Whether any of `ids` is not `completed` yet."""
     return any(
@@ -667,8 +734,9 @@ def end_work_item(
     now = _now()
     for sid in session_ids or []:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
     node_id = conn.execute(
@@ -797,8 +865,9 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     events.append(conn, work_item_id, WorkItemEvent.PAUSE_REQUESTED, {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 

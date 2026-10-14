@@ -333,10 +333,6 @@ def test_docker_argv_names_the_container_when_asked():
     assert argv[n_i + 1] == "kraft-s1"
 
 
-def test_container_name_is_prefixed_and_stable():
-    assert docker.container_name("s1") == "kraft-s1"
-
-
 def test_docker_argv_leaves_a_submodule_gitdir_writable(tmp_path):
     """A submodule `builtins._setup_submodules` initialized lives at
     `<worktree gitdir>/modules/<sm>`, inside the gitdir this session has to

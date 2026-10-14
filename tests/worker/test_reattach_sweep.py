@@ -45,7 +45,7 @@ async def test_an_agent_task_that_ended_across_a_restart_is_swept(
         _summary, adopted = await reattach.reattach(database, run_dirs)
         child.stdin.close()
         child.wait()
-        await adopted["s1"]
+        await adopted["w1-s1"]
     else:
         await it.session("s1", path, running=(2_000_000_000, 123.0))
         await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)

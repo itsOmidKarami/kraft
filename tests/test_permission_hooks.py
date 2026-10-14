@@ -135,7 +135,7 @@ def test_server_down_mid_run_through_the_real_client(monkeypatch, fail_closed, e
     """Review focus 1: Kraft's server is down. With no allowlist the hook has
     no opinion and Cursor's classifier keeps the worker going; with one
     (--fail-closed) every call is denied, never allowed."""
-    monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
+    monkeypatch.setenv("KRAFT_SESSION_ID", "w1/s1")
 
     async def down(*_a, **_k):
         raise ValueError("no server")
@@ -148,7 +148,7 @@ def test_server_down_mid_run_through_the_real_client(monkeypatch, fail_closed, e
 def test_a_refused_ask_reads_as_one_kraft_line(monkeypatch, capsys):
     """The hook's stderr said `unavailable: kraft 404: unknown session`, the
     lead every other refusal dropped: it reads as the one line they all do."""
-    monkeypatch.setenv("KRAFT_SESSION_ID", "gone")
+    monkeypatch.setenv("KRAFT_SESSION_ID", "w1/gone")
 
     async def refused(*_a, **_k):
         return 404, {"detail": "unknown session"}
@@ -168,7 +168,7 @@ def test_an_enforce_ask_times_out_inside_cursors_hook_timeout(monkeypatch, mode,
 
     import httpx
 
-    monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
+    monkeypatch.setenv("KRAFT_SESSION_ID", "w1/s1")
     seen = {}
 
     async def slow(method, path, **kw):

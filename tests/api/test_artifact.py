@@ -1,8 +1,9 @@
 """GET /work-items/{wid}/artifact — what a human reads at a spec or plan gate.
 
-The document is read off the worktree, not out of the index: a reviewer sitting
-at an open gate must see the file the agent just wrote, whether or not the
-indexer has caught up.
+The document is read off disk, not out of the index: a reviewer sitting at an
+open gate must see the file the agent just wrote, whether or not the indexer
+has caught up. A new one is in the item's `docs/`; an item that ran before
+that wrote it in its worktree's `.engineering/`.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import pytest
 import yaml
 from support.harness import connected_repo, fake_templates_dir, v1_named_chain
 
-from kraft import api
+from kraft import api, item_paths
 from kraft.api.routes import board
 
 #: No default repo entry for an unconnected repo, as before this used the shared client.
@@ -103,38 +104,57 @@ def worktree(client, item_at_spec_gate) -> Path:
     return Path(client.get(f"/api/work-items/{item_at_spec_gate}").json()["worktree_path"])
 
 
-def _write_artifact(worktree: Path, wid: str, text: str) -> Path:
+def _spec(client, wid: str) -> Path:
+    """Where the fake agent wrote the spec, as its contract told it: the item's
+    `docs/spec.md`, outside the worktree."""
+    return item_paths.docs_dir(client.app.state.run_dirs, wid) / "spec.md"
+
+
+def _write_artifact(client, wid: str, text: str, *, older: bool = False) -> Path:
     """The document a compliant agent would have written.
 
     Written by the test, overwriting whatever `fixtures/fake-claude.sh` already
     wrote for this hook (it has honoured the artifact contract since Task 8):
     these tests are about the endpoint's contract, not about the fake's own
-    fixed content.
+    fixed content. `older`: where an item that ran before `docs/` wrote it,
+    in its worktree, with no `docs/` copy to read first.
     """
-    path = worktree / ".engineering" / "specs" / f"{wid}.md"
+    st = client.app.state
+    path = _spec(client, wid)
+    if older:
+        path.unlink()
+        path = item_paths.path_of(st.run_dirs, wid, item_paths.legacy_document_name(wid, "spec"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
 
 
-def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, worktree):
-    _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+@pytest.mark.parametrize("older", [False, True], ids=["new-place", "older-worktree"])
+def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, older):
+    wid = item_at_spec_gate
+    path = _write_artifact(client, wid, "---\ntitle: A spec\n---\n\nthe body\n", older=older)
+    name = (item_paths.legacy_document_name if older else item_paths.document_name)(wid, "spec")
 
-    body = client.get(f"/api/work-items/{item_at_spec_gate}").json()
-    assert body["gate_artifact"] == f".engineering/specs/{item_at_spec_gate}.md"
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["gate_artifact"] == name
 
-    art = client.get(f"/api/work-items/{item_at_spec_gate}/artifact").json()
+    art = client.get(f"/api/work-items/{wid}/artifact").json()
+    assert (art["path"], art["absolute_path"]) == (name, str(path))
     assert art["title"] == "A spec"
     assert art["content"].strip() == "the body"
     assert art["truncated"] is False
 
+    assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+    docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
+    assert [d["path"] for d in docs if d["source_kind"] == "artifact"] == [name]
+
 
 @pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
 def test_gate_artifact_carries_its_absolute_path_and_opens_in_an_editor(
-    client, item_at_spec_gate, worktree, monkeypatch, route
+    client, item_at_spec_gate, monkeypatch, route
 ):
     wid = item_at_spec_gate
-    path = _write_artifact(worktree, wid, "# A spec\n")
+    path = _write_artifact(client, wid, "# A spec\n")
     art = client.get(f"/api/work-items/{wid}/{route}").json()
     assert art["absolute_path"] == str(path)
 
@@ -153,9 +173,10 @@ def test_gate_artifact_open_refuses_what_the_read_refuses(
 ):
     """`GET /artifact` walks the path with no symlink followed, so a link
     inside the worktree is a 404 there; the editor launch refuses it too, not
-    just a link out of the worktree (R14e-03)."""
+    just a link out of the worktree (R14e-03). The document is in `docs/`, so
+    that is where the link is planted."""
     wid = item_at_spec_gate
-    path = _write_artifact(worktree, wid, "# A spec\n")
+    path = _write_artifact(client, wid, "# A spec\n")
     if link == "file":
         real = worktree / "real.md"
         path.rename(real)
@@ -171,6 +192,11 @@ def test_gate_artifact_open_refuses_what_the_read_refuses(
     assert client.get(f"/api/work-items/{wid}/{route}").status_code == 404
     r = client.post(f"/api/work-items/{wid}/{route}/open", json={"editor": "code"})
     assert r.status_code == 404, r.text
+    missing = {
+        "artifact": "this work item's gate has no artifact",
+        "artifacts/spec": "this work item has no spec on disk",
+    }
+    assert r.json()["detail"] == missing[route]
     assert launched == []
 
 
@@ -188,30 +214,29 @@ def test_gate_artifact_open_is_refused_for_a_non_loopback_client(client, monkeyp
     assert launched == []
 
 
+@pytest.mark.parametrize(
+    ("older", "origin"),
+    [(False, None), (True, "event_ingest")],
+    ids=["new-place", "older-worktree"],
+)
 def test_a_tasks_produced_document_reads_off_the_worktree_then_from_the_index(
-    client, item_at_spec_gate, worktree
+    client, item_at_spec_gate, worktree, older, origin
 ):
     """A task's Output is the document it produced, not the session note that says
-    where it is: read off the worktree while it is there, and from the copy the
-    gate's approval indexed once the worktree is gone."""
+    where it is: read off disk while it is there. Removing the worktree leaves
+    a document in `docs/` where it is; an older one went with the worktree, and
+    the copy the gate's approval indexed, under its old name, is read instead."""
     wid = item_at_spec_gate
-    _write_artifact(worktree, wid, "---\ntitle: A spec\n---\n\nthe body\n")
+    _write_artifact(client, wid, "---\ntitle: A spec\n---\n\nthe body\n", older=older)
+    name = (item_paths.legacy_document_name if older else item_paths.document_name)(wid, "spec")
     art = client.get(f"/api/work-items/{wid}/artifacts/spec").json()
-    assert (art["kind"], art["path"], art["title"]) == (
-        "spec",
-        f".engineering/specs/{wid}.md",
-        "A spec",
-    )
+    assert (art["kind"], art["path"], art["title"]) == ("spec", name, "A spec")
     assert art["content"].strip() == "the body"
 
     assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
     shutil.rmtree(worktree)
     art = client.get(f"/api/work-items/{wid}/artifacts/spec").json()
-    assert (art["path"], art["title"], art["origin"]) == (
-        f".engineering/specs/{wid}.md",
-        "A spec",
-        "event_ingest",
-    )
+    assert (art["path"], art["title"], art.get("origin")) == (name, "A spec", origin)
     assert art["content"].strip() == "the body"
 
 
@@ -233,13 +258,13 @@ def test_a_produced_document_is_only_a_kind_the_chain_produces(
     assert r.status_code == 404, r.text
 
 
-def test_a_produced_document_nobody_wrote_or_indexed_is_a_404(client, item_at_spec_gate, worktree):
-    (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink(missing_ok=True)
+def test_a_produced_document_nobody_wrote_or_indexed_is_a_404(client, item_at_spec_gate):
+    _spec(client, item_at_spec_gate).unlink()
     r = client.get(f"/api/work-items/{item_at_spec_gate}/artifacts/spec")
     assert r.status_code == 404, r.text
 
 
-def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_spec_gate, worktree):
+def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_spec_gate):
     """An agent can report done without honouring the contract. The gate stays
     answerable; there is just nothing to read.
 
@@ -247,7 +272,7 @@ def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_sp
     nothing" is simulated by removing what it wrote rather than by picking a
     fake invocation that skips it.
     """
-    (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink()
+    _spec(client, item_at_spec_gate).unlink()
     assert client.get(f"/api/work-items/{item_at_spec_gate}").json()["gate_artifact"] is None
     # A UI polls the detail endpoint while it waits for the agent's session to
     # finish; this case must not write an event on every poll, only the ones
@@ -259,47 +284,57 @@ def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_sp
     assert not [e for e in events if e["type"] == "artifact_refused"]
 
 
-@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
+@pytest.mark.parametrize(
+    ("route", "refused"),
+    [("artifact", []), ("artifacts/spec", ["escaped_containment"])],
+    ids=["pending-gate", "produced"],
+)
 def test_a_symlink_out_of_the_worktree_is_a_404(
-    client, item_at_spec_gate, worktree, tmp_path, caplog, route
+    client, item_at_spec_gate, tmp_path, caplog, route, refused
 ):
+    """A link planted at the document's name in `docs/` is no document
+    (`item_paths.document`): the pending gate has none to show. The produced
+    route reads that name all the same, and refuses it as an escape."""
     outside = tmp_path / "secret.md"
     outside.write_text("not yours")
-    path = worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md"
+    path = _spec(client, item_at_spec_gate)
     path.unlink()  # fake-claude.sh already wrote a real file here; swap it out
     path.symlink_to(outside)
 
     with caplog.at_level("WARNING", logger="kraft.api"):
         resp = client.get(f"/api/work-items/{item_at_spec_gate}/{route}")
     assert resp.status_code == 404
+    assert "not yours" not in resp.text
+    assert client.get(f"/api/work-items/{item_at_spec_gate}").json()["gate_artifact"] is None
     # Pins the escape branch specifically, not merely "some 404 happened": a
     # regression that made the containment check a no-op would still 404 (the
     # read would fail some other way) without ever logging this.
-    assert item_at_spec_gate in caplog.text
+    assert (item_at_spec_gate in caplog.text) is bool(refused)
 
     # Spec §4: the reason has to reach a reviewer with no access to this log,
     # so it belongs on the item's own timeline too, not only in caplog.
     events = client.get(f"/api/work-items/{item_at_spec_gate}/events").json()
-    refusals = [e for e in events if e["type"] == "artifact_refused"]
-    assert len(refusals) == 1
-    assert refusals[0]["payload"]["reason"] == "escaped_containment"
+    refusals = [e["payload"]["reason"] for e in events if e["type"] == "artifact_refused"]
+    assert refusals == refused
 
 
 def test_a_symlinked_directory_out_of_the_worktree_is_a_404(
-    client, item_at_spec_gate, worktree, tmp_path, caplog
+    client, item_at_spec_gate, tmp_path, caplog
 ):
     """The escape doesn't have to be the artifact file itself — a symlinked
-    ancestor directory resolves outside the worktree exactly the same way."""
-    outside_dir = tmp_path / "outside-engineering"
-    (outside_dir / "specs").mkdir(parents=True)
-    (outside_dir / "specs" / f"{item_at_spec_gate}.md").write_text("not yours either")
+    ancestor directory resolves outside the run folder exactly the same way.
+    The pending gate sees no document; the produced route refuses the read."""
+    outside_dir = tmp_path / "outside-docs"
+    outside_dir.mkdir()
+    (outside_dir / "spec.md").write_text("not yours either")
 
-    engineering = worktree / ".engineering"
-    shutil.rmtree(engineering)  # fake-claude.sh already wrote a real tree here
-    engineering.symlink_to(outside_dir, target_is_directory=True)
+    docs = _spec(client, item_at_spec_gate).parent
+    shutil.rmtree(docs)  # fake-claude.sh already wrote a real tree here
+    docs.symlink_to(outside_dir, target_is_directory=True)
 
+    assert client.get(f"/api/work-items/{item_at_spec_gate}/artifact").status_code == 404
     with caplog.at_level("WARNING", logger="kraft.api"):
-        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
+        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifacts/spec")
     assert resp.status_code == 404
     assert item_at_spec_gate in caplog.text
 
@@ -388,7 +423,7 @@ def test_a_fifo_planted_at_the_path_is_refused_not_waited_on(tmp_path, reader):
 
 
 def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
-    client, item_at_spec_gate, worktree
+    client, item_at_spec_gate
 ):
     """Spec §7's named-but-uncovered branch: `fh.read(DIFF_MAX_BYTES + 1)`,
     `len(data) > DIFF_MAX_BYTES`, and `data[:DIFF_MAX_BYTES].decode(errors=
@@ -404,9 +439,7 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     content = before + split_char + after
     assert len(content) == DIFF_MAX_BYTES + 10
 
-    path = worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
+    _spec(client, item_at_spec_gate).write_bytes(content)
 
     resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
     assert resp.status_code == 200  # not a 500 from a decode error
@@ -415,13 +448,14 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     assert len(body["content"]) <= DIFF_MAX_BYTES
 
 
-def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_spec_gate, worktree):
-    """Nothing Kraft wrote under `.engineering/` is committed anymore
-    (`forge._work_product_pathspec` excludes it), so gate approval is what
-    makes the spec durable:
+def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_spec_gate):
+    """A gate document is never committed (it is outside the worktree, or,
+    for an older item, under `.engineering/`, which
+    `forge._work_product_pathspec` excludes), so gate approval is what makes
+    the spec durable:
     it must land in the index synchronously, before the approve response comes
     back — not on the indexer's own scan schedule."""
-    _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+    _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
 
     resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
     assert resp.status_code == 200
@@ -430,7 +464,7 @@ def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_sp
     artifacts = [d for d in docs if d["source_kind"] == "artifact"]
     assert len(artifacts) == 1
     assert artifacts[0]["kind"] == "specs"
-    assert artifacts[0]["path"] == f".engineering/specs/{item_at_spec_gate}.md"
+    assert artifacts[0]["path"] == item_paths.document_name(item_at_spec_gate, "spec")
     # W13 A: an artifact has no session, so no run info.
     assert (artifacts[0]["attempt"], artifacts[0]["round"], artifacts[0]["session_status"]) == (
         None,
@@ -443,14 +477,14 @@ def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_sp
     assert doc["content"] == "\nthe body\n"
 
 
-def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, worktree, monkeypatch):
+def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, monkeypatch):
     """A locked index or an unwritable index.db must not block a gate the
     agent already satisfied. Same contract `ingest_session_summary` gives the
     event-drain loop (the index never blocks the executor) -- enforced here
     instead, since approval is a synchronous request a reviewer is waiting on.
     The approve response must still succeed and the gate must still clear even
     though nothing got indexed."""
-    _write_artifact(worktree, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+    _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
 
     async def _boom(*args, **kwargs):
         raise RuntimeError("index is locked")
@@ -464,13 +498,13 @@ def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, wor
     assert [d for d in docs if d["source_kind"] == "artifact"] == []
 
 
-def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_gate, worktree):
+def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_gate):
     """An agent that reported done without honouring the artifact contract
     (Task 8) must not make gate approval 500, and must leave nothing behind
     for this gate's artifact -- there is nothing to remember. (The fake
     agent's own session summary still ingests separately; this only pins the
     artifact side.)"""
-    (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink()
+    _spec(client, item_at_spec_gate).unlink()
 
     resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
     assert resp.status_code == 200
@@ -495,7 +529,8 @@ def test_the_review_gate_still_resolves_its_brief(tmp_path):
     brief.parent.mkdir(parents=True)
     brief.write_text("---\ntitle: The brief\n---\n\nbody\n")
 
-    st = SimpleNamespace(run_dirs=SimpleNamespace(worktrees=tmp_path / "wt"))
+    # An item from before `docs/`: its brief is in its worktree.
+    st = SimpleNamespace(run_dirs=SimpleNamespace(base=tmp_path / "run", worktrees=tmp_path / "wt"))
     row = {"id": "w1", "chain_definition": "{}", "materialized_chain": chain.to_json()}
 
     assert board._gate_artifact(st, row, "final_review") == ".engineering/review_briefs/w1.md"

@@ -117,7 +117,7 @@ async def worker_api():
             {"harness": "cursor", "stdin": '{"tool_name": "Shell"}'},
             (
                 "POST",
-                "/api/worker-sessions/s-own/permission-hook",
+                "/api/work-items/w-own/sessions/s-own/permission-hook",
                 {"harness": "cursor", "stdin": '{"tool_name": "Shell"}'},
             ),
         ),
@@ -128,7 +128,10 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
     """The session and the credential are the channel's and the daemon's,
     whatever the worker sent in their place."""
     api, ask = worker_api
-    api.answers["/api/worker-sessions/s-own/permission-hook"] = (200, {"body": "{}", "code": 0})
+    api.answers["/api/work-items/w-own/sessions/s-own/permission-hook"] = (
+        200,
+        {"body": "{}", "code": 0},
+    )
     status, _, events = await ask(
         verb,
         form,
@@ -137,7 +140,7 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
     assert status == 200
     [seen] = api.calls
     assert (seen["method"], seen["path"], seen["json"]) == call
-    assert (seen["session"], seen["authorization"]) == ("s-own", "Bearer daemon-token")
+    assert (seen["session"], seen["authorization"]) == ("w-own/s-own", "Bearer daemon-token")
     assert events == []
 
 
@@ -209,7 +212,7 @@ async def test_the_hook_verb_returns_the_hook_body_or_an_error(worker_api, answe
     """The shim prints a 200's body as the hook's answer and fails closed on
     anything else, so only an answered hook may come back as a 200."""
     api, ask = worker_api
-    api.answers["/api/worker-sessions/s-own/permission-hook"] = answer
+    api.answers["/api/work-items/w-own/sessions/s-own/permission-hook"] = answer
     got, text, _ = await ask("permission-hook", {"harness": "cursor", "stdin": "{}"})
     assert got == status
     if body is not None:

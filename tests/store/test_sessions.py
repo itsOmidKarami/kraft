@@ -4,6 +4,8 @@ from support.store_fixtures import mk_item
 from kraft import db, events, store
 from kraft.usage import Usage
 
+W1 = {"work_item_id": "w1"}
+
 
 @pytest.fixture
 async def database(database):
@@ -31,7 +33,11 @@ def _session(database, sid, *, wid="w1", node_id="verify", hook_point="on.test.r
 
 
 def _exit(database, sid, status, *args, **kw):
-    return database.write(lambda c: store.session_exited(c, sid, status, *args, **kw))
+    return database.write(lambda c: store.session_exited(c, sid, status, *args, **kw, **W1))
+
+
+def _pause_usage(database, usage):
+    return database.write(lambda c: store.record_pause_usage(c, "s1", usage, **W1))
 
 
 def _row(database, sid, columns="*"):
@@ -67,7 +73,7 @@ async def test_session_lifecycle(database):
         "thread": 1,
     }
 
-    await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
+    await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5, **W1))
     row = _row(database, "s1")
     assert (row["status"], row["pid"], row["pid_start_time"]) == ("running", 4321, 111.5)
     started = _last_event(database)
@@ -157,7 +163,7 @@ async def test_escalation_threads_projection(database):
 
 async def test_session_unknown_sets_status_and_event(database):
     await _session(database, "s1")
-    await database.write(lambda c: store.session_unknown(c, "s1"))
+    await database.write(lambda c: store.session_unknown(c, "s1", **W1))
     row = _row(database, "s1", "status, exited_at")
     assert row["status"] == "unknown"
     assert row["exited_at"] is not None
@@ -168,8 +174,8 @@ async def test_session_unknown_sets_status_and_event(database):
 
 async def test_session_reattached_emits_event_without_row_change(database):
     await _session(database, "s1")
-    await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
-    await database.write(lambda c: store.session_reattached(c, "s1"))
+    await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5, **W1))
+    await database.write(lambda c: store.session_reattached(c, "s1", **W1))
     assert _row(database, "s1")["status"] == "running"  # unchanged
     ev = _last_event(database)
     assert ev["type"] == "session_reattached"
@@ -271,7 +277,7 @@ async def test_worker_session_events_carry_the_attempt(database):
     assert created["payload"]["session_id"] == "s2"
     assert created["payload"]["attempt"] == 2
 
-    await database.write(lambda c: store.session_running(c, "s2", 4321, 111.5))
+    await database.write(lambda c: store.session_running(c, "s2", 4321, 111.5, **W1))
     started = _last_event(database)
     assert started["type"] == "worker_session_started"
     assert started["payload"]["attempt"] == 2
@@ -376,7 +382,7 @@ async def test_reusable_session_ignores_a_non_done_status(database, status):
     per case, so no sibling clause can be what refuses it."""
     await _session(database, "s1", head_sha="sha-a")
     if status == "running":
-        await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5))
+        await database.write(lambda c: store.session_running(c, "s1", 4321, 111.5, **W1))
     else:
         await _exit(database, "s1", status)
     assert _reusable(database) is None
@@ -567,7 +573,7 @@ async def test_reusable_session_still_reuses_a_crash_recovery_after_an_older_rej
 async def _running_review(database):
     """A `chain_review` session, running: the shape a pause lands on."""
     await _session(database, "s1", node_id="chain_review", hook_point="gate_review")
-    await database.write(lambda c: store.session_running(c, "s1", 1, 1.0))
+    await database.write(lambda c: store.session_running(c, "s1", 1, 1.0, **W1))
 
 
 async def test_a_paused_session_records_the_usage_it_was_handed(database):
@@ -600,9 +606,7 @@ async def test_recording_pause_usage_is_a_no_op_on_a_session_that_moved_on(datab
     settled must not be reopened by a late writer."""
     await _running_review(database)
     await _exit(database, "s1", "done", None, Usage(10, 1, 0.01, "m"))
-    await database.write(
-        lambda c: store.record_pause_usage(c, "s1", Usage(999, 999, 9.99, "wrong"))
-    )
+    await _pause_usage(database, Usage(999, 999, 9.99, "wrong"))
     row = _row(database, "s1", "cost_usd, model")
     assert row["cost_usd"] == pytest.approx(0.01)
     assert row["model"] == "m"
@@ -614,7 +618,7 @@ async def test_a_pause_with_no_envelope_records_nothing_rather_than_zero(databas
     would be a claim."""
     await _running_review(database)
     await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
-    await database.write(lambda c: store.record_pause_usage(c, "s1", None))
+    await _pause_usage(database, None)
     row = _row(database, "s1", "cost_usd, tokens_in")
     assert row["cost_usd"] is None
     assert row["tokens_in"] is None
@@ -636,10 +640,10 @@ async def test_every_usage_writer_stores_the_cache_kinds_apart(database, writer)
     split = Usage(7, 3, 0.5, "m", tokens_cache_write=40, tokens_cache_read=900)
     await _running_review(database)
     if writer == "progress":
-        await database.write(lambda c: store.session_progress(c, "s1", split))
+        await database.write(lambda c: store.session_progress(c, "s1", split, **W1))
     elif writer == "pause":
         await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
-        await database.write(lambda c: store.record_pause_usage(c, "s1", split))
+        await _pause_usage(database, split)
     else:
         await _exit(database, "s1", "done", None, split)
     kinds = "tokens_in, tokens_cache_write, tokens_cache_read, tokens_out"
@@ -658,7 +662,7 @@ async def test_session_progress_estimates_cost_for_a_known_model(database):
     # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
     # round $2.00, easy to check without floating-point noise.
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.session_progress(c, "s1", live, **W1))
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] == pytest.approx(2.0)
     assert row["cost_estimated"] == 1
@@ -669,7 +673,7 @@ async def test_session_progress_estimates_nothing_for_an_unknown_model(database)
     the same shape as a finished session with no reported cost."""
     await _running_review(database)
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="some-model-nobody-priced")
-    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.session_progress(c, "s1", live, **W1))
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] is None
     assert row["cost_estimated"] == 0
@@ -680,7 +684,7 @@ async def test_exit_replaces_the_estimate_with_the_real_cost_and_clears_the_flag
     figure that stands once the session is done."""
     await _running_review(database)
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.session_progress(c, "s1", live, **W1))
     assert _row(database, "s1", "cost_estimated")["cost_estimated"] == 1
 
     await _exit(database, "s1", "done", None, Usage(1_000_000, 500, 3.33, "claude-sonnet-5"))
@@ -699,7 +703,7 @@ async def test_exit_with_no_reported_cost_keeps_an_estimate_from_final_tokens(da
     own number."""
     await _running_review(database)
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.session_progress(c, "s1", live, **W1))
     assert _row(database, "s1", "cost_usd")["cost_usd"] == pytest.approx(2.0)
 
     await _exit(database, "s1", "done", None, Usage(1_000_000, 500, None, "claude-sonnet-5"))
@@ -730,12 +734,10 @@ async def test_pause_also_clears_a_running_estimate(database):
     does."""
     await _running_review(database)
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.session_progress(c, "s1", live, **W1))
     await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
 
-    await database.write(
-        lambda c: store.record_pause_usage(c, "s1", Usage(1_000_000, 500, 3.33, "claude-sonnet-5"))
-    )
+    await _pause_usage(database, Usage(1_000_000, 500, 3.33, "claude-sonnet-5"))
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] == pytest.approx(3.33)
     assert row["cost_estimated"] == 0
@@ -748,9 +750,7 @@ async def test_pause_with_no_reported_cost_keeps_an_estimate_from_final_tokens(d
     await _running_review(database)
     await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
 
-    await database.write(
-        lambda c: store.record_pause_usage(c, "s1", Usage(1_000_000, 500, None, "claude-sonnet-5"))
-    )
+    await _pause_usage(database, Usage(1_000_000, 500, None, "claude-sonnet-5"))
     # claude-sonnet-5: $2/M input + $10/M output -- 1,000,000 input and 500
     # output is 2.0 + 0.005 = 2.005.
     row = _row(database, "s1", "cost_usd, cost_estimated")

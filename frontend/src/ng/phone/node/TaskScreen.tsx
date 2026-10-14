@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, FIX_LOOP, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, FIX_LOOP, isSessionDoc, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
@@ -46,7 +46,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
   const tab = (tabs.some((t) => t.id === place.tab) ? place.tab : tabs[0].id) as TaskTab;
   const name = esc ? "escalation" : loop ? taskName(path) : place.sel.task;
-  const mine = docs.filter((d) => at && (d.worker_session_id === at.id || (d.hook_point === path && d.attempt === at.attempt)));
+  const mine = docs.filter((d) => at && (isSessionDoc(d, at) || (d.hook_point === path && d.attempt === at.attempt)));
   const kind = at?.model ? "agent task" : "task";
   // A node the chain ran again reads one pass at a time: the screen says which.
   const pass = esc ? "" : passWords(item, nodeId, place.pass);
@@ -156,7 +156,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
             </Block>
           )
         )}
-        {tab === "log" && <TaskLog session={at} />}
+        {tab === "log" && <TaskLog workItemId={item.id} session={at} />}
         {tab === "config" && (
           <Facts rows={[
             ["path", <span key="p" className="ph-mono">{path}</span>],
@@ -171,10 +171,10 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   );
 }
 
-export function TaskLog({ session }: { session?: WorkerSession }) {
+export function TaskLog({ workItemId, session }: { workItemId: string; session?: WorkerSession }) {
   const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
   const running = session?.status === "running" || session?.status === "pending";
-  const { lines, error } = useLog(session?.id ?? null, !!running);
+  const { lines, error } = useLog(workItemId, session?.id ?? null, !!running);
   const shown = (lines ?? []).filter((l) => src === "all" || l.src === src);
   return (
     <>

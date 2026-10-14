@@ -39,7 +39,7 @@ The answer carries:
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
-| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. |
+| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `adopted`, `resolved_from_file` and `unknown` entry is `<work item id>/<session id>`, since a session id is unique only within its work item. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 
@@ -99,6 +99,54 @@ ReDoc's "Redocly" logo is not fetched.
 
 On a machine without internet access,
 load `/openapi.json` into your own OpenAPI viewer.
+
+## Work item IDs in a path
+
+The `{id}` segment of a route under `/api/work-items/` may be the start of a
+work item ID instead of all of it. A start is 4 characters or more, from `0-9`
+and `a-z`. Kraft makes it the whole ID before the route runs, so the answer
+and everything the route does name the whole ID.
+
+| What the segment is | Answer |
+|---|---|
+| An item's whole ID | That item, even when it is also the start of a longer ID. |
+| The start of exactly one item's ID | That item. |
+| The start of more than one | `409`, naming every ID it starts. |
+| Anything else, a value under 4 characters or one with another character included | `404 unknown work item`, as for an ID that does not exist. |
+
+A caller the [refusals](#refusals) above turn away gets that refusal first, so
+it learns nothing about which IDs exist. A worker inside a network sandbox
+reaches Kraft through its own channel, which still takes only its own item's
+whole ID.
+
+## Session IDs in a path
+
+A session ID is unique only within its work item, so a session's routes are
+under its item:
+
+| Route | What it does |
+|---|---|
+| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. |
+| `POST /api/work-items/{id}/sessions/{session}/permission` | A worker's [permission](/reference/permissions) ask. |
+| `POST /api/work-items/{id}/sessions/{session}/permission-hook` | A sandboxed worker's permission hook. |
+
+`{id}` may be the start of the item's ID, as above. `{session}` is always the
+whole session ID. A session of another item answers `404 unknown session`.
+
+The older routes, `/api/worker-sessions/{session}/log`, `/permission` and
+`/permission-hook`, still answer, for a client built before session IDs were
+per item. Given an ID exactly one session has, every ID from before then and
+most since, they answer as the route under its item does. Given one that no
+session or more than one session has, they answer `404`, ending
+`use /work-items/{wid}/sessions/{sid}`.
+
+A worker's own session travels in the `X-Kraft-Session-Id` header as
+`<work item id>/<session id>`, from [`KRAFT_SESSION_ID`](/reference/configuration/environment-variables#kraft_session_id).
+A bare ID is a session from before then, so it is accepted only at that
+session's 32 characters. Any other value, a bare 6-character session ID
+included, answers `400`. A sandboxed worker's channel admits only its own session's
+`permission` and `permission-hook` routes, by both whole IDs. It admits the
+older routes only for a session from before then, by its whole 32-character ID.
 
 ## Routes the pages document
 

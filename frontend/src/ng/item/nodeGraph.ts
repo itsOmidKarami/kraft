@@ -1,5 +1,5 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, WorkerSession, WorkItemDocument } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
@@ -117,6 +117,13 @@ export const settled = (item: ItemDetail, path: string) => {
 export const statusWords = (s: WorkerSession) => (s.skipped ? "skipped" : s.status.replaceAll("_", " "));
 
 /** What a session draws as: its glyph state and the one meta word (Decisions §5 Task meta: duration only). */
+/** Whether `d` is a document session `s` wrote: its id, and its item, since a session id is
+ *  unique only within its item. A link with no item (an older server's, or one written before
+ *  the server recorded it) is a session id from before, unique on its own. */
+export function isSessionDoc(d: Pick<WorkItemDocument, "worker_session_id" | "session_work_item_id">, s: Pick<WorkerSession, "id" | "work_item_id">): boolean {
+  return d.worker_session_id === s.id && (d.session_work_item_id ?? s.work_item_id) === s.work_item_id;
+}
+
 export function sessionLook(s: WorkerSession | undefined, now: number): Look {
   if (!s) return { state: "todo" };
   if (s.skipped) return SKIPPED;

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from support.harness import commit_all, make_repo
 
-from kraft import config, review
+from kraft import config, item_paths, review
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
@@ -73,24 +73,20 @@ def test_write_package_names_the_file_by_the_session(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
-    results = tmp_path / "results"
-    results.mkdir()
+    results = tmp_path / "items" / "w1" / "sessions" / "sess1"
 
-    path = review.write_package(results, repo, base, "sess1")
-    assert path is not None
-    assert path.name == "sess1.review.md"
+    path = review.write_package(results / "review.md", repo, base)
+    assert path == results / "review.md", "where it is told, its folder made"
     body = path.read_text()
     assert "## Commits" in body and "## Files changed" in body and "## Diff" in body
     assert "a + b" in body
 
 
-def test_two_items_on_the_same_base_do_not_share_a_package(tmp_path):
-    """`run_dirs.results` is one directory for every work item, and uncommitted
-    work is the normal mid-chain state — so naming by the base..HEAD range gave
-    two items branched from the same commit the same file, and one reviewer the
-    other item's diff."""
-    results = tmp_path / "results"
-    results.mkdir()
+def test_two_items_on_the_same_base_do_not_share_a_package(tmp_path, run_dirs):
+    """Uncommitted work is the normal mid-chain state — so naming by the
+    base..HEAD range gave two items branched from the same commit the same
+    file, and one reviewer the other item's diff. A package is its
+    session's, in its own folder."""
     repo_a = make_repo(tmp_path, name="a")
     repo_b = make_repo(tmp_path, name="b")
     # same base sha, neither has committed anything past it
@@ -98,8 +94,12 @@ def test_two_items_on_the_same_base_do_not_share_a_package(tmp_path):
     (repo_a / "calc.py").write_text("A CHANGED THIS\n")
     (repo_b / "calc.py").write_text("B CHANGED THIS\n")
 
-    a = review.write_package(results, repo_a, _head(repo_a), "sess-a")
-    b = review.write_package(results, repo_b, _head(repo_b), "sess-b")
+    a = review.write_package(
+        item_paths.session_files(run_dirs, "wa", "sa").review, repo_a, _head(repo_a)
+    )
+    b = review.write_package(
+        item_paths.session_files(run_dirs, "wb", "sb").review, repo_b, _head(repo_b)
+    )
     assert a is not None and b is not None
     assert a != b
     assert "A CHANGED THIS" in a.read_text()
@@ -109,7 +109,7 @@ def test_two_items_on_the_same_base_do_not_share_a_package(tmp_path):
 def test_write_package_returns_none_when_git_fails(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
-    assert review.write_package(results, make_repo(tmp_path), "not-a-ref", "sess1") is None
+    assert review.write_package(results / "s.review.md", make_repo(tmp_path), "not-a-ref") is None
     assert list(results.iterdir()) == []
 
 
@@ -149,14 +149,14 @@ def test_the_package_diffs_from_the_given_head_when_one_is_known(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
 
-    path = review.write_package(results, repo, base, "sess-since", since=reviewed)
+    path = review.write_package(results / "sess-since.review.md", repo, base, since=reviewed)
     body = path.read_text()
     assert "the new fix" in body
     assert "reviewed already" not in body, "round 0's work must not be re-read every round"
     assert [f["path"] for f in review.read_change(repo, reviewed).files] == ["round1.py"]
 
     # ... and the whole-branch package, for contrast, still carries both
-    whole = review.write_package(results, repo, base, "sess-whole").read_text()
+    whole = review.write_package(results / "sess-whole.review.md", repo, base).read_text()
     assert "reviewed already" in whole and "the new fix" in whole
 
 
@@ -171,7 +171,9 @@ def test_the_package_says_where_the_range_starts_and_how_to_widen_it(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
 
-    body = review.write_package(results, repo, base, "sess-hdr", since=reviewed).read_text()
+    body = review.write_package(
+        results / "sess-hdr.review.md", repo, base, since=reviewed
+    ).read_text()
     assert reviewed[:12] in body, "the reviewer has to know where the range starts"
     assert f"git diff {base}...HEAD" in body, "and how to see the rest of the branch"
 
@@ -186,7 +188,7 @@ def test_no_since_is_the_whole_branch(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
 
-    body = review.write_package(results, repo, base, "sess-full").read_text()
+    body = review.write_package(results / "sess-full.review.md", repo, base).read_text()
     assert "git diff" not in body, "nothing to widen to: this IS the whole branch"
 
 
@@ -202,7 +204,7 @@ def test_write_package_still_spans_base_to_working_tree(tmp_path):
     results = tmp_path / "results"
     results.mkdir()
 
-    path = review.write_package(results, repo, base, "sess-span")
+    path = review.write_package(results / "sess-span.review.md", repo, base)
     assert path is not None
     body = path.read_text()
     assert "landed paperwork" in body

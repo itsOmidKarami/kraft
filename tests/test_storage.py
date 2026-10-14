@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 from support.archive import days_ago, seed_completed_item
+from support.deep_tree import deep_chain, opens_during
 
-from kraft import policy, storage
+from kraft import item_paths, policy, storage
 
 MB = 1024**2
 
@@ -58,6 +61,142 @@ def test_measure_totals_each_item_and_category(tmp_path):
     assert used.governed < 6 * MB  # logs and databases are not governed
 
 
+@pytest.mark.parametrize("items", ["folder", "link"], ids=["items-folder", "items-is-a-link"])
+def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path, items):
+    """Of an item's own folder, what a worker writes is governed: its
+    sandbox home, which is also the item's (archiving removes it), and its
+    `docs/` and sessions' `out/`, which archiving keeps. Kraft's copies and
+    session files are not. A `run/items` moved elsewhere and linked is
+    Kraft's, and counted as `worktrees/` is."""
+    run = tmp_path / "run"
+    run.mkdir()
+    if items == "link":
+        (tmp_path / "elsewhere").mkdir()
+        (run / "items").symlink_to(tmp_path / "elsewhere")
+    item = run / "items" / "w1"
+    _fill(item / "sandbox-home" / "f")
+    _fill(item / "docs" / "spec.md", 2 * MB)
+    _fill(item / "sessions" / "s1" / "out" / "result.json", 2 * MB)
+    for part in ("history/spec.1.md", "filed/spec.md", "sessions/s1/session.log"):
+        _fill(item / part, 4096)
+
+    used = storage.measure(run)
+
+    assert set(used.items) == {"w1"}
+    assert used.items["w1"] == used.categories["sandboxes"]
+    assert MB <= used.items["w1"] < 2 * MB
+    assert 4 * MB <= used.categories["documents"] < 5 * MB
+    assert used.documents == {"w1": used.categories["documents"]}
+    assert 2 * 4096 <= used.categories["attachments"] < MB
+    assert 4096 <= used.categories["logs"] < MB
+    assert used.categories["other"] == 0
+    assert used.governed == sum(used.categories[c] for c in ("worktrees", "sandboxes", "documents"))
+
+
+@pytest.mark.parametrize("when", ["open", "scandir"], ids=["before-open", "before-listing"])
+def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypatch, when):
+    """A worker can swap a folder in its home or worktree for a link to `/`
+    while the walk runs: after the walk saw it in its parent and before it
+    opens it, or after it opened it and before it lists it. The walk opens
+    each folder with no link followed and lists it by that descriptor, so
+    it counts what was there, never what the link points at."""
+    _fill(tmp_path / "outside" / "big", 4 * MB)
+    cache = tmp_path / "run" / "items" / "w1" / "sandbox-home" / "cache"
+    _fill(cache / "f", 4096)
+    original = os.stat(cache)
+    real = getattr(os, when)
+    swapped = []
+
+    def swap():
+        swapped.append(True)
+        cache.rename(cache.with_name("moved"))
+        cache.symlink_to(tmp_path / "outside")
+
+    def swap_then_open(name, flags, *a, dir_fd=None, **kw):
+        if not swapped and dir_fd is not None and name == "cache":
+            swap()
+        return real(name, flags, *a, dir_fd=dir_fd, **kw)
+
+    def swap_then_list(arg="."):
+        try:
+            seen = os.fstat(arg) if isinstance(arg, int) else os.stat(arg)
+        except OSError:
+            seen = None
+        if not swapped and seen is not None and os.path.samestat(seen, original):
+            swap()
+        return real(arg)
+
+    monkeypatch.setattr(os, when, swap_then_open if when == "open" else swap_then_list)
+
+    used = storage.measure(tmp_path / "run")
+
+    assert swapped, "the walk never reached the folder"
+    assert used.categories["sandboxes"] < MB
+
+
+_DEEP_MEASURE = """
+import errno, json, os, resource, sys
+from pathlib import Path
+from kraft import storage
+
+real_open, emfile = os.open, []
+
+def counting_open(*a, **kw):
+    try:
+        return real_open(*a, **kw)
+    except OSError as exc:
+        if exc.errno == errno.EMFILE:
+            emfile.append(a[0])
+        raise
+
+os.open = counting_open
+resource.setrlimit(resource.RLIMIT_NOFILE, (64, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+used = storage.measure(Path(sys.argv[1]))
+print(json.dumps({"a": used.items.get("a", 0), "emfile": len(emfile)}))
+"""
+
+
+def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
+    """A worker can nest folders far deeper than the daemon's open-file limit
+    (256 under launchd). The walk holds a bounded number of descriptors, so
+    it never runs the daemon out of them, and counts the file at the bottom."""
+    deep_chain(tmp_path / "run" / "worktrees" / "a", 300, leaf=os.urandom(4 * MB))
+
+    done = subprocess.run(
+        [sys.executable, "-c", _DEEP_MEASURE, str(tmp_path / "run")],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    seen = json.loads(done.stdout)
+    assert seen["emfile"] == 0
+    assert seen["a"] >= 4 * MB
+
+
+def test_a_deep_tree_is_counted_with_opens_linear_in_its_folders(tmp_path):
+    """Folders deeper than the walk holds descriptors for are gone back up to
+    by `..`, not reopened from the top each time: reopening made 2,000 levels
+    take 2.6 seconds and 50,000 half an hour, and a worker makes either at
+    almost no cost. 5,000 levels take about two opens a folder, where
+    reopening took some 12.5 million. Counted, not timed, so a loaded
+    machine cannot fail it, and by the audit hook, which sees every open
+    however the walk binds `os.open`."""
+    run = tmp_path / "run"
+    deep_chain(run / "worktrees" / "a", 5000, leaf=os.urandom(MB))
+    try:
+        opens, items = opens_during(
+            "from kraft import storage", f"storage.measure({str(run)!r}).items"
+        )
+
+        assert items["a"] >= MB
+        assert 5000 <= opens < 10 * 5000
+    finally:
+        item_paths.remove_tree(run)
+
+
 def test_measure_counts_a_hard_linked_file_once(tmp_path):
     _fill(tmp_path / "worktrees" / "a" / "f")
     before = storage.measure(tmp_path).governed
@@ -65,11 +204,16 @@ def test_measure_counts_a_hard_linked_file_once(tmp_path):
     assert storage.measure(tmp_path).governed - before < MB // 2
 
 
-def test_measure_does_not_follow_a_symlink(tmp_path):
+@pytest.mark.parametrize(
+    "where",
+    ["worktrees/a", "items/a/sandbox-home", "items/a/docs", "items/a"],
+    ids=["worktree", "item-sandbox-home", "item-docs", "item-folder"],
+)
+def test_measure_does_not_follow_a_symlink(tmp_path, where):
     _fill(tmp_path / "outside" / "big", 4 * MB)
-    (tmp_path / "run" / "worktrees" / "a").mkdir(parents=True)
-    (tmp_path / "run" / "worktrees" / "a" / "link").symlink_to(tmp_path / "outside")
-    assert storage.measure(tmp_path / "run").governed < MB
+    (tmp_path / "run" / where).mkdir(parents=True)
+    (tmp_path / "run" / where / "link").symlink_to(tmp_path / "outside")
+    assert sum(storage.measure(tmp_path / "run").categories.values()) < MB
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-0 directory")
@@ -85,12 +229,32 @@ def test_measure_skips_what_it_cannot_read(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("governed", "state"),
-    [(80, "ok"), (81, "over_quota"), (100, "over_quota"), (101, "held")],
-    ids=["at-quota", "over-quota", "at-limit", "over-limit"],
+    ("governed", "documents", "state"),
+    [
+        (80, 0, "ok"),
+        (81, 0, "over_quota"),
+        (100, 0, "over_quota"),
+        (101, 0, "held"),
+        (81, 81, "over_quota"),
+        (150, 50, "over_quota"),
+        (150, 49, "held"),
+    ],
+    ids=[
+        "at-quota",
+        "over-quota",
+        "at-limit",
+        "over-limit",
+        "documents-over-quota",
+        "documents-over-limit",
+        "reclaimable-over-limit",
+    ],
 )
-def test_state_reads_usage_against_quota_and_limit(governed, state):
-    assert storage.state_of(_policy(100, 80), _usage(governed)) == state
+def test_state_reads_usage_against_quota_and_limit(governed, documents, state):
+    """Documents count toward the quota, but archiving keeps them: only what
+    archiving frees over the limit holds starts, or one worker filling its
+    `docs/` would hold every start on the machine for good."""
+    used = _usage(governed, categories={"documents": documents})
+    assert storage.state_of(_policy(100, 80), used) == state
 
 
 def test_state_is_none_until_measured():
@@ -112,6 +276,13 @@ def test_only_a_start_that_would_make_a_worktree_is_held(tmp_path):
     assert storage.holds(st, "has") is False
     st.storage_usage = _usage(100)
     assert storage.holds(st, "new") is False
+
+
+def test_a_held_start_is_told_the_figure_compared_with_the_limit():
+    """Not the governed figure: the documents in it hold no start."""
+    st = SimpleNamespace(policy=_policy(100, 80), storage_usage=_usage(150, {}, {"documents": 40}))
+    assert storage.state_of(st.policy, st.storage_usage) == "held"
+    assert storage.figures(st) == {"used_bytes": 110, "limit_bytes": 100}
 
 
 def test_forget_takes_an_items_bytes_off_the_cache():
@@ -149,8 +320,12 @@ async def test_refresh_runs_one_walk_for_two_callers(tmp_path, monkeypatch):
     assert storage.usage(app.state).governed == 7
 
 
-async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypatch):
-    (tmp_path / "worktrees" / "here").mkdir(parents=True)
+@pytest.mark.parametrize(
+    "left", ["worktrees/here", "items/here/sandbox-home"], ids=["worktree", "item-sandbox-home"]
+)
+async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypatch, left):
+    (tmp_path / left).mkdir(parents=True)
+    (tmp_path / "items" / "gone" / "docs").mkdir(parents=True)  # kept by archive, not governed
     monkeypatch.setattr(
         storage, "measure", lambda base, stop=None: _usage(7, {"here": 2, "gone": 5})
     )
@@ -159,6 +334,30 @@ async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypat
     used = await storage.refresh(app)
 
     assert (used.governed, used.items) == (2, {"here": 2})
+
+
+@pytest.mark.parametrize("abandoned", [False, True], ids=["archived", "abandoned"])
+async def test_refresh_drops_the_documents_of_an_item_abandoned_while_it_walked(
+    tmp_path, monkeypatch, abandoned
+):
+    """Abandoning removes an item's folder and takes its documents off the
+    figure; a walk that measured them before must not put them back. An
+    archived item keeps its folder, and its documents stay counted."""
+    if not abandoned:
+        (tmp_path / "items" / "w1" / "docs").mkdir(parents=True)
+    monkeypatch.setattr(
+        storage,
+        "measure",
+        lambda base, stop=None: storage.Usage(
+            "2026-01-01T00:00:00+00:00", 10, {}, {"documents": 10}, {"w1": 10}
+        ),
+    )
+    app = SimpleNamespace(state=SimpleNamespace(run_dirs=SimpleNamespace(base=tmp_path)))
+
+    used = await storage.refresh(app)
+
+    left = (0, 0, {}) if abandoned else (10, 10, {"w1": 10})
+    assert (used.governed, used.categories["documents"], used.documents) == left
 
 
 def test_a_stopped_walk_returns_early(tmp_path):
@@ -188,6 +387,18 @@ async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatc
     await storage.tick(app)
 
     assert storage.usage(app.state) is None
+
+
+async def test_tick_with_no_measurement_acts_on_nothing(tmp_path, stub_app, monkeypatch):
+    """Shutdown can stop the first walk before it caches anything."""
+    app = stub_app(policy=_policy(100, 80, 0))
+
+    async def stopped(_app):
+        return None
+
+    monkeypatch.setattr(storage, "refresh", stopped)
+
+    assert await storage.tick(app) == []
 
 
 def _state(tmp_path, *, limit, quota, min_age_s) -> dict:
@@ -232,6 +443,53 @@ async def test_tick_over_limit_archives_oldest_first_down_to_quota(
     )
     payload = json.loads(event["payload"])
     assert (payload["by"], payload["reason"]) == ("auto", "storage")
+
+
+@pytest.mark.parametrize(
+    ("worktrees", "documents", "archived", "named"),
+    [
+        (110, 80, ["old", "mid"], True),
+        (200, 100, ["old", "mid", "new"], False),
+        (60, 80, [], True),
+    ],
+    ids=["documents-keep-it-over", "worktrees-keep-it-over", "only-documents-over"],
+)
+async def test_tick_archives_only_down_to_what_archiving_can_free(
+    tmp_path, repo, stub_app, monkeypatch, caplog, worktrees, documents, archived, named
+):
+    """Items' documents are governed, but archiving keeps them: a worker that
+    filled its `docs/` must not have every finished item archived without
+    the figure coming down. Archiving stops once what it can free is under
+    quota, and the log names the item whose documents hold the rest, but
+    only when documents are what keeps usage over the limit: with more to
+    archive than the limit allows, abandoning would not bring it under.
+    Documents alone over the limit hold nothing, so nothing is archived."""
+    app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
+    old, mid, new = await _three(app, repo)
+    # `mid` was archived, not abandoned: its folder, and so its documents, stay.
+    item_paths.item_dir(app.state.run_dirs, "mid").mkdir(parents=True)
+    monkeypatch.setattr(
+        storage,
+        "measure",
+        lambda base, stop=None: storage.Usage(
+            "2026-01-01T00:00:00+00:00",
+            worktrees + documents,
+            {"old": 30, "mid": 30, "new": 30},
+            {"worktrees": worktrees, "documents": documents},
+            {"mid": documents},
+        ),
+    )
+
+    assert await storage.tick(app) == archived
+
+    assert [p.exists() for p in (old, mid, new)] == [wid not in archived for wid in _IDS]
+    assert storage.usage(app.state).governed == worktrees + documents - 30 * len(archived)
+    holders = [r.getMessage() for r in caplog.records if "archiving keeps" in r.getMessage()]
+    assert len(holders) == named
+    assert all("mid" in h and "abandon" in h for h in holders)
+
+
+_IDS = ("old", "mid", "new")
 
 
 async def test_tick_never_takes_an_item_newer_than_min_age(tmp_path, repo, stub_app, monkeypatch):
@@ -374,31 +632,41 @@ def test_refusal_says_why_an_item_cannot_be_archived(row, why):
 
 
 def test_report_joins_the_measurement_to_the_work_items():
+    """Each item with its worktree and home (`bytes`, what archiving frees)
+    and its documents (kept by archiving), so the page can name the item
+    whose documents hold the space, an archived one included."""
     used = storage.Usage(
         "2026-01-01T00:00:00+00:00",
-        155,
+        199,
         {"done": 30, "live": 50, "old": 5, "ghost": 70},
-        {"worktrees": 155, "sandboxes": 0},
+        {"worktrees": 155, "sandboxes": 0, "documents": 44},
+        {"done": 4, "kept": 40},
     )
     rows = {
         "done": _row("completed", title="Done one"),
         "live": _row("active", title="Live one"),
         "old": _row("completed", "2026-01-02T00:00:00+00:00"),
+        "kept": _row("completed", "2026-01-02T00:00:00+00:00"),
     }
 
     got = storage.report(_policy(150, 120), used, rows)
 
-    assert [(i["id"], i["bytes"], i["reclaimable"], i["archived"]) for i in got["items"]] == [
-        ("live", 50, False, False),
-        ("done", 30, True, False),
-        ("old", 5, False, True),
+    assert [
+        (i["id"], i["bytes"], i["documents_bytes"], i["reclaimable"], i["archived"])
+        for i in got["items"]
+    ] == [
+        ("live", 50, 0, False, False),
+        ("kept", 0, 40, False, True),
+        ("done", 30, 4, True, False),
+        ("old", 5, 0, False, True),
     ]
-    assert got["items"][1] == {
+    assert got["items"][2] == {
         "id": "done",
         "title": "Done one",
         "status": "completed",
         "archived": False,
         "bytes": 30,
+        "documents_bytes": 4,
         "updated_at": "2026-01-01T00:00:00+00:00",
         "reclaimable": True,
     }
@@ -408,7 +676,7 @@ def test_report_joins_the_measurement_to_the_work_items():
     assert (got["measured_at"], got["state"], got["used_bytes"]) == (
         "2026-01-01T00:00:00+00:00",
         "held",
-        155,
+        199,
     )
     assert (got["quota_bytes"], got["limit_bytes"]) == (120, 150)
 

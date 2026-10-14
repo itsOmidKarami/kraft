@@ -63,7 +63,7 @@ export async function createItem(page: Page, title: string, chain: string): Prom
 
 /** The id of the item the composer just created, from where it landed. */
 export async function createdId(page: Page): Promise<string> {
-  await expect(page).toHaveURL(/[?&]sel=|\/work-items\/[0-9a-f]{32}/);
+  await expect(page).toHaveURL(/[?&]sel=|\/work-items\/[0-9a-z]{8,32}/);
   const url = new URL(page.url());
   return url.searchParams.get("sel") ?? url.pathname.split("/").pop()!;
 }

@@ -23,7 +23,7 @@ function mount(it: ReturnType<typeof detail>, path: string | { pathname: string;
     "GET /work-items/w1": [200, it],
     "GET /work-items/w1/compare": [200, { files: [] }],
     "GET /work-items/w1/draft": [200, { ops: [] }],
-    "GET /worker-sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }] }],
+    "GET /work-items/w1/sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }] }],
     ...answers,
   });
   render(
@@ -170,7 +170,7 @@ describe("Pause (C.5)", () => {
   it("a Cancel while the pause is still being answered does not let the answer close the screen under it (Kraft-9d8b2.54)", async () => {
     let answer = () => {};
     const gate = new Promise<void>((r) => (answer = r));
-    stubFetch({ "GET /work-items/w1": [200, item("running")], "GET /work-items/w1/compare": [200, { files: [] }], "GET /worker-sessions/s1/log": [200, { lines: [] }] });
+    stubFetch({ "GET /work-items/w1": [200, item("running")], "GET /work-items/w1/compare": [200, { files: [] }], "GET /work-items/w1/sessions/s1/log": [200, { lines: [] }] });
     const plain = (globalThis.fetch as unknown as (u: string, i?: RequestInit) => Promise<Response>);
     vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => (String(u).endsWith("/pause") ? (await gate, new Response("{}", { status: 200 })) : plain(u, i))));
     render(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from support.api import _poll_events, _post_default, _set_status
-from support.harness import git
+from support.harness import git, write
 
 from kraft.adapters.forge.git import PUSHED_REFS
 from kraft.api.routes import lifecycle
@@ -30,6 +30,27 @@ def test_archive_reclaims_the_worktree_and_keeps_status(client, repo):
     detail = client.get(f"/api/work-items/{wid}").json()
     assert detail["status"] == "completed"
     assert detail["archived_at"]
+
+
+@pytest.mark.parametrize(
+    "home", ["items/{wid}/sandbox-home", "sandbox-home/{wid}"], ids=["new-home", "old-home"]
+)
+def test_archiving_keeps_the_item_s_folder_but_its_sandbox_home(client, repo, home):
+    """The documents, their versions, what was filed and the session files
+    stay for the archived item's page; the sandbox home, wherever it is (an
+    older item's in `sandbox-home/`), is a cache, and goes."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "completed")
+    run = Path(os.environ["KRAFT_RUN_DIR"])
+    parts = ("docs/spec.md", "history/spec.1.md", "filed/spec.md", "sessions/s1/session.log")
+    kept = [write(run / "items" / wid, p, "x") for p in parts]
+    cache = write(run, f"{home.format(wid=wid)}/.cache/x", "x")
+
+    assert client.post(f"/api/work-items/{wid}/archive").status_code == 200
+
+    assert [p.read_text() for p in kept] == ["x"] * len(kept)
+    assert not cache.parent.parent.exists()
 
 
 @pytest.mark.parametrize(

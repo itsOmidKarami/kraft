@@ -83,7 +83,7 @@ def test_a_terminal_action_stops_active_work(client, repo, monkeypatch, verb):
                 result_path="/r",
             )
         )
-        await db.write(lambda c: store.session_running(c, "s-review", 4242, 1.0))
+        await db.write(lambda c: store.session_running(c, "s-review", 4242, 1.0, work_item_id=wid))
 
     client.portal.call(seed)
     _set_status(wid, "active")

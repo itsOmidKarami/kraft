@@ -24,6 +24,7 @@ from support.api import (
 )
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
+from kraft import item_paths
 from kraft.adapters import beads
 from kraft.api.routes.work_items import NewWorkItem
 
@@ -504,7 +505,7 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(client, tm
     item = client.get(f"/api/work-items/{wid}").json()
     # Trimming a gate is irreversible, so intake copies the plan into
     # Kraft's own storage and reports that copy as `source` (Kraft-eqgn).
-    stored_dir = client.app.state.run_dirs.attachments / wid
+    stored_dir = item_paths.filed_dir(client.app.state.run_dirs, wid)
     expected = [{"kind": "plan", "path": ".engineering/plans/p.md"}]
     assert [{k: v for k, v in a.items() if k != "source"} for a in item["attachments"]] == expected
     assert Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
@@ -639,7 +640,9 @@ def test_intake_accepts_an_attachment_from_another_worktree_of_the_repo(client, 
     assert stored[0]["path"] == ".engineering/specs/s.md"
     # and `source` is Kraft's own copy, not the worktree original --
     # a trimmed gate must be self-backed (Kraft-eqgn).
-    assert Path(stored[0]["source"]).is_relative_to(client.app.state.run_dirs.attachments / wid)
+    assert Path(stored[0]["source"]).is_relative_to(
+        item_paths.filed_dir(client.app.state.run_dirs, wid)
+    )
     assert Path(stored[0]["source"]).read_text() == spec.read_text()
 
 

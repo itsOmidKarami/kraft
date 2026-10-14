@@ -72,7 +72,9 @@ def test_cancel_preview_of_a_running_item_names_its_session(client, repo, monkey
             result_path="/r",
         ),
     )
-    client.portal.call(db.write, lambda c: store.session_running(c, "s-running", 4242, 1.0))
+    client.portal.call(
+        db.write, lambda c: store.session_running(c, "s-running", 4242, 1.0, work_item_id=wid)
+    )
     _set_status(wid, "active")
 
     r = client.get(f"/api/work-items/{wid}/cancel-preview")

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from kraft import item_paths
+
 
 def _doc(repo: Path, rel: str, text: str) -> str:
     path = repo / rel
@@ -30,6 +32,11 @@ def _file(client, repo, **body) -> str:
 
 def _item(client, wid) -> dict:
     return client.get(f"/api/work-items/{wid}").json()
+
+
+def _filed(client, wid) -> Path:
+    """Where intake keeps the item's attachment copies."""
+    return item_paths.filed_dir(client.app.state.run_dirs, wid)
 
 
 def _nodes(item) -> list[str]:
@@ -60,7 +67,7 @@ def test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan(client, repo):
     assert Path(after["spec"]["source"]).read_text() == "# spec v2\n"
     assert after["plan"] == before["plan"]
     # The superseded snapshot does not linger beside the one the row names.
-    stored = client.app.state.run_dirs.attachments / wid
+    stored = _filed(client, wid)
     assert sorted(p.name for p in stored.iterdir()) == sorted(
         Path(a["source"]).name for a in after.values()
     )
@@ -86,7 +93,7 @@ def test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate(client, 
     item = _item(client, wid)
     assert item["attachments"] == []
     assert _nodes(item)[:2] == ["spec", "spec_approval"]
-    assert not any((client.app.state.run_dirs.attachments / wid).iterdir())
+    assert not any(_filed(client, wid).iterdir())
 
 
 def test_an_attachment_patch_keeps_the_nodes_skipped_at_intake(client, repo):
@@ -120,7 +127,7 @@ def test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot(clie
     after = _item(client, wid)
     assert after["attachments"] == before["attachments"]
     assert after["materialized_chain"] == before["materialized_chain"]
-    assert [p.name for p in (client.app.state.run_dirs.attachments / wid).iterdir()] == [
+    assert [p.name for p in _filed(client, wid).iterdir()] == [
         Path(before["attachments"][0]["source"]).name
     ]
 
@@ -185,9 +192,7 @@ def test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with(
 
     assert r.status_code == 409, r.text
     assert _item(client, wid)["attachments"] == filed
-    assert [p.name for p in (client.app.state.run_dirs.attachments / wid).iterdir()] == [
-        Path(filed[0]["source"]).name
-    ]
+    assert [p.name for p in _filed(client, wid).iterdir()] == [Path(filed[0]["source"]).name]
     assert Path(filed[0]["source"]).read_text() == "# filed\n"
 
 
@@ -288,9 +293,7 @@ def test_a_patch_racing_another_patch_is_refused_and_the_winner_keeps_its_files(
     assert r.status_code == 409, r.text
     assert "changed" in r.json()["detail"]
     assert _item(client, wid)["attachments"] == [filed["plan"]]
-    assert [p.name for p in (client.app.state.run_dirs.attachments / wid).iterdir()] == [
-        Path(filed["plan"]["source"]).name
-    ]
+    assert [p.name for p in _filed(client, wid).iterdir()] == [Path(filed["plan"]["source"]).name]
 
 
 # --- GET /work-items/{id}/attachments/{kind}: reading one before start ------
@@ -328,9 +331,40 @@ def test_an_attachment_reads_from_the_snapshot_and_follows_a_revision(client, re
     assert client.get(f"/api/work-items/{wid}/attachments/plan").json()["title"] == "Plan two"
 
 
+@pytest.mark.parametrize("stored", ["filed", "older-attachments", "run-dir-spelled-otherwise"])
+def test_an_attachment_reads_from_where_it_was_stored(client, repo, stored):
+    """A copy is found by the file name its row records, in one of the
+    item's own copy folders: `filed/`, or `attachments/<id>/` for an item
+    filed before the upgrade, whose copy was never moved. The row's folder
+    is not compared, so a `KRAFT_RUN_DIR` moved or spelled another way since
+    filing still finds it."""
+    wid = _file(client, repo, attachments=[{"kind": "spec", "path": _doc(repo, "s.md", "# s\n")}])
+    [a] = _item(client, wid)["attachments"]
+    source = a["source"]
+    if stored == "older-attachments":
+        older = client.app.state.run_dirs.attachments / wid / Path(source).name
+        older.parent.mkdir(parents=True)
+        Path(source).rename(older)
+        source = str(older)
+    elif stored == "run-dir-spelled-otherwise":
+        source = f"/old/kraft/run/attachments/{wid}/{Path(source).name}"
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute(
+        "UPDATE work_items SET attachments = ? WHERE id = ?",
+        (json.dumps([{**a, "source": source}]), wid),
+    )
+    conn.commit()
+    conn.close()
+
+    got = client.get(f"/api/work-items/{wid}/attachments/spec")
+
+    assert got.status_code == 200, got.text
+    assert got.json()["content"] == "# s\n"
+
+
 def test_an_attachment_whose_snapshot_is_gone_is_a_404_saying_so(client, repo):
     wid = _file(client, repo, attachments=[{"kind": "spec", "path": _doc(repo, "s.md", "# s\n")}])
-    for f in (client.app.state.run_dirs.attachments / wid).iterdir():
+    for f in _filed(client, wid).iterdir():
         f.unlink()
 
     got = client.get(f"/api/work-items/{wid}/attachments/spec")

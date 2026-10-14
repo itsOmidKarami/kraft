@@ -34,6 +34,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from support.harness import own_files
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
@@ -97,7 +98,7 @@ def _sweep_dead_runs(cli: str) -> None:
         # refuses to remove first.
         names = sorted(run(*listing, "--filter", "label=kraft.home").split(), key=len)
         for name in names:
-            owner = re.fullmatch(r"kraft-(?:relay-(?:b-)?|egress-)?s(\d+)", name)
+            owner = re.fullmatch(r"kraft-(?:relay-(?:b-)?|egress-)?(?:w1-)?s(\d+)", name)
             if owner is None or not _dead(int(owner[1])):
                 continue
             home = run(kind, "inspect", "-f", f'{{{{index {labels} "kraft.home"}}}}', name)
@@ -217,12 +218,15 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     modes: list[tuple[str, ...]] = []
     real_close = docker.DockerBackend.close_session
 
-    async def close_session(self, session_id):
+    async def close_session(self, session_id, *, work_item_id):
         inspect = [runtime.cli, "inspect", "-f", "{{.HostConfig.NetworkMode}}"]
-        relays = (docker.relay_name(session_id), docker.relay_b_name(session_id))
+        relays = (
+            docker.relay_name(work_item_id, session_id),
+            docker.relay_b_name(work_item_id, session_id),
+        )
         done = [subprocess.run([*inspect, r], capture_output=True) for r in relays]
         modes.append(tuple(d.stdout.decode().strip() for d in done))
-        await real_close(self, session_id)
+        await real_close(self, session_id, work_item_id=work_item_id)
 
     monkeypatch.setattr(docker.DockerBackend, "close_session", close_session)
     await database.write(
@@ -274,7 +278,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
             if e["type"] == SandboxEvent.EGRESS_REFUSED
         ]
         out = work / "out"
-        log = short_run.logs / f"s{os.getpid()}.log"
+        log = own_files(short_run, f"s{os.getpid()}").log
         assert status != "config_error", log.read_text() if log.exists() else status
         (row,) = database.read(lambda c: c.execute("SELECT egress FROM worker_sessions").fetchall())
         transport = json.loads(row["egress"])["transport"]

@@ -2,6 +2,7 @@
 files -- no child process. `run_task` itself is test_subprocess.py."""
 
 import json
+import os
 import subprocess
 import sys
 
@@ -13,8 +14,8 @@ from kraft.usage import RateLimitInfo
 # --- the result and exit files -------------------------------------------------------
 
 
-def test_result_path_for_matches_the_convention_run_task_uses(run_dirs):
-    assert sp.result_path_for(run_dirs, "abc123") == run_dirs.results / "abc123.json"
+#: A result file that is a symlink to a host file the worker did not write.
+_LINKED = "<symlink to a host file>"
 
 
 @pytest.mark.parametrize(
@@ -35,6 +36,10 @@ def test_result_path_for_matches_the_convention_run_task_uses(run_dirs):
         ('{"status": "made_up_status"}', 0, "failed"),
         ("42", 0, "failed"),
         ("[]", 0, "failed"),
+        # A link is unreadable, never the file it points at, which says done.
+        (_LINKED, 0, "failed"),
+        # Deeper than the parser recurses: malformed, not a crashed exit.
+        ("[" * 100_000, 0, "failed"),
     ],
     ids=[
         "absent-rc0",
@@ -48,11 +53,17 @@ def test_result_path_for_matches_the_convention_run_task_uses(run_dirs):
         "unknown-status",
         "a-number",
         "a-list",
+        "symlink-is-unreadable",
+        "too-deeply-nested",
     ],
 )
 def test_resolve_reads_the_result_file_over_the_exit_code(tmp_path, content, rc, expected):
     path = tmp_path / "r.json"
-    if content is not None:
+    if content == _LINKED:
+        host = tmp_path / "host.json"
+        host.write_text('{"status": "done"}')
+        path.symlink_to(host)
+    elif content is not None:
         path.write_text(content)
     assert sp._resolve(path, rc) == expected
 
@@ -66,24 +77,49 @@ def test_resolve_result_file_survives_non_utf8_bytes(tmp_path):
     assert sp._resolve_result_file(p) == "failed"
 
 
-def test_read_result_fields_is_the_one_place_the_field_list_lives(tmp_path):
+@pytest.mark.parametrize(
+    ("given", "reported", "recorded"),
+    [
+        (None, ".engineering/sessions/s1.md", ".engineering/sessions/s1.md"),
+        (
+            "items/w1/sessions/s1/out/summary.md",
+            "notes.md",
+            "items/w1/sessions/s1/out/summary.md",
+        ),
+        (None, "items/w2/sessions/s9/out/summary.md", None),
+        (None, "/etc/passwd", None),
+    ],
+    ids=[
+        "older-session-s-own-ref",
+        "kraft-s-wins",
+        "worker-ref-under-items-refused",
+        "absolute-refused",
+    ],
+)
+def test_read_result_fields_is_the_one_place_the_field_list_lives(
+    tmp_path, given, reported, recorded
+):
     """`run_task` and `reattach._exit_from_file` are two independent readers of
     the same result file; a field spelled out in only one of them would reach
     the DB on one exit path and silently drop on the other after a restart
-    (Kraft-k3d). Both call this instead of enumerating the fields."""
+    (Kraft-k3d). Both call this instead of enumerating the fields.
+
+    The summary Kraft asked for and found written is `given`, and wins. A
+    ref the worker reports is kept only when it is relative and not under
+    `items/`, where only Kraft names a summary."""
     path = tmp_path / "result.json"
     path.write_text(
         json.dumps(
             {
                 "status": "done_with_concerns",
-                "session_summary_ref": ".engineering/sessions/s1.md",
+                "session_summary_ref": reported,
                 "concerns": "the retry path is untested",
                 "question": "which branch?",
             }
         )
     )
-    assert sp.read_result_fields(path) == {
-        "summary_ref": ".engineering/sessions/s1.md",
+    assert sp.read_result_fields(path, summary=given) == {
+        "summary_ref": recorded,
         "concerns": "the retry path is untested",
         "question": "which branch?",
     }
@@ -110,8 +146,8 @@ def test_read_concerns_and_read_question_read_their_own_field(
 
 @pytest.mark.parametrize(
     "raw",
-    [None, b"not json", b"[1, 2, 3]", b'{"status": "done"}', b"\xff\xfe\x00\x01"],
-    ids=["missing", "not-json", "not-a-mapping", "key-absent", "not-utf8"],
+    [None, b"not json", b"[1, 2, 3]", b'{"status": "done"}', b"\xff\xfe\x00\x01", b"[" * 100_000],
+    ids=["missing", "not-json", "not-a-mapping", "key-absent", "not-utf8", "too-deeply-nested"],
 )
 @pytest.mark.parametrize(
     "reader", [sp.read_summary_ref, sp.read_concerns, sp.read_question, sp.read_verdict]
@@ -206,9 +242,22 @@ def test_exit_wrapper_records_the_code_and_propagates_it(tmp_path, code, expecte
     assert sp._resolve_exit_file(exit_path) == expected
 
 
-@pytest.mark.parametrize("content", [None, "not a number"], ids=["missing", "garbage"])
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize(
+    "content",
+    [None, "not a number", "symlink", "fifo", "²"],
+    ids=["missing", "garbage", "symlink-is-unreadable", "fifo-is-unreadable", "unicode-digit"],
+)
 def test_resolve_exit_file_missing_or_garbage_is_none(tmp_path, content):
+    """An older escalation thread's exit file is beside `results/`, which its
+    codex turns may write: a link there is not followed, and a FIFO does not
+    hold the server."""
     path = tmp_path / "s.exit"
-    if content is not None:
+    if content == "symlink":
+        (tmp_path / "elsewhere").write_text("0")
+        path.symlink_to(tmp_path / "elsewhere")
+    elif content == "fifo":
+        os.mkfifo(path)
+    elif content is not None:
         path.write_text(content)
     assert sp._resolve_exit_file(path) is None

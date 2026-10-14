@@ -116,35 +116,37 @@ def session_wall_ms(row, now: str | None = None) -> int | None:
     return _span_ms(row["started_at"] or row["created_at"], row["exited_at"] or now or _now())
 
 
-def wait_sessions(conn, work_item_ids) -> set[str]:
+def wait_sessions(conn, work_item_ids) -> set[tuple[str, str]]:
     """The sessions among `work_item_ids`' that ran an external wait (a forge
     task watching CI, a review, a merge): each observation it made names it in
     an `external_wait_observed` record (`kraft.waits`). Such a session waits;
-    it does no work of its own."""
+    it does no work of its own. `(work_item_id, session_id)` pairs: a session
+    id is unique only within its item."""
     ids = list(work_item_ids)
     if not ids:
         return set()
     rows = conn.execute(
-        "SELECT DISTINCT json_extract(payload, '$.session_id') AS sid FROM events "
+        "SELECT DISTINCT work_item_id, json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) "
         "AND type = ?",
         (*ids, ForgeEvent.EXTERNAL_WAIT_OBSERVED),
     ).fetchall()
-    return {r["sid"] for r in rows if r["sid"]}
+    return {(r["work_item_id"], r["sid"]) for r in rows if r["sid"]}
 
 
-def wait_timed_out_sessions(conn, work_item_ids) -> set[str]:
+def wait_timed_out_sessions(conn, work_item_ids) -> set[tuple[str, str]]:
     """The sessions among `work_item_ids`' that ended because an external
-    wait timed out. Such a session exits `capped_out`, the status a fix loop's
-    cap also writes; the wait's own `external_wait_ended` record (`kraft.waits`)
-    is what tells the two apart (Kraft-uwbc8), so no status was added."""
+    wait timed out, as `(work_item_id, session_id)` pairs. Such a session exits
+    `capped_out`, the status a fix loop's cap also writes; the wait's own
+    `external_wait_ended` record (`kraft.waits`) is what tells the two apart
+    (Kraft-uwbc8), so no status was added."""
     ids = list(work_item_ids)
     if not ids:
         return set()
     rows = conn.execute(
-        "SELECT json_extract(payload, '$.session_id') AS sid FROM events "
+        "SELECT work_item_id, json_extract(payload, '$.session_id') AS sid FROM events "
         f"WHERE work_item_id IN ({','.join('?' * len(ids))}) "
         "AND type = ? AND json_extract(payload, '$.outcome') = 'timed_out'",
         (*ids, ForgeEvent.EXTERNAL_WAIT_ENDED),
     ).fetchall()
-    return {r["sid"] for r in rows if r["sid"]}
+    return {(r["work_item_id"], r["sid"]) for r in rows if r["sid"]}

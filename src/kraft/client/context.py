@@ -82,6 +82,12 @@ async def resolve_repo(cwd: Path | None = None) -> str | None:
     return None
 
 
+#: The server's `kraft.store.MIN_PREFIX`: below it a value is never read as
+#: the start of a work item id. The client imports neither `kraft.store` nor
+#: `kraft.api`, so the number is kept here too.
+_MIN_PREFIX = 4
+
+
 def _forbid_self_action(work_item_id: str | None) -> str:
     """Resolve the target of an act call, refusing a worker's own item.
 
@@ -89,14 +95,22 @@ def _forbid_self_action(work_item_id: str | None) -> str:
     human-gate model, so the refusal sits at the boundary the agent cannot route
     around rather than in a skill's prose. Client-side because `origin` is known
     only here: `kraft.api.perimeter` sees an authenticated local caller either way.
+
+    A value the worker's own id starts with, `_MIN_PREFIX` characters or more,
+    is its own item too: the server reads it as that id whenever no other id
+    starts the same way, and no other id is the whole of it, since intake
+    refuses a new id that is the start of an existing one.
     """
     resolved, origin = resolve_context()
     target = work_item_id or resolved
     if target is None:
         raise ValueError("no work item: pass an id, or run from a Kraft worktree")
-    if origin == "worker" and target == resolved:
+    own = target == resolved or (
+        resolved is not None and len(target) >= _MIN_PREFIX and resolved.startswith(target)
+    )
+    if origin == "worker" and own:
         raise PermissionError(
-            f"a worker session cannot act on its own work item ({target}). "
+            f"a worker session cannot act on its own work item ({resolved}). "
             "Gates are where a human decides; report what you found instead."
         )
     return target
@@ -108,9 +122,8 @@ async def resolve_work_item(work_item_id: str | None) -> str:
     Not `_forbid_self_action`: reading your own logs is exactly what a worker
     session should be able to do. The guard is about acting, not looking.
 
-    Public because `cli.view._cmd_events` needs the resolved id twice — once for the
-    events call, once to filter the instance-wide bus — and `cli.py` must not
-    become a second definition of what a work item is (Kraft-t5s9).
+    Public because `cli.py` must not become a second definition of what a
+    work item is (Kraft-t5s9).
     """
     if work_item_id:
         return work_item_id

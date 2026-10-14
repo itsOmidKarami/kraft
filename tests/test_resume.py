@@ -7,7 +7,7 @@ from pathlib import Path
 
 from support.harness import isolated_bd, v1_named_chain, v1_seeded_chain
 
-from kraft import builtins, events, executor, store
+from kraft import builtins, events, executor, ids, store
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
@@ -163,7 +163,7 @@ async def test_resume_current_node_failed_session_is_needs_human(
             result_path="/r",
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s-impl", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s-impl", "failed", work_item_id=wid))
     result = await executor.resume(
         database,
         run_dirs,
@@ -243,7 +243,7 @@ async def test_resume_still_gives_a_node_the_repair_its_template_declared(
             result_path="/r",
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s-poll", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s-poll", "failed", work_item_id=wid))
 
     result = await executor.resume(
         database, run_dirs, work_item_id=wid, adopted={}, bd_cwd=str(tracker)
@@ -281,18 +281,19 @@ async def test_resume_awaits_adopted_task_before_reading_status(tmp_path, databa
             result_path="/r",
         )
     )
-    await database.write(lambda c: store.session_running(c, sid, 4242, 1.0))
+    await database.write(lambda c: store.session_running(c, sid, 4242, 1.0, work_item_id=wid))
 
     async def wait_task():
         await asyncio.sleep(0.05)
-        await database.write(lambda c: store.session_exited(c, sid, "done"))
+        await database.write(lambda c: store.session_exited(c, sid, "done", work_item_id=wid))
 
     task = asyncio.create_task(wait_task())
     result = await executor.resume(
         database,
         run_dirs,
         work_item_id=wid,
-        adopted={sid: task},
+        # Keyed as `reattach` keys them, by the session's item and id.
+        adopted={ids.qualified(wid, sid): task},
         bd_cwd=str(tracker),
     )
     assert result == "completed"

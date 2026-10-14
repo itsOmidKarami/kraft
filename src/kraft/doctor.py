@@ -110,6 +110,7 @@ async def run_checks() -> list[dict]:
     else:
         checks.extend(await _repo_checks())
         checks.append(await _orphan_check())
+    checks.append(_old_documents_check())
     return checks
 
 
@@ -130,6 +131,15 @@ def _storage_line(payload: dict) -> tuple[str, str] | None:
             else ""
         )
         return "held", f"{used}: starts that need a new worktree are held{waited}; {free}"
+    if s["state"] == "over_quota" and s["used_bytes"] > s["limit_bytes"]:
+        # Not held, yet over the limit: what is over it is items' documents,
+        # which archiving keeps, so archiving cannot make that room.
+        return "over_quota", (
+            f"{used}, over the limit in items' documents, which archiving keeps, so "
+            "starts still go ahead; kraft view storage lists them by item, abandoning "
+            "an item removes its documents, and kraft item archive --reclaimable "
+            "frees the rest"
+        )
     if s["state"] == "over_quota":
         return "over_quota", f"{used}, over the {size(s['quota_bytes'])} quota; {free}"
     return "ok", f"{used}; kraft view storage lists it by item"
@@ -1552,6 +1562,43 @@ async def _orphan_check() -> dict:
             f"{len(orphans)} under {worktrees} with no work item: {', '.join(orphans)}",
         )
     return _check("worktrees", True, str(worktrees))
+
+
+def _old_documents_check() -> dict:
+    """How many worktrees still hold a `.engineering/` folder: documents and
+    summaries written before they moved to `run/items/<id>/`. They are read
+    where they are, so this is never a failure; it says when the fallback
+    reads that keep them working (and the prompt's `git add -f` warning) can
+    go. Read off the disk, so it needs no server. A link named `.engineering`
+    is not counted and not followed."""
+    worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
+    try:
+        held = sum(
+            1
+            for d in worktrees.iterdir()
+            if d.is_dir() and not d.is_symlink() and _is_real_dir(d / ".engineering")
+        )
+    except FileNotFoundError:
+        held = 0
+    except OSError as exc:
+        return _check("old documents", True, f"{worktrees}: {exc}", warn=True)
+    if not held:
+        return _check("old documents", True, "0 worktrees hold documents in .engineering/")
+    return _check(
+        "old documents",
+        True,
+        f"{held} worktree(s) still hold documents in .engineering/: they are read where "
+        "they are, and the count drops as those items are archived",
+        warn=True,
+    )
+
+
+def _is_real_dir(path: Path) -> bool:
+    """A folder, not a link to one."""
+    try:
+        return stat.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
 
 
 def _bundle_check() -> dict:

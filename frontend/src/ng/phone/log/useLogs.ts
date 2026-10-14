@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LogLine } from "../../../types";
+import { logUrl } from "../../../api";
 import { request } from "../../http";
 import { LOG_POLL_MS } from "./useLog";
 
@@ -7,8 +8,9 @@ export interface TaggedLine extends LogLine {
   who: string;
 }
 
-/** Several sessions' logs as one list, a session after the other, each line named for its task (the node screen's Log). */
-export function useLogs(sessions: { id: string; who: string; running: boolean }[]) {
+/** Several sessions' logs as one list, a session after the other, each line named for its task (the node screen's Log).
+ *  Every one is a session of `workItemId`. */
+export function useLogs(workItemId: string, sessions: { id: string; who: string; running: boolean }[]) {
   const [lines, setLines] = useState<TaggedLine[] | null>(null);
   const key = sessions.map((s) => `${s.id}:${s.running}`).join(",");
   const anyRunning = sessions.some((s) => s.running);
@@ -19,7 +21,7 @@ export function useLogs(sessions: { id: string; who: string; running: boolean }[
     const read = async () => {
       const all = await Promise.all(
         sessions.map((s) =>
-          request<{ lines: LogLine[] }>(`/worker-sessions/${encodeURIComponent(s.id)}/log?format=jsonl`).then((r) =>
+          request<{ lines: LogLine[] }>(`${logUrl(workItemId, s.id)}?format=jsonl`).then((r) =>
             r.status === 200 ? r.body.lines.filter((l) => !l.truncated).map((l): TaggedLine => ({ ...l, who: s.who })) : [],
           ),
         ),
@@ -33,6 +35,6 @@ export function useLogs(sessions: { id: string; who: string; running: boolean }[
       if (t) clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, anyRunning]);
+  }, [workItemId, key, anyRunning]);
   return lines;
 }

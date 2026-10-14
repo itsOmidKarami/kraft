@@ -284,19 +284,19 @@ describe("Api.streamLog", () => {
     return ns;
   };
 
-  it("streams a log until the end frame", async () => {
+  it("streams a log, under its item, until the end frame", async () => {
     const f = sse(['data: {"n":0,"t":null,"src":"stdout","text":"a"}\n\nev', 'ent: end\ndata: {}\n\ndata: {"n":1}\n\n']);
-    const ns = await drain(new Api("http://h:1", "tok", f as any).streamLog("s 1", new AbortController().signal));
+    const ns = await drain(new Api("http://h:1", "tok", f as any).streamLog("k7m2x9qa", "s 1", new AbortController().signal));
     expect(ns).toEqual([0]);
     const [url, init] = f.mock.calls[0];
-    expect(url).toBe("http://h:1/api/worker-sessions/s%201/log?format=jsonl&follow=true");
+    expect(url).toBe("http://h:1/api/work-items/k7m2x9qa/sessions/s%201/log?format=jsonl&follow=true");
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" });
   });
 
   it("ends without throwing when aborted", async () => {
     const ctrl = new AbortController();
     const ns: number[] = [];
-    for await (const l of new Api("http://h:1", undefined, sse(['data: {"n":0}\n\n'], true) as any).streamLog("s1", ctrl.signal)) {
+    for await (const l of new Api("http://h:1", undefined, sse(['data: {"n":0}\n\n'], true) as any).streamLog("w1", "s1", ctrl.signal)) {
       ns.push(l.n);
       ctrl.abort();
     }
@@ -311,7 +311,7 @@ describe("Api.streamLog", () => {
     const api = new Api("http://h:1", undefined, f as any);
     const failures: ApiFailure[] = [];
     api.onError = (x) => failures.push(x);
-    await expect(drain(api.streamLog("s1", new AbortController().signal))).rejects.toMatchObject(want);
+    await expect(drain(api.streamLog("w1", "s1", new AbortController().signal))).rejects.toMatchObject(want);
     expect(failures).toMatchObject([{ method: "GET", ...want }]);
   });
 });

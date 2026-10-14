@@ -490,9 +490,9 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
 
     /* logs: jsonl, plain text, SSE tail */
-    if ((m = p.match(/^\/worker-sessions\/([^/]+)\/log$/))) {
-      const sid = m[1];
-      const bundle = Object.values(S.bundles).find((b) => b.logs[sid]);
+    if ((m = p.match(/^\/work-items\/([^/]+)\/sessions\/([^/]+)\/log$/))) {
+      const sid = m[2];
+      const bundle = S.bundles[m[1]];
       const lines = bundle?.logs[sid] ?? [];
       const status = bundle?.sessions.find((s) => s.id === sid)?.status ?? "done";
       if (q.get("follow") === "1") {

@@ -104,15 +104,17 @@ def test_status_knob_reports_needs_context_and_the_question_text(tmp_path):
 def test_fix_mode_writes_session_summary_from_injected_context(tmp_path):
     """fake-claude obeys the 04 §6 summary instructions the agent adapter injects."""
     (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n")
+    out = tmp_path / "items/w1/sessions/s9/out/summary.md"
     ctx = (
         "Work item: w1\nNode: implementation\n"
         "Hook point: on.implementation.start\nWorker session: s9\n"
+        f"When you are done, write a short session summary to {out}, starting with YAML\n"
     )
     proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "fix"}, ctx=ctx)
     assert proc.returncode == 0
-    result = json.loads((tmp_path / "result.json").read_text())
-    assert result["session_summary_ref"] == ".engineering/sessions/s9.md"
-    summary = (tmp_path / ".engineering" / "sessions" / "s9.md").read_text()
+    # Kraft records the summary it asked for; the fake reports no ref.
+    assert "session_summary_ref" not in json.loads((tmp_path / "result.json").read_text())
+    summary = out.read_text()
     assert "work_item_ids: [w1]" in summary
     assert "worker_session_id: s9" in summary
 
@@ -127,9 +129,12 @@ def test_a_needs_context_report_writes_no_artifact(tmp_path):
     The session summary is still written: a stopped worker is told to write one,
     and `run_agent_task` reads it back the same way.
     """
+    out = tmp_path / "items/w1/sessions/s9/out/summary.md"
+    spec = tmp_path / "items/w1/docs/spec.md"
     ctx = (
         "Work item: w1\nNode: spec\nHook point: spec.main.author\nWorker session: s9\n"
-        "Write your spec to .engineering/specs/w1.md, relative to the repo root.\n"
+        f"When you are done, write a short session summary to {out}, starting with YAML\n"
+        f"Write your spec to {spec}, creating that directory if it does not exist.\n"
     )
     proc = _run(
         tmp_path,
@@ -141,20 +146,20 @@ def test_a_needs_context_report_writes_no_artifact(tmp_path):
         ctx=ctx,
     )
     assert proc.returncode == 0, proc.stderr
-    assert not (tmp_path / ".engineering" / "specs" / "w1.md").exists()
+    assert not spec.exists()
     assert json.loads((tmp_path / "result.json").read_text())["status"] == "needs_context"
-    assert (tmp_path / ".engineering" / "sessions" / "s9.md").is_file()
+    assert out.is_file()
 
 
 def test_the_skip_knob_suppresses_the_artifact_on_a_done_report(tmp_path):
     """The positive control and the knob in one test: `done` writes the plan,
     and `KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT=1` suppresses it for a test that wants
     the empty-gate failure on purpose (the same knob `fake_agent.py` has)."""
+    artifact = tmp_path / "items/w2/docs/plan.md"
     ctx = (
         "Work item: w2\nNode: plan\nHook point: plan.main.author\nWorker session: s7\n"
-        "Write your plan to .engineering/plans/w2.md, relative to the repo root.\n"
+        f"Write your plan to {artifact}, creating that directory if it does not exist.\n"
     )
-    artifact = tmp_path / ".engineering" / "plans" / "w2.md"
 
     proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "noop"}, ctx=ctx)
     assert proc.returncode == 0, proc.stderr

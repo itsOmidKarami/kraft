@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from support.harness import isolated_bd, v1_resolved
 
-from kraft import executor
+from kraft import executor, item_paths
 
 _IMPLEMENT = """
 - id: implementation
@@ -210,7 +210,7 @@ async def test_intake_copies_an_attachment_into_kraft_storage(database, run_dirs
     # source now points at Kraft's own copy, not the external file
     assert entry["source"] != str(external)
     assert Path(entry["source"]).read_text() == "# the plan\n"
-    assert Path(entry["source"]).is_relative_to(run_dirs.attachments)
+    assert Path(entry["source"]).is_relative_to(item_paths.filed_dir(run_dirs, wid))
 
 
 async def test_the_copy_survives_the_original_being_deleted(database, run_dirs, tmp_path):
@@ -296,5 +296,5 @@ async def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect
         )
 
     assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []
-    assert not any(run_dirs.attachments.iterdir())
+    assert not any(run_dirs.items.iterdir())
     assert filed == []

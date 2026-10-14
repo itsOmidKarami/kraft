@@ -15,6 +15,10 @@ describes its verbs and the flags that change what they do. Wherever a
 command takes a [work item](/concepts/vocabulary#work-item) ID, you can omit it when you run the command from
 inside that item's worktree.
 
+You can also give the start of an ID instead of all of it: 4 characters or
+more, as long as no other item's ID starts the same way. A worker inside a
+network sandbox must still give its own item's whole ID.
+
 ## Find a verb by what you want to do
 
 Each command links to its entry.

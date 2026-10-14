@@ -14,11 +14,11 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, node_runs, start_queue, storage, store
+from kraft import escalate, events, executor, item_paths, node_runs, start_queue, storage, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
-from kraft.api import api_router, deps
+from kraft.api import api_router, deps, item_ids
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
@@ -486,9 +486,21 @@ async def abandon_work_item(wid: str, request: Request):
         storage.forget(st, wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
-    # a state the board cannot show.
-    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
+    # a state the board cannot show. In a thread: a large folder must not hold
+    # the event loop.
+    await asyncio.to_thread(_remove_item_files, st.run_dirs, wid)
+    storage.forget_documents(st, wid)
     return {"id": wid, "status": "abandoned", **removed}
+
+
+def _remove_item_files(run_dirs, wid: str) -> None:
+    """An abandoned item's own folder and an older item's attachment copies
+    (`item_paths.remove_tree`: no link followed, so a link a worker planted
+    in `docs/` or the sandbox home is removed, never what it points at, and a
+    read-only folder a tool left, such as a Go module cache, is removed
+    too)."""
+    item_paths.remove_tree(item_paths.item_dir(run_dirs, wid))
+    item_paths.remove_tree(item_paths.filed_dirs(run_dirs, wid)[1])
 
 
 def _archive_lock(st) -> asyncio.Lock:
@@ -603,10 +615,21 @@ async def bulk_work_items(body: Bulk, request: Request):
     siblings. `cancel`'s reason is checked once, up front, so a request that
     cannot possibly succeed touches nothing (`EndWorkItem.reason` would
     otherwise answer the same 422 for the first id and silently skip it for
-    the rest)."""
+    the rest).
+
+    An id may be the start of one (`store.match_work_item_ids`): its result
+    names the whole id, and a start of several is its own failed result."""
     if body.action == "cancel" and not (body.reason or "").strip():
         raise HTTPException(422, "reason: cancel needs a non-blank reason")
-    results = [await _bulk_one(request, wid, body.action, body.reason) for wid in body.ids]
+    st = request.app.state
+    results = []
+    for given in body.ids:
+        ids = st.db.read(lambda c, g=given: store.match_work_item_ids(c, g))
+        if len(ids) > 1:
+            results.append({"id": given, "ok": False, "error": item_ids.ambiguous(given, ids)})
+            continue
+        wid = ids[0] if ids else given
+        results.append(await _bulk_one(request, wid, body.action, body.reason))
     return {"results": results}
 
 
@@ -708,6 +731,14 @@ async def unblock_work_item(wid: str, request: Request, body: Unblock | None = N
             "dependencies can be dropped",
         )
     only = body.dependency if body else None
+    if only:
+        # Named by the start of an id too, matched against this item's own
+        # dependencies rather than every item.
+        waits_on = st.db.read(lambda c: [d["id"] for d in store.dependencies_of(c, wid)])
+        matched = store.match_ids(waits_on, only)
+        if len(matched) > 1:
+            raise HTTPException(409, item_ids.ambiguous(only, matched))
+        only = matched[0] if matched else only
     dropped = await st.db.write(lambda c: store.drop_dependencies(c, wid, only))
     if only and not dropped:
         raise HTTPException(409, f"{only} is not one of this work item's dependencies")
@@ -739,7 +770,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
             409, "this run is rework after a gate rejection: it follows the note, not the plan"
         )
     worktree = st.run_dirs.worktrees / wid
-    tasks = progress_mod.tasks_for(row, worktree)
+    tasks = progress_mod.tasks_for(row, worktree, st.run_dirs)
     if not tasks:
         raise HTTPException(400, "this work item's plan has no '## Task N' headings")
     if not 1 <= body.task <= len(tasks):
@@ -751,7 +782,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "title": tasks[body.task - 1][0],
     }
     await st.db.write(lambda c: events.append(c, wid, WorkItemEvent.PLAN_PROGRESS, payload))
-    p = progress_mod.for_item(st.db, row, worktree)
+    p = progress_mod.for_item(st.db, row, worktree, st.run_dirs)
     return {"id": wid, "progress": p.model_dump() if p else None}
 
 
@@ -1285,7 +1316,12 @@ async def _retry(wid: str, body: Retry, request: Request):
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
-    caller_session_id = request.headers.get("x-kraft-session-id")
+    # The caller as this item's session, bare, as every event records one:
+    # `<wid>/<sid>` names it only when `wid` is this item, and a bare id is
+    # unique on its own: `deps.caller_ref` takes one only at the 32
+    # characters of a session from before per-item ids.
+    caller = deps.caller_ref(request)
+    caller_session_id = caller[1] if caller is not None and caller[0] in (None, wid) else None
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
         # Not the escalation calling on itself -- a stranger's retry (a human,
@@ -2252,7 +2288,9 @@ async def stop_escalation(wid: str, request: Request):
     if running is None:
         raise HTTPException(409, "no escalation turn is running")
     row = st.db.read(
-        lambda c: c.execute("SELECT pid FROM worker_sessions WHERE id = ?", (running,)).fetchone()
+        lambda c: c.execute(
+            "SELECT pid FROM worker_sessions WHERE work_item_id = ? AND id = ?", (wid, running)
+        ).fetchone()
     )
     await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
     _terminate(row["pid"] if row else None)

@@ -205,7 +205,7 @@ def test_health_block_names_each_degraded_reason():
         "invalid_intake": "intake.yaml: 'interval_s': not a number",
         "reattach_summary": {
             "scanned": 2,
-            "adopted": ["s1"],
+            "adopted": ["w1/s1"],
             "resolved_from_file": [],
             "unknown": [],
             "resumed_work_items": [],
@@ -389,6 +389,7 @@ def test_storage_block_shows_usage_categories_and_each_worktree():
                 "status": "completed",
                 "archived": False,
                 "bytes": 2 * 1024**3,
+                "documents_bytes": 3 * 1024**2,
                 "updated_at": None,
                 "reclaimable": True,
             },
@@ -411,11 +412,11 @@ def test_storage_block_shows_usage_categories_and_each_worktree():
     assert ["quota", "8G"] in rows
     assert ["reclaimable", "2G"] in rows
     assert ["worktrees", "11G"] in rows and ["logs", "512K"] in rows
-    assert ["aaa", "completed", "2G", "-", "yes", "Old", "work"] in rows
-    assert ["bbb", "archived", "1G", "-", "-", "Live", "work"] in rows
-    assert ["ccc", "orphan", "1M", "-", "-", "no", "work", "item"] in rows
-    assert rows.index(["aaa", "completed", "2G", "-", "yes", "Old", "work"]) < rows.index(
-        ["bbb", "archived", "1G", "-", "-", "Live", "work"]
+    assert ["aaa", "completed", "2G", "3M", "-", "yes", "Old", "work"] in rows
+    assert ["bbb", "archived", "1G", "-", "-", "-", "Live", "work"] in rows
+    assert ["ccc", "orphan", "1M", "-", "-", "-", "no", "work", "item"] in rows
+    assert rows.index(["aaa", "completed", "2G", "3M", "-", "yes", "Old", "work"]) < rows.index(
+        ["bbb", "archived", "1G", "-", "-", "-", "Live", "work"]
     )
 
 

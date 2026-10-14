@@ -213,6 +213,8 @@ def test_read_survives_missing_and_unparseable_files(tmp_path):
     (tmp_path / "bad.log").write_text("not json at all")
     (tmp_path / "bad.json").write_text("{{{")
     assert usage.read(tmp_path / "bad.log", tmp_path / "bad.json", "claude-stream-json") is None
+    (tmp_path / "deep.json").write_text("[" * 100_000)
+    assert usage.read(tmp_path / "bad.log", tmp_path / "deep.json", "claude-stream-json") is None
 
 
 def test_reader_none_reads_only_the_result_file(tmp_path):
@@ -288,8 +290,8 @@ def _session(conn, sid, node, *, round=0, status="done", u: Usage | None = None)
         result_path="r",
         round=round,
     )
-    store.session_running(conn, sid, 1, 1.0)
-    store.session_exited(conn, sid, status, None, u)
+    store.session_running(conn, sid, 1, 1.0, work_item_id="w")
+    store.session_exited(conn, sid, status, None, u, work_item_id="w")
 
 
 async def _scenario(tmp_path):
@@ -431,12 +433,12 @@ async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_gue
             log_path="l",
             result_path="r",
         )
-        store.session_running(c, sid, 1, 1.0)
+        store.session_running(c, sid, 1, 1.0, work_item_id="w")
         # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens
         # is a round $2.00.
         # a live claude session's output is unknown, not zero (`usage.from_stream`)
         live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-        store.session_progress(c, sid, live)
+        store.session_progress(c, sid, live, work_item_id="w")
 
     await database.write(lambda c: _running(c, "live", "verify"))
     await database.write(lambda c: _session(c, "done", "plan", u=Usage(100, 10, 0.5, "m")))

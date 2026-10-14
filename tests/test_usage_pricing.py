@@ -85,8 +85,10 @@ async def test_a_finished_priced_session_with_no_reported_cost_is_complete_but_e
             log_path="l",
             result_path="r",
         )
-        store.session_running(c, "s1", 1, 1.0)
-        store.session_exited(c, "s1", "done", None, Usage(1_000_000, 500, None, "claude-sonnet-5"))
+        store.session_running(c, "s1", 1, 1.0, work_item_id="w")
+        store.session_exited(
+            c, "s1", "done", None, Usage(1_000_000, 500, None, "claude-sonnet-5"), work_item_id="w"
+        )
 
     await database.write(_exited)
     rollup = database.read(lambda c: store.usage_rollup(c, "w"))

@@ -16,6 +16,7 @@ from support.harness import (
     git,
     isolated_bd,
     make_repo_with_submodule,
+    own_files,
     v1_resolved,
     write,
 )
@@ -455,7 +456,7 @@ async def test_a_workspace_item_that_changed_nothing_opens_no_merge_request(
     status = await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch)
 
     assert status == "config_error" and not fake.opened
-    log = (run_dirs.logs / "s1.log").read_text()
+    log = own_files(run_dirs, "s1").log.read_text()
     assert log.startswith("refusing to open a merge request") and "no selected repository" in log
 
 

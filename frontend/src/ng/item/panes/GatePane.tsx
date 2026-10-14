@@ -59,7 +59,7 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
         </>
       )}
       <dl className="item-facts ip-facts ip-gap">
-        {item.test_result && <div><dt>tests</dt><dd><TestsLine result={item.test_result} /></dd></div>}
+        {item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
         {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
         {to && <div><dt>reject to</dt><dd className="is-mono">{to}</dd></div>}
         <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : gateSkipped(events, gate.id) ? "skipped" : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < item.chain_definition.nodes.findIndex((n) => n.id === item.current_node_id) ? "passed" : "not reached"}</dd></div>

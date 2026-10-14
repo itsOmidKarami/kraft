@@ -46,11 +46,12 @@ describe("CleanupDialog", () => {
   });
 
   it.each([
-    ["ok", "under the quota of 8G"],
-    ["held", "still over the limit of 10G, so starts stay held"],
-    [null, "9G used afterwards."],
-  ] as const)("says where usage lands when the state after is %s", async (state_after, text) => {
-    mount({ "POST /storage/preview": [200, storagePreview({ state_after })] });
+    ["ok", "under the quota of 8G", 9 * GB],
+    ["held", "still over the limit of 10G, so starts stay held", 9 * GB],
+    ["over_quota", "11G used afterwards: over the limit of 10G in documents archiving keeps, so starts still go ahead", 11 * GB],
+    [null, "9G used afterwards.", 9 * GB],
+  ] as const)("says where usage lands when the state after is %s", async (state_after, text, used_after_bytes) => {
+    mount({ "POST /storage/preview": [200, storagePreview({ state_after, used_after_bytes })] });
     expect(await screen.findByText((content) => content.includes(text))).toBeInTheDocument();
   });
 

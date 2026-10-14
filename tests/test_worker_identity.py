@@ -10,7 +10,7 @@ import asyncio
 import sys
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, own_files
 
 from kraft import client, db, store
 from kraft.adapters import agent
@@ -52,7 +52,7 @@ def _run_agent_and_read_log(tmp_path, repo, session_id="s1", work_item_id="w1") 
             )
         finally:
             await database.close()
-        return (rd.logs / f"{session_id}.log").read_text()
+        return own_files(rd, session_id, work_item_id).log.read_text()
 
     return asyncio.run(scenario())
 
@@ -64,7 +64,7 @@ def test_the_session_environment_carries_the_work_item_id(tmp_path):
 
 def test_the_session_environment_carries_the_session_id(tmp_path):
     log = _run_agent_and_read_log(tmp_path, make_repo(tmp_path), session_id="s-abc")
-    assert '"KRAFT_SESSION_ID": "s-abc"' in log
+    assert '"KRAFT_SESSION_ID": "w1/s-abc"' in log
 
 
 def test_a_session_with_the_env_var_resolves_as_a_worker(monkeypatch, tmp_path):

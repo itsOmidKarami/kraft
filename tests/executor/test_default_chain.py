@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from support.harness import entry_of
 
-from kraft import executor, store
+from kraft import executor, item_paths, store
 from kraft import policy as _policy
 from kraft.executor import gates
 from kraft.templates.library import TemplateLibrary
@@ -99,7 +99,7 @@ async def test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote(
 
     assert await _walk(it, chain, "work_brief") == "awaiting_gate"
     assert gates.pending_gate(it.database, it.id) == "local_review"
-    brief = f".engineering/work_briefs/{it.id}.md"
+    brief = item_paths.document_name(it.id, "work_brief")
     assert gates.gate_artifact(run_dirs, it.row(), "local_review") == brief
 
 

@@ -152,7 +152,11 @@ async def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(datab
 
     for sid, status in (("older", "failed"), ("asked", "needs_context")):
         await session(sid)
-        await database.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
+        await database.write(
+            lambda c, sid=sid, status=status: store.session_exited(
+                c, sid, status, work_item_id="wh"
+            )
+        )
     await database.write(
         lambda c: store.mark_needs_human(
             c, "wh", "verify", "needs_context: which db?", kind="question"
@@ -638,3 +642,53 @@ async def test_the_queue_is_read_earliest_first_and_a_kept_place_survives(databa
     assert database.read(store.queued_ids) == ["b", "a"]
     await database.write(lambda c: store.keep_place(c, "a", taken["at"]))
     assert database.read(store.queued_ids) == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("given", "matched"),
+    [
+        ("abcd", ["abcd"]),
+        ("abcd111", ["abcd1111" + "0" * 24]),
+        ("abcd11", ["abcd1111" + "0" * 24, "abcd1122" + "0" * 24]),
+        ("abc", []),
+        ("ABCD", []),
+        ("abczz", ["abczzzzz"]),
+    ],
+    ids=["exact-wins", "unique-start", "ambiguous", "short", "uppercase", "start-of-the-last-id"],
+)
+def test_ids_in_hand_and_stored_ids_are_matched_alike(conn, given, matched):
+    """`match_ids` (an item's own dependencies) answers what
+    `match_work_item_ids` answers over the table: an exact id before every id
+    it is the start of."""
+    ids = ["abcd1122" + "0" * 24, "abcd", "abcd1111" + "0" * 24, "abczzzzz"]
+    for wid in ids:
+        _mk_item(conn, wid)
+
+    assert store.match_ids(ids, given) == matched
+    assert store.match_work_item_ids(conn, given) == matched
+
+
+@pytest.mark.parametrize(
+    ("ask", "answer"),
+    [
+        (lambda c: store.match_work_item_ids(c, "abcd11"), ["abcd1111", "abcd1122"]),
+        (lambda c: store.work_item_id_taken(c, "abcd1"), True),
+        (lambda c: store.work_item_id_taken(c, "abce"), False),
+    ],
+    ids=["prefix-match", "taken-by-a-longer-id", "not-taken"],
+)
+def test_a_start_of_an_id_is_looked_up_by_the_primary_key(conn, ask, answer):
+    """Asked on every request that names an item: a scan of every row would
+    grow with the board, on the event loop."""
+    for wid in ("abcd1111", "abcd1122", "abcz"):
+        _mk_item(conn, wid)
+    asked: list[str] = []
+    conn.set_trace_callback(asked.append)
+
+    assert ask(conn) == answer
+
+    conn.set_trace_callback(None)
+    plans = [
+        " ".join(r["detail"] for r in conn.execute(f"EXPLAIN QUERY PLAN {sql}")) for sql in asked
+    ]
+    assert plans and all("SCAN" not in p and "USING" in p for p in plans), plans

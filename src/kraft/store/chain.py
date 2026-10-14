@@ -209,7 +209,8 @@ def skip_node(
     """
     now = _now()
     parked = conn.execute(
-        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ?",
+        "SELECT id FROM worker_sessions WHERE work_item_id = ? AND node_id = ? AND status = ? "
+        "ORDER BY rowid",
         (work_item_id, node_id, SessionStatus.WAITING),
     ).fetchall()
     if not write_status(
@@ -226,8 +227,9 @@ def skip_node(
     )
     for sid in dict.fromkeys([*(session_ids or []), *(r[0] for r in parked)]):
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 
@@ -254,13 +256,14 @@ def skip_scope(
     now = _now()
     parked = conn.execute(
         "SELECT id FROM worker_sessions WHERE work_item_id = ? AND status = ? "
-        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?) ORDER BY rowid",
         (work_item_id, SessionStatus.WAITING, path, path + ".", path + "."),
     ).fetchall()
     for sid in [*(session_ids or []), *(r[0] for r in parked)]:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
     events.append(conn, work_item_id, ChainEvent.SCOPE_SKIPPED, {"path": path, "note": note})

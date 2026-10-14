@@ -19,10 +19,18 @@ def run_dir(monkeypatch, tmp_path):
     return base
 
 
-def test_a_worker_cannot_act_on_its_own_item(run_dir, monkeypatch):
-    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
-    with pytest.raises(PermissionError, match="its own work item"):
-        client.context._forbid_self_action("mine")
+# A worker's own id, one from before 8-character ids: 32 characters, so its
+# first eight are a start of it, not the whole id.
+OWN = "abcd1111" + "0" * 24
+
+
+@pytest.mark.parametrize("given", [OWN, "abcd1111", "abcd"], ids=["whole", "eight", "four"])
+def test_a_worker_cannot_act_on_its_own_item(run_dir, monkeypatch, given):
+    """The start of its own id names its own item too: the server reads it
+    as that id."""
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", OWN)
+    with pytest.raises(PermissionError, match=f"its own work item \\({OWN}\\)"):
+        client.context._forbid_self_action(given)
 
 
 def test_a_worker_acting_with_no_target_resolves_to_itself_and_is_refused(run_dir, monkeypatch):
@@ -33,9 +41,14 @@ def test_a_worker_acting_with_no_target_resolves_to_itself_and_is_refused(run_di
         client.context._forbid_self_action(None)
 
 
-def test_a_worker_may_act_on_a_different_item(run_dir, monkeypatch):
-    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
-    assert client.context._forbid_self_action("someone-elses") == "someone-elses"
+@pytest.mark.parametrize(
+    "given",
+    ["someone-elses", "abc", "abcd2"],
+    ids=["other", "three-is-not-a-start", "another-start"],
+)
+def test_a_worker_may_act_on_a_different_item(run_dir, monkeypatch, given):
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", OWN)
+    assert client.context._forbid_self_action(given) == given
 
 
 def test_a_human_in_a_worktree_may_act_on_that_item(run_dir, monkeypatch):

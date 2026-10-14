@@ -7,7 +7,6 @@ import logging
 import shlex
 import sqlite3
 import traceback
-import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -16,7 +15,7 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import config as _config
-from kraft import events, node_runs, store
+from kraft import events, item_paths, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -79,6 +78,7 @@ from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 from kraft.worker.env import TEST_ENV
+from kraft.worker.worktree_read import read_no_follow
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +293,7 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
         log_path,
         result_path,
         session_id=common["session_id"],
+        work_item_id=common["work_item_id"],
         status=CONFIG_ERROR,
         log=log,
     )
@@ -308,6 +309,7 @@ async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str
         log_path,
         result_path,
         session_id=common["session_id"],
+        work_item_id=common["work_item_id"],
         status="capped_out",
         log=f"not started: {hit.reason}\n",
     )
@@ -566,6 +568,7 @@ async def _run_changed_test_scopes(
             log_path,
             result_path,
             session_id=common["session_id"],
+            work_item_id=common["work_item_id"],
             status="done",
             log=f'{work_item_row["repo"]} declares test_command: "" (no tests) — nothing to run\n',
         )
@@ -591,7 +594,12 @@ async def _run_changed_test_scopes(
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
-            **{**common, "session_id": uuid.uuid4().hex},
+            **{
+                **common,
+                "session_id": db.read(
+                    lambda c, w=common["work_item_id"]: store.new_session_id(c, w)
+                ),
+            },
         )
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
@@ -679,7 +687,8 @@ def scope_results(
     scope."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.result_path "
+            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.log_path, "
+            "ws.result_path "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
             "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
@@ -714,7 +723,7 @@ def scope_results(
         if row["status"] not in COMMAND_FINISHED:
             continue
         entry: dict = {"command": command, **_scope_facts(table, command)}
-        if (code := _exit_code(row["result_path"])) is not None:
+        if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         entry["passed"] = row["status"] == SessionStatus.DONE
         entry["session_id"] = row["id"]
@@ -794,7 +803,8 @@ def scope_runs(
     `scope_results` reads it."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.result_path, e.seq "
+            "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.log_path, "
+            "ws.result_path, e.seq "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
             "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
@@ -854,7 +864,7 @@ def scope_runs(
         }
         if (ran_in(row), repo, row["round"]) in picked:
             entry["selected"] = True
-        if (code := _exit_code(row["result_path"])) is not None:
+        if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
@@ -880,14 +890,23 @@ def scope_runs(
     return out
 
 
-def _exit_code(result_path: str | None) -> int | None:
-    """The code a task exited with, off the sidecar its launch wrapper writes
-    (`subprocess._wrap_with_exit_file`), or None when there is none to read."""
+def _exit_code(row) -> int | None:
+    """The code a session exited with, off the sidecar its launch wrapper
+    writes (`subprocess._wrap_with_exit_file`, `item_paths.exit_file`), or
+    None when there is none to read."""
     try:
-        raw = Path(result_path).with_suffix(".exit").read_text().strip() if result_path else ""
+        # No link followed, no wait on a FIFO: an older escalation thread's
+        # exit file is beside `results/`, which its codex turns may write.
+        raw = (
+            read_no_follow(item_paths.exit_file(row["log_path"], row["result_path"]))
+            .decode()
+            .strip()
+            if row["result_path"]
+            else ""
+        )
     except (OSError, UnicodeDecodeError):
         return None
-    return int(raw) if raw.lstrip("-").isdigit() else None
+    return item_paths.exit_code(raw)
 
 
 def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
@@ -932,7 +951,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         lambda c: c.execute(
             "SELECT id, status, log_path, result_path FROM worker_sessions "
             "WHERE work_item_id = ? AND hook_point = ? AND (rowid > ? OR "
-            "(status = 'waiting' AND node_id = ? AND round = ?))",
+            "(status = 'waiting' AND node_id = ? AND round = ?)) ORDER BY rowid",
             (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
         ).fetchall()
     )
@@ -941,7 +960,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
         sid, log_path, result_path = await _builtins.start_session(
             db,
             run_dirs,
-            session_id=uuid.uuid4().hex,
+            session_id=db.read(lambda c: store.new_session_id(c, work_item_row["id"])),
             work_item_id=work_item_row["id"],
             node_id=node.id,
             hook_point=task.path,
@@ -956,6 +975,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
             Path(r["log_path"]),
             Path(r["result_path"]),
             session_id=r["id"],
+            work_item_id=work_item_row["id"],
             status=status,
             log=log,
             reused=True,
@@ -1026,7 +1046,7 @@ async def _dispatch_task(
                     break
             return status
     task_policy = scope_policy(work_item_row, task, repository)
-    session_id = uuid.uuid4().hex
+    session_id = db.read(lambda c: store.new_session_id(c, work_item_row["id"]))
     # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
     # dispatch: a sha read later would be whatever HEAD moved to while the task
     # ran, which is the opposite of the question the gate asks. `git_read`
@@ -1242,7 +1262,7 @@ async def _dispatch_task(
             )
             + (prompts.METHOD_NOTE if method_is_own else "")
             + prompts.scope_note(t, launch.repo_entry if launch else None)
-            + prompts.progress_note(t, work_item_row, worktree, db, sandbox)
+            + prompts.progress_note(t, work_item_row, worktree, db, sandbox, run_dirs=run_dirs)
             + prompts.review_threads_note(t, work_item_row, db, note, sandbox)
         )
     ) + prompts.BEAD_NOTE
@@ -1271,7 +1291,8 @@ async def _dispatch_task(
             instruction += prompts.carried_findings_note(carried or [])
         if AgentInput.PREVIOUS_REVIEW in t.inputs:
             instruction += prompts.previous_review_note(
-                prompts.last_review_session(db, work_item_row["id"], task.path)
+                prompts.last_review_session(db, work_item_row["id"], task.path),
+                run_dirs=run_dirs,
             )
     item_override = (
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
@@ -1308,6 +1329,14 @@ async def _dispatch_task(
         )
     except _agent.HarnessUnavailable:
         table = None
+    if t.produces:
+        # A re-run revises its document in place, so keep the one a gate or a
+        # person last saw first (`a-revised-document-keeps-its-earlier-
+        # version`); on a first run there is none and nothing is written. Once
+        # per dispatch, before any candidate: a fallback relaunch is the same
+        # revision, and the steer note below must name the `docs/` copy this
+        # seeds from an older worktree's.
+        item_paths.keep_version(run_dirs, work_item_row["id"], t.produces, worktree=worktree)
     cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
@@ -1367,7 +1396,12 @@ async def _dispatch_task(
             if await over_budget():
                 await tried.flush()
                 return BUDGET
-            common = {**common, "session_id": uuid.uuid4().hex}
+            common = {
+                **common,
+                "session_id": db.read(
+                    lambda c, w=common["work_item_id"]: store.new_session_id(c, w)
+                ),
+            }
         await tried.launching(here, common["session_id"])
         status, final = await _launch_agent(
             db,
@@ -1657,7 +1691,14 @@ async def _launch_agent(
             method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(
-                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                prompts.steer_prefix(
+                    t.produces,
+                    work_item_row,
+                    worktree,
+                    note,
+                    run_dirs=run_dirs,
+                    source=note_source,
+                )
                 if note
                 else ""
             )
@@ -1858,7 +1899,7 @@ async def measure_node(
         else:
             session = _latest_session(db, work_item_id, node, failed[0])
             status = session["status"] if session is not None else "failed"
-            note = prompts.task_failure_note(failed[0].task.id, status, session)
+            note = prompts.task_failure_note(failed[0].task.id, status, session, run_dirs=run_dirs)
         return await run_recovery(
             db,
             run_dirs,
@@ -2405,7 +2446,7 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
     rows = db.read(
         lambda c: c.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            f"AND hook_point IN ({','.join('?' * len(paths))}) ORDER BY created_at",
+            f"AND hook_point IN ({','.join('?' * len(paths))}) ORDER BY created_at, rowid",
             (work_item_id, node.id, *paths),
         ).fetchall()
     )
@@ -2568,7 +2609,7 @@ def judge_history(
             lambda c: c.execute(
                 "SELECT round, result_path FROM worker_sessions WHERE work_item_id = ? "
                 f"AND node_id = ? AND hook_point IN ({','.join('?' * len(fix_paths))}) "
-                "ORDER BY round",
+                "ORDER BY round, rowid",
                 (work_item_id, node_id, *fix_paths),
             ).fetchall()
         )

@@ -162,11 +162,10 @@ def _run(fn) -> None:
         conn.close()
 
 
-def _paused_item(client, repo, *, materialized_chain: str | None = None) -> str:
+def _paused_item(client, repo, *, wid="w1", materialized_chain: str | None = None) -> str:
     """A work item with no chain run yet -- `store.create_work_item` directly,
     like the API's own create route, so a test can drive it onto a stop by
     hand rather than through a real walk."""
-    wid = "w1"
     _run(
         lambda c: store.create_work_item(
             c,
@@ -284,8 +283,8 @@ def test_stop_detail_rate_limited(client, repo):
     assert "fallback" not in stop["facts"]  # no AgentTask to resolve: no chain was loaded
 
 
-def _stopped_item(client, repo) -> str:
-    wid = _paused_item(client, repo)
+def _stopped_item(client, repo, wid="w1") -> str:
+    wid = _paused_item(client, repo, wid=wid)
     _run(lambda c: store.load_chain(c, wid, "implement"))
     _run(lambda c: store.mark_needs_human(c, wid, "implement", "task failed", kind="failed"))
     return wid
@@ -308,7 +307,12 @@ def _escalation_turn(wid: str, session: str | None, status: str = "pending") -> 
             result_path="/r",
         )
     )
-    _run(lambda c: c.execute("UPDATE worker_sessions SET status = ? WHERE id = 'e1'", (status,)))
+    _run(
+        lambda c: c.execute(
+            "UPDATE worker_sessions SET status = ? WHERE work_item_id = ? AND id = 'e1'",
+            (status, wid),
+        )
+    )
 
 
 def _displays(client, wid: str) -> tuple[str, str]:
@@ -338,6 +342,17 @@ def test_display_status_is_the_stops_own_once_the_escalation_turn_has_exited(cli
     _escalation_turn(wid, "e1", status)
 
     assert _displays(client, wid) == ("failed", "failed")
+
+
+def test_each_item_reads_its_own_escalation_turn_of_a_shared_session_id(client, repo):
+    """A session id is unique only within its item: two items' turns may both
+    be `e1`, and each item's badge, on the detail and the list, follows its
+    own turn's session."""
+    _escalation_turn(_stopped_item(client, repo, "w1"), "e1", "done")
+    _escalation_turn(_stopped_item(client, repo, "w2"), "e1", "running")
+
+    assert _displays(client, "w1") == ("failed", "failed")
+    assert _displays(client, "w2") == ("escalated", "escalated")
 
 
 def test_a_turn_with_no_session_row_yet_reads_escalated_only_while_it_is_new(client, repo):
@@ -638,7 +653,7 @@ def _exit_session(wid, sid, result, command, status, code, round=0, repository=N
             repository=repository,
         )
     )
-    _run(lambda c: store.session_exited(c, sid, status))
+    _run(lambda c: store.session_exited(c, sid, status, work_item_id=wid))
 
 
 def _verified_item(client, repo, tmp_path, runs: list[tuple[str, str, int]], **fields) -> str:

@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 
 from kraft import caps, events, executor, store
 from kraft import overrides as _overrides
@@ -162,7 +161,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     await _agent.run_agent_task(
         db,
         run_dirs,
-        session_id=uuid.uuid4().hex,
+        session_id=db.read(lambda c: store.new_session_id(c, work_item_id)),
         work_item_id=work_item_id,
         node_id=gate,
         hook_point=f"{gate}.reply",

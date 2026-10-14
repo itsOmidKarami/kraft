@@ -11,10 +11,11 @@ import "./settings.css";
 import "./storage.css";
 
 const HOUSEKEEPING = "/settings/policy/housekeeping";
-/** The spec's seven categories, in the order the page lists them. */
+/** The server's eight categories, in the order the page lists them. */
 const CATEGORIES: [key: string, label: string][] = [
   ["worktrees", "Worktrees"],
   ["sandboxes", "Sandbox stores and homes"],
+  ["documents", "Item documents and session output"],
   ["logs", "Logs"],
   ["results", "Results"],
   ["databases", "Databases and backups"],
@@ -78,7 +79,7 @@ export function StoragePage() {
 
   // One live region, always mounted: a screen reader hears a change in it, not a relabelled button.
   const note =
-    measuring && data ? "Measuring…" : data?.state === "held" ? "Over the limit: starts are held until you make room." : data?.state === "over_quota" ? "Over the quota: Kraft is warning; starts still go ahead." : "";
+    measuring && data ? "Measuring…" : data?.state === "held" ? "Over the limit: starts are held until you make room." : data?.state === "over_quota" && limit != null && used > limit ? "Over the limit in items' documents, which archiving keeps: starts still go ahead. Abandoning an item removes its documents." : data?.state === "over_quota" ? "Over the quota: Kraft is warning; starts still go ahead." : "";
 
   return (
     <div className="ng-settings">
@@ -150,6 +151,7 @@ export function StoragePage() {
                     <th scope="col">Work item</th>
                     <th scope="col">Status</th>
                     <th scope="col" className="is-num">Size</th>
+                    <th scope="col" className="is-num" title="Kept by archiving; removed by abandoning the item">Documents</th>
                     <th scope="col">Updated</th>
                   </tr>
                 </thead>
@@ -160,6 +162,7 @@ export function StoragePage() {
                       <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
                       <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> reclaimable</span>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>
+                      <td className="is-num">{i.documents_bytes ? humanSize(i.documents_bytes) : ""}</td>
                       <td>{ago(i.updated_at)}</td>
                     </tr>
                   ))}
@@ -169,6 +172,7 @@ export function StoragePage() {
                       <td className="set-mono">{o.name}</td>
                       <td>no work item</td>
                       <td className="is-num">{humanSize(o.bytes)}</td>
+                      <td />
                       <td />
                     </tr>
                   ))}

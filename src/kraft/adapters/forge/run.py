@@ -1126,6 +1126,7 @@ async def run_task(
             log_path,
             result_path,
             session_id=session_id,
+            work_item_id=work_item_id,
             status="config_error",
             log=f"refusing to open a merge request for {branch}: no selected repository has "
             "commits beyond its base -- the implementation committed nothing\n",
@@ -1143,6 +1144,7 @@ async def run_task(
             log_path,
             result_path,
             session_id=session_id,
+            work_item_id=work_item_id,
             status="config_error",
             log=f"{hook_point} cannot run: {exc}\n",
             reused=reused,
@@ -1176,7 +1178,7 @@ async def run_task(
         # Resolved once against the item's own worktree (`repo`, not whichever
         # target the loop below is on) -- a multi-repo item's submodule paths
         # are not where the agent's `on.mr.describe` artifact lives.
-        meta = mr_ops.read_mr_meta(repo, work_item_id)
+        meta = mr_ops.read_mr_meta(repo, work_item_id, run_dirs)
         if handler == "open_mr" and workspace:
             # Every workspace item, before anything opens: a submodule the agent changed
             # that the target never selected has no branch and no merge
@@ -1309,6 +1311,7 @@ async def run_task(
         log_path,
         result_path,
         session_id=session_id,
+        work_item_id=work_item_id,
         status=status,
         log=log,
         findings=findings,

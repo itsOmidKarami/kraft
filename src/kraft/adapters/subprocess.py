@@ -8,6 +8,7 @@ import os
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import caps, events, logs, store
+from kraft import caps, events, item_paths, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
@@ -39,6 +40,7 @@ from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
 from kraft.worker.inject import InjectRule
+from kraft.worker.worktree_read import read_no_follow
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
@@ -57,7 +59,9 @@ _flush_sleep = asyncio.sleep
 _JOB_NAME_MAX = 200
 
 
-async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, reader) -> str:
+async def fail_abandoned_jobs(
+    db, session_id: str, log_path: Path, status: str, reader, *, work_item_id: str
+) -> str:
     """`status`, or `failed` when the agent's turn ended with a background job
     still running (Kraft-xvugd): the session ends with its turn, so nothing
     would ever read that job's result. The prose in `agent._CTX` alone did not
@@ -85,7 +89,8 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
 
     def _record(c):
         row = c.execute(
-            "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (session_id,)
+            "SELECT work_item_id, node_id FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (work_item_id, session_id),
         ).fetchone()
         payload = {"session_id": session_id, "node_id": row["node_id"], "jobs": jobs}
         events.append(
@@ -99,20 +104,51 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
     return status if status == "needs_context" else "failed"
 
 
-def result_path_for(run_dirs, name: str) -> Path:
-    """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
-    caller that needs to predict it ahead of dispatch must use, rather than
-    reimplementing it. `name` is the session id, or an escalation thread's
-    `escalate.thread_files` name."""
-    return run_dirs.results / f"{name}.json"
+def _worker_files(files: item_paths.SessionFiles) -> tuple[Path, ...]:
+    """The files a worker writes that Kraft creates for it: its result and
+    summary, each in its `writable` folder. An escalation thread from before
+    the upgrade keeps its summary in the worktree, which is not one of them."""
+    return tuple(p for p in (files.result, files.summary) if p.parent == files.writable)
+
+
+def _create_worker_files(files: item_paths.SessionFiles) -> None:
+    """The files a worker writes, created empty before launch, sandboxed or
+    not: a sandbox mounts each as a file (docker makes a root-owned folder of
+    a mount source that does not exist), and an unsandboxed worker finds its
+    folder there. Created, never truncated or written through a name already
+    there: an escalation thread's summary is its last turn's, emptied by
+    `escalate._archive_last_turn`, and a name a worker planted is left for
+    the no-follow reads to refuse."""
+    files.writable.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    for path in _worker_files(files):
+        try:
+            os.close(os.open(path, flags, 0o644))
+        except FileExistsError:
+            if stat.S_ISREG(os.lstat(path).st_mode):
+                continue
+            # A link, a FIFO or a folder an earlier turn left: a sandbox
+            # would mount what it points at. The name goes, never its target.
+            item_paths.remove_entry(path)
+            os.close(os.open(path, flags, 0o644))
+
+
+def _read_result(path: Path) -> bytes:
+    """A result file's bytes, read with no symlink followed and no wait on a
+    FIFO (`worktree_read.read_no_follow`): the worker writes it, and could
+    have planted any name in its place. Raises `OSError`,
+    `FileNotFoundError` for none."""
+    return read_no_follow(Path(path))
 
 
 def _resolve_result_file(path: Path) -> str | None:
-    """Status from a result file alone, or None if it's missing/empty."""
-    if not path.exists():
-        return None
+    """Status from a result file alone, or None if it's missing/empty. One
+    that is not a regular file reached without a symlink is unreadable:
+    `failed`, never the file a link points at."""
     try:
-        raw = path.read_text().strip()
+        raw = _read_result(path).decode().strip()
+    except FileNotFoundError:
+        return None
     except (OSError, UnicodeDecodeError):
         # UnicodeDecodeError is a ValueError, not an OSError: a plugin that died
         # mid-write leaves bytes that are not valid UTF-8, and reading them must
@@ -122,7 +158,8 @@ def _resolve_result_file(path: Path) -> str | None:
         return None
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
+        # A worker can nest a result deeper than the parser recurses.
         return "failed"
     status = data.get("status") if isinstance(data, dict) else None
     # An unrecognized status still resolves to failed: an agent inventing a status
@@ -130,18 +167,24 @@ def _resolve_result_file(path: Path) -> str | None:
     return status if status in _AGENT_STATUSES else "failed"
 
 
-def _read_str_field(path: Path, key: str) -> str | None:
-    """A string `key` from a result file's JSON, or None if it's missing/unreadable.
+def _read_json(path: Path):
+    """A result file's JSON, or None if it's missing/unreadable.
 
     Catches OSError, ValueError rather than json.JSONDecodeError alone: a
-    non-UTF-8 result file raises UnicodeDecodeError from read_text(), which is a
-    ValueError, not caught by `except OSError`. That exact clause has been wrong
-    three times in this codebase already.
+    non-UTF-8 result file raises UnicodeDecodeError, which is a ValueError,
+    not caught by `except OSError`. That exact clause has been wrong three
+    times in this codebase already. And RecursionError, which is neither: a
+    worker can nest a result deeper than the parser recurses.
     """
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
+        return json.loads(_read_result(path))
+    except (OSError, ValueError, RecursionError):
         return None
+
+
+def _read_str_field(path: Path, key: str) -> str | None:
+    """A string `key` from a result file's JSON, or None if it's missing/unreadable."""
+    data = _read_json(path)
     if not isinstance(data, dict):
         return None
     value = data.get(key)
@@ -175,10 +218,7 @@ def read_suggested_action(path: Path) -> dict | None:
     abandoned -- says so here rather than only in prose, so the stop can offer
     it as one command. A shape Kraft cannot act on is dropped, not guessed at.
     """
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
+    data = _read_json(path)
     value = data.get("suggested_action") if isinstance(data, dict) else None
     if not isinstance(value, dict) or value.get("action") not in SUGGESTED_ACTIONS:
         return None
@@ -201,7 +241,7 @@ def read_verdict(path: Path) -> str | None:
     return _read_str_field(path, "verdict")
 
 
-def read_result_fields(path: Path) -> dict[str, str | None]:
+def read_result_fields(path: Path, *, summary: str | None = None) -> dict[str, str | None]:
     """`session_summary_ref`/`concerns`/`question` together.
 
     The one place the result-file contract's field list is spelled out.
@@ -209,9 +249,19 @@ def read_result_fields(path: Path) -> dict[str, str | None]:
     the same file, on the two paths a session can exit by (in process, or
     adopted after a restart); a field added to one and not the other would
     reach the DB on one path and silently drop on the other (Kraft-k3d).
+
+    `summary` is the summary Kraft asked for and found written
+    (`item_paths.recorded_summary`), which wins. A ref the worker reports is
+    untrusted: kept only when it is relative and not under `items/`, where
+    only Kraft names a summary, in the run folder's own terms.
     """
+    reported = read_summary_ref(path)
+    if reported is not None and (
+        Path(reported).is_absolute() or Path(reported).parts[:1] == (item_paths.ITEMS,)
+    ):
+        reported = None
     return {
-        "summary_ref": read_summary_ref(path),
+        "summary_ref": summary or reported,
         "concerns": read_concerns(path),
         "question": read_question(path),
     }
@@ -366,7 +416,9 @@ async def record_oom_kill(
     leave their callers before any of them asks. Such a session keeps
     `status`, and nothing is recorded."""
     if not oom.confirmed and await db.write(
-        lambda c: store.session_status(c, session_id) == SessionStatus.PAUSED
+        lambda c: (
+            store.session_status(c, session_id, work_item_id=work_item_id) == SessionStatus.PAUSED
+        )
     ):
         return status
     with open(log_path, "a") as fh:
@@ -393,12 +445,15 @@ def _resolve_exit_file(path: Path) -> str | None:
     one. Writing a result file for every subprocess task would erase it.
     """
     try:
-        raw = path.read_text().strip()
+        # No link followed, no wait on a FIFO: the exit file sits where a
+        # worker may write (an older escalation thread's, beside `results/`).
+        raw = read_no_follow(Path(path)).decode().strip()
     except (OSError, UnicodeDecodeError):
         return None
-    if not raw.lstrip("-").isdigit():
+    code = item_paths.exit_code(raw)
+    if code is None:
         return None
-    return "done" if int(raw) == 0 else "failed"
+    return "done" if code == 0 else "failed"
 
 
 def _missing_executable(cmd0: str, cwd: Path, env: dict[str, str]) -> bool:
@@ -541,8 +596,12 @@ async def open_egress(
             # read them again; absent, the daemon's own (no repo entry).
             if repo is not None:
                 egress["repo"] = repo
-        await db.write(lambda c: store.set_session_egress(c, session_id, egress))
-    proxy_env = await backend.open_session(session_id, sandbox, sock_path)
+        await db.write(
+            lambda c: store.set_session_egress(c, session_id, egress, work_item_id=work_item_id)
+        )
+    proxy_env = await backend.open_session(
+        session_id, sandbox, sock_path, work_item_id=work_item_id
+    )
     if not proxy_env:
         raise _sandbox.SandboxNotReady(
             f"the {backend.kind} sandbox gave its session no egress route for `network:`"
@@ -550,13 +609,13 @@ async def open_egress(
     return proxy_env
 
 
-async def close_egress(backend, session_id: str) -> None:
+async def close_egress(backend, session_id: str, *, work_item_id: str) -> None:
     """Undo `open_egress`: the backend's route, then the channel."""
     try:
-        await backend.close_session(session_id)
+        await backend.close_session(session_id, work_item_id=work_item_id)
     finally:
         if (channels := _channel.current()) is not None:
-            await channels.close(session_id)
+            await channels.close(session_id, work_item_id=work_item_id)
 
 
 async def _item_identity(db, work_item_id: str) -> dict[str, str]:
@@ -627,10 +686,11 @@ async def run_task(
     #: deadline the process group, and a sandbox's container, is killed and
     #: the session exits `capped_out` with `LimitEvent.TIME_CAP_REACHED` naming the scope.
     time_cap: caps.Deadline | None = None,
-    #: The name the result file (and its sidecars) goes under, when not the
-    #: session's own: an escalation thread's, shared by its turns
-    #: (`escalate.thread_files`, Kraft-s7c04.54). The log stays per session.
-    files: str | None = None,
+    #: Where the session's files go, when not its own folder's
+    #: (`item_paths.session_files`): an escalation turn's result and summary
+    #: are its thread's, shared by its turns (`escalate.thread_files`,
+    #: Kraft-s7c04.54). The log, exit code and container id stay its own.
+    files: item_paths.SessionFiles | None = None,
     #: `{"harness": <harness id>, "model": <resolved model or None>}`, which a
     #: `rate_limit_hit` carries so a later launch can skip that pair until its
     #: reset (`executor.fallback.known_limited`). Only `run_agent_task` sets it.
@@ -658,13 +718,16 @@ async def run_task(
     #: `cwd` alone, with no member (Kraft-ju36l).
     checkout: _sandbox.Checkout | None = None,
 ) -> str:
-    log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = result_path_for(run_dirs, files or session_id)
+    files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
+    # Kraft's own folder: the log, and the two sidecars below, are written
+    # by the host and never handed to the worker (`SessionFiles`).
+    files.folder.mkdir(parents=True, exist_ok=True)
+    log_path, result_path = files.log, files.result
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
-    exit_path = result_path.with_suffix(".exit")
+    exit_path = files.exit
     # docker's own sidecar, written only once it created the container.
-    cidfile = result_path.with_suffix(".cid")
+    cidfile = files.cid
     # Captured before any sandbox wrap reassigns `cmd` below (Kraft-s7c04.35) --
     # this must read as what actually ran, never a docker-wrapped invocation.
     command_ran = shlex.join(cmd)
@@ -709,6 +772,11 @@ async def run_task(
     full_env = {k: v for k, v in full_env.items() if k not in withheld}
     refs: Sequence = ()
     root, members = checkout if checkout is not None else (Path(cwd), {})
+    # What a sandboxed worker may write outside its worktree and its home:
+    # its own two files, each its own mount, and its item's documents. An
+    # older escalation thread's summary is in the worktree, mounted already.
+    rw_files = _worker_files(files)
+    rw_dirs = (item_paths.docs_dir(run_dirs, work_item_id),)
     if backend is not None:
         if checkout is None and (unmounted := _declared_members(db, work_item_id)):
             # Fails closed for a caller that forgot: unmounted, a member's
@@ -718,20 +786,36 @@ async def run_task(
                 f"kraft: this sandboxed launch was not given the checkout of workspace "
                 f"members {', '.join(unmounted)} to mount, so it does not start\n"
             )
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         # Before anything below writes one of them.
         if problem := await backend.owner_refusal(
-            run_dirs, root, work_item_id, result_path, members=members
+            run_dirs,
+            root,
+            work_item_id,
+            result_path,
+            members=members,
+            rw_files=rw_files,
+            rw_dirs=rw_dirs,
         ):
             log_path.write_text(f"kraft: {problem}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
-        # The container writes its result here, and `result_path` is mounted
+        # The container writes its result and summary here, each mounted
         # read-write into it by name -- docker can only bind-mount a file
-        # that already exists, so create it now (empty) rather than letting
-        # docker invent a directory at that path.
-        result_path.touch(exist_ok=True)
+        # that already exists, so create them now (empty) rather than letting
+        # docker invent a directory at that path. Likewise the docs folder.
+        _create_worker_files(files)
+        for d in rw_dirs:
+            d.mkdir(parents=True, exist_ok=True)
         # docker refuses a cidfile that already exists.
         cidfile.unlink(missing_ok=True)
         # `db.write` for the reads: this session's own row, and a co-task's
@@ -753,7 +837,11 @@ async def run_task(
             )
         except (OSError, RuntimeError) as exc:
             log_path.write_text(f"kraft: could not prepare the sandbox's ref store: {exc}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         if problem := await backend.probe(
             sandbox,
@@ -764,7 +852,11 @@ async def run_task(
             else None,
         ):
             log_path.write_text(f"kraft: {problem}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         try:
             # The Kraft CA joins the bundle only when a credential is managed.
@@ -772,7 +864,11 @@ async def run_task(
             ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             log_path.write_text(f"kraft: {exc}\n")
-            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            await db.write(
+                lambda c: store.session_exited(
+                    c, session_id, "config_error", work_item_id=work_item_id
+                )
+            )
             return "config_error"
         proxy_env: dict[str, str] = {}
         if network:
@@ -794,11 +890,15 @@ async def run_task(
                 )
             except BaseException as exc:
                 # Whatever part of the route did open, closed.
-                await close_egress(backend, session_id)
+                await close_egress(backend, session_id, work_item_id=work_item_id)
                 if not isinstance(exc, _sandbox.SandboxNotReady):
                     raise
                 log_path.write_text(f"kraft: {exc}\n")
-                await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+                await db.write(
+                    lambda c: store.session_exited(
+                        c, session_id, "config_error", work_item_id=work_item_id
+                    )
+                )
                 return "config_error"
     # From here until the process is launched, whatever ends this call --
     # an early return, an exception, a cancel -- closes a route it opened;
@@ -816,11 +916,11 @@ async def run_task(
             # still outrank it.
             repo_env = repo_entry.env if repo_entry is not None else {}
             identity = await _item_identity(db, work_item_id)
-            # Only this item's: the folder holds every item's diffs and
-            # findings. `db.write` so this session's own row is seen.
-            results = await db.write(
-                lambda c: store.result_files(c, run_dirs.results, work_item_id)
-            )
+            # Only this item's sessions' files, each one by name: the
+            # results folder holds every item's diffs and findings, and a
+            # session folder holds what the host writes and trusts. `db.write`
+            # so this session's own row is seen.
+            results = await db.write(lambda c: store.result_files(c, run_dirs, work_item_id))
             cmd = backend.wrap(
                 cmd,
                 root,
@@ -833,7 +933,10 @@ async def run_task(
                     **proxy_env,
                 },
                 session_id=session_id,
+                work_item_id=work_item_id,
                 result_path=result_path,
+                rw_files=rw_files,
+                rw_dirs=rw_dirs,
                 cidfile=cidfile,
                 refs=refs,
                 workdir=cwd,
@@ -854,7 +957,9 @@ async def run_task(
         # worktree the caller believes is idle. One read, right before the one
         # place that can actually refuse the launch, covers every caller that
         # marks a row stopped: no log file is opened and no process is started.
-        current_status = await db.write(lambda c: store.session_status(c, session_id))
+        current_status = await db.write(
+            lambda c: store.session_status(c, session_id, work_item_id=work_item_id)
+        )
         if current_status != SessionStatus.PENDING:
             return current_status
         if backend is None:
@@ -865,9 +970,18 @@ async def run_task(
             # the item's, never `cwd`'s, which is the member on a fanned-out run.
             identity = await _item_identity(db, work_item_id)
             full_env = {**identity, **full_env}
+            # Where $KRAFT_RESULT_PATH points, as a sandboxed launch has it,
+            # and the folder $KRAFT_DOCS_DIR names.
+            _create_worker_files(files)
+            for d in rw_dirs:
+                d.mkdir(parents=True, exist_ok=True)
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
-        client_cwd = backend.client_cwd(session_id) if backend is not None else None
+        client_cwd = (
+            backend.client_cwd(session_id, work_item_id=work_item_id)
+            if backend is not None
+            else None
+        )
         log = open(log_path, "w", opener=private)
         try:
             try:
@@ -906,15 +1020,19 @@ async def run_task(
                 # problem, and reporting it as a task failure opens a fix cycle no
                 # agent can win by editing source (Kraft-579). The caller
                 # short-circuits this straight to needs_human.
-                await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+                await db.write(
+                    lambda c: store.session_exited(
+                        c, session_id, "config_error", work_item_id=work_item_id
+                    )
+                )
                 if backend is not None:
-                    await backend.close(session_id)
+                    await backend.close(session_id, work_item_id=work_item_id)
                 return "config_error"
         finally:
             log.close()  # the child holds its own dup'd fd
     finally:
         if network and not launched:
-            await close_egress(backend, session_id)
+            await close_egress(backend, session_id, work_item_id=work_item_id)
     # The child owns the log fd, so it keeps writing across a Kraft restart — which
     # is the whole premise of reattach. A watcher thread therefore *tails the file*
     # rather than draining a pipe: piping through the parent would give the
@@ -936,7 +1054,11 @@ async def run_task(
             pid_start_time = psutil.Process(proc.pid).create_time()
         except psutil.Error:
             pid_start_time = None
-        await db.write(lambda c: store.session_running(c, session_id, proc.pid, pid_start_time))
+        await db.write(
+            lambda c: store.session_running(
+                c, session_id, proc.pid, pid_start_time, work_item_id=work_item_id
+            )
+        )
 
         # Poll instead of `await asyncio.to_thread(proc.wait)`: a blocked thread is
         # uncancellable, so on SIGTERM the executor task's cancel() could not
@@ -969,7 +1091,11 @@ async def run_task(
             try:
                 log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
                 if live is not None:
-                    await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+                    await db.write(
+                        lambda c, u=live: store.session_progress(
+                            c, session_id, u, work_item_id=work_item_id
+                        )
+                    )
             except Exception:
                 logger.exception("usage progress tick failed for session %s", session_id)
     finally:
@@ -997,7 +1123,8 @@ async def run_task(
         # snapshot may predate the pause -- which would skip the flush wait
         # and lose exactly the cost this fix exists to keep.
         paused = (
-            await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED
+            await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
+            == SessionStatus.PAUSED
         )
         if paused and flush_grace:
             await _flush_sleep(flush_grace)
@@ -1021,15 +1148,15 @@ async def run_task(
                     # before the sandbox holding it goes -- and whether its
                     # memory limit killed the session, which goes with it.
                     try:
-                        await backend.collect(session_id, result_path)
-                        oom = await backend.oom_killed(session_id)
+                        await backend.collect(session_id, result_path, work_item_id=work_item_id)
+                        oom = await backend.oom_killed(session_id, work_item_id=work_item_id)
                     finally:
                         # The worker, then its route out (spec §4).
                         try:
-                            await backend.close(session_id)
+                            await backend.close(session_id, work_item_id=work_item_id)
                         finally:
                             if network:
-                                await close_egress(backend, session_id)
+                                await close_egress(backend, session_id, work_item_id=work_item_id)
             finally:
                 if refs:
                     await _sync_refs(db, backend, refs, work_item_id, session_id)
@@ -1040,7 +1167,11 @@ async def run_task(
             # both are guarded on the row still being paused.
             await db.write(
                 lambda c: store.record_pause_usage(
-                    c, session_id, _usage.read(log_path, result_path, reader), reader
+                    c,
+                    session_id,
+                    _usage.read(log_path, result_path, reader),
+                    reader,
+                    work_item_id=work_item_id,
                 )
             )
     if capped:
@@ -1054,6 +1185,7 @@ async def run_task(
                 None,
                 _usage.read(log_path, result_path, reader),
                 reader=reader,
+                work_item_id=work_item_id,
             )
             events.append(
                 c,
@@ -1086,7 +1218,9 @@ async def run_task(
     if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
         status = "failed"
     if require_result_file:
-        status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
+        status = await fail_abandoned_jobs(
+            db, session_id, log_path, status, reader, work_item_id=work_item_id
+        )
     rate_limit = _rate_limit_rejection(log_path, reader=reader)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this
@@ -1105,11 +1239,16 @@ async def run_task(
         status = post_resolve(status, log_path, returncode)
     # A human pausing the item SIGTERMs this child, so a non-zero rc here may mean
     # "stopped on purpose" rather than "failed". The row is the authority.
-    if await db.write(lambda c: store.session_status(c, session_id)) == SessionStatus.PAUSED:
+    if (
+        await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
+        == SessionStatus.PAUSED
+    ):
         return "paused"
     if oom is not None:
         status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)
-    fields = read_result_fields(result_path)
+    fields = read_result_fields(
+        result_path, summary=item_paths.recorded_summary(run_dirs, work_item_id, files)
+    )
     seen = _usage.read(log_path, result_path, reader)
     await db.write(
         lambda c: store.session_exited(
@@ -1121,6 +1260,7 @@ async def run_task(
             concerns=fields["concerns"],
             question=fields["question"],
             reader=reader,
+            work_item_id=work_item_id,
         )
     )
     return status

@@ -131,7 +131,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
               ...(gate
                 ? ([
                     ...(message ? [["message", message]] : []),
-                    ...(item.test_result ? [["tests", <TestsLine key="t" result={item.test_result} linkClass="ph-linkbtn ph-mono" />]] as [string, React.ReactNode][] : []),
+                    ...(item.test_result ? [["tests", <TestsLine key="t" workItemId={item.id} result={item.test_result} linkClass="ph-linkbtn ph-mono" />]] as [string, React.ReactNode][] : []),
                     ...(doc ? [["document", <button key="d" type="button" className="ph-linkbtn ph-mono" onClick={() => navigate(`${placeUrl(item.id, { node: nodeId, sel: { kind: "node", node: nodeId } })}?doc=${encodeURIComponent(doc.document_id)}`)}>{doc.path.split("/").at(-1)}</button>]] as [string, React.ReactNode][] : []),
                     ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])
@@ -251,7 +251,7 @@ function NodeLog({ item, node, round }: { item: ItemDetail; node: string; round?
   const ran = round ? passOf(item, node).filter((s) => s.round === (repair.has(s.hook_point) ? round : round - 1)) : [...passOf(item, node), ...escalationsOf(item, node)];
   for (const s of [...ran].sort((a, b) => a.created_at.localeCompare(b.created_at))) latest.set(s.hook_point, s);
   const sessions = [...latest.values()].map((s) => ({ id: s.id, who: taskName(s.hook_point), running: s.status === "running" || s.status === "pending" }));
-  const lines = useLogs(sessions);
+  const lines = useLogs(item.id, sessions);
   const shown = (lines ?? []).filter((l) => src === "all" || l.src === src);
   return (
     <>

@@ -1,6 +1,7 @@
 """Filing a work item with the items it comes after (`depends_on`)."""
 
 import pytest
+from support import permissions
 from support.api import _paused, _set_status
 
 
@@ -12,17 +13,22 @@ def _create(client, repo, **body):
 
 
 @pytest.mark.parametrize(
-    ("status", "code", "detail"),
-    [(None, 422, "no work item"), ("abandoned", 422, "abandoned"), ("completed", 201, None)],
-    ids=["unknown", "abandoned", "completed"],
+    ("status", "typed", "code", "detail"),
+    [
+        (None, lambda w: w, 422, "no work item"),
+        ("abandoned", lambda w: w, 422, "abandoned"),
+        ("completed", lambda w: w, 201, None),
+        ("completed", lambda w: w[:5], 201, None),
+    ],
+    ids=["unknown", "abandoned", "completed", "completed-by-its-start"],
 )
-def test_what_an_item_may_be_filed_after(client, repo, status, code, detail):
+def test_what_an_item_may_be_filed_after(client, repo, status, typed, code, detail):
     dep = "0" * 32
     if status is not None:
         dep = _paused(client, repo, chain_template="default")
         _set_status(dep, status)
 
-    r = _create(client, repo, depends_on=[dep])
+    r = _create(client, repo, depends_on=[typed(dep)])
 
     assert r.status_code == code, r.text
     if detail:
@@ -42,3 +48,14 @@ def test_autostart_after_an_unfinished_item_is_filed_blocked(client, repo):
     assert r.json()["status"] == "blocked"
     assert [d["id"] for d in r.json()["waiting_on"]] == [dep]
     assert client.get(f"/api/work-items/{r.json()['id']}").json()["status"] == "blocked"
+
+
+def test_an_item_cannot_be_filed_after_an_ambiguous_start(client, repo):
+    first, second = "abcd1111" + "0" * 24, "abcd1122" + "0" * 24
+    for sid, wid in (("s-a", first), ("s-b", second)):
+        permissions.seed_session(sid=sid, wid=wid)
+
+    r = _create(client, repo, depends_on=["abcd11"])
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == f"'abcd11' is the start of 2 work items: {first}, {second}"

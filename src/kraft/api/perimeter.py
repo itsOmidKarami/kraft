@@ -4,7 +4,9 @@ decorator needs `app`, which does not exist until the package `__init__`
 builds it) -- registration order there must stay `_spa_navigation`,
 `_authenticate`, `_perimeter`, `_frame_guard` (rule 9: Starlette runs the
 last-declared middleware first, so `_perimeter` must come after the other two,
-and `_frame_guard` after it so a refusal carries its headers too)."""
+and `_frame_guard` after it so a refusal carries its headers too).
+`item_ids.whole_work_item_id` is declared before all four, so it runs after
+them and resolves an id's start only for a caller they admitted."""
 
 from __future__ import annotations
 

@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 54
+SCHEMA_VERSION = 55
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -159,7 +159,7 @@ CREATE INDEX idx_events_type ON events(type);
 CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq);
 
 CREATE TABLE worker_sessions (
-  id             TEXT PRIMARY KEY,
+  id             TEXT NOT NULL, -- unique only with work_item_id
   work_item_id   TEXT NOT NULL REFERENCES work_items(id),
   node_id        TEXT NOT NULL,
   hook_point     TEXT NOT NULL,
@@ -215,10 +215,15 @@ CREATE TABLE worker_sessions (
   -- the repository a fanned-out run (`scope: each_repository`) was for: its id
   -- in the item's frozen target. NULL for a task that is not fanned out, a
   -- single-repository item's, and every row older than this column
-  repository     TEXT
+  repository     TEXT,
+  -- a session's id is unique only within its work item (`store.new_session_id`),
+  -- and a row from before that keeps its 32-character id, unique on its own
+  PRIMARY KEY (work_item_id, id)
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
+-- a flat `/worker-sessions/{sid}` route and an older row are looked up by id alone
+CREATE INDEX idx_worker_sessions_id ON worker_sessions(id);
 
 CREATE TABLE auth_sessions (
   id           TEXT PRIMARY KEY,
@@ -1276,6 +1281,66 @@ SELECT id, bead_id, title, description, repo, chain_template, chain_definition,
         "DROP TABLE work_items",
         "ALTER TABLE work_items_new RENAME TO work_items",
         _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER,
+    ],
+    # A session's id is unique only within its work item (`store.new_session_id`):
+    # the key becomes (work_item_id, id). SQLite cannot alter a key, so the table
+    # is rebuilt from literal text, as migration 26 did. Every row keeps its id,
+    # its 32-character one included, and its `rowid`, which readers order by
+    # (`escalate`, `worker.reattach`). Nothing references this table by a foreign
+    # key and it has no trigger; its one index is recreated, beside the new one on
+    # `id` alone.
+    54: [
+        """CREATE TABLE worker_sessions_new (
+  id             TEXT NOT NULL,
+  work_item_id   TEXT NOT NULL REFERENCES work_items(id),
+  node_id        TEXT NOT NULL,
+  hook_point     TEXT NOT NULL,
+  pid            INTEGER,
+  pid_start_time REAL,
+  log_path       TEXT NOT NULL,
+  result_path    TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN
+                   ('pending', 'running', 'done', 'failed', 'capped_out', 'paused', 'unknown',
+                    'done_with_concerns', 'needs_context', 'rate_limited', 'config_error',
+                    'waiting', 'conflict', 'infra', 'infra_stop')),
+  attempt        INTEGER NOT NULL DEFAULT 1,
+  thread         INTEGER NOT NULL DEFAULT 1,
+  session_summary_ref TEXT,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  round          INTEGER NOT NULL DEFAULT 0,
+  model          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  tokens_cache_write INTEGER,
+  tokens_cache_read  INTEGER,
+  cost_usd       REAL,
+  wall_ms        INTEGER,
+  exited_at      TEXT,
+  head_sha       TEXT,
+  command        TEXT,
+  harness        TEXT,
+  cost_estimated INTEGER NOT NULL DEFAULT 0,
+  sandbox        TEXT,
+  egress         TEXT,
+  repository     TEXT,
+  PRIMARY KEY (work_item_id, id)
+)""",
+        """INSERT INTO worker_sessions_new (rowid, id, work_item_id, node_id, hook_point, pid,
+  pid_start_time, log_path, result_path, status, attempt, thread, session_summary_ref,
+  created_at, started_at, round, model, tokens_in, tokens_out, tokens_cache_write,
+  tokens_cache_read, cost_usd, wall_ms, exited_at, head_sha, command, harness,
+  cost_estimated, sandbox, egress, repository)
+SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_path,
+       result_path, status, attempt, thread, session_summary_ref, created_at, started_at,
+       round, model, tokens_in, tokens_out, tokens_cache_write, tokens_cache_read, cost_usd,
+       wall_ms, exited_at, head_sha, command, harness, cost_estimated, sandbox, egress,
+       repository
+  FROM worker_sessions ORDER BY rowid""",
+        "DROP TABLE worker_sessions",
+        "ALTER TABLE worker_sessions_new RENAME TO worker_sessions",
+        "CREATE INDEX idx_worker_sessions_status ON worker_sessions(status)",
+        "CREATE INDEX idx_worker_sessions_id ON worker_sessions(id)",
     ],
 }
 

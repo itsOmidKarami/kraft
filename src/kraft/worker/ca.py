@@ -280,18 +280,23 @@ def _host_leaf(run_dirs, name: str) -> tuple[Path, Path]:
     )
 
 
-def session_dir(run_dirs, session_id: str) -> Path:
-    """`run/ca/sessions/<session_id>/`: everything relay B mounts, and only
-    that -- `client.pem`, `key.pem` and the root's `ca.pem`."""
-    return run_dirs.ca / "sessions" / session_id
+def session_dir(run_dirs, name: str) -> Path:
+    """`run/ca/sessions/<name>/`: everything relay B mounts, and only that --
+    `client.pem`, `key.pem` and the root's `ca.pem`. `name` is the session's
+    `ids.qualified(work_item_id, session_id)`: `<wid>-<sid>`, or the bare id
+    of a session minted before per-item ids, whose folder keeps the name it
+    started with. One string names the folder and the certificate's CN, so
+    the backend's sweep keeps a folder by its name alone."""
+    return run_dirs.ca / "sessions" / name
 
 
-def mint_session_cert(run_dirs, session_id: str) -> tuple[Path, Path]:
-    """The session's client certificate and key, CN = the whole session id,
-    beside a copy of the CA's certificate (never its key). Idempotent: an
-    existing pair is returned as it is."""
+def mint_session_cert(run_dirs, name: str) -> tuple[Path, Path]:
+    """The session's client certificate and key, CN = `name` (its
+    `ids.qualified` name, which the channel registry is keyed by), beside a
+    copy of the CA's certificate (never its key). Idempotent: an existing
+    pair is returned as it is."""
     ca_cert_path, _ = ensure_ca(run_dirs)
-    directory = session_dir(run_dirs, session_id)
+    directory = session_dir(run_dirs, name)
     for d in (directory.parent, directory):
         d.mkdir(parents=True, exist_ok=True, mode=0o700)
         d.chmod(0o700)
@@ -303,13 +308,13 @@ def mint_session_cert(run_dirs, session_id: str) -> tuple[Path, Path]:
         run_dirs,
         cert_path,
         key_path,
-        session_id,
+        name,
         usage=ExtendedKeyUsageOID.CLIENT_AUTH,
         days=_SESSION_DAYS,
     )
 
 
-def discard_session_cert(run_dirs, session_id: str) -> None:
+def discard_session_cert(run_dirs, name: str) -> None:
     """Remove the session's directory, key and all. Best-effort; a no-op for
     a session that never minted one."""
-    shutil.rmtree(session_dir(run_dirs, session_id), ignore_errors=True)
+    shutil.rmtree(session_dir(run_dirs, name), ignore_errors=True)

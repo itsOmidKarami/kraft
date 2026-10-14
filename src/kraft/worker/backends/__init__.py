@@ -12,6 +12,12 @@ so its `collect` has nothing to fetch; a backend with no shared filesystem
 caller never reads what a sandboxed session left in the worktree before the
 session's backend has had its `code_out` and `collect`: that ordering is what
 lets such a backend exist without reworking every caller.
+
+A session id is unique only within its work item, so every session call
+takes the item too (`work_item_id=`), and anything a backend names for the
+session on the machine is built from `ids.qualified(work_item_id,
+session_id)`: the item and the session, or a session minted before per-item
+ids by its bare id, as it started.
 """
 
 from __future__ import annotations
@@ -36,10 +42,11 @@ class SandboxBackend(Protocol):
     async def owner_refusal(
         self, run_dirs, cwd: Path, work_item_id: str, result_path: Path, **kw
     ) -> str | None:
-        """Why a path this launch's container writes (its HOME, ref stores or
-        result file) belongs to someone it cannot write as, or None. Asked
-        before Kraft writes any of them; `config_error` when it answers.
-        `members=` as for `code_in`."""
+        """Why a path this launch's container writes (its HOME, ref stores,
+        result file, and the `rw_files=` and `rw_dirs=` `wrap` is given)
+        belongs to someone it cannot write as, or None. Asked before Kraft
+        writes any of them; `config_error` when it answers. `members=` as for
+        `code_in`."""
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         """Why a launch of `executable` cannot start, or None to go ahead:
@@ -63,11 +70,15 @@ class SandboxBackend(Protocol):
 
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox; `results` is the files of
-        the results folder it may read (`store.result_files`), None for none;
-        `ca_bundle=` is
+        its item's sessions it may read (`store.result_files`), None for none;
+        `rw_files=` the files it writes outside its worktree (its result and
+        summary) and `rw_dirs=` the folders (its item's `docs/`), each
+        writable and nothing else of the item's folder; `ca_bundle=` is
         what `prepare` returned, `sentinels=` each proxy-managed
         credential's variable and what it holds in the value's place,
-        `workdir=` where under `cwd` the command runs when not at its top."""
+        `workdir=` where under `cwd` the command runs when not at its top.
+        `session_id=` and `work_item_id=` name the session it runs, together
+        or not at all."""
 
     def oneshot(self, sandbox: dict, cwd, home):
         """Short commands in the session's image, asked as its session would
@@ -75,7 +86,7 @@ class SandboxBackend(Protocol):
         argv up to it), `await .close()` after. `worker.sandbox.SandboxNotReady`
         where it cannot."""
 
-    def client_cwd(self, session_id: str) -> Path | None:
+    def client_cwd(self, session_id: str, *, work_item_id: str) -> Path | None:
         """The directory to start the wrapped command's client in, made for
         the session and gone after `close`; None for the task's own `cwd`."""
 
@@ -92,11 +103,11 @@ class SandboxBackend(Protocol):
         """`code_out` for every session of the item no launch is left to
         publish (adopted after a restart, or found dead)."""
 
-    async def collect(self, session_id: str, result_path: Path) -> None:
+    async def collect(self, session_id: str, result_path: Path, *, work_item_id: str) -> None:
         """Bring the session's result file back to `result_path`. A no-op
         for a session this backend never ran."""
 
-    async def oom_killed(self, session_id: str) -> OomKill | None:
+    async def oom_killed(self, session_id: str, *, work_item_id: str) -> OomKill | None:
         """Whether the session's sandbox was killed under its memory limit,
         and whether the runtime confirmed the limit did it; None when it was
         not, or this backend cannot tell (a session it never ran). Asked
@@ -104,7 +115,7 @@ class SandboxBackend(Protocol):
         evidence. An exit code alone never counts: an unconfirmed kill needs
         a memory limit, and `record_oom_kill` drops one Kraft stopped itself."""
 
-    async def close(self, session_id: str) -> None:
+    async def close(self, session_id: str, *, work_item_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A
         no-op for a session this backend never ran."""
 
@@ -114,7 +125,9 @@ class SandboxBackend(Protocol):
         mTLS listener (a runtime in a VM cannot connect to a host socket).
         Raises `worker.sandbox.SandboxNotReady` when it cannot tell."""
 
-    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
+    async def open_session(
+        self, session_id: str, sandbox: dict, sock_path: Path | None, *, work_item_id: str
+    ) -> dict:
         """Ready the session's egress route under `sandbox['network']`
         before it starts, to the channel listening at `sock_path`
         (`worker.channel`), None under the "tls" transport: docker starts a
@@ -124,14 +137,15 @@ class SandboxBackend(Protocol):
         with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
         route cannot be made (`config_error`), never opens egress instead."""
 
-    async def close_session(self, session_id: str) -> None:
+    async def close_session(self, session_id: str, *, work_item_id: str) -> None:
         """Undo `open_session`, best-effort and bounded like `close`, and a
         no-op for a session with no route. The channel itself is closed by
         whoever opened it (`run_task`, reattach), not by the backend."""
 
-    async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
+    async def sweep(self, keep_sessions: Iterable[tuple[str, str]]) -> list[str]:
         """Remove what this Kraft home started that no session in
-        `keep_sessions` owns, returning what went."""
+        `keep_sessions`, `(work item id, session id)` pairs, owns, returning
+        what went."""
 
     def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
         """Forget what the item kept beside its worktree. A no-op for an

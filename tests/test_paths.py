@@ -11,6 +11,7 @@ def test_rundirs_derives_paths():
     assert rd.logs == Path("/run/kraft/logs")
     assert rd.results == Path("/run/kraft/results")
     assert rd.worktrees == Path("/run/kraft/worktrees")
+    assert rd.items == Path("/run/kraft/items")
 
 
 def test_rundirs_ensure_creates_dirs(tmp_path):
@@ -18,6 +19,7 @@ def test_rundirs_ensure_creates_dirs(tmp_path):
     assert rd.logs.is_dir()
     assert rd.results.is_dir()
     assert rd.worktrees.is_dir()
+    assert rd.items.is_dir()
     rd.ensure()  # idempotent, must not raise
 
 

@@ -3,6 +3,10 @@ export interface DocumentLink {
   node_id: string | null;
   hook_point: string | null;
   worker_session_id: string | null;
+  /** The work item `worker_session_id` belongs to: a session id is unique
+   *  only within its item. Null for a link written before the server
+   *  recorded it, or absent from an older server. */
+  session_work_item_id?: string | null;
 }
 
 export interface WorkItemDocument {
@@ -15,6 +19,8 @@ export interface WorkItemDocument {
   node_id: string | null;
   hook_point: string | null;
   worker_session_id: string | null;
+  /** See `DocumentLink.session_work_item_id`. */
+  session_work_item_id?: string | null;
   /** Set when this row is an intake attachment rather than an agent-written link. */
   attachment_kind: "spec" | "plan" | null;
   /** Server-sorted newest first; the only time field every document kind has. */

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+from support import permissions
 from support.api import _force_node, _poll_events, _post_default, _set_status
 
 # --- F: retry's attempt, bulk (B2, B9) ------------------------------------
@@ -154,7 +156,8 @@ def test_bulk_cancel_with_a_reason_cancels_each_item(client, repo):
     assert r.json()["results"] == [{"id": wid, "ok": True, "status": "abandoned"}]
 
 
-def test_bulk_archive_takes_only_ended_items(client, repo):
+@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:5]], ids=["whole", "start"])
+def test_bulk_archive_takes_only_ended_items(client, repo, typed):
     active = _post_default(client, repo)
     _poll_events(client, active, "gate_requested")
     _set_status(active, "active")
@@ -162,10 +165,31 @@ def test_bulk_archive_takes_only_ended_items(client, repo):
     done = _post_default(client, repo)
     _set_status(done, "completed")
 
-    r = client.post("/api/work-items/bulk", json={"action": "archive", "ids": [active, done]})
+    r = client.post(
+        "/api/work-items/bulk", json={"action": "archive", "ids": [active, typed(done)]}
+    )
 
     assert r.status_code == 200, r.text
     results = r.json()["results"]
     assert results[0]["ok"] is False
     assert results[1] == {"id": done, "ok": True, "status": "completed"}
     assert client.get(f"/api/work-items/{done}").json()["archived_at"] is not None
+
+
+def test_bulk_reports_an_ambiguous_start_and_goes_on(client, repo):
+    first, second = "abcd1111" + "0" * 24, "abcd1122" + "0" * 24
+    for sid, wid in (("s-a", first), ("s-b", second)):
+        permissions.seed_session(sid=sid, wid=wid)
+    done = _post_default(client, repo)
+    _set_status(done, "completed")
+
+    r = client.post("/api/work-items/bulk", json={"action": "archive", "ids": ["abcd11", done]})
+
+    assert r.status_code == 200, r.text
+    ambiguous, archived = r.json()["results"]
+    assert ambiguous == {
+        "id": "abcd11",
+        "ok": False,
+        "error": f"'abcd11' is the start of 2 work items: {first}, {second}",
+    }
+    assert (archived["id"], archived["ok"]) == (done, True)

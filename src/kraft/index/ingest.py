@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import os
 import re
@@ -16,11 +17,16 @@ import yaml
 
 from kraft.events import _now
 from kraft.index.chunk import chunk_markdown
+from kraft.worker.worktree_read import READ_MAX_BYTES
 
 _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _ATX_HEADING = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 
 SESSIONS_DIR = ".engineering/sessions"
+#: A document and a session summary in an item's folder, named relative to
+#: the run folder (`kraft.item_paths`).
+ITEM_DOCUMENT = re.compile(r"items/(?P<item>[^/]+)/docs/(?P<kind>[^/]+)\.md")
+ITEM_SUMMARY = re.compile(r"items/(?P<item>[^/]+)/sessions/(?P<folder>[^/]+)/out/summary\.md")
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,13 @@ class LinkRow:
     node_id: str | None = None
     hook_point: str | None = None
     worker_session_id: str | None = None
+    #: The item `worker_session_id` belongs to: a session id is unique only
+    #: within its item. From the session's own database row, or from front
+    #: matter whose `work_item_ids` names exactly one item
+    #: (`links_from_front_matter`). None when unknown (front matter naming
+    #: several items or none, or a link written before the column), looked up
+    #: by the session id alone.
+    session_work_item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,22 +70,71 @@ class ReconcileStats:
     deleted: int = 0
 
 
+#: The longest front matter read, in UTF-8: what Kraft asks a worker for is
+#: about 150 bytes, and the largest in this repository is 410. Past it a
+#: worker's document reads as having none, before any YAML is parsed:
+#: parsing runs on the event loop at some tens of microseconds a byte.
+FRONT_MATTER_MAX_BYTES = 4 * 1024
+#: The deepest `[`/`{` nesting read. PyYAML's scanner slows quadratically
+#: with flow nesting: 800 levels in under 2 KB took a third of a second. No
+#: front matter Kraft asks for nests past one.
+FRONT_MATTER_MAX_DEPTH = 64
+
+
+class _FrontMatterLoader(yaml.SafeLoader):
+    """A SafeLoader that refuses any alias, and flow nesting past
+    `FRONT_MATTER_MAX_DEPTH`: front matter never needs either, an anchor on a
+    long value used two thousand times is gigabytes once the metadata is
+    serialised, and deep nesting is slow to scan."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.YAMLError("front matter uses an alias")
+        return super().compose_node(parent, index)
+
+    def fetch_flow_collection_start(self, TokenClass):
+        # The scanner's own count, so a bracket inside quotes is not one.
+        if self.flow_level >= FRONT_MATTER_MAX_DEPTH:
+            raise yaml.YAMLError("front matter nests too deep")
+        super().fetch_flow_collection_start(TokenClass)
+
+
 def split_front_matter(text: str) -> tuple[dict, str]:
+    """A document's YAML front matter and its body. A worker writes the
+    document, so the front matter is read bounded: longer than
+    `FRONT_MATTER_MAX_BYTES` in UTF-8, nesting brackets past
+    `FRONT_MATTER_MAX_DEPTH`, using an alias, anything YAML cannot build (an
+    impossible date, a number too large for a float), or anything that is not
+    strict UTF-8 JSON once built (keys of mixed types, a lone surrogate,
+    infinity, an int past the digit limit) reads as no front matter, so every
+    reader of it, the index and the API included, can store and send it as it
+    is."""
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
     body = text[m.end() :]
+    raw = m.group(1)
+    # Characters first: a str no longer than the cap encodes cheaply.
+    if len(raw) > FRONT_MATTER_MAX_BYTES or len(raw.encode()) > FRONT_MATTER_MAX_BYTES:
+        return {}, body
     try:
-        data = yaml.safe_load(m.group(1))
-    except yaml.YAMLError:
+        data = yaml.load(raw, _FrontMatterLoader)  # noqa: S506 -- a SafeLoader
+        json.dumps(data, sort_keys=True, default=str, ensure_ascii=False, allow_nan=False).encode()
+    except Exception:  # untrusted, and only ever displayed or matched
         return {}, body
     return (data, body) if isinstance(data, dict) else ({}, body)
 
 
 def derive_kind(path: str, front_matter: dict) -> str | None:
+    """The front matter's `kind`, else what the path says: `<kind>s` for a
+    document, `sessions` for a summary, as `.engineering/<kind>s/` did."""
     fm = front_matter.get("kind")
     if isinstance(fm, str) and fm.strip():
         return fm.strip()
+    if m := ITEM_DOCUMENT.fullmatch(path):
+        return f"{m['kind']}s"
+    if ITEM_SUMMARY.fullmatch(path):
+        return "sessions"
     parts = Path(path).parts
     try:
         i = parts.index(".engineering")
@@ -87,12 +149,22 @@ def derive_title(path: str, front_matter: dict, body: str) -> str:
     if isinstance(fm, str) and fm.strip():
         return fm.strip()
     m = _ATX_HEADING.search(body)
-    return m.group(1).strip() if m else Path(path).stem
+    if m:
+        return m.group(1).strip()
+    # Every item's file has the same stem (`spec`, `summary`): say whose.
+    if doc := ITEM_DOCUMENT.fullmatch(path):
+        return f"{doc['kind']} for {doc['item']}"
+    if summary := ITEM_SUMMARY.fullmatch(path):
+        return f"session summary for {summary['item']}"
+    return Path(path).stem
 
 
 def source_kind_for(path: str) -> str:
-    """04 §6: everything under .engineering/sessions/ is a session summary."""
-    return "session_summary" if path.startswith(f"{SESSIONS_DIR}/") else "artifact"
+    """04 §6: everything under .engineering/sessions/ is a session summary,
+    and so is a session's `out/summary.md` in its item's folder."""
+    if path.startswith(f"{SESSIONS_DIR}/") or ITEM_SUMMARY.fullmatch(path):
+        return "session_summary"
+    return "artifact"
 
 
 def _str_or_none(value) -> str | None:
@@ -101,18 +173,28 @@ def _str_or_none(value) -> str | None:
 
 def links_from_front_matter(fm: dict) -> list[LinkRow]:
     """Linkage rows described by a summary's front-matter (04 §6). One row per
-    work item, plus one carrying the node/hook/session triple."""
+    work item, plus one carrying the node/hook/session triple.
+
+    A session id is unique only within its item, so the session row takes
+    its item from `work_item_ids` when that names exactly one; naming
+    several or none, it says nothing of whose session it is."""
     raw = fm.get("work_item_ids")
     if isinstance(raw, str):
         raw = [raw]
     elif not isinstance(raw, list):
         raw = []
-    links = [LinkRow(work_item_id=w) for w in (_str_or_none(x) for x in raw) if w]
+    items = [w for w in (_str_or_none(x) for x in raw) if w]
+    links = [LinkRow(work_item_id=w) for w in items]
     node = _str_or_none(fm.get("node_id"))
     hook = _str_or_none(fm.get("hook_point"))
     session = _str_or_none(fm.get("worker_session_id"))
     if node or hook or session:
-        links.append(LinkRow(node_id=node, hook_point=hook, worker_session_id=session))
+        only = items[0] if session and len(set(items)) == 1 else None
+        links.append(
+            LinkRow(
+                node_id=node, hook_point=hook, worker_session_id=session, session_work_item_id=only
+            )
+        )
     return links
 
 
@@ -136,7 +218,9 @@ def read_inside(repo: Path, rel: str) -> str | None:
     index, and search would serve it. Every symlink is skipped, one pointing
     inside the repo too: it can name an untracked, ignored file such as
     `.env`. A symlinked directory on the way is the same thing one level up.
-    A FIFO would hold the scan forever and a device is no document."""
+    A FIFO would hold the scan forever and a device is no document, and a
+    file larger than `READ_MAX_BYTES` is not read past it: a worker can
+    write a summary of any size."""
     path = repo / rel
     try:
         if os.path.realpath(path) != os.path.join(os.path.realpath(repo), rel):
@@ -144,13 +228,18 @@ def read_inside(repo: Path, rel: str) -> str | None:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
-    with os.fdopen(fd) as f:
+    with os.fdopen(fd, "rb") as f:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         try:
-            return f.read()
+            data = f.read(READ_MAX_BYTES + 1)
         except OSError:
             return None
+    if len(data) > READ_MAX_BYTES:
+        return None
+    # Decoded as the text-mode read before it did: the locale's encoding,
+    # universal newlines.
+    return io.TextIOWrapper(io.BytesIO(data)).read()
 
 
 def _timestamps(repo: Path, rel: str) -> tuple[str | None, str | None]:
@@ -203,6 +292,7 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
 def _meta_json(metadata: dict) -> str:
     # default=str: YAML front-matter can yield dates / other non-JSON scalars;
     # metadata_json is for display, so stringify rather than fail ingestion.
+    # `split_front_matter` has already refused what JSON cannot write.
     return json.dumps(metadata, sort_keys=True, default=str)
 
 
@@ -212,7 +302,7 @@ def replace_links(conn, document_id: str, links) -> None:
     for link in links:
         conn.execute(
             "INSERT INTO document_links (id, document_id, work_item_id, node_id, "
-            "hook_point, worker_session_id) VALUES (?,?,?,?,?,?)",
+            "hook_point, worker_session_id, session_work_item_id) VALUES (?,?,?,?,?,?,?)",
             (
                 uuid.uuid4().hex,
                 document_id,
@@ -220,6 +310,7 @@ def replace_links(conn, document_id: str, links) -> None:
                 link.node_id,
                 link.hook_point,
                 link.worker_session_id,
+                link.session_work_item_id,
             ),
         )
 

@@ -13,6 +13,9 @@ function lands(p: StoragePreview, u: StorageUsage): string {
   const quota = humanSize(u.quota_bytes ?? 0);
   const limit = humanSize(u.limit_bytes ?? 0);
   if (p.state_after === "ok") return `${after}, under the quota of ${quota}.`;
+  // Over the limit but not held: what is left over it is documents, which archiving keeps.
+  if (p.state_after === "over_quota" && p.used_after_bytes > (u.limit_bytes ?? 0))
+    return `${after}: over the limit of ${limit} in documents archiving keeps, so starts still go ahead.`;
   if (p.state_after === "over_quota") return `${after}: still over the quota of ${quota}, under the limit of ${limit}.`;
   if (p.state_after === "held") return `${after}: still over the limit of ${limit}, so starts stay held.`;
   return `${after}.`;

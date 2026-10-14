@@ -53,7 +53,9 @@ def test_happy_path_via_api(client, repo, monkeypatch):
 
     # 4B: each agent session's summary is ingested and linked to the work item
     impl_session = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
-    assert impl_session["session_summary_ref"] == (f".engineering/sessions/{impl_session['id']}.md")
+    assert impl_session["session_summary_ref"] == (
+        f"items/{wid}/sessions/{impl_session['id']}/out/summary.md"
+    )
     for _ in range(100):
         docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
         if docs:
@@ -300,7 +302,7 @@ def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session
     r = client.post(
         f"/api/work-items/{wid}/retry",
         json={},
-        headers={"x-kraft-session-id": "s1"},
+        headers={"x-kraft-session-id": f"{wid}/s1"},
     )
 
     assert r.status_code == 200, r.text
@@ -429,7 +431,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
             "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
         },
     ).json()["id"]
-    stored = client.app.state.run_dirs.attachments / wid
+    stored = client.app.state.run_dirs.items / wid / "filed"
     assert stored.is_dir()
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")
@@ -555,7 +557,11 @@ def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
 
 @pytest.mark.parametrize(
     ("headers", "by_person"),
-    [({}, True), ({"X-Kraft-Session-Id": "s-worker"}, False), ({"X-Kraft-Client": "mcp"}, False)],
+    [
+        ({}, True),
+        ({"X-Kraft-Session-Id": "w-other/s-worker"}, False),
+        ({"X-Kraft-Client": "mcp"}, False),
+    ],
     ids=["person", "worker", "mcp-assistant"],
 )
 def test_only_a_persons_retry_resets_a_cap_counter(client, repo, headers, by_person):

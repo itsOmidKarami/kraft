@@ -367,7 +367,7 @@ def templates_dir(tmp_path, monkeypatch):
 )
 @pytest.mark.parametrize(
     ("caller", "refused"),
-    [("s-own", True), ("s-escalation", False), ("s-other", False), (None, False)],
+    [("w1/s-own", True), ("w1/s-escalation", False), ("w2/s-other", False), (None, False)],
     ids=["own-worker", "own-escalation", "other-items-worker", "no-header"],
 )
 def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body, caller, refused):
@@ -392,7 +392,7 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
     # Kraft-9efnk.16 / .29: a gate and a spending cap are a human's, not the
     # escalation agent's.
     spending = path.endswith("/budget/raise") or (body or {}).keys() & {"budget_usd", "policy"}
-    if caller == "s-escalation" and (path.endswith(("/approve", "/reject")) or spending):
+    if caller == "w1/s-escalation" and (path.endswith(("/approve", "/reject")) or spending):
         refused = True
     r = client.request(method, path, json=body, headers=headers)
     assert (r.status_code == 403) is refused, r.text

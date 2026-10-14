@@ -19,6 +19,11 @@ def _reconcile(*args, **kwargs):
 
 # ---- split_front_matter ----
 
+#: Nine levels of ten aliases each: about 550 bytes that expand to 10**9 nodes.
+_ALIAS_BOMB = "a0: &a0 [x]\n" + "".join(
+    f"a{n}: &a{n} [{', '.join([f'*a{n - 1}'] * 10)}]\n" for n in range(1, 10)
+)
+
 
 def test_split_front_matter_present():
     fm, body = ingest.split_front_matter("---\ntitle: Hi\nkind: notes\n---\n# Body\ntext\n")
@@ -27,13 +32,58 @@ def test_split_front_matter_present():
 
 
 @pytest.mark.parametrize(
+    ("yaml_text", "value"),
+    [
+        ("[" * 64 + "1" + "]" * 64, eval("[" * 64 + "1" + "]" * 64)),
+        ('"' + "[" * 200 + '"', "[" * 200),
+    ],
+    ids=["nested-to-the-depth", "brackets-inside-quotes"],
+)
+def test_front_matter_within_the_limits_is_read(yaml_text, value):
+    fm, _ = ingest.split_front_matter(f"---\nx: {yaml_text}\n---\nbody\n")
+    assert fm == {"x": value}
+
+
+@pytest.mark.parametrize(
     ("text", "body"),
     [
         ("# Just a heading\nbody", "# Just a heading\nbody"),
         ("---\n: : not : valid :\n---\nbody\n", "body\n"),
         ("---\njust a string\n---\nbody\n", "body\n"),
+        ("---\n" + _ALIAS_BOMB + "---\nbody\n", "body\n"),
+        ("---\na: &x v\nb: *x\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "t" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "é" * 2_500 + "\n---\nbody\n", "body\n"),
+        ("---\nx: " + "[" * 65 + "]" * 65 + "\n---\nbody\n", "body\n"),
+        ("---\nx: " + '["]",' * 65 + "1" + "]" * 65 + "\n---\nbody\n", "body\n"),
+        ("---\ndate: 2026-02-30\n---\nbody\n", "body\n"),
+        ("---\nx: 1:" + "0:" * 200 + "0.5\n---\nbody\n", "body\n"),
+        ("---\na:\n" + "- " * 1_500 + "x\n---\nbody\n", "body\n"),
+        ("---\nn: 0x" + "f" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\n1: a\nb: c\n---\nbody\n", "body\n"),
+        ("---\n2026-01-01: x\nb: c\n---\nbody\n", "body\n"),
+        ('---\ntitle: "\\ud800"\n---\nbody\n', "body\n"),
+        ("---\nx: .inf\n---\nbody\n", "body\n"),
     ],
-    ids=["absent", "malformed-yaml-ignored", "scalar-not-dict"],
+    ids=[
+        "absent",
+        "malformed-yaml-ignored",
+        "scalar-not-dict",
+        "aliases-expanding",
+        "any-alias",
+        "longer-than-the-cap",
+        "longer-than-the-cap-in-utf8",
+        "nested-past-the-depth",
+        "nested-past-the-depth-behind-quoted-brackets",
+        "impossible-date",
+        "float-overflow",
+        "nested-past-the-parser",
+        "int-past-the-digit-limit",
+        "key-not-a-string",
+        "date-key",
+        "lone-surrogate",
+        "infinity",
+    ],
 )
 def test_split_front_matter_without_a_mapping_yields_none(text, body):
     assert ingest.split_front_matter(text) == ({}, body)
@@ -46,6 +96,10 @@ def test_derive_kind_from_folder():
     assert ingest.derive_kind(".engineering/specs/a.md", {}) == "specs"
     assert ingest.derive_kind(".engineering/specs/sub/a.md", {}) == "specs"
     assert ingest.derive_kind(".engineering/a.md", {}) is None
+    # An item's folder, named relative to the run folder: the same kinds.
+    assert ingest.derive_kind("items/w1/docs/spec.md", {}) == "specs"
+    assert ingest.derive_kind("items/w1/sessions/s1/out/summary.md", {}) == "sessions"
+    assert ingest.derive_kind("items/w1/history/spec.1.md", {}) is None
 
 
 def test_derive_kind_front_matter_overrides():
@@ -56,6 +110,10 @@ def test_derive_title_precedence():
     assert ingest.derive_title("x/a.md", {"title": "FM"}, "# Heading\n") == "FM"
     assert ingest.derive_title("x/a.md", {}, "\n#  Heading here \nmore") == "Heading here"
     assert ingest.derive_title("x/my-doc.md", {}, "no heading here") == "my-doc"
+    # Every item's file has the same stem: the fallback says whose it is.
+    assert ingest.derive_title("items/w1/docs/plan.md", {}, "") == "plan for w1"
+    summary = "items/w1/sessions/s1/out/summary.md"
+    assert ingest.derive_title(summary, {}, "") == "session summary for w1"
 
 
 # ---- scan_repo ----
@@ -254,6 +312,9 @@ def test_source_kind_for_sessions_folder():
     assert ingest.source_kind_for(".engineering/sessions/s1.md") == "session_summary"
     assert ingest.source_kind_for(".engineering/specs/a.md") == "artifact"
     assert ingest.source_kind_for("README.md") == "artifact"
+    assert ingest.source_kind_for("items/w1/sessions/s1/out/summary.md") == "session_summary"
+    assert ingest.source_kind_for("items/w1/sessions/s1/out/result.json") == "artifact"
+    assert ingest.source_kind_for("items/w1/docs/spec.md") == "artifact"
 
 
 def test_links_from_front_matter_full():
@@ -271,6 +332,21 @@ def test_links_from_front_matter_full():
     assert session_rows[0].node_id == "verify"
     assert session_rows[0].hook_point == "on.test.run"
     assert session_rows[0].work_item_id is None
+
+
+@pytest.mark.parametrize(
+    ("work_item_ids", "item"),
+    [(["w1"], "w1"), ("w1", "w1"), (["w1", "w1"], "w1"), (["w1", "w2"], None), ([], None)],
+    ids=["one", "scalar", "one-twice", "two", "none"],
+)
+def test_a_front_matter_session_takes_its_only_item(work_item_ids, item):
+    """A session id is unique only within its item: the session row takes
+    the item `work_item_ids` names when it names exactly one."""
+    links = ingest.links_from_front_matter(
+        {"work_item_ids": work_item_ids, "worker_session_id": "abc123"}
+    )
+    (session,) = [x for x in links if x.worker_session_id]
+    assert (session.worker_session_id, session.session_work_item_id) == ("abc123", item)
 
 
 def test_links_from_front_matter_scalar_work_item_id():
@@ -486,3 +562,14 @@ def test_embedder_failure_still_keeps_the_document_and_chunks(conn):
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 0
+
+
+def test_an_oversized_document_is_not_read(tmp_path, monkeypatch):
+    """A worker can write a summary of any size, and the index reads it
+    whole: past the cap it is skipped, as a file that is not regular is."""
+    monkeypatch.setattr(ingest, "READ_MAX_BYTES", 8)
+    (tmp_path / "small.md").write_text("# sm\r\n")
+    (tmp_path / "big.md").write_text("# too big\n")
+
+    assert ingest.read_inside(tmp_path, "small.md") == "# sm\n"
+    assert ingest.read_inside(tmp_path, "big.md") is None

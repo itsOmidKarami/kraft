@@ -3,7 +3,7 @@ import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../typ
 import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { lookWord, sessionLook, statusWords } from "../nodeGraph";
+import { isSessionDoc, lookWord, sessionLook, statusWords } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
@@ -82,7 +82,7 @@ function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tas
  *  On the plan task, `progress` is the plan's sub-tasks, whichever attempt is shown: it describes
  *  the plan, not a session; `running` is whether the task's newest session runs. */
 export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean }) {
-  const mine = docs.filter((d) => d.worker_session_id === s.id || (d.hook_point === path && d.attempt === s.attempt));
+  const mine = docs.filter((d) => isSessionDoc(d, s) || (d.hook_point === path && d.attempt === s.attempt));
   return (
     <>
       <dl className="item-facts ip-facts">

@@ -460,11 +460,14 @@ _PREVIEW = {
 @pytest.fixture
 def archiving(monkeypatch):
     """The client calls `item archive` makes, recorded: (previewed, archived) id lists."""
-    calls = {"previewed": [], "archived": [], "preview": _PREVIEW, "bulk": None}
+    calls = {"previewed": [], "archived": [], "preview": None, "bulk": None}
 
     async def storage_preview(ids):
         calls["previewed"].append(ids)
-        return calls["preview"]
+        if calls["preview"] is not None:
+            return calls["preview"]
+        # As the server answers: one item per id, in order, each once.
+        return {**_PREVIEW, "items": [_PREVIEW["items"][0] | {"id": i} for i in dict.fromkeys(ids)]}
 
     async def archive(ids):
         calls["archived"].append(ids)
@@ -481,12 +484,17 @@ def _archived(wid) -> bool:
     return bool(asyncio.run(cli.item.client.transport._get(f"/work-items/{wid}"))["archived_at"])
 
 
-def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys):
+@pytest.mark.parametrize(
+    "typed",
+    [lambda w: [w], lambda w: [w[:5]], lambda w: [w[:5], w]],
+    ids=["whole", "start", "same-item-twice"],
+)
+def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys, typed):
     wid = make_item(repo)
     _set_status(wid, "completed")
 
     with pytest.raises(SystemExit) as stopped:
-        cli.main(["item", "archive", wid])
+        cli.main(["item", "archive", *typed(wid)])
 
     assert stopped.value.code == 1
     seen = capsys.readouterr()
@@ -494,9 +502,12 @@ def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys):
     assert "pass --yes" in seen.err
     assert not _archived(wid)
 
-    cli.main(["item", "archive", wid, "--yes"])
+    cli.main(["item", "archive", *typed(wid), "--yes"])
 
-    assert f"archived {wid}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"archived {wid}" in out
+    # Two names for one item are one item, not one of two reclaimable ones.
+    assert "largest of" not in out
     assert _archived(wid)
 
     cli.main(["item", "restore", wid])

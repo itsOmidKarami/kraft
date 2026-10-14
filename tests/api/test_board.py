@@ -222,7 +222,7 @@ def _seed_escalation_session(client, wid, *, session_id, thread, status="done"):
             result_path=f"/tmp/{session_id}.json",
             thread=thread,
         )
-        store.session_exited(conn, session_id, status)
+        store.session_exited(conn, session_id, status, work_item_id=wid)
         conn.commit()
     finally:
         conn.close()

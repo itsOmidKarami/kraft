@@ -208,7 +208,7 @@ async def test_skip_node_marks_a_running_session_paused_before_it_can_be_read_as
     await database.write(
         lambda c: store.skip_node(c, "w1", "verify", None, None, session_ids=["s1"])
     )
-    await database.write(lambda c: store.session_exited(c, "s1", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s1", "failed", work_item_id="w1"))
     row = database.read(
         lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
     )

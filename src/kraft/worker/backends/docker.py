@@ -33,6 +33,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from kraft import ids, item_paths
 from kraft.config import ConfigError
 from kraft.paths import RunDirs, config_dir, default_run_dir, kraft_home
 from kraft.worker import ca as _ca
@@ -58,36 +59,59 @@ if TYPE_CHECKING:
     from kraft.worker.refstore import RefStore
 
 
-def container_name(session_id: str) -> str:
+def _container(name: str) -> str:
+    return f"kraft-{name}"
+
+
+def _relay(name: str) -> str:
+    return f"kraft-relay-{name}"
+
+
+def _relay_b(name: str) -> str:
+    return f"kraft-relay-b-{name}"
+
+
+def _volume(name: str) -> str:
+    return f"kraft-egress-{name}"
+
+
+def container_name(work_item_id: str, session_id: str) -> str:
     """The `--name` a sandboxed session's container runs under.
 
     A handle a caller can `docker kill`/`docker rm -f` by, independent of
     whatever became of the `docker run` client's own pid -- that client is
     the process Kraft's group-kill signals, but the container itself is
     parented by the docker daemon, not that group, and does not die with it.
-    `session_id` is already a Kraft-minted id (safe for docker's
-    `[a-zA-Z0-9_.-]` name charset); prefixed so a stray `kraft-*` container is
-    obviously this tool's to clean up.
+
+    Built from `ids.qualified`: docker's names are shared by the whole
+    daemon, another Kraft instance's sessions included, and a session id is
+    unique only within its item, so the name carries both (`kraft-<wid>-<sid>`).
+    A session minted before per-item ids keeps `kraft-<sid>`, the name it
+    started under, so a restart across the upgrade still finds it. Both ids
+    are Kraft-minted (safe for docker's `[a-zA-Z0-9_.-]` name charset);
+    prefixed so a stray `kraft-*` container is obviously this tool's to
+    clean up. Every helper below takes the qualified string itself, so
+    nothing ever splits a name back apart.
     """
-    return f"kraft-{session_id}"
+    return _container(ids.qualified(work_item_id, session_id))
 
 
-def relay_name(session_id: str) -> str:
+def relay_name(work_item_id: str, session_id: str) -> str:
     """The `--name` of a session's relay under `network:`, which its worker
     joins (`--network container:<this>`)."""
-    return f"kraft-relay-{session_id}"
+    return _relay(ids.qualified(work_item_id, session_id))
 
 
-def relay_b_name(session_id: str) -> str:
+def relay_b_name(work_item_id: str, session_id: str) -> str:
     """The `--name` of a TLS-transport session's second relay: on the
     default network, from the session's volume to the daemon's listener."""
-    return f"kraft-relay-b-{session_id}"
+    return _relay_b(ids.qualified(work_item_id, session_id))
 
 
-def volume_name(session_id: str) -> str:
+def volume_name(work_item_id: str, session_id: str) -> str:
     """The named volume a TLS-transport session's two relays share its
     socket through: inside the runtime's VM, where a unix socket works."""
-    return f"kraft-egress-{session_id}"
+    return _volume(ids.qualified(work_item_id, session_id))
 
 
 #: What a relay is labelled besides `home_label`, so it reads as one.
@@ -808,18 +832,19 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
     return [*argv, relay_image, *socat]
 
 
-def relay_argv(session_id: str, sock_path: Path | None, relay_image: str) -> list[str]:
-    """The session's relay, which its worker joins: no network of its own,
+def relay_argv(name: str, sock_path: Path | None, relay_image: str) -> list[str]:
+    """The relay of the session `name` (`ids.qualified`), which its worker
+    joins: no network of its own,
     forwarding 127.0.0.1:3128 in its namespace to the session's socket. That
     is the channel's, whose directory is mounted (a file mount would miss a
     socket the daemon re-creates after a restart); or, `sock_path` None, the
     one relay B listens on in the session's volume (the TLS transport)."""
     if sock_path is None:
-        mount, target = f"{volume_name(session_id)}:{_HOP_DIR}", _HOP_SOCKET
+        mount, target = f"{_volume(name)}:{_HOP_DIR}", _HOP_SOCKET
     else:
         mount, target = f"{sock_path.parent}:{sock_path.parent}", str(sock_path)
     return _relay_argv(
-        relay_name(session_id),
+        _relay(name),
         relay_image,
         ["--network=none"],
         [mount],
@@ -828,8 +853,9 @@ def relay_argv(session_id: str, sock_path: Path | None, relay_image: str) -> lis
     )
 
 
-def relay_b_argv(session_id: str, relay_image: str, port: int, cert_dir: Path) -> list[str]:
-    """A TLS-transport session's second relay, on the default network: the
+def relay_b_argv(name: str, relay_image: str, port: int, cert_dir: Path) -> list[str]:
+    """The second relay of the TLS-transport session `name`
+    (`ids.qualified`), on the default network: the
     socket in the session's volume, to the daemon's listener at the
     runtime's gateway name, presenting the session's client certificate and
     verifying the daemon's against the Kraft CA. It mounts that volume and
@@ -838,10 +864,10 @@ def relay_b_argv(session_id: str, relay_image: str, port: int, cert_dir: Path) -
     gateway = _ca.GATEWAY_HOSTS[1 if cached_runtime().podman else 0]
     certs = _RELAY_B_CERTS
     return _relay_argv(
-        relay_b_name(session_id),
+        _relay_b(name),
         relay_image,
         [],
-        [f"{volume_name(session_id)}:{_HOP_DIR}", f"{cert_dir}:{certs}:ro"],
+        [f"{_volume(name)}:{_HOP_DIR}", f"{cert_dir}:{certs}:ro"],
         f"UNIX-LISTEN:{_HOP_SOCKET},fork,mode=600,unlink-early",
         f"OPENSSL:{gateway}:{port},cert={certs}/client.pem,key={certs}/key.pem,"
         f"cafile={certs}/ca.pem,verify=1",
@@ -858,6 +884,8 @@ def docker_argv(
     result_path: str | Path | None = None,
     cidfile: str | Path | None = None,
     *,
+    rw_files: Iterable[str | Path] = (),
+    rw_dirs: Iterable[str | Path] = (),
     refstores: Sequence[RefStore] = (),
     workdir: str | Path | None = None,
     home: str | Path | None = None,
@@ -887,18 +915,24 @@ def docker_argv(
     then `.git/modules/<sub>/hooks`, then `.git/worktrees/<id>/modules/...`),
     and the container only has to find the one nobody listed.
 
-    `results`: the files of the results folder this session may read, each
-    mounted read-only at its own path (`store.result_files`): its work item's
-    result files, review packages and cut instructions, and nothing of another
-    item's. That folder is one directory for every work item of every
-    repository, so it is never mounted itself (Kraft-dni4n): a worker would
-    read every other item's diff and findings there. Read-only, because a
-    session writing another session's `<other>.json` would forge its status
-    and findings. Only this session's own `result_path` is mounted back
-    read-write. Docker makes a directory, as root, of a source that does not
-    exist, so the caller lists only files it has seen. `None` for a launch
-    that is no session and has no results to read (a repository's
-    `setup_command`, `builtins.run_setup_command`): nothing is mounted.
+    `results`: the files of its item's sessions this session may read, each
+    mounted read-only at its own path (`store.result_files`): result files,
+    summaries, review packages and cut instructions, and nothing of another
+    item's. Neither the shared results folder nor a session folder is ever
+    mounted itself (Kraft-dni4n): a worker would read every other item's
+    diff and findings in the one, and could rewrite the log and exit code
+    the host reads and writes in the other. Read-only, because a session
+    writing another session's result would forge its status and findings.
+    Docker makes a directory, as root, of a source that does not exist, so
+    the caller lists only files it has seen. `None` for a launch that is no
+    session and has no results to read (a repository's `setup_command`,
+    `builtins.run_setup_command`): nothing is mounted.
+
+    What the session writes is mounted back read-write: `result_path` and
+    `rw_files` (its own result and summary, `SessionFiles`), each as a file,
+    which cannot be removed or swapped for a symlink from inside the
+    container; and `rw_dirs` (its item's `docs/`), each as a folder, where
+    it creates the document it was asked for.
 
     `<repo>/.git`, for every repository of the checkout -- the worktree's own
     and each workspace member's: a private ref store (`refstores` below), so
@@ -1017,12 +1051,17 @@ def docker_argv(
     if isinstance(results, str | Path):
         # Iterated, a path is its characters, and the first is `/`.
         raise TypeError("`results` is the files to mount, never the results folder itself")
+    own = list(dict.fromkeys(str(p) for p in (*([result_path] if result_path else ()), *rw_files)))
     for path in dict.fromkeys(str(p) for p in results or ()):
-        # Its own is mounted read-write below; docker refuses a target twice.
-        if result_path is None or path != str(result_path):
+        # Its own are mounted read-write below; docker refuses a target twice.
+        if path not in own:
             argv += ["-v", f"{path}:{path}:ro"]
-    if result_path is not None:
-        argv += ["-v", f"{result_path}:{result_path}"]
+    # Each its own file mount: a bind-mounted file cannot be removed or
+    # swapped for a symlink from inside the container.
+    for path in own:
+        argv += ["-v", f"{path}:{path}"]
+    for path in dict.fromkeys(str(d) for d in rw_dirs):
+        argv += ["-v", f"{path}:{path}"]
     argv += _gitdir_mounts(Path(cwd), refstores)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
@@ -1281,8 +1320,9 @@ def _linked_mounts(
     return mounts
 
 
-async def teardown(session_id: str) -> None:
-    """`docker rm -f` this session's container, best-effort.
+async def teardown(name: str) -> None:
+    """`docker rm -f` the container of the session `name` (`ids.qualified`),
+    best-effort.
 
     The one place a session's container is torn down, called from every path
     a session can *end* on -- `run_task`'s `finally` (normal exit, pause,
@@ -1304,18 +1344,19 @@ async def teardown(session_id: str) -> None:
     every session's way out and for every row at startup. A container that
     outlives a timed-out call is `sweep_orphans`'s at the next start.
     """
-    await docker_call("rm", "-f", container_name(session_id))
-    shutil.rmtree(client_dir(session_id), ignore_errors=True)
+    await docker_call("rm", "-f", _container(name))
+    shutil.rmtree(client_dir(name), ignore_errors=True)
 
 
-def client_dir(session_id: str) -> Path:
-    """Where the `docker run` client of a session runs, never the worktree:
+def client_dir(name: str) -> Path:
+    """Where the `docker run` client of the session `name` (`ids.qualified`)
+    runs, named for its container, never the worktree:
     podman's conmon on cgroup v1 writes an `oom` file into its client's
     working directory, which in a worktree a later session could commit.
     The argv needs no working directory of its own (every mount and `-w` is
     absolute). Made by `client_cwd`, removed by `teardown`."""
     base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
-    return base / "sandbox-client" / container_name(session_id)
+    return base / "sandbox-client" / _container(name)
 
 
 def _size(n: int) -> str:
@@ -1335,8 +1376,9 @@ class OomKill(NamedTuple):
     confirmed: bool
 
 
-async def oom_killed(session_id: str) -> OomKill | None:
-    """Whether this session's container was killed under its memory limit,
+async def oom_killed(name: str) -> OomKill | None:
+    """Whether the container of the session `name` (`ids.qualified`) was
+    killed under its memory limit,
     read before `teardown` removes the container; None when it was not, or
     cannot be told (already gone, no daemon).
 
@@ -1357,7 +1399,7 @@ async def oom_killed(session_id: str) -> OomKill | None:
             "inspect",
             "--format",
             "{{.State.OOMKilled}} {{.HostConfig.Memory}} {{.State.ExitCode}}",
-            container_name(session_id),
+            _container(name),
         )
         if got is None or got[0] != 0:
             return None
@@ -1367,7 +1409,7 @@ async def oom_killed(session_id: str) -> OomKill | None:
         # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
         # conmon writes an `oom` file into the client's directory instead.
         podman = (await asyncio.to_thread(runtime)).podman
-        if killed == "true" or (podman and (client_dir(session_id) / "oom").exists()):
+        if killed == "true" or (podman and (client_dir(name) / "oom").exists()):
             return OomKill(_size(int(memory)), True)
         if code != "137":
             return None
@@ -1586,8 +1628,10 @@ def foreign_owned(paths: Iterable[Path], host: Runtime) -> str | None:
 def sandbox_home(run_dirs, work_item_id: str) -> Path:
     """The `HOME` a sandboxed item's containers share, kept across its
     sessions so an agent CLI can resume one: the same directory for every
-    session of the item, never shared with another item."""
-    return run_dirs.base / "sandbox-home" / work_item_id
+    session of the item, never shared with another item. An older item's
+    `run/sandbox-home/<id>/` while it exists, else `items/<id>/sandbox-home/`
+    (`item_paths.sandbox_home`)."""
+    return item_paths.sandbox_home(run_dirs, work_item_id)
 
 
 def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
@@ -1637,6 +1681,8 @@ class DockerBackend:
         result_path: Path,
         *,
         members: Mapping[str, tuple[Path, Path] | None] = {},
+        rw_files: Iterable[Path] = (),
+        rw_dirs: Iterable[Path] = (),
     ) -> str | None:
         try:
             host = await asyncio.to_thread(_launch_runtime)
@@ -1651,7 +1697,10 @@ class DockerBackend:
         admins = [dirs[1]] if dirs is not None else []
         admins += [d[1] for d in members.values() if d is not None]
         shadows = [_refstore.shadow_dir(run_dirs.base, a) for a in admins]
-        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadows, result_path), host)
+        return foreign_owned(
+            (sandbox_home(run_dirs, work_item_id), *shadows, result_path, *rw_files, *rw_dirs),
+            host,
+        )
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
@@ -1696,7 +1745,10 @@ class DockerBackend:
         env: dict | None = None,
         *,
         session_id: str | None = None,
+        work_item_id: str | None = None,
         result_path: str | Path | None = None,
+        rw_files: Iterable[str | Path] = (),
+        rw_dirs: Iterable[str | Path] = (),
         cidfile: str | Path | None = None,
         refs: Sequence[RefStore] = (),
         workdir: str | Path | None = None,
@@ -1706,23 +1758,28 @@ class DockerBackend:
         ca_bundle: str | Path | None = None,
         sentinels: dict[str, str] | None = None,
     ) -> list[str]:
-        network = sandbox.get("network") and session_id is not None
+        if session_id is not None and work_item_id is None:
+            raise TypeError("wrap: a session's container is named by its work item too")
+        name = ids.qualified(work_item_id, session_id) if session_id is not None else None
+        network = sandbox.get("network") and name is not None
         return docker_argv(
             cmd,
             cwd,
             sandbox,
             results,
             env=env,
-            name=container_name(session_id) if session_id is not None else None,
+            name=_container(name) if name is not None else None,
             result_path=result_path,
             cidfile=cidfile,
+            rw_files=rw_files,
+            rw_dirs=rw_dirs,
             refstores=refs,
             workdir=workdir,
             home=home,
             passthrough=passthrough,
             ro_paths=ro_paths,
             ca_bundle=ca_bundle,
-            relay=relay_name(session_id) if network else None,
+            relay=_relay(name) if network else None,
             sentinels=sentinels,
         )
 
@@ -1741,20 +1798,20 @@ class DockerBackend:
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
         return _refstore.sync_item(run_base, work_item_id)
 
-    async def collect(self, session_id: str, result_path: Path) -> None:
+    async def collect(self, session_id: str, result_path: Path, *, work_item_id: str) -> None:
         """Nothing to fetch: the result file is bind-mounted, so the worker
         wrote it where Kraft reads it."""
 
-    def client_cwd(self, session_id: str) -> Path:
-        path = client_dir(session_id)
+    def client_cwd(self, session_id: str, *, work_item_id: str) -> Path:
+        path = client_dir(ids.qualified(work_item_id, session_id))
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    async def oom_killed(self, session_id: str) -> OomKill | None:
-        return await oom_killed(session_id)
+    async def oom_killed(self, session_id: str, *, work_item_id: str) -> OomKill | None:
+        return await oom_killed(ids.qualified(work_item_id, session_id))
 
-    async def close(self, session_id: str) -> None:
-        await teardown(session_id)
+    async def close(self, session_id: str, *, work_item_id: str) -> None:
+        await teardown(ids.qualified(work_item_id, session_id))
 
     async def _relay_image(self) -> tuple[str, Runtime]:
         try:
@@ -1775,7 +1832,9 @@ class DockerBackend:
             raise SandboxNotReady(problem)
         return "unix" if reachable else "tls"
 
-    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
+    async def open_session(
+        self, session_id: str, sandbox: dict, sock_path: Path | None, *, work_item_id: str
+    ) -> dict:
         """Start the session's relay (`relay_argv`) and return the worker's
         proxy environment; `{}` for a sandbox with no `network`. Under the
         TLS transport (`sock_path` None) the relay reaches the daemon
@@ -1792,17 +1851,18 @@ class DockerBackend:
                 f"could not read image {sandbox['image']!r}'s PATH to put the `kraft` shim "
                 "first on it (the image is not pulled, or the runtime did not answer)"
             )
+        name = ids.qualified(work_item_id, session_id)
         try:
             if sock_path is None:
-                await self._open_relay_b(session_id, image, host)
-            argv = relay_argv(session_id, sock_path, image)
+                await self._open_relay_b(name, image, host)
+            argv = relay_argv(name, sock_path, image)
         except SandboxRefused as exc:
-            await self.close_session(session_id)
+            await self._close_session(name)
             raise SandboxNotReady(str(exc)) from exc
-        await self._run_or_remove(session_id, argv, f"the sandbox's egress relay from {image!r}")
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay from {image!r}")
         return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
 
-    async def _open_relay_b(self, session_id: str, image: str, host: Runtime) -> None:
+    async def _open_relay_b(self, name: str, image: str, host: Runtime) -> None:
         """The TLS transport's half: the session's volume, its client
         certificate, and relay B dialling the listener's persisted port."""
         run_dirs = _run_dirs()
@@ -1812,9 +1872,9 @@ class DockerBackend:
                 "the Kraft server's egress TLS listener has not started, so a sandbox "
                 "with `network:` on this runtime has no route; restart the server"
             )
-        await asyncio.to_thread(_ca.mint_session_cert, run_dirs, session_id)
+        await asyncio.to_thread(_ca.mint_session_cert, run_dirs, name)
         await self._run_or_remove(
-            session_id,
+            name,
             [
                 host.cli,
                 "volume",
@@ -1823,38 +1883,44 @@ class DockerBackend:
                 home_label(),
                 "--label",
                 VOLUME_LABEL,
-                volume_name(session_id),
+                _volume(name),
             ],
             "the sandbox's egress volume",
         )
-        argv = relay_b_argv(session_id, image, port, _ca.session_dir(run_dirs, session_id))
-        await self._run_or_remove(session_id, argv, f"the sandbox's egress relay B from {image!r}")
+        argv = relay_b_argv(name, image, port, _ca.session_dir(run_dirs, name))
+        await self._run_or_remove(name, argv, f"the sandbox's egress relay B from {image!r}")
 
-    async def _run_or_remove(self, session_id: str, argv: list[str], what: str) -> None:
+    async def _run_or_remove(self, name: str, argv: list[str], what: str) -> None:
         done = await docker_call(*argv[1:])
         if done is None or done[0] != 0:
-            await self.close_session(session_id)
+            await self._close_session(name)
             raise SandboxNotReady(
                 f"could not start {what}: `{argv[0]} {argv[1]}` "
                 f"{'did not answer' if done is None else 'failed'}"
             )
 
-    async def close_session(self, session_id: str) -> None:
+    async def close_session(self, session_id: str, *, work_item_id: str) -> None:
         """`docker rm -f` the session's relays, then its volume, and discard
         its client certificate, bounded like `teardown`: whichever transport
         it ran, each a no-op for what it never had. The socket is the
         channel's to close (`ChannelRegistry.close`), not this backend's."""
-        await docker_call("rm", "-f", relay_name(session_id), relay_b_name(session_id))
-        await docker_call("volume", "rm", "-f", volume_name(session_id))
-        _ca.discard_session_cert(_run_dirs(), session_id)
+        await self._close_session(ids.qualified(work_item_id, session_id))
 
-    async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
+    async def _close_session(self, name: str) -> None:
+        await docker_call("rm", "-f", _relay(name), _relay_b(name))
+        await docker_call("volume", "rm", "-f", _volume(name))
+        _ca.discard_session_cert(_run_dirs(), name)
+
+    async def sweep(self, keep_sessions: Iterable[tuple[str, str]]) -> list[str]:
         """What no live session owns: containers, relays included, then the
-        volumes they mounted, then client certificates (named for nothing)."""
-        keep = set(keep_sessions)
-        names = (container_name, relay_name, relay_b_name)
-        gone = await sweep_orphans({name(sid) for sid in keep for name in names})
-        gone += await sweep_volumes({volume_name(sid) for sid in keep})
+        volumes they mounted, then client certificates (named for nothing).
+        `keep_sessions` is `(work item id, session id)` pairs, qualified once
+        here: every name below is built from that string, and a certificate
+        folder is named by it, so nothing is split back apart."""
+        keep = {ids.qualified(wid, sid) for wid, sid in keep_sessions}
+        helpers = (_container, _relay, _relay_b)
+        gone = await sweep_orphans({helper(name) for name in keep for helper in helpers})
+        gone += await sweep_volumes({_volume(name) for name in keep})
         sessions = _run_dirs().ca / "sessions"
         for directory in sessions.iterdir() if sessions.is_dir() else ():
             if directory.name not in keep:
@@ -1866,7 +1932,13 @@ class DockerBackend:
         # before the worktree goes; its members' by the item they record.
         _refstore.discard(run_dirs.base, worktree)
         _refstore.discard_item(run_dirs.base, work_item_id)
-        shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
+        # Both places, not `sandbox_home`'s one answer: the old one is never
+        # made after the upgrade, so this leaves no home behind either way.
+        # `remove_tree` refuses a link at the top and, below it, works by
+        # descriptors and removes a link without following it, so nothing a
+        # worker planted or swaps in reaches past the home.
+        for home in item_paths.sandbox_homes(run_dirs, work_item_id):
+            item_paths.remove_tree(home)
 
     async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a

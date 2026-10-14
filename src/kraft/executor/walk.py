@@ -1639,7 +1639,7 @@ async def _walk_node_once(
             fix_paths=dispatch.fix_task_paths(node),
         )
         instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
-        instruction += prompts.previous_attempt_note(previous_fix)
+        instruction += prompts.previous_attempt_note(previous_fix, run_dirs=run_dirs)
         head_before = _config.git_read(Path(worktree), "rev-parse", "HEAD")
         # The fix loop is an ordered shape of its own (`fix-loop-supports-one-
         # ordered-repair-shape`), so the repair runs through the same steps

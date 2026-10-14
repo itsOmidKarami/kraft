@@ -17,6 +17,7 @@ import shlex
 import subprocess
 
 import pytest
+from support.harness import own_files
 
 from kraft import store, usage
 from kraft.adapters import subprocess as sp
@@ -172,7 +173,7 @@ async def run_agent(database, run_dirs, tmp_path):
                 (SessionEvent.BACKGROUND_JOBS_ABANDONED,),
             ).fetchall()
         )
-        return status, (run_dirs.logs / "s1.log").read_text(), [json.loads(r[1]) for r in found]
+        return status, own_files(run_dirs, "s1").log.read_text(), [json.loads(r[1]) for r in found]
 
     return go
 
@@ -234,7 +235,7 @@ async def test_a_session_adopted_after_a_restart_is_held_to_the_same_rule(
     proc = subprocess.Popen(["true"])
     proc.wait()
 
-    await reattach._adopt(database, "s1", proc.pid, poll_s=0.01)
+    await reattach._adopt(database, "s1", proc.pid, work_item_id=it.id, poll_s=0.01)
 
     assert it.sessions()[0]["status"] == "failed"
     assert [e["payload"]["jobs"] for e in it.events(SessionEvent.BACKGROUND_JOBS_ABANDONED)] == [

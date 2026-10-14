@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from kraft import caps as _caps
-from kraft import events, logs, store
+from kraft import events, item_paths, logs, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -679,8 +679,14 @@ async def ensure_worktree(
     # Kraft-eqgn, so a missing one means Kraft lost it, and the gate it justified
     # is trimmed. A worktree made anyway would take the early return above on a
     # retry and run without the document (Kraft-s7c04.29).
-    for a in attachments or []:
-        src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
+    # Each read where it is now (`item_paths.stored_attachment`): a run folder
+    # moved since filing leaves the row naming the old place.
+    attachments = [
+        {**a, "source": str(item_paths.stored_attachment(run_dirs, work_item_id, a, repo))}
+        for a in attachments or []
+    ]
+    for a in attachments:
+        src = Path(a["source"])
         if not src.is_file():
             raise FileNotFoundError(
                 f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
@@ -906,6 +912,7 @@ async def run_setup_command(
                 None,
                 env=proxy_env,
                 session_id=setup_id,
+                work_item_id=worktree.name,
                 refs=refs,
                 # The entry's `env:` by name too: its values are in the
                 # client's own env (`worker_env` below), never on argv.
@@ -918,11 +925,14 @@ async def run_setup_command(
             )
         except BaseException as exc:
             if network:
-                await _subprocess.close_egress(backend, setup_id)
+                await _subprocess.close_egress(backend, setup_id, work_item_id=worktree.name)
             if isinstance(exc, _sandbox.SandboxNotReady):
                 raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
             raise
-        run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
+        run = dict(
+            args=argv,
+            cwd=backend.client_cwd(setup_id, work_item_id=worktree.name) or worktree,
+        )
     else:
         run = dict(args=cmd, shell=True, cwd=worktree)
     oom = None
@@ -946,14 +956,16 @@ async def run_setup_command(
     finally:
         if sandbox:
             try:
-                oom = await backend.oom_killed(setup_id)
+                oom = await backend.oom_killed(setup_id, work_item_id=worktree.name)
             finally:
                 # The command, then its route out (spec §4).
                 try:
-                    await backend.close(setup_id)
+                    await backend.close(setup_id, work_item_id=worktree.name)
                 finally:
                     if network:
-                        await _subprocess.close_egress(backend, setup_id)
+                        await _subprocess.close_egress(
+                            backend, setup_id, work_item_id=worktree.name
+                        )
     # Kraft never stops a setup command itself, so an unconfirmed kill counts.
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
@@ -2027,8 +2039,11 @@ async def start_session(
     returned id/paths are that row's, not `session_id`'s -- the caller must
     use the returned id, not `session_id`, for the rest of its work.
     """
-    log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = run_dirs.results / f"{session_id}.json"
+    files = item_paths.session_files(run_dirs, work_item_id, session_id)
+    # Its own `out/`, which holds the result file `finish_session` writes:
+    # nothing but Kraft writes there for an in-process task.
+    files.writable.mkdir(parents=True, exist_ok=True)
+    log_path, result_path = files.log, files.result
     actual_id, log_str, result_str = await db.write(
         lambda c: store.create_session(
             c,
@@ -2053,6 +2068,7 @@ async def finish_session(
     result_path: Path,
     *,
     session_id: str,
+    work_item_id: str,
     status: str,
     log: str,
     findings: list[dict] | None = None,
@@ -2101,7 +2117,7 @@ async def finish_session(
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a
         # missing time column is cosmetic, not a reason to fail the node.
         logger.warning("no log time sidecar for session %s", session_id)
-    await db.write(lambda c: store.session_exited(c, session_id, status))
+    await db.write(lambda c: store.session_exited(c, session_id, status, work_item_id=work_item_id))
     return status
 
 
@@ -2139,7 +2155,13 @@ async def _record_done(
         repository=repository,
     )
     return await finish_session(
-        db, log_path, result_path, session_id=session_id, status=status, log=log
+        db,
+        log_path,
+        result_path,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        status=status,
+        log=log,
     )
 
 

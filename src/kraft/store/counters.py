@@ -245,7 +245,9 @@ def mark_sessions_capped_out(
         f"AND status NOT IN ({in_list(CAP_SWEEP_LEAVES)})"
     )
     args = (work_item_id, node_id, *hook_points)
-    capped = conn.execute(f"SELECT id FROM worker_sessions WHERE {where}", args).fetchall()
+    capped = conn.execute(
+        f"SELECT id FROM worker_sessions WHERE {where} ORDER BY rowid", args
+    ).fetchall()
     conn.execute(
         f"UPDATE worker_sessions SET status = 'capped_out', exited_at = ? WHERE {where}",
         (_now(), *args),

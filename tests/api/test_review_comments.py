@@ -111,7 +111,7 @@ def test_a_submitted_reply_or_an_agents_one_cannot_change(client, running):
     agents = client.post(
         f"/api/threads/{tid}/replies",
         json={"body": "done"},
-        headers={"x-kraft-session-id": spec},
+        headers={"x-kraft-session-id": f"{running}/{spec}"},
     )
     assert agents.status_code == 201, agents.text
     before = _comments(client, running, tid)

@@ -47,7 +47,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
         {!hit ? (
           <p className="ph-note">{at.why}</p>
         ) : tab === "log" ? (
-          <TaskLog session={s} />
+          <TaskLog workItemId={item.id} session={s} />
         ) : (
           <Facts rows={[
             ["status", statusWords(hit.chip)],

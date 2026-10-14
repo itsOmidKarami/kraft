@@ -98,6 +98,8 @@ def test_diff_landed_and_in_flight_truncate_independently(
     from kraft.api.routes import artifacts
 
     monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
+    # One file that fits ahead of the big ones, so there is a boundary to cut at.
+    write(worktree, "a.py", "a = 1\n")
     for i in range(20):
         write(worktree, f"landed{i}.py", "x = 1\n" * 100)
     commit_all(worktree, "bulk")
@@ -197,6 +199,8 @@ def test_diff_truncates_at_a_file_boundary(client, seeded_item, worktree, monkey
     from kraft.api.routes import artifacts
 
     monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
+    # One file that fits ahead of the big ones, so there is a boundary to cut at.
+    write(worktree, "a.py", "a = 1\n")
     for i in range(20):
         write(worktree, f"f{i}.py", "x = 1\n" * 100)
     git(worktree, "add", "-A")
@@ -272,7 +276,7 @@ def _item_with_a_live_session(client, tmp_path, sandboxed: bool) -> str:
                 result_path=str(tmp_path / "live.json"),
             )
         )
-        await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0))
+        await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0, work_item_id=wid))
 
     client.portal.call(seed)
     return wid

@@ -6,6 +6,7 @@ import json
 import pytest
 
 from kraft import harness
+from kraft.adapters import agent
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
@@ -79,18 +80,63 @@ def test_an_amp_rules_file_is_mounted_read_only_in_the_sandbox(run, tmp_path):
         sandbox=DOCKER,
         deny_tools=("Bash",),
     )
-    assert seen["ro_paths"] == (str(tmp_path / "harness-config" / "amp" / "s1.json"),)
+    assert seen["ro_paths"] == (str(tmp_path / "harness-config" / "amp" / "w1-s1.json"),)
 
 
-def test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own(run, tmp_path):
+@pytest.mark.parametrize(
+    "home", ["items/w1/sandbox-home", "sandbox-home/w1"], ids=["no-old-home", "old-home-exists"]
+)
+def test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own(run, tmp_path, home):
     """The shared directory would be one item's worker's to rewrite under
-    every other item's launches; the item's sandbox home is already mounted."""
+    every other item's launches; the item's sandbox home is already mounted.
+    That home is an older item's `sandbox-home/<id>/` while it exists (its
+    chats are there to resume), else the item's own folder's."""
+    if home.startswith("sandbox-home/"):
+        (tmp_path / home).mkdir(parents=True)
     seen = run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
-    own = tmp_path / "sandbox-home" / "w1" / ".kraft-harness-config" / "cursor"
+    own = tmp_path / home / ".kraft-harness-config" / "cursor"
     assert seen["env"]["CURSOR_CONFIG_DIR"] == str(own)
     assert (own / "cli-config.json").is_file()
     unsandboxed = run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path))
     assert unsandboxed["env"]["CURSOR_CONFIG_DIR"] == str(tmp_path / "harness-config" / "cursor")
+
+
+@pytest.mark.parametrize(
+    ("link", "refused"),
+    [
+        (".kraft-harness-config", True),
+        (".kraft-harness-config/cursor", True),
+        (".kraft-harness-config/cursor/cli-config.json", False),
+        (".kraft-harness-config/cursor/.cli-config.json.planted", True),
+    ],
+    ids=["config-folder", "harness-folder", "config-file", "temporary-file"],
+)
+def test_a_link_in_the_sandbox_home_is_never_written_through(
+    run, tmp_path, monkeypatch, link, refused
+):
+    """The sandbox home is the worker's: a link it planted on the way to the
+    config folder, or at the temporary file's name, refuses the launch,
+    naming the folder, and one at a file's name is replaced. What either
+    points at is never written."""
+    monkeypatch.setattr(agent.secrets, "token_hex", lambda _n: "planted")
+    home = tmp_path / "items" / "w1" / "sandbox-home"
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "cli-config.json").write_text("untouched")
+    planted = home / link
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    in_folder = link.startswith(".kraft-harness-config/cursor/")
+    planted.symlink_to(victim / "cli-config.json" if in_folder else victim)
+    launch = dict(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path))
+
+    if refused:
+        with pytest.raises(LaunchRefused, match=r"\.kraft-harness-config/cursor"):
+            run(**launch, sandbox=DOCKER)
+    else:
+        run(**launch, sandbox=DOCKER)
+        assert not (home / ".kraft-harness-config/cursor/cli-config.json").is_symlink()
+    assert [p.name for p in victim.iterdir()] == ["cli-config.json"]
+    assert (victim / "cli-config.json").read_text() == "untouched"
 
 
 @pytest.mark.parametrize(

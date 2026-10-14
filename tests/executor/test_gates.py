@@ -3,14 +3,14 @@ and is auto-reviewed only when it declares a reviewer and the item opts in.
 
 Auto-escalation of a non-gate `needs_human` stop is tests/executor/test_escalation.py."""
 
-import json
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from support import harness
 from support.harness import entry_of, fake_harness_home, v1_chain, v1_resolved, v1_walk
 
-from kraft import events, executor, store
+from kraft import events, executor, item_paths, store
 from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.api.routes import gates as gates_route
@@ -377,9 +377,8 @@ async def test_a_gate_shows_the_artifact_its_own_field_names(item_on):
             {"id": "unwritten", "kind": "gate", "artifact": "review_brief"},
         ]
     )
-    rel = agent_mod.artifact_path("spec", it.id)
-    (it.worktree / rel).parent.mkdir(parents=True, exist_ok=True)
-    (it.worktree / rel).write_text("the spec\n")
+    rel = item_paths.document_name(it.id, "spec")
+    harness.write(it.run_dirs.base, rel, "the spec\n")
 
     row = it.row()
     assert executor.gate_artifact(it.run_dirs, row, "spec_approval") == rel
@@ -399,9 +398,7 @@ async def test_a_gate_with_arbitrary_id_works_without_a_name_table(tmp_path, rep
             "reject_to": "shape_it",
         },
     ]
-    rel = agent_mod.artifact_path("spec", "w1")
-    (run_dirs.worktrees / "w1" / rel).parent.mkdir(parents=True, exist_ok=True)
-    (run_dirs.worktrees / "w1" / rel).write_text("x\n")
+    harness.write(run_dirs.base, item_paths.document_name("w1", "spec"), "x\n")
 
     status, evts, _sessions, _row = await v1_walk(
         tmp_path, v1_chain(nodes, repo=repo), repo=repo, run_dirs=run_dirs
@@ -585,9 +582,8 @@ async def test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate(
 
     async def _capture(_db, _rd, **kw):
         seen.update(kw)
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "looks right"})
-        )
+        verdict = {"status": "done", "verdict": "approve", "concerns": "looks right"}
+        harness.write_own_result(it.run_dirs, kw["work_item_id"], kw["session_id"], verdict)
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _capture)
@@ -630,9 +626,8 @@ async def test_auto_review_launches_with_the_method_mode_and_tools_it_resolved(
 
     async def _capture(_db, _rd, **kw):
         seen.update(kw)
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "ok"})
-        )
+        verdict = {"status": "done", "verdict": "approve", "concerns": "ok"}
+        harness.write_own_result(it.run_dirs, kw["work_item_id"], kw["session_id"], verdict)
         return "done"
 
     monkeypatch.setattr(agent_mod, "run_agent_task", _capture)
