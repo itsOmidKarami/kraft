@@ -83,16 +83,17 @@ const stopAt = stages.findIndex(stage => stage.stop)
   background: color-mix(in oklab, var(--ui-primary) 14%, transparent);
 }
 
-/* Not yet run: the chain is waiting on the stop before it. Muted text is
-   still above 4.5:1 on the strip's background in both modes. */
+/* Not yet run: the chain is waiting on the stop before it. Toned, not
+   muted: muted on the strip's background is 4.35:1 in light mode, under
+   WCAG AA's 4.5:1; toned is 6.9:1. */
 .stage-strip__after {
-  color: var(--ui-text-muted);
+  color: var(--ui-text-toned);
 }
 
 .stage-strip__caption {
   margin-top: 0.875rem;
   font-size: 0.8125rem;
-  color: var(--ui-text-muted);
+  color: var(--ui-text-toned);
 }
 
 /* On a phone the stages stack, one per line. */
