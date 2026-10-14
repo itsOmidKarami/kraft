@@ -27,7 +27,7 @@ const rows = computed(() => props.messages.reduce<{ from?: string, to?: string, 
           <span class="diagram-name">{{ row.from }}</span>{{ ' ' }}<DiagramArrow :kind="row.reply ? 'dashed' : 'next'" :say="row.reply ? 'replies to' : 'to'" />{{ ' ' }}<span class="diagram-name">{{ row.to }}</span>
         </span>
         <span class="diagram-sequence__say diagram-note">{{ row.say }}</span>
-        <span v-for="note in row.notes" :key="note.note" class="diagram-sequence__note diagram-label">note over {{ note.over }}: {{ note.note }}</span>
+        <span v-for="note in row.notes" :key="note.note" class="diagram-sequence__note diagram-label"><template v-if="note.over">{{ note.over }}: </template>{{ note.note }}</span>
       </li>
     </ol>
   </DiagramFigure>
