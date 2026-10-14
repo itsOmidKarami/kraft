@@ -117,19 +117,28 @@ def filed_copy(run_dirs, wid: str, source: str | None) -> tuple[Path, str] | Non
 
 
 def stored_attachment(run_dirs, wid: str, attachment: dict, repo: str | Path) -> Path:
-    """Where starting an item reads an attachment from: the `source` its row
-    records when a file is there; else the copy of that name in the item's
-    copy folders (`filed_copy`), so a `KRAFT_RUN_DIR` moved or spelled
-    another way since filing still finds it; else the recorded path as it
-    is, for the caller to report missing. With no `source`, the path in the
+    """Where starting an item reads an attachment from. A `source` shaped
+    like one of intake's copies (in a `filed/` folder, or in
+    `attachments/<id>/`) is looked for first in this item's own copy
+    folders, by its name (`filed_copy`): a `KRAFT_RUN_DIR` moved or spelled
+    another way since filing leaves the row naming the old place, which may
+    still hold an older copy. Otherwise, or when this item has no copy of
+    that name, the recorded `source` when a file is there; else the copy of
+    that name in the item's copy folders; else the recorded path as it is,
+    for the caller to report missing. With no `source`, the path in the
     repo."""
     source = attachment.get("source")
     if not source:
         return Path(repo) / attachment["path"]
-    if Path(source).is_file():
-        return Path(source)
+    recorded = Path(source)
+    if recorded.parent.name == "filed" or recorded.parent.parent.name == "attachments":
+        found = filed_copy(run_dirs, wid, source)
+        if found:
+            return found[0] / found[1]
+    if recorded.is_file():
+        return recorded
     found = filed_copy(run_dirs, wid, source)
-    return found[0] / found[1] if found else Path(source)
+    return found[0] / found[1] if found else recorded
 
 
 def is_filed_copy(run_dirs, wid: str, source: str | None) -> bool:

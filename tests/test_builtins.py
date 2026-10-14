@@ -74,7 +74,9 @@ async def test_ensure_worktree_alone_copies_attachments_before_any_node_runs(
     assert copied.read_text() == "# the spec\n"
 
 
-@pytest.mark.parametrize("stored", ["other-worktree", "run-dir-spelled-otherwise"])
+@pytest.mark.parametrize(
+    "stored", ["other-worktree", "run-dir-spelled-otherwise", "older-run-dir-still-there"]
+)
 async def test_an_attachment_from_another_worktree_is_copied_from_its_source(
     tmp_path, database, run_dirs, repo, stored
 ):
@@ -84,7 +86,7 @@ async def test_an_attachment_from_another_worktree_is_copied_from_its_source(
     silently — a trimmed spec gate with no spec, which is worse than the 422
     this replaces. A stored copy whose row names a run folder since moved, or
     spelled another way, is found in the item's `filed/` by its name, as the
-    board finds it."""
+    board finds it: first, even while a copy is still at the old place."""
     if stored == "other-worktree":
         other = tmp_path / "other-wt"
         git(repo, "worktree", "add", "-q", str(other), "-b", "other")
@@ -95,6 +97,8 @@ async def test_an_attachment_from_another_worktree_is_copied_from_its_source(
     else:
         write(run_dirs.items / "w1" / "filed", "spec.md", "# from the other worktree\n")
         source = "/old/kraft/run/items/w1/filed/spec.md"
+        if stored == "older-run-dir-still-there":
+            source = str(write(tmp_path / "old-run" / "items" / "w1" / "filed", "spec.md", "x"))
 
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(
