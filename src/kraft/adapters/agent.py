@@ -56,10 +56,10 @@ _CTX = (
     "When you are done, write a short session summary to {summary_path}, "
     "starting with YAML front-matter carrying exactly these keys and values:\n"
     "---\n"
-    "work_item_ids: [{work_item_id}]\n"
+    'work_item_ids: ["{work_item_id}"]\n'
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
-    "worker_session_id: {session_id}\n"
+    'worker_session_id: "{session_id}"\n'
     "---\n"
     "\n"
     'Report how it went as "status" in the JSON result file at '
@@ -141,7 +141,7 @@ _ARTIFACT = (
     "exist, and to no other path. Start it with YAML "
     "front matter carrying exactly these keys:\n"
     "---\n"
-    "work_item_ids: [{work_item_id}]\n"
+    'work_item_ids: ["{work_item_id}"]\n'
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
     "kind: {kind}s\n"

@@ -62,9 +62,11 @@ CREATE TABLE document_links (
   node_id           TEXT,
   hook_point        TEXT,
   worker_session_id TEXT,
-  -- The session's own work item, from its database row: a session id is
-  -- unique only within its item. NULL on a link written before this column,
-  -- whose session id is a pre-upgrade one, unique on its own.
+  -- The session's own work item: a session id is unique only within its
+  -- item. From the session's database row, or from front matter naming one
+  -- item. NULL on a link written before this column (a pre-upgrade session
+  -- id, unique on its own) and on a scanned summary naming several items,
+  -- whose session is looked up among those items only.
   session_work_item_id TEXT
 );
 

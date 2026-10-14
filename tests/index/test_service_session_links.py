@@ -99,22 +99,34 @@ async def test_a_summary_linked_before_the_upgrade_keeps_its_run(
 
 
 @pytest.mark.parametrize(
-    ("items", "holders", "status"),
+    ("items", "holders", "beside", "status"),
     [
-        (["w1", "w3"], ["w2"], None),
-        (["w1"], ["w2"], None),
-        (["w1", "w3"], ["w1", "w2"], "done"),
+        (["w1", "w3"], ["w2"], None, None),
+        (["w1"], ["w2"], None, None),
+        (["w1", "w3"], ["w1", "w2"], None, "done"),
+        (["w1", "w3"], ["w2"], ["w1", "w2"], None),
     ],
-    ids=["another-item-s-session", "its-one-item-has-none", "its-own-item-s-session"],
+    ids=[
+        "another-item-s-session",
+        "its-one-item-has-none",
+        "its-own-item-s-session",
+        "a-sibling-summary-s-item-s-session",
+    ],
 )
 async def test_a_scanned_summary_finds_only_its_own_items_session(
-    tmp_path, database, conn, items, holders, status
+    tmp_path, database, conn, items, holders, beside, status
 ):
     """A summary git scanned names its session by id alone, and its items in
     `work_item_ids`. Only those items' sessions are its: a 6-character id
-    one other item's session holds gives it no run, not that item's."""
+    one other item's session holds gives it no run, not that item's, even
+    when another summary scanned with it names that item."""
     summary = f"---\nwork_item_ids: [{', '.join(items)}]\nworker_session_id: abc123\n---\n# S\nx\n"
-    repo = make_repo_with_engineering(tmp_path, {".engineering/sessions/s.md": summary})
+    files = {".engineering/sessions/s.md": summary}
+    if beside:
+        files[".engineering/sessions/t.md"] = (
+            f"---\nwork_item_ids: [{', '.join(beside)}]\nworker_session_id: def456\n---\n# T\ny\n"
+        )
+    repo = make_repo_with_engineering(tmp_path, files)
     for wid in ("w1", "w2", "w3"):
         await seed_work_item(database, str(repo), wid)
     for wid in holders:
@@ -128,5 +140,5 @@ async def test_a_scanned_summary_finds_only_its_own_items_session(
     ix = Indexer(conn, database, repos_env=str(repo))
     await ix.rescan_repo(str(repo))
 
-    (doc,) = ix.documents_for_work_item("w1")
+    (doc,) = [d for d in ix.documents_for_work_item("w1") if d["path"].endswith("/s.md")]
     assert (doc["worker_session_id"], doc["session_status"]) == ("abc123", status)
