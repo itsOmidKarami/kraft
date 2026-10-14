@@ -319,8 +319,7 @@ def test_request_changes_to_a_bad_node_writes_no_review(client, gated):
 
 
 def _session_of(client, wid, node_id):
-    """`<wid>/<sid>` for `node_id`'s session on `wid`, as a real agent's
-    `X-Kraft-Session-Id` carries it."""
+    """`<wid>/<sid>` of `node_id`'s session on `wid`, as an agent's header carries it."""
     body = client.get(f"/api/work-items/{wid}").json()
     return next(f"{wid}/{s['id']}" for s in body["worker_sessions"] if s["node_id"] == node_id)
 
@@ -363,9 +362,8 @@ def test_reply_door_refuses_humans_and_other_items(client, gated, repo):
         ).status_code
         == 403
     )
-    # A bare id two sessions share names neither, even with the thread's own
-    # item's first and the thread published: only a pre-upgrade id may be bare,
-    # and the door does not lean on its being unique.
+    # A bare (pre-upgrade) id two sessions share names neither, even with the
+    # thread published and its own item's session first.
     client.post(f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"})
     shared = "8cbfe6e27c1044b3e445c0f0d726357d"
     add_session(shared, gated)
