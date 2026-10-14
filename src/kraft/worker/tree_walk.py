@@ -18,7 +18,14 @@ descriptors for the deepest `held` folders of the path it is on, as GNU
 fts does: going back up past them, it opens `..` from the folder it is
 leaving and checks that the folder it gets is the one it came down through,
 by device and inode. One that is not (the worker moved a folder while the
-walk was below it) is not continued, and is logged.
+walk was below it) is logged, and the walk does not go back into any
+folder it had let go of: it resumes at the nearest one it still holds,
+which below the window is the top, so the rest of that subtree is not
+walked. It does not try to find its way back down by name: for a removal
+that would act on folders it can no longer vouch for, and for a measure a
+worker gains nothing it lacks already (a mode-0 folder hides what is in it
+from a daemon that is not root), while each retry costs a walk down from
+the top, which a worker moving folders in a loop could make quadratic.
 """
 
 from __future__ import annotations
@@ -34,8 +41,10 @@ logger = logging.getLogger(__name__)
 
 #: How a folder is opened: never through a link, never inherited by a child.
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-#: The most folder descriptors a walk holds open at once, besides the top's
-#: and one it is opening.
+#: How many folder descriptors a walk keeps open, besides the top's (the
+#: caller's). Briefly a few more: the one it is opening before it lets the
+#: shallowest go, the parent it reopens by `..` before it closes the child,
+#: and the duplicate `os.scandir` makes of a folder it lists.
 HELD = 16
 
 
@@ -94,7 +103,10 @@ def walk(
     `dir_fd` is valid only during the call. An entry that cannot be
     `lstat`ed is skipped, as is one that `open_dir` opens to anything but a
     folder; a folder that cannot be listed is walked as empty. The
-    callbacks must not raise."""
+    callbacks must not raise. `held` is at least 1: the folder being walked
+    is always held."""
+    if held < 1:
+        raise ValueError(f"held must be at least 1, not {held}")
     root = _Frame("", top, _key(os.fstat(top)), _list(top) if names is None else list(names))
     stack = [root]
     # The deepest `open_count` frames hold a descriptor; those between them
@@ -141,9 +153,12 @@ def walk(
             frame.fd = None
             open_count -= 1
             if parent.fd is None:
+                # `%r`: the names are a worker's, and may hold a newline.
                 logger.warning(
-                    "%s moved while it was walked; not walking the rest of it",
-                    "/".join(f.name for f in stack[1:]) or "a folder",
+                    "%r was moved out of %r while it was walked; not walking the rest of %r",
+                    frame.name,
+                    "/".join(f.name for f in stack[1:]),
+                    stack[1].name if len(stack) > 1 else "",
                 )
                 while stack[-1].fd is None:
                     stack.pop()

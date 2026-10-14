@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -177,22 +176,30 @@ def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
     assert seen["a"] >= 4 * MB
 
 
-def test_a_deep_tree_is_counted_in_time_linear_in_its_folders(tmp_path):
+def test_a_deep_tree_is_counted_in_time_linear_in_its_folders(tmp_path, monkeypatch):
     """Folders deeper than the walk holds descriptors for are gone back up to
     by `..`, not reopened from the top each time: reopening made 2,000 levels
     take 2.6 seconds and 50,000 half an hour, and a worker makes either at
-    almost no cost. 5,000 levels take a small fraction of a second; the bound
-    is far above that, and far below what reopening took."""
+    almost no cost. 5,000 levels take about two opens a folder, where
+    reopening took some 12.5 million. Counted, not timed, so a loaded
+    machine cannot fail it."""
     run = tmp_path / "run"
     deep_chain(run / "worktrees" / "a", 5000, leaf=os.urandom(MB))
+    real, opens = os.open, []
+
+    def counting_open(*a, **kw):
+        opens.append(a[0])
+        return real(*a, **kw)
+
+    monkeypatch.setattr(os, "open", counting_open)
     try:
-        began = time.perf_counter()
         used = storage.measure(run)
-        took = time.perf_counter() - began
+        monkeypatch.undo()
 
         assert used.items["a"] >= MB
-        assert took < 3, f"5,000 levels took {took:.1f}s"
+        assert len(opens) < 3 * 5000
     finally:
+        monkeypatch.undo()
         item_paths.remove_tree(run)
 
 
