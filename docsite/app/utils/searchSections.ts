@@ -10,6 +10,9 @@ type Page = { path: string, title: string, description: string, body: { value: M
 export type SearchSection = { id: string, title: string, titles: string[], content: string, level: number }
 
 const ENDS_AN_ITEM = ['td', 'th', 'li']
+// Only links to pages that are their own hits, so they only repeated those
+// pages' words (a query for "stop reason" found every page that links to one).
+const LINK_LISTS = ['Related', 'Next steps', 'See also', 'In this section']
 // A page's syntax-highlighting <style> is not text anyone wrote.
 const IGNORED = ['style']
 
@@ -24,10 +27,17 @@ export function searchSections(pages: Page[]): SearchSection[] {
   return pages.flatMap((page) => {
     const sections: SearchSection[] = [{ id: page.path, title: page.title || '', titles: [], content: (page.description || '').trim(), level: 1 }]
     const trail: { level: number, title: string }[] = []
+    let skipFrom = 0 // the level of a link list being skipped, until a heading at or above it
     for (const node of page.body?.value ?? []) {
       const level = typeof node === 'string' ? 0 : Number(/^h([1-6])$/.exec(node[0])?.[1] ?? 0)
+      if (skipFrom && (!level || level > skipFrom)) continue
+      skipFrom = 0
       if (level) {
         const title = textOf(node).trim()
+        if (LINK_LISTS.includes(title)) {
+          skipFrom = level
+          continue
+        }
         while (trail.length && trail[trail.length - 1]!.level >= level) trail.pop()
         sections.push({ id: `${page.path}#${(node as [string, Record<string, unknown>])[1].id}`, title, titles: [page.title, ...trail.map(t => t.title)], content: '', level })
         trail.push({ level, title })

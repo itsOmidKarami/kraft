@@ -6,13 +6,12 @@
      index keeps the HTML entities of the page's text (&lt; &gt; &#39;), which
      the results would show literally, so decode them. On a /next/ URL answered
      by the stable build's root 404.html this searches the release docs, so the
-     dialog says so. Results come grouped by section in the order a learner
-     needs them (below), not in the order of the best match, so "raise budget"
+     dialog says so. A Reference hit is ranked lower (below), so "raise budget"
      opens on the guide and not on the HTTP route. -->
 <script setup lang="ts">
 import type { ContentNavigationItem } from '@nuxt/content'
 
-const props = defineProps<{
+defineProps<{
   navigation?: ContentNavigationItem[]
 }>()
 
@@ -40,20 +39,30 @@ const { data: files } = useLazyAsyncData('search_docs', async () => {
   server: false,
 })
 
-// preserveGroupOrder lists a group per section in this order, each by its own
-// match score, so a reference hit is demoted, not hidden. Project sits above
-// Reference because a policy or a changelog answers more newcomers than a
-// route table. A section not named here (a new one) goes last.
-const sectionOrder = ['get-started', 'concepts', 'guides', 'troubleshooting', 'project', 'reference']
-const rank = (item: ContentNavigationItem) => {
-  const at = sectionOrder.indexOf(item.path.split('/').pop() ?? '')
-  return at < 0 ? sectionOrder.length : at
-}
-const orderedSections = computed(() => props.navigation?.toSorted((a, b) => rank(a) - rank(b)))
-
+// Reference pages are the best match for nearly any word that is also the
+// name of a route or a verb ("raise budget" found POST .../budget/raise
+// first and the guide ninth), so a Reference hit is ranked as if it scored
+// REFERENCE_PENALTY worse (Fuse: 0 is exact, 1 is none; the guide that should
+// lead scored about 0.64 where that route scored 0.17), which lets a good hit
+// elsewhere lead but not hide it. A query that is itself a route, a flag or a
+// verb (it has a / - _ or .) is a search for the reference, so it gets none.
 // The match limit counts hits across every section before they are grouped,
 // so at the default 12 a dozen reference rows left no room for the guide.
-const resultLimit = 40
+// Fuse is handed the page's path as one more, near-weightless key, because
+// that is the only way its sort function can see which page a hit is: the
+// path is the first value of its `item`.
+const REFERENCE_PENALTY = 0.55
+const term = ref('')
+type Hit = { score: number, idx: number, item: Record<number, { v: string }> }
+const rank = (hit: Hit) => hit.score
+  + (!/[/\-_.]/.test(term.value) && hit.item[0]!.v.startsWith('/reference') ? REFERENCE_PENALTY : 0)
+const fuse = {
+  resultLimit: 40,
+  fuseOptions: {
+    keys: [{ name: 'to', weight: 0.01 }],
+    sortFn: (a: Hit, b: Hit) => rank(a) - rank(b) || a.idx - b.idx,
+  },
+}
 
 const stableOnNext = computed(() => at.value.channel === 'next' && docs.channel !== 'next')
 const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`)
@@ -62,9 +71,9 @@ const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`
 <template>
   <LazyUContentSearch
     :files="files"
-    :navigation="orderedSections"
-    preserve-group-order
-    :fuse="{ resultLimit }"
+    :navigation="navigation"
+    :fuse="fuse"
+    v-model:search-term="term"
     :color-mode="!forcedColorMode"
     :title="stableOnNext ? `Search ${releaseDocs}` : undefined"
     :description="stableOnNext ? `This page is not in the next docs; this searches ${releaseDocs}.` : undefined"
