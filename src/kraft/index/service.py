@@ -439,15 +439,29 @@ class Indexer:
         # W13 A: the run a session summary came from. worker_sessions lives in
         # the state db, not the index, so the join is a keyed lookup rather
         # than SQL. Artifacts and attachments have no session: all three null.
-        runs = self._session_runs(
-            [
-                (d.get("session_work_item_id"), d["worker_session_id"])
-                for d in docs
-                if d.get("worker_session_id")
-            ]
-        )
+        # A session with no item is looked for among the document's own
+        # items' sessions only.
+        unpaired = [
+            d["document_id"]
+            for d in docs
+            if d.get("worker_session_id") and d.get("session_work_item_id") is None
+        ]
+        own = {
+            doc: frozenset(link["work_item_id"] for link in links if link["work_item_id"])
+            for doc, links in self._links_for(unpaired).items()
+        }
+        keys = {
+            d["document_id"]: (
+                d.get("session_work_item_id"),
+                d["worker_session_id"],
+                own.get(d["document_id"], frozenset()),
+            )
+            for d in docs
+            if d.get("worker_session_id")
+        }
+        runs = self._session_runs(list(keys.values()))
         for d in docs:
-            run = runs.get((d.get("session_work_item_id"), d.get("worker_session_id")))
+            run = runs.get(keys.get(d["document_id"]))
             d["attempt"] = run["attempt"] if run else None
             d["round"] = run["round"] if run else None
             d["session_status"] = run["status"] if run else None
@@ -458,17 +472,19 @@ class Indexer:
         return docs
 
     def _session_runs(
-        self, sessions: list[tuple[str | None, str]]
-    ) -> dict[tuple[str | None, str], dict]:
-        """attempt/round/status per `(work item id, session id)` given, keyed
-        the same way. A session id is unique only within its item, so a pair
-        with its item is looked up by both. One with none (a link written
-        before `session_work_item_id`, or a summary git scanned) is looked up
-        by id alone: a pre-upgrade id is unique on its own, and an id more
-        than one item's session has answers nothing rather than another
-        item's run."""
-        paired = sorted({(w, s) for w, s in sessions if w is not None})
-        bare = sorted({s for w, s in sessions if w is None})
+        self, sessions: list[tuple[str | None, str, frozenset[str]]]
+    ) -> dict[tuple[str | None, str, frozenset[str]], dict]:
+        """attempt/round/status per `(work item id, session id, document's
+        items)` given, keyed the same way. A session id is unique only within
+        its item, so a pair with its item is looked up by both. One with none
+        (a link written before `session_work_item_id`, or a summary git
+        scanned that names no one item) is looked up by id among the
+        sessions of its document's own items, never another item's: a
+        pre-upgrade id is unique on its own, and an id more than one of
+        those items' sessions has answers nothing rather than a guess."""
+        paired = sorted({(w, s) for w, s, _ in sessions if w is not None})
+        bare = sorted({s for w, s, _ in sessions if w is None})
+        scope = sorted({i for w, _, items in sessions if w is None for i in items})
         rows = []
         if paired:
             pairs = ",".join("(?, ?)" for _ in paired)
@@ -480,23 +496,29 @@ class Indexer:
                     args,
                 ).fetchall()
             )
-        found = {(r["work_item_id"], r["id"]): r for r in rows}
-        if bare:
-            marks = ",".join("?" * len(bare))
-            by_id: dict[str, list] = {}
+        by_pair = {(r["work_item_id"], r["id"]): r for r in rows}
+        by_id: dict[str, list] = {}
+        if bare and scope:
+            marks, items = ",".join("?" * len(bare)), ",".join("?" * len(scope))
             for r in self._state.read(
                 lambda c: c.execute(
                     "SELECT work_item_id, id, attempt, round, status FROM worker_sessions "
-                    f"WHERE id IN ({marks})",
-                    bare,
+                    f"WHERE id IN ({marks}) AND work_item_id IN ({items})",
+                    [*bare, *scope],
                 ).fetchall()
             ):
                 by_id.setdefault(r["id"], []).append(r)
-            found |= {(None, sid): rs[0] for sid, rs in by_id.items() if len(rs) == 1}
-        return {
-            key: {"attempt": r["attempt"], "round": r["round"], "status": r["status"]}
-            for key, r in found.items()
-        }
+        found = {}
+        for key in set(sessions):
+            wid, sid, items = key
+            if wid is not None:
+                r = by_pair.get((wid, sid))
+            else:
+                mine = [r for r in by_id.get(sid, []) if r["work_item_id"] in items]
+                r = mine[0] if len(mine) == 1 else None
+            if r is not None:
+                found[key] = {"attempt": r["attempt"], "round": r["round"], "status": r["status"]}
+        return found
 
     def _attachment_docs(self, work_item_id: str) -> list[dict]:
         """Intake attachments (Kraft-dgh), joined at read time rather than stored

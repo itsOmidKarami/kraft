@@ -68,24 +68,65 @@ async def test_a_summary_is_listed_once_with_its_own_item_s_session(tmp_path, da
     assert len([d for d in ix.documents_for_work_item("w1") if d["worker_session_id"]]) == 2
 
 
+_SHARED = [("w1", "abc123", "done"), ("w2", "abc123", "failed")]
+
+
 @pytest.mark.parametrize(
-    ("sessions", "status"),
+    ("sessions", "linked_to", "status"),
     [
-        ([("w1", OLD, "done")], "done"),
-        ([("w1", "abc123", "done"), ("w2", "abc123", "failed")], None),
+        ([("w1", OLD, "done")], (), "done"),
+        (_SHARED, ("w1", "w2"), None),
+        (_SHARED, (), "done"),
     ],
-    ids=["pre-upgrade-id", "an-id-two-items-share"],
+    ids=["pre-upgrade-id", "an-id-two-items-share", "an-id-another-item-has-too"],
 )
 async def test_a_summary_linked_before_the_upgrade_keeps_its_run(
-    tmp_path, database, conn, sessions, status
+    tmp_path, database, conn, sessions, linked_to, status
 ):
     """A link written before `session_work_item_id` has none: its session is
-    found by id alone, which a pre-upgrade id names uniquely. An id more
-    than one item's session has gives no run rather than another item's."""
-    ix = await _summarised(tmp_path, database, conn, sessions)
+    found by id among the sessions of the summary's own items, which a
+    pre-upgrade id names uniquely. An id more than one of those items'
+    sessions has gives no run rather than a guess, and another item's
+    session of that id is not looked at."""
+    ix = await _summarised(tmp_path, database, conn, sessions, linked_to)
     conn.execute("UPDATE document_links SET session_work_item_id = NULL")
     conn.commit()
 
-    (doc,) = [d for d in ix.documents_for_work_item("w1") if d["source_kind"] == "session_summary"]
+    docs = [d for d in ix.documents_for_work_item("w1") if d["source_kind"] == "session_summary"]
+    (doc,) = [d for d in docs if d["path"].startswith("items/w1/")]
     assert doc["session_status"] == status
     assert doc["attempt"] == (1 if status else None)
+
+
+@pytest.mark.parametrize(
+    ("items", "holders", "status"),
+    [
+        (["w1", "w3"], ["w2"], None),
+        (["w1"], ["w2"], None),
+        (["w1", "w3"], ["w1", "w2"], "done"),
+    ],
+    ids=["another-item-s-session", "its-one-item-has-none", "its-own-item-s-session"],
+)
+async def test_a_scanned_summary_finds_only_its_own_items_session(
+    tmp_path, database, conn, items, holders, status
+):
+    """A summary git scanned names its session by id alone, and its items in
+    `work_item_ids`. Only those items' sessions are its: a 6-character id
+    one other item's session holds gives it no run, not that item's."""
+    summary = f"---\nwork_item_ids: [{', '.join(items)}]\nworker_session_id: abc123\n---\n# S\nx\n"
+    repo = make_repo_with_engineering(tmp_path, {".engineering/sessions/s.md": summary})
+    for wid in ("w1", "w2", "w3"):
+        await seed_work_item(database, str(repo), wid)
+    for wid in holders:
+        await seed_session(database, "abc123", wid, ".engineering/sessions/s.md")
+        await database.write(
+            lambda c, w=wid: c.execute(
+                "UPDATE worker_sessions SET status = ? WHERE work_item_id = ?",
+                ("done" if w == "w1" else "failed", w),
+            )
+        )
+    ix = Indexer(conn, database, repos_env=str(repo))
+    await ix.rescan_repo(str(repo))
+
+    (doc,) = ix.documents_for_work_item("w1")
+    assert (doc["worker_session_id"], doc["session_status"]) == ("abc123", status)

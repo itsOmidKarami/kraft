@@ -155,6 +155,11 @@ enforced-by: tests/index/test_service_session_links.py::test_a_summary_is_listed
 origin: src/kraft/index/service.py §ingest_session_summary, src/kraft/index/service.py §_session_runs
 
 ## REQ a-summary-linked-before-the-upgrade-is-found-by-id
-WHILE a session summary's index link records no work item for its session, the system SHALL find that session by its id alone, and SHALL give the summary no run when more than one session has that id.
-enforced-by: tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[pre-upgrade-id], tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[an-id-two-items-share], tests/index/test_db.py::test_v3_index_migrates_forward_keeping_its_links_with_no_session_item
+WHILE a session summary's index link records no work item for its session, the system SHALL find that session by its id among the sessions of the work items the summary itself is linked to, never another item's, and SHALL give the summary no run when more than one of them has that id.
+enforced-by: tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[pre-upgrade-id], tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[an-id-two-items-share], tests/index/test_service_session_links.py::test_a_summary_linked_before_the_upgrade_keeps_its_run[an-id-another-item-has-too], tests/index/test_service_session_links.py::test_a_scanned_summary_finds_only_its_own_items_session[another-item-s-session], tests/index/test_service_session_links.py::test_a_scanned_summary_finds_only_its_own_items_session[its-own-item-s-session], tests/index/test_db.py::test_v3_index_migrates_forward_keeping_its_links_with_no_session_item
 origin: src/kraft/index/service.py §_session_runs, src/kraft/index/db.py §_MIGRATIONS
+
+## REQ a-scanned-summary-s-session-takes-its-one-item
+WHEN the system indexes a session summary whose front matter names a session and exactly one work item, it SHALL record that work item as the session's.
+enforced-by: tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[one], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[scalar], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[one-twice], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[two], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[none], tests/index/test_service_session_links.py::test_a_scanned_summary_finds_only_its_own_items_session[its-one-item-has-none]
+origin: src/kraft/index/ingest.py §links_from_front_matter
