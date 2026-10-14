@@ -146,7 +146,7 @@ origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes
 
 WHEN a work item is abandoned, the system SHALL remove `run/items/<id>/`.
 enforced-by: tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at, tests/api/test_lifecycle.py::test_abandon_reclaims_the_attachment_storage, tests/api/test_abandon_item_folder.py::test_abandoning_removes_the_item_s_folder_off_the_event_loop, tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[abandoned-item]
-origin: src/kraft/api/routes/lifecycle.py §abandon_work_item -- `shutil.rmtree` walks by folder handle and removes a link without following it, so a link a worker planted in `docs/` or the sandbox home takes nothing outside with it.
+origin: src/kraft/api/routes/lifecycle.py §abandon_work_item -- `item_paths.remove_tree` walks by folder descriptor and removes a link without following it, so a link a worker planted in `docs/` or the sandbox home takes nothing outside with it.
 
 ## REQ storage-counts-item-sandbox-homes
 
@@ -201,11 +201,19 @@ origin: src/kraft/worker/worktree_read.py §read_no_follow -- a result file or s
 
 ## REQ the-storage-walk-holds-few-descriptors
 
-WHEN the system measures a folder a worker can write, it SHALL hold
+WHEN the system measures or removes a folder a worker can write, it SHALL hold
 a bounded number of open descriptors however deep the folder nests, take time
 linear in its folders, and reach what is at the bottom.
-enforced-by: tests/test_storage.py::test_a_deep_tree_is_counted_within_a_low_open_file_limit, tests/test_storage.py::test_a_deep_tree_is_counted_in_time_linear_in_its_folders, tests/worker/test_tree_walk.py::test_a_folder_gone_back_up_to_by_dotdot_is_the_one_come_down_through[in-place], tests/worker/test_tree_walk.py::test_a_folder_gone_back_up_to_by_dotdot_is_the_one_come_down_through[moved-out]
+enforced-by: tests/test_storage.py::test_a_deep_tree_is_counted_within_a_low_open_file_limit, tests/test_storage.py::test_a_deep_tree_is_counted_in_time_linear_in_its_folders, tests/test_item_paths.py::test_a_deep_tree_is_removed_within_a_low_open_file_limit, tests/worker/test_tree_walk.py::test_a_folder_gone_back_up_to_by_dotdot_is_the_one_come_down_through[in-place], tests/worker/test_tree_walk.py::test_a_folder_gone_back_up_to_by_dotdot_is_the_one_come_down_through[moved-out]
 origin: src/kraft/worker/tree_walk.py §walk -- a worker can nest folders far deeper than the daemon's open-file limit; one descriptor per level starves the daemon's sockets, database and logs, and reopening each deep folder from the top is quadratic. The walk keeps the deepest few, goes back up by `..`, and stops where `..` is not the folder it came down through.
+
+## REQ removing-a-workers-folder-follows-no-link
+
+WHEN the system removes a folder a worker can write, it SHALL remove nothing
+outside it, even when the worker swaps a folder in it for a link while it is
+being removed, and SHALL remove a folder there its owner cannot write or list.
+enforced-by: tests/test_item_paths.py::test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside[read-only], tests/test_item_paths.py::test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside[mode-0], tests/test_item_paths.py::test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside[mode-0-folder-itself], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[abandoned-item], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[archived-home], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[planted-summary], tests/test_item_paths.py::test_a_folder_its_owner_cannot_write_is_still_removed[worker-files]
+origin: src/kraft/item_paths.py §remove_tree -- a path-based retry (`chmod`, `unlink`, `rmtree` by full path) resolves every component again, so a worker that swaps `docs/a` for a link to the daemon's home between the failure and the retry has the daemon delete its own files; every step is by a descriptor, and a mode-0 folder is unlocked through `O_PATH` and `/proc/self/fd`, or `fchmodat(AT_SYMLINK_NOFOLLOW)`, never by path.
 
 ## REQ auto-cleanup-archives-only-for-what-archiving-frees
 

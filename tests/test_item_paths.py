@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from support.deep_tree import deep_chain
 from support.harness import write
 from support.unprivileged import run_unprivileged
 
@@ -462,3 +465,100 @@ def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, wh
         for left in (root / "locked", root / "hidden"):
             if left.is_dir() and not left.is_symlink():
                 left.chmod(0o755)
+
+
+_SWAP = """
+import os, sys
+from pathlib import Path
+from kraft import item_paths
+
+item, when, swap, target = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+real_open, swapped = os.open, []
+
+def swap_then_open(name, flags, *a, dir_fd=None, **kw):
+    # The worker's move, just as Kraft opens `when`: the folder `swap` (in
+    # `docs/`) is renamed beside itself and a link into the daemon's home
+    # put in its place.
+    if not swapped and dir_fd is not None and name == when:
+        swapped.append(name)
+        try:
+            os.rename(item / "docs" / swap, item / "docs" / (swap + ".moved"))
+            os.symlink(target, item / "docs" / swap)
+        except OSError as exc:
+            swapped.append(exc)
+    return real_open(name, flags, *a, dir_fd=dir_fd, **kw)
+
+os.open = swap_then_open
+item_paths.remove_tree(item)
+print(swapped[1:] or "swapped" if swapped else "never swapped")
+"""
+
+
+@pytest.mark.parametrize(
+    ("folder", "mode", "swap"),
+    [("run", 0o555, "a"), ("hidden", 0o000, "a"), ("hidden", 0o000, "a/hidden")],
+    ids=["read-only", "mode-0", "mode-0-folder-itself"],
+)
+def test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside(
+    run_dirs, tmp_path, folder, mode, swap
+):
+    """A worker plants `docs/a/<folder>/kraft.db` in a folder its owner cannot
+    write or list, and as Kraft goes into it swaps `docs/a`, or the folder
+    itself, for a link into the daemon's home. Kraft removes what it found
+    through the descriptors it opened, and gives a folder back its
+    permissions through one too, so the daemon's own `~/.kraft/<folder>/`
+    keeps its `kraft.db` and its mode."""
+    item = item_paths.item_dir(run_dirs, "w1")
+    planted = write(item, f"docs/a/{folder}/kraft.db", "worker's")
+    home = tmp_path / "home"
+    victim = write(home, f"{folder}/kraft.db", "the daemon's")
+    target = home if swap == "a" else victim.parent
+    planted.parent.chmod(mode)
+    victim.parent.chmod(0o500)
+    try:
+        done = run_unprivileged(_SWAP, str(item), folder, swap, str(target))
+
+        assert done.returncode == 0, done.stderr
+        assert done.stdout.strip() == "swapped"
+        assert victim.read_text() == "the daemon's"
+        assert victim.parent.stat().st_mode & 0o777 == 0o500
+        if swap == "a":
+            # Removed where it went, through the descriptors Kraft holds.
+            assert not os.path.lexists(item / "docs" / "a.moved" / folder)
+    finally:
+        victim.parent.chmod(0o755)
+        for left in (item / "docs" / "a.moved" / folder, item / "docs" / "a" / "hidden.moved"):
+            if left.is_dir() and not left.is_symlink():
+                left.chmod(0o755)
+
+
+_DEEP_REMOVE = """
+import resource, sys, time
+from kraft import item_paths
+
+resource.setrlimit(resource.RLIMIT_NOFILE, (64, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+began = time.perf_counter()
+item_paths.remove_tree(sys.argv[1])
+print(time.perf_counter() - began)
+"""
+
+
+def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
+    """A worker can nest folders in its `docs/` far deeper than the daemon's
+    open-file limit. Removing them holds a bounded number of descriptors,
+    goes back up by `..` rather than reopening from the top, and removes
+    the item's folder whole."""
+    item = item_paths.item_dir(run_dirs, "w1")
+    deep_chain(item / "docs", 5000, leaf=b"x")
+
+    done = subprocess.run(
+        [sys.executable, "-c", _DEEP_REMOVE, str(item)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert not os.path.lexists(item)
+    assert float(done.stdout) < 3

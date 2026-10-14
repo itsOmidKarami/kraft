@@ -42,11 +42,11 @@ import errno
 import logging
 import os
 import re
-import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from kraft.worker import tree_walk
 from kraft.worker.worktree_read import open_dir_no_symlinks, open_no_symlinks, read_worktree_file
 
 logger = logging.getLogger(__name__)
@@ -360,38 +360,151 @@ def remove_entry(path: Path) -> None:
 
 def remove_tree(path: str | os.PathLike[str]) -> None:
     """Remove the folder `path` and everything under it, best-effort, never
-    following a link: `shutil.rmtree`, whose walk opens each folder relative
-    to its parent and removes a link rather than what it points at, and
-    refuses a link at `path` itself.
+    following a link, never raising.
+
+    Only `path`'s own folders are resolved as a path, and they are Kraft's;
+    below them the walk is `tree_walk.walk`'s, by descriptors: each name is
+    opened, unlinked or removed relative to the descriptor of the folder it
+    was listed in, with no link followed, so a link is removed rather than
+    what it points at, and a worker swapping a folder for a link (to the
+    daemon's home) while Kraft removes it redirects nothing. A link or a
+    file at `path` itself is left, as `shutil.rmtree` refuses it.
 
     A worker, or a tool it ran, can leave a folder its owner cannot write or
-    list (`chmod 555`, a Go module cache), which a daemon that is not root
-    cannot empty. Such a folder is given back its owner's read, write and
-    search permission and the removal retried; a folder Kraft cannot fix
-    that way (another user's) is left, as before."""
-    tried: set[str] = set()
+    list (`chmod 555`, `chmod 000`, a Go module cache), which a daemon that
+    is not root cannot empty. Such a folder is given back its owner's read,
+    write and search permission through a descriptor of the folder itself
+    (`_unlock`), never a path, and the removal retried; a folder Kraft
+    cannot fix that way (another user's) is left, as is everything above
+    it."""
+    path = os.path.abspath(os.fspath(path))
+    parent, name = os.path.split(path)
+    if name in ("", ".", ".."):
+        return
+    try:
+        top = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return
+    try:
+        tree_walk.walk(
+            top,
+            lambda dir_fd, entry, st: _remove_entry_at(dir_fd, entry, st, at_top=dir_fd == top),
+            open_dir=_open_to_remove,
+            leave=lambda dir_fd, entry: _as_owner(dir_fd, lambda: os.rmdir(entry, dir_fd=dir_fd)),
+            names=[name],
+        )
+    except OSError:
+        pass
+    finally:
+        os.close(top)
 
-    def retry(func, failed, exc):
-        if isinstance(exc, FileNotFoundError):
-            return
-        failed = os.fspath(failed)
+
+def _remove_entry_at(dir_fd: int, name: str, st: os.stat_result, *, at_top: bool) -> bool:
+    """`remove_tree`'s step for one entry of the folder `dir_fd`: a folder is
+    walked (True); anything else, a link included, is unlinked by its name
+    there, never followed. At the top only a folder is removed."""
+    if stat.S_ISDIR(st.st_mode):
+        return True
+    if at_top:
+        return False
+    if _as_owner(dir_fd, lambda: os.unlink(name, dir_fd=dir_fd)):
+        return False
+    # Swapped for a folder since its `lstat`? Then walk that.
+    try:
+        return stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
+def _as_owner(dir_fd: int, op) -> bool:
+    """Run `op`, an unlink or rmdir in the folder `dir_fd`, and when it is
+    refused, give that folder its owner's read, write and search permission
+    through `dir_fd` itself (`fchmod`) and run it once more. True when the
+    name is gone."""
+    try:
+        op()
+        return True
+    except FileNotFoundError:
+        return True
+    except PermissionError:
+        pass
+    except OSError:
+        return False
+    try:
+        os.fchmod(dir_fd, stat.S_IMODE(os.fstat(dir_fd).st_mode) | stat.S_IRWXU)
+        op()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _open_to_remove(dir_fd: int, name: str) -> int | None:
+    """The folder `name` in `dir_fd`, opened with no link followed and given
+    its owner's read, write and search permission, so what is in it can be
+    listed and removed: a mode-0 folder through `_unlock` first. None, and
+    the folder left, when Kraft cannot open it that way."""
+    fd = tree_walk.open_child(dir_fd, name)
+    if fd is None:
+        if not _unlock(dir_fd, name):
+            return None
+        fd = tree_walk.open_child(dir_fd, name)
+        if fd is None:
+            return None
+    try:
+        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+        if mode & stat.S_IRWXU != stat.S_IRWXU:
+            os.fchmod(fd, mode | stat.S_IRWXU)
+    except OSError:
+        pass  # another user's: what can be removed in it still is
+    return fd
+
+
+def _unlock(dir_fd: int, name: str) -> bool:
+    """Give the folder `name` in `dir_fd`, one Kraft cannot open (mode 0),
+    its owner's read, write and search permission without following a link
+    and without resolving any path a worker could swap a component of. True
+    when it did.
+
+    On Linux, the folder is opened with `O_PATH | O_NOFOLLOW`, which needs no
+    permission on it, checked to be a folder, and changed through
+    `/proc/self/fd/<n>`, which names the object that descriptor holds rather
+    than any path (glibc's `lchmod` does the same). Where the platform has
+    `fchmodat(AT_SYMLINK_NOFOLLOW)` (macOS), that, relative to `dir_fd`.
+    With neither, the folder is left: never a chmod by path."""
+    o_path = getattr(os, "O_PATH", 0)
+    if o_path:
         try:
-            if func in (os.unlink, os.rmdir, os.remove):
-                parent = os.path.dirname(failed)
-                if parent in tried or not _is_real_dir(parent):
-                    return
-                tried.add(parent)
-                _add_owner_rwx(parent)
-                func(failed)
-            elif failed not in tried and _is_real_dir(failed):
-                # It could not be opened or listed: fix it and remove it whole.
-                tried.add(failed)
-                _add_owner_rwx(failed)
-                shutil.rmtree(failed, onexc=retry)
+            pfd = os.open(
+                name, o_path | os.O_NOFOLLOW | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=dir_fd
+            )
         except OSError:
+            pfd = None
+        if pfd is not None:
+            try:
+                info = os.fstat(pfd)
+                if stat.S_ISDIR(info.st_mode):
+                    os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(info.st_mode) | stat.S_IRWXU)
+                    return True
+            except OSError:
+                pass
+            finally:
+                os.close(pfd)
+    if os.chmod in os.supports_dir_fd and os.chmod in os.supports_follow_symlinks:
+        try:
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                os.chmod(
+                    name,
+                    stat.S_IMODE(info.st_mode) | stat.S_IRWXU,
+                    dir_fd=dir_fd,
+                    follow_symlinks=False,
+                )
+                return True
+        except (OSError, NotImplementedError):
             pass
-
-    shutil.rmtree(path, onexc=retry)
+    return False
 
 
 def _is_real_dir(path: str | os.PathLike[str]) -> bool:
@@ -400,13 +513,6 @@ def _is_real_dir(path: str | os.PathLike[str]) -> bool:
         return stat.S_ISDIR(os.lstat(path).st_mode)
     except OSError:
         return False
-
-
-def _add_owner_rwx(path: str) -> None:
-    """Give the folder `path`'s owner read, write and search permission,
-    which a daemon may do to a folder it owns. Only a real folder: checked
-    with `lstat` just before, never a link."""
-    os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IRWXU)
 
 
 def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:

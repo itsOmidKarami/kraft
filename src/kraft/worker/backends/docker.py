@@ -1893,8 +1893,9 @@ class DockerBackend:
         _refstore.discard_item(run_dirs.base, work_item_id)
         # Both places, not `sandbox_home`'s one answer: the old one is never
         # made after the upgrade, so this leaves no home behind either way.
-        # `rmtree` refuses a link at the top and removes one inside without
-        # following it, so nothing a worker planted reaches past the home.
+        # `remove_tree` refuses a link at the top and, below it, works by
+        # descriptors and removes a link without following it, so nothing a
+        # worker planted or swaps in reaches past the home.
         for home in item_paths.sandbox_homes(run_dirs, work_item_id):
             item_paths.remove_tree(home)
 
