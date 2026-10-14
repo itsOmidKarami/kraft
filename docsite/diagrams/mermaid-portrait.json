@@ -13,5 +13,5 @@
     "lineColor": "#64748b",
     "edgeLabelBackground": "#f1f5f9"
   },
-  "themeCSS": ".edgeLabel rect { opacity: 1; } .cluster-label text, .cluster-label tspan, text.actor, text.actor > tspan { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }"
+  "themeCSS": ".edgeLabel rect { opacity: 1; } text.actor, text.actor > tspan { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }"
 }
