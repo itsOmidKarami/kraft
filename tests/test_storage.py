@@ -405,13 +405,20 @@ async def test_tick_over_limit_archives_oldest_first_down_to_quota(
     assert (payload["by"], payload["reason"]) == ("auto", "storage")
 
 
+@pytest.mark.parametrize(
+    ("worktrees", "documents", "archived", "named"),
+    [(60, 80, ["old"], True), (200, 100, ["old", "mid", "new"], False)],
+    ids=["documents-keep-it-over", "worktrees-keep-it-over"],
+)
 async def test_tick_archives_only_down_to_what_archiving_can_free(
-    tmp_path, repo, stub_app, monkeypatch, caplog
+    tmp_path, repo, stub_app, monkeypatch, caplog, worktrees, documents, archived, named
 ):
     """Items' documents are governed, but archiving keeps them: a worker that
     filled its `docs/` must not have every finished item archived without
     the figure coming down. Archiving stops once what it can free is under
-    quota, and the log names the item whose documents hold the rest."""
+    quota, and the log names the item whose documents hold the rest, but
+    only when documents are what keeps usage over the limit: with more to
+    archive than the limit allows, abandoning would not bring it under."""
     app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
     old, mid, new = await _three(app, repo)
     # `mid` was archived, not abandoned: its folder, and so its documents, stay.
@@ -421,18 +428,23 @@ async def test_tick_archives_only_down_to_what_archiving_can_free(
         "measure",
         lambda base, stop=None: storage.Usage(
             "2026-01-01T00:00:00+00:00",
-            140,
+            worktrees + documents,
             {"old": 20, "mid": 20, "new": 20},
-            {"worktrees": 60, "documents": 80},
-            {"mid": 80},
+            {"worktrees": worktrees, "documents": documents},
+            {"mid": documents},
         ),
     )
 
-    assert await storage.tick(app) == ["old"]
+    assert await storage.tick(app) == archived
 
-    assert not old.exists() and mid.exists() and new.exists()
-    assert storage.usage(app.state).governed == 120
-    assert "mid" in caplog.text and "abandon" in caplog.text
+    assert [p.exists() for p in (old, mid, new)] == [wid not in archived for wid in _IDS]
+    assert storage.usage(app.state).governed == worktrees + documents - 20 * len(archived)
+    holders = [r.getMessage() for r in caplog.records if "archiving keeps" in r.getMessage()]
+    assert len(holders) == named
+    assert all("mid" in h and "abandon" in h for h in holders)
+
+
+_IDS = ("old", "mid", "new")
 
 
 async def test_tick_never_takes_an_item_newer_than_min_age(tmp_path, repo, stub_app, monkeypatch):

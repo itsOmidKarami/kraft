@@ -220,5 +220,5 @@ origin: src/kraft/item_paths.py §remove_tree -- a path-based retry (`chmod`, `u
 WHILE `auto_cleanup` archives items to make room, the system SHALL stop once
 the part of usage archiving can free is at or under the quota, and SHALL name
 in its log the items whose documents keep usage over the limit.
-enforced-by: tests/test_storage.py::test_tick_archives_only_down_to_what_archiving_can_free
+enforced-by: tests/test_storage.py::test_tick_archives_only_down_to_what_archiving_can_free[documents-keep-it-over], tests/test_storage.py::test_tick_archives_only_down_to_what_archiving_can_free[worktrees-keep-it-over]
 origin: src/kraft/storage.py §tick -- items' documents are governed but archiving keeps them, so a worker that filled its `docs/` would otherwise have every finished item archived without the figure coming down.

@@ -343,8 +343,9 @@ async def tick(app) -> list[str]:
 
     Items' `documents` are governed but archiving keeps them, so they are no
     reason to archive: a worker that filled its `docs/` would otherwise have
-    every finished item archived without the figure ever coming down. Those
-    are named in the log, for a person to abandon the item."""
+    every finished item archived without the figure ever coming down. When
+    they are what keeps usage over the limit, the items holding the most are
+    named in the log, for a person to abandon one."""
     st = app.state
     st.storage_too_recent = 0
     if st.policy is None or st.policy.storage_limit_bytes is None:
@@ -364,7 +365,7 @@ async def tick(app) -> list[str]:
     )
     finished = [r for r in finished if (st.run_dirs.worktrees / r["id"]).is_dir()]
     # Read once: a reload that drops the limit mid-loop must not change the target.
-    quota = st.policy.storage_quota_bytes
+    quota, limit = st.policy.storage_quota_bytes, st.policy.storage_limit_bytes
     archived: list[str] = []
     stuck = 0
     for n, row in enumerate(finished):
@@ -397,7 +398,10 @@ async def tick(app) -> list[str]:
             ", ".join(archived),
             render.human_size(usage(st).governed),
         )
-    if state_of(st.policy, usage(st)) == "held" and usage(st).documents:
+    # Documents are named only when they are what keeps usage over the
+    # limit: with more than the limit left to archive, abandoning an item
+    # would not bring it under.
+    if usage(st).documents and archivable(usage(st)) <= limit < usage(st).governed:
         heaviest = sorted(usage(st).documents.items(), key=lambda kv: -kv[1])[:3]
         logger.warning(
             "storage: still over the limit; items' documents, which archiving keeps, "
