@@ -72,8 +72,9 @@ class ReconcileStats:
 
 #: The longest front matter read: a handful of keys and short lists in
 #: practice. Past it a worker's document reads as having none, before any
-#: YAML is parsed (a long sexagesimal number alone parses in quadratic time).
-FRONT_MATTER_MAX_BYTES = 64 * 1024
+#: YAML is parsed: parsing runs on the event loop, and a long sexagesimal
+#: number alone parses in quadratic time.
+FRONT_MATTER_MAX_BYTES = 16 * 1024
 
 
 class _FrontMatterLoader(yaml.SafeLoader):
@@ -90,9 +91,12 @@ class _FrontMatterLoader(yaml.SafeLoader):
 def split_front_matter(text: str) -> tuple[dict, str]:
     """A document's YAML front matter and its body. A worker writes the
     document, so the front matter is read bounded: longer than
-    `FRONT_MATTER_MAX_BYTES`, using an alias, or anything YAML cannot build
-    (an impossible date, a number too large for a float, nesting the parser
-    recurses through) reads as no front matter."""
+    `FRONT_MATTER_MAX_BYTES`, using an alias, anything YAML cannot build (an
+    impossible date, a number too large for a float, nesting the parser
+    recurses through), or anything that is not strict UTF-8 JSON once built
+    (a key that is not a string, a lone surrogate, infinity, an int past the
+    digit limit) reads as no front matter, so every reader of it, the index
+    and the API included, can store and send it as it is."""
     m = _FRONT_MATTER.match(text)
     if not m:
         return {}, text
@@ -101,6 +105,7 @@ def split_front_matter(text: str) -> tuple[dict, str]:
         return {}, body
     try:
         data = yaml.load(m.group(1), _FrontMatterLoader)  # noqa: S506 -- a SafeLoader
+        json.dumps(data, sort_keys=True, default=str, ensure_ascii=False, allow_nan=False).encode()
     except Exception:  # untrusted, and only ever displayed or matched
         return {}, body
     return (data, body) if isinstance(data, dict) else ({}, body)
@@ -273,12 +278,8 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
 def _meta_json(metadata: dict) -> str:
     # default=str: YAML front-matter can yield dates / other non-JSON scalars;
     # metadata_json is for display, so stringify rather than fail ingestion.
-    # An int past Python's digit limit (a hex literal builds as one) cannot be
-    # written at all: the document is stored with none rather than refused.
-    try:
-        return json.dumps(metadata, sort_keys=True, default=str)
-    except (ValueError, OverflowError, RecursionError):
-        return "{}"
+    # `split_front_matter` has already refused what JSON cannot write.
+    return json.dumps(metadata, sort_keys=True, default=str)
 
 
 def replace_links(conn, document_id: str, links) -> None:

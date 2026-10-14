@@ -39,10 +39,15 @@ def test_split_front_matter_present():
         ("---\njust a string\n---\nbody\n", "body\n"),
         ("---\n" + _ALIAS_BOMB + "---\nbody\n", "body\n"),
         ("---\na: &x v\nb: *x\n---\nbody\n", "body\n"),
-        ("---\ntitle: " + "t" * 70_000 + "\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "t" * 20_000 + "\n---\nbody\n", "body\n"),
         ("---\ndate: 2026-02-30\n---\nbody\n", "body\n"),
         ("---\nx: 1:" + "0:" * 200 + "0.5\n---\nbody\n", "body\n"),
         ("---\na: " + "[" * 5_000 + "]" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\nn: 0x" + "f" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\n1: a\nb: c\n---\nbody\n", "body\n"),
+        ("---\n2026-01-01: x\nb: c\n---\nbody\n", "body\n"),
+        ('---\ntitle: "\\ud800"\n---\nbody\n', "body\n"),
+        ("---\nx: .inf\n---\nbody\n", "body\n"),
     ],
     ids=[
         "absent",
@@ -54,16 +59,15 @@ def test_split_front_matter_present():
         "impossible-date",
         "float-overflow",
         "nested-past-the-parser",
+        "int-past-the-digit-limit",
+        "key-not-a-string",
+        "date-key",
+        "lone-surrogate",
+        "infinity",
     ],
 )
 def test_split_front_matter_without_a_mapping_yields_none(text, body):
     assert ingest.split_front_matter(text) == ({}, body)
-
-
-def test_metadata_too_large_to_write_as_json_is_stored_as_none():
-    """`0x` and thousands of hex digits builds an int no JSON can write."""
-    fm, _ = ingest.split_front_matter("---\nn: 0x" + "f" * 5_000 + "\n---\nbody\n")
-    assert ingest._meta_json(fm) == "{}"
 
 
 # ---- derive_kind / derive_title ----
