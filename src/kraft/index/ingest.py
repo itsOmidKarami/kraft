@@ -70,41 +70,33 @@ class ReconcileStats:
     deleted: int = 0
 
 
-#: The longest front matter read: a handful of keys and short lists in
-#: practice. Past it a worker's document reads as having none, before any
-#: YAML is parsed: parsing runs on the event loop, and a long sexagesimal
-#: number alone parses in quadratic time.
-FRONT_MATTER_MAX_BYTES = 16 * 1024
+#: The longest front matter read, in UTF-8: what Kraft asks a worker for is
+#: about 150 bytes, and the largest in this repository is 410. Past it a
+#: worker's document reads as having none, before any YAML is parsed:
+#: parsing runs on the event loop at some tens of microseconds a byte.
+FRONT_MATTER_MAX_BYTES = 4 * 1024
 #: The deepest `[`/`{` nesting read. PyYAML's scanner slows quadratically
-#: with flow nesting, whatever the length: 800 levels in under 2 KB took a
-#: third of a second. No front matter Kraft asks for nests past two.
+#: with flow nesting: 800 levels in under 2 KB took a third of a second. No
+#: front matter Kraft asks for nests past one.
 FRONT_MATTER_MAX_DEPTH = 64
 
 
-def _nests_too_deep(text: str) -> bool:
-    """Whether brackets in `text` nest past `FRONT_MATTER_MAX_DEPTH`, counted
-    in one pass and without regard to quoting, so a quoted run of brackets
-    counts too: no real front matter has one."""
-    depth = 0
-    for ch in text:
-        if ch in "[{":
-            depth += 1
-            if depth > FRONT_MATTER_MAX_DEPTH:
-                return True
-        elif ch in "]}":
-            depth = max(0, depth - 1)
-    return False
-
-
 class _FrontMatterLoader(yaml.SafeLoader):
-    """A SafeLoader that refuses any alias: front matter never needs one, and
-    an anchor on a long value used two thousand times is gigabytes once the
-    metadata is serialised."""
+    """A SafeLoader that refuses any alias, and flow nesting past
+    `FRONT_MATTER_MAX_DEPTH`: front matter never needs either, an anchor on a
+    long value used two thousand times is gigabytes once the metadata is
+    serialised, and deep nesting is slow to scan."""
 
     def compose_node(self, parent, index):
         if self.check_event(yaml.AliasEvent):
             raise yaml.YAMLError("front matter uses an alias")
         return super().compose_node(parent, index)
+
+    def fetch_flow_collection_start(self, TokenClass):
+        # The scanner's own count, so a bracket inside quotes is not one.
+        if self.flow_level >= FRONT_MATTER_MAX_DEPTH:
+            raise yaml.YAMLError("front matter nests too deep")
+        super().fetch_flow_collection_start(TokenClass)
 
 
 def split_front_matter(text: str) -> tuple[dict, str]:
@@ -124,8 +116,6 @@ def split_front_matter(text: str) -> tuple[dict, str]:
     raw = m.group(1)
     # Characters first: a str no longer than the cap encodes cheaply.
     if len(raw) > FRONT_MATTER_MAX_BYTES or len(raw.encode()) > FRONT_MATTER_MAX_BYTES:
-        return {}, body
-    if _nests_too_deep(raw):
         return {}, body
     try:
         data = yaml.load(raw, _FrontMatterLoader)  # noqa: S506 -- a SafeLoader

@@ -32,6 +32,19 @@ def test_split_front_matter_present():
 
 
 @pytest.mark.parametrize(
+    ("yaml_text", "value"),
+    [
+        ("[" * 64 + "1" + "]" * 64, eval("[" * 64 + "1" + "]" * 64)),
+        ('"' + "[" * 200 + '"', "[" * 200),
+    ],
+    ids=["nested-to-the-depth", "brackets-inside-quotes"],
+)
+def test_front_matter_within_the_limits_is_read(yaml_text, value):
+    fm, _ = ingest.split_front_matter(f"---\nx: {yaml_text}\n---\nbody\n")
+    assert fm == {"x": value}
+
+
+@pytest.mark.parametrize(
     ("text", "body"),
     [
         ("# Just a heading\nbody", "# Just a heading\nbody"),
@@ -39,12 +52,13 @@ def test_split_front_matter_present():
         ("---\njust a string\n---\nbody\n", "body\n"),
         ("---\n" + _ALIAS_BOMB + "---\nbody\n", "body\n"),
         ("---\na: &x v\nb: *x\n---\nbody\n", "body\n"),
-        ("---\ntitle: " + "t" * 20_000 + "\n---\nbody\n", "body\n"),
-        ("---\ntitle: " + "é" * 9_000 + "\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "t" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\ntitle: " + "é" * 2_500 + "\n---\nbody\n", "body\n"),
         ("---\nx: " + "[" * 65 + "]" * 65 + "\n---\nbody\n", "body\n"),
+        ("---\nx: " + '["]",' * 65 + "1" + "]" * 65 + "\n---\nbody\n", "body\n"),
         ("---\ndate: 2026-02-30\n---\nbody\n", "body\n"),
         ("---\nx: 1:" + "0:" * 200 + "0.5\n---\nbody\n", "body\n"),
-        ("---\na: " + "[" * 5_000 + "]" * 5_000 + "\n---\nbody\n", "body\n"),
+        ("---\na:\n" + "- " * 1_500 + "x\n---\nbody\n", "body\n"),
         ("---\nn: 0x" + "f" * 5_000 + "\n---\nbody\n", "body\n"),
         ("---\n1: a\nb: c\n---\nbody\n", "body\n"),
         ("---\n2026-01-01: x\nb: c\n---\nbody\n", "body\n"),
@@ -60,6 +74,7 @@ def test_split_front_matter_present():
         "longer-than-the-cap",
         "longer-than-the-cap-in-utf8",
         "nested-past-the-depth",
+        "nested-past-the-depth-behind-quoted-brackets",
         "impossible-date",
         "float-overflow",
         "nested-past-the-parser",
