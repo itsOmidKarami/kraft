@@ -520,6 +520,19 @@ async def test_escalation_running_reports_a_pending_or_running_session(database,
         )
     )
     assert escalate.escalation_running(database, wid) == "s1"
+    # Two live at once: the newer, though its id sorts after the older's.
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="z-newer",
+            work_item_id=wid,
+            node_id="implementation",
+            hook_point="escalation",
+            log_path=str(run_dirs.logs / "z.log"),
+            result_path=str(run_dirs.logs / "z.json"),
+        )
+    )
+    assert escalate.escalation_running(database, wid) == "z-newer"
 
 
 async def test_last_escalation_status_is_the_newest_sessions_status(database, run_dirs):

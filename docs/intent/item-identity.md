@@ -163,3 +163,8 @@ origin: src/kraft/index/service.py §_session_runs, src/kraft/index/db.py §_MIG
 WHEN the system indexes a session summary whose front matter names a session and exactly one work item, it SHALL record that work item as the session's.
 enforced-by: tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[one], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[scalar], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[one-twice], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[two], tests/index/test_ingest.py::test_a_front_matter_session_takes_its_only_item[none], tests/index/test_service_session_links.py::test_a_scanned_summary_finds_only_its_own_items_session[its-one-item-has-none]
 origin: src/kraft/index/ingest.py §links_from_front_matter
+
+## REQ the-running-escalation-is-the-newest
+WHILE more than one escalation session of a work item is pending or running, the system SHALL take the most recently created one as the item's running escalation, the one a retry from its session is told apart by.
+enforced-by: tests/test_escalate.py::test_escalation_running_reports_a_pending_or_running_session
+origin: src/kraft/escalate.py §escalation_running

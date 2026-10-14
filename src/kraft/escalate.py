@@ -216,11 +216,13 @@ def escalation_running(db, work_item_id: str) -> str | None:
     that session from the search here -- a genuine self-retry still has to
     be recognised as "an escalation turn is live", just handled differently
     (deferred, not refused) than a stranger's call landing mid-turn.
+
+    Should two be live at once, the newer: a self-retry is the newest turn's.
     """
     row = db.read(
         lambda c: c.execute(
             "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-            f"AND status IN ({in_list(LIVE)}) LIMIT 1",
+            f"AND status IN ({in_list(LIVE)}) ORDER BY rowid DESC LIMIT 1",
             (work_item_id,),
         ).fetchone()
     )
