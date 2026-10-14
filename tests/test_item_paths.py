@@ -432,14 +432,15 @@ _LOCKED = {"locked": 0o555, "hidden": 0o000}
 
 
 @pytest.mark.parametrize(
-    ("which", "tree", "modes"),
+    ("which", "tree", "modes", "items_mode"),
     [
-        ("planted-summary", "sessions/s1/out/summary.md", _LOCKED),
-        ("worker-files", "sessions/s1/out/summary.md", _LOCKED),
-        ("archived-home", "sandbox-home/go/pkg/mod", _LOCKED),
-        ("abandoned-item", "docs/cache", _LOCKED),
-        ("abandoned-item", "docs/cache", {"readable": 0o600}),
-        ("abandoned-item", "docs/cache", {"read-only": 0o400}),
+        ("planted-summary", "sessions/s1/out/summary.md", _LOCKED, None),
+        ("worker-files", "sessions/s1/out/summary.md", _LOCKED, None),
+        ("archived-home", "sandbox-home/go/pkg/mod", _LOCKED, None),
+        ("abandoned-item", "docs/cache", _LOCKED, None),
+        ("abandoned-item", "docs/cache", {"readable": 0o600}, None),
+        ("abandoned-item", "docs/cache", {"read-only": 0o400}, None),
+        ("abandoned-item", "docs/cache", {"read-only": 0o555}, 0o555),
     ],
     ids=[
         "planted-summary",
@@ -448,14 +449,19 @@ _LOCKED = {"locked": 0o555, "hidden": 0o000}
         "abandoned-item",
         "mode-600",
         "mode-400",
+        "items-folder-read-only",
     ],
 )
-def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, which, tree, modes):
+def test_a_folder_its_owner_cannot_write_is_still_removed(
+    run_dirs, tmp_path, which, tree, modes, items_mode
+):
     """A worker, or a tool it ran (a Go module cache is read-only), can leave
     a folder its owner cannot write, search or list. A daemon that is not
     root cannot empty it as it is: Kraft sets it to mode 0700 and removes
     it, and never follows a link while doing so. (A mode-0 folder only where
-    Kraft can unlock one, `_UNLOCKS_MODE_0`.)"""
+    Kraft can unlock one, `_UNLOCKS_MODE_0`.) The folder the removed one is
+    in is Kraft's and stays: made writable to remove it, it keeps its own
+    bits (`run/items` at 0555 ends at 0755, not 0700)."""
     root = item_paths.item_dir(run_dirs, "w1") / tree
     modes = {n: m for n, m in modes.items() if m or _UNLOCKS_MODE_0}
     victim = write(tmp_path, "victim/keep.md", "untouched")
@@ -464,6 +470,8 @@ def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, wh
     (root / next(iter(modes)) / "link").symlink_to(victim.parent)
     for name, mode in modes.items():
         (root / name).chmod(mode)
+    if items_mode is not None:
+        run_dirs.items.chmod(items_mode)
     try:
         done = run_unprivileged(
             _REMOVE, which, str(run_dirs.base), env={"KRAFT_HOME": str(tmp_path / "home")}
@@ -477,7 +485,10 @@ def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, wh
         else:
             assert not os.path.lexists(root)
         assert victim.read_text() == "untouched"
+        if items_mode is not None:
+            assert run_dirs.items.stat().st_mode & 0o777 == items_mode | 0o700
     finally:
+        run_dirs.items.chmod(0o755)
         for name in modes:
             if (root / name).is_dir() and not (root / name).is_symlink():
                 (root / name).chmod(0o755)
@@ -590,7 +601,8 @@ import os, sys
 from pathlib import Path
 
 # A platform without `O_PATH`, with `fchmodat(AT_SYMLINK_NOFOLLOW)`: macOS.
-del os.O_PATH
+if hasattr(os, "O_PATH"):
+    del os.O_PATH
 os.supports_follow_symlinks.add(os.chmod)
 from kraft import item_paths
 
