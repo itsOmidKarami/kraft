@@ -56,7 +56,8 @@ function forwardingPage(from: string, to: string): string {
 // inside #__nuxt and is replaced when the app mounts, with error.vue's page,
 // which says the same. GitHub Pages serves this one file for a missing path
 // under / and under /next/ alike, so it cannot know which docs the reader
-// wanted and links to both. Styled inline, in the site's own colour tokens
+// wanted and links to both, at the fixed addresses runtimeConfig gives them
+// (stableBase, nextBase), not this build's base. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
 const missingPage = `<style>
@@ -68,16 +69,16 @@ const missingPage = `<style>
 .nf main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.75rem}
 .nf p{margin:0}
 .nf .code{font:600 1rem/1.5rem 'IBM Plex Mono',ui-monospace,monospace;color:var(--ui-primary,#7c3aed)}
-.nf h1{margin:0;font-weight:700;font-size:2.25rem;line-height:2.5rem;color:var(--ui-text-highlighted,#0f172a)}
+.nf h1{margin:0;font-weight:600;font-size:2.25rem;line-height:2.5rem;color:var(--ui-text-highlighted,#0f172a)}
 .nf .links{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem 1.5rem;margin-top:.75rem}
 </style>
 <div class="nf">
-<header><a href="${withBase('/')}">kraft</a></header>
+<header><a href="/">kraft</a></header>
 <main id="main-content" tabindex="-1">
 <p class="code">404</p>
 <h1>No page at this address</h1>
 <p>It may have been renamed or moved.</p>
-<p class="links"><a href="${withBase('/')}">Release docs</a> <a href="/next/">Next docs, for unreleased main</a></p>
+<p class="links"><a href="/">Release docs</a> <a href="/next/">Next docs, for unreleased main</a></p>
 </main>
 </div>`
 
