@@ -35,10 +35,12 @@ class LinkRow:
     node_id: str | None = None
     hook_point: str | None = None
     worker_session_id: str | None = None
-    #: The item `worker_session_id` belongs to, from the session's own
-    #: database row, never from front matter: a session id is unique only
-    #: within its item. None when unknown (a summary git scanned, or a link
-    #: written before the column), looked up by the session id alone.
+    #: The item `worker_session_id` belongs to: a session id is unique only
+    #: within its item. From the session's own database row, or from front
+    #: matter whose `work_item_ids` names exactly one item
+    #: (`links_from_front_matter`). None when unknown (front matter naming
+    #: several items or none, or a link written before the column), looked up
+    #: by the session id alone.
     session_work_item_id: str | None = None
 
 
