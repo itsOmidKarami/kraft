@@ -24,6 +24,7 @@ from kraft.item_paths import ITEMS
 from kraft.store import _now
 from kraft.vocab import Verb, admitting
 from kraft.vocab.sql import in_list
+from kraft.worker import tree_walk
 
 logger = logging.getLogger(__name__)
 
@@ -112,74 +113,17 @@ def _blocks(info: os.stat_result, seen: set[tuple[int, int]]) -> int:
     return info.st_blocks * 512
 
 
-#: The most folder descriptors a walk holds open at once, besides the one
-#: it is listing. A worker can nest folders thousands deep in its worktree;
-#: a walk holding one descriptor per level (`os.fwalk`) would take the
-#: daemon to its open-file limit (256 under launchd), starving its sockets,
-#: database and logs, and skip whatever lay below.
-_HELD = 16
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-
-
-class _Folders:
-    """Opens folders below the folder `root_fd`, by their names, never
-    following a link (`O_NOFOLLOW` at each component). It keeps descriptors
-    for the leading folders of the last path it opened, at most `_HELD`, so a
-    depth-first walk reopens little; a folder deeper than that is reached
-    from the deepest one held, one descriptor at a time."""
-
-    def __init__(self, root_fd: int):
-        self._root = root_fd
-        self._names: list[str] = []
-        self._fds: list[int] = []
-
-    def open(self, parts: tuple[str, ...]) -> int:
-        """A new descriptor for the folder `parts` below the root, which the
-        caller closes. Raises `OSError` for one that is gone, not a folder,
-        a link, or not readable."""
-        common = 0
-        for held, part in zip(self._names, parts, strict=False):
-            if held != part:
-                break
-            common += 1
-        while len(self._names) > common:
-            self._names.pop()
-            os.close(self._fds.pop())
-        here = self._fds[-1] if self._fds else self._root
-        transient: int | None = None
-        try:
-            for part in parts[common:]:
-                fd = os.open(part, _DIR_FLAGS, dir_fd=here)
-                if transient is None and len(self._fds) < _HELD:
-                    self._names.append(part)
-                    self._fds.append(fd)
-                else:
-                    if transient is not None:
-                        os.close(transient)
-                    transient = fd
-                here = fd
-            return transient if transient is not None else os.dup(here)
-        except BaseException:
-            if transient is not None:
-                os.close(transient)
-            raise
-
-    def close(self) -> None:
-        while self._fds:
-            os.close(self._fds.pop())
-        self._names.clear()
-
-
 def _bytes(path: str | os.PathLike[str], seen: set[tuple[int, int]], stop) -> int:
     """Disk blocks under `path`, a hard-linked file once, no link followed.
 
     `path` itself is not followed either: a link there counts as the link.
-    Each folder is opened by its names from `path` down, with no link
-    followed at any of them, and listed by that descriptor (`_Folders`), so a
-    worker swapping a folder in its worktree or home for a link to `/` while
-    the walk runs makes it count the link, never what it points at; and the
-    walk holds a bounded number of descriptors however deep the folders go.
-    A folder that cannot be opened or listed is skipped, never an error."""
+    Below it, `tree_walk.walk` opens each folder by its name in its parent's
+    descriptor, with no link followed, and lists it by its own, so a worker
+    swapping a folder in its worktree or home for a link to `/` while the
+    walk runs makes it count the link, never what it points at; and the walk
+    holds a bounded number of descriptors, in time linear in the folders,
+    however deep they go. A folder that cannot be opened or listed is
+    skipped, never an error."""
     if stop is not None and stop.is_set():
         return 0
     try:
@@ -190,35 +134,18 @@ def _bytes(path: str | os.PathLike[str], seen: set[tuple[int, int]], stop) -> in
     if not stat.S_ISDIR(info.st_mode):
         return total
     try:
-        root = os.open(path, _DIR_FLAGS)
+        root = os.open(path, tree_walk.DIR_FLAGS)
     except OSError:
         return total
-    folders = _Folders(root)
-    pending: list[tuple[str, ...]] = [()]
+
+    def count(_dir_fd: int, _name: str, st: os.stat_result) -> bool:
+        nonlocal total
+        total += _blocks(st, seen)
+        return stat.S_ISDIR(st.st_mode)
+
     try:
-        while pending and not (stop is not None and stop.is_set()):
-            parts = pending.pop()
-            try:
-                fd = folders.open(parts)
-            except OSError:
-                continue
-            try:
-                with os.scandir(fd) as entries:
-                    names = [entry.name for entry in entries]
-                for name in names:
-                    try:
-                        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
-                    except OSError:
-                        continue
-                    total += _blocks(st, seen)
-                    if stat.S_ISDIR(st.st_mode):
-                        pending.append((*parts, name))
-            except OSError:
-                pass
-            finally:
-                os.close(fd)
+        tree_walk.walk(root, count, stop=stop)
     finally:
-        folders.close()
         os.close(root)
     return total
 

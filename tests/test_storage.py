@@ -6,12 +6,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
 from support.archive import days_ago, seed_completed_item
+from support.deep_tree import deep_chain
 
-from kraft import policy, storage
+from kraft import item_paths, policy, storage
 
 MB = 1024**2
 
@@ -92,16 +94,29 @@ def test_measure_counts_an_item_s_sandbox_home_under_the_item(tmp_path, items):
     assert used.governed == sum(used.categories[c] for c in ("worktrees", "sandboxes", "documents"))
 
 
-def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypatch):
+@pytest.mark.parametrize("when", ["open", "scandir"], ids=["before-open", "before-listing"])
+def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypatch, when):
     """A worker can swap a folder in its home or worktree for a link to `/`
-    while the walk runs. The walk lists each folder by the descriptor it
-    opened, so it counts what was there, never what the link points at."""
+    while the walk runs: after the walk saw it in its parent and before it
+    opens it, or after it opened it and before it lists it. The walk opens
+    each folder with no link followed and lists it by that descriptor, so
+    it counts what was there, never what the link points at."""
     _fill(tmp_path / "outside" / "big", 4 * MB)
     cache = tmp_path / "run" / "items" / "w1" / "sandbox-home" / "cache"
     _fill(cache / "f", 4096)
     original = os.stat(cache)
-    real = os.scandir
+    real = getattr(os, when)
     swapped = []
+
+    def swap():
+        swapped.append(True)
+        cache.rename(cache.with_name("moved"))
+        cache.symlink_to(tmp_path / "outside")
+
+    def swap_then_open(name, flags, *a, dir_fd=None, **kw):
+        if not swapped and dir_fd is not None and name == "cache":
+            swap()
+        return real(name, flags, *a, dir_fd=dir_fd, **kw)
 
     def swap_then_list(arg="."):
         try:
@@ -109,16 +124,14 @@ def test_measure_counts_what_a_folder_held_when_it_was_opened(tmp_path, monkeypa
         except OSError:
             seen = None
         if not swapped and seen is not None and os.path.samestat(seen, original):
-            swapped.append(arg)
-            cache.rename(cache.with_name("moved"))
-            cache.symlink_to(tmp_path / "outside")
+            swap()
         return real(arg)
 
-    monkeypatch.setattr(os, "scandir", swap_then_list)
+    monkeypatch.setattr(os, when, swap_then_open if when == "open" else swap_then_list)
 
     used = storage.measure(tmp_path / "run")
 
-    assert swapped, "the walk never listed the folder"
+    assert swapped, "the walk never reached the folder"
     assert used.categories["sandboxes"] < MB
 
 
@@ -148,16 +161,7 @@ def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
     """A worker can nest folders far deeper than the daemon's open-file limit
     (256 under launchd). The walk holds a bounded number of descriptors, so
     it never runs the daemon out of them, and counts the file at the bottom."""
-    folder = os.open(tmp_path, os.O_RDONLY)
-    for name in ("run", "worktrees", "a", *["d"] * 300):
-        os.mkdir(name, dir_fd=folder)
-        deeper = os.open(name, os.O_RDONLY, dir_fd=folder)
-        os.close(folder)
-        folder = deeper
-    big = os.open("big", os.O_WRONLY | os.O_CREAT, 0o644, dir_fd=folder)
-    os.write(big, os.urandom(4 * MB))
-    os.close(big)
-    os.close(folder)
+    deep_chain(tmp_path / "run" / "worktrees" / "a", 300, leaf=os.urandom(4 * MB))
 
     done = subprocess.run(
         [sys.executable, "-c", _DEEP_MEASURE, str(tmp_path / "run")],
@@ -171,6 +175,25 @@ def test_a_deep_tree_is_counted_within_a_low_open_file_limit(tmp_path):
     seen = json.loads(done.stdout)
     assert seen["emfile"] == 0
     assert seen["a"] >= 4 * MB
+
+
+def test_a_deep_tree_is_counted_in_time_linear_in_its_folders(tmp_path):
+    """Folders deeper than the walk holds descriptors for are gone back up to
+    by `..`, not reopened from the top each time: reopening made 2,000 levels
+    take 2.6 seconds and 50,000 half an hour, and a worker makes either at
+    almost no cost. 5,000 levels take a small fraction of a second; the bound
+    is far above that, and far below what reopening took."""
+    run = tmp_path / "run"
+    deep_chain(run / "worktrees" / "a", 5000, leaf=os.urandom(MB))
+    try:
+        began = time.perf_counter()
+        used = storage.measure(run)
+        took = time.perf_counter() - began
+
+        assert used.items["a"] >= MB
+        assert took < 3, f"5,000 levels took {took:.1f}s"
+    finally:
+        item_paths.remove_tree(run)
 
 
 def test_measure_counts_a_hard_linked_file_once(tmp_path):
