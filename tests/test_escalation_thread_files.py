@@ -191,21 +191,27 @@ async def test_a_thread_keeps_its_first_turn_s_paths_for_every_turn(
     """A resumed conversation remembers the literal paths an earlier turn
     used. A thread is from before the upgrade when its first turn's log is not
     in a session folder; `result_path` is no test, because archiving a turn
-    rewrites it. Each turn's log is its own either way."""
+    rewrites it. Each turn's log is its own either way. So is how a turn's
+    summary is kept: an older thread's stays the worker's to name, even for a
+    turn that ran after the upgrade, so a turn that wrote none records none
+    and has nothing of the last turn's copied into its folder."""
     record = run_dirs.base / "paths"
     turn = f'echo "$KRAFT_RESULT_PATH" >> {record}; echo {_DONE} > "$KRAFT_RESULT_PATH"'
-    legacy = run_dirs.results / "escalation-w1-1.json"
+    legacy, legacy_summary = item_paths.legacy_thread_files(run_dirs, "w1", 1)
+    shared_ref = legacy_summary.relative_to(run_dirs.worktrees / "w1").as_posix()
 
     async def make_turn_one_old(i, played):
         if i == 0 and started == "before-upgrade":
             sid = played[0]["session_id"]
             await database.write(
                 lambda c: c.execute(
-                    "UPDATE worker_sessions SET log_path = ?, result_path = ? WHERE id = ?",
-                    (str(run_dirs.logs / f"{sid}.log"), str(legacy), sid),
+                    "UPDATE worker_sessions SET log_path = ?, result_path = ?, "
+                    "session_summary_ref = ? WHERE id = ?",
+                    (str(run_dirs.logs / f"{sid}.log"), str(legacy), shared_ref, sid),
                 )
             )
             legacy.write_text(json.dumps({"status": "done"}))
+            legacy_summary.write_text("# turn one\n")
 
     played = await turns(turn, turn, turn, between=make_turn_one_old)
 
@@ -227,6 +233,9 @@ async def test_a_thread_keeps_its_first_turn_s_paths_for_every_turn(
         not item_paths.is_legacy_log(_row(database, p["session_id"])["log_path"])
         for p in played[1:]
     )
+    if older:
+        assert second["session_summary_ref"] is None
+        assert not own[1].summary.exists()
 
 
 async def test_a_folder_planted_at_the_thread_s_summary_does_not_stop_the_next_turn(

@@ -174,7 +174,7 @@ origin: src/kraft/item_paths.py §locate -- `run/items` and an item's folder are
 WHILE an escalation thread started before the upgrade continues, the system
 SHALL NOT record the thread's shared summary for a turn whose worker reported
 none.
-enforced-by: tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[older-thread], tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last[before-upgrade]
+enforced-by: tests/test_item_paths.py::test_kraft_records_only_a_summary_the_worker_wrote[older-thread], tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last[before-upgrade], tests/test_escalation_thread_files.py::test_a_thread_keeps_its_first_turn_s_paths_for_every_turn[before-upgrade]
 origin: src/kraft/item_paths.py §recorded_summary -- an older thread's summary stays in the worktree for every turn, so one turn's is still there when the next writes none.
 
 ## REQ keeping-a-version-never-stops-a-dispatch
