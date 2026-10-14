@@ -308,6 +308,30 @@ async def test_refresh_drops_an_item_removed_while_it_walked(tmp_path, monkeypat
     assert (used.governed, used.items) == (2, {"here": 2})
 
 
+@pytest.mark.parametrize("abandoned", [False, True], ids=["archived", "abandoned"])
+async def test_refresh_drops_the_documents_of_an_item_abandoned_while_it_walked(
+    tmp_path, monkeypatch, abandoned
+):
+    """Abandoning removes an item's folder and takes its documents off the
+    figure; a walk that measured them before must not put them back. An
+    archived item keeps its folder, and its documents stay counted."""
+    if not abandoned:
+        (tmp_path / "items" / "w1" / "docs").mkdir(parents=True)
+    monkeypatch.setattr(
+        storage,
+        "measure",
+        lambda base, stop=None: storage.Usage(
+            "2026-01-01T00:00:00+00:00", 10, {}, {"documents": 10}, {"w1": 10}
+        ),
+    )
+    app = SimpleNamespace(state=SimpleNamespace(run_dirs=SimpleNamespace(base=tmp_path)))
+
+    used = await storage.refresh(app)
+
+    left = (0, 0, {}) if abandoned else (10, 10, {"w1": 10})
+    assert (used.governed, used.categories["documents"], used.documents) == left
+
+
 def test_a_stopped_walk_returns_early(tmp_path):
     import threading
 
@@ -390,6 +414,8 @@ async def test_tick_archives_only_down_to_what_archiving_can_free(
     quota, and the log names the item whose documents hold the rest."""
     app = stub_app(**_state(tmp_path, limit=100, quota=50, min_age_s=0))
     old, mid, new = await _three(app, repo)
+    # `mid` was archived, not abandoned: its folder, and so its documents, stay.
+    item_paths.item_dir(app.state.run_dirs, "mid").mkdir(parents=True)
     monkeypatch.setattr(
         storage,
         "measure",

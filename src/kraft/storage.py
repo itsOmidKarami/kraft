@@ -325,6 +325,10 @@ async def refresh(app) -> Usage:
         left = (st.run_dirs.base / "worktrees" / wid, *item_paths.sandbox_homes(st.run_dirs, wid))
         if not any(os.path.lexists(p) for p in left):
             forget(st, wid)
+    # Its documents too, once it was abandoned: archiving keeps its folder.
+    for wid in list(st.storage_usage.documents):
+        if not os.path.lexists(item_paths.item_dir(st.run_dirs, wid)):
+            forget_documents(st, wid)
     return st.storage_usage
 
 
