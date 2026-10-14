@@ -268,6 +268,14 @@ def exit_file(log_path: str | os.PathLike[str], result_path: str | os.PathLike[s
     return Path(result_path).with_suffix(".exit")
 
 
+def exit_code(raw: str) -> int | None:
+    """The code an exit file holds, or None: ASCII digits only, so text a
+    worker could plant there (`"²"` is a digit to `str.isdigit` and not to
+    `int`) is no code rather than an error."""
+    raw = raw.strip()
+    return int(raw) if re.fullmatch(r"-?[0-9]+", raw) else None
+
+
 def sandbox_homes(run_dirs, wid: str) -> tuple[Path, Path]:
     """Both places an item's sandbox home can be: the old
     `run/sandbox-home/<id>/` and `items/<id>/sandbox-home/`. Archiving and

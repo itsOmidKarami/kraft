@@ -242,8 +242,8 @@ def test_exit_wrapper_records_the_code_and_propagates_it(tmp_path, code, expecte
 @pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     "content",
-    [None, "not a number", "symlink", "fifo"],
-    ids=["missing", "garbage", "symlink-is-unreadable", "fifo-is-unreadable"],
+    [None, "not a number", "symlink", "fifo", "²"],
+    ids=["missing", "garbage", "symlink-is-unreadable", "fifo-is-unreadable", "unicode-digit"],
 )
 def test_resolve_exit_file_missing_or_garbage_is_none(tmp_path, content):
     """An older escalation thread's exit file is beside `results/`, which its

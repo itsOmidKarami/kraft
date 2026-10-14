@@ -443,9 +443,10 @@ def _resolve_exit_file(path: Path) -> str | None:
         raw = read_no_follow(Path(path)).decode().strip()
     except (OSError, UnicodeDecodeError):
         return None
-    if not raw.lstrip("-").isdigit():
+    code = item_paths.exit_code(raw)
+    if code is None:
         return None
-    return "done" if int(raw) == 0 else "failed"
+    return "done" if code == 0 else "failed"
 
 
 def _missing_executable(cmd0: str, cwd: Path, env: dict[str, str]) -> bool:

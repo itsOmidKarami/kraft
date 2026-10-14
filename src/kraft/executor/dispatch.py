@@ -899,7 +899,7 @@ def _exit_code(row) -> int | None:
         )
     except (OSError, UnicodeDecodeError):
         return None
-    return int(raw) if raw.lstrip("-").isdigit() else None
+    return item_paths.exit_code(raw)
 
 
 def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:

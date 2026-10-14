@@ -14,8 +14,8 @@ from kraft.executor import dispatch
 @pytest.mark.timeout(20)
 @pytest.mark.parametrize(
     ("planted", "code"),
-    [("file", 3), (None, None), ("symlink", None), ("fifo", None)],
-    ids=["written", "absent", "symlink-is-unreadable", "fifo-is-unreadable"],
+    [("file", 3), (None, None), ("symlink", None), ("fifo", None), ("unicode-digit", None)],
+    ids=["written", "absent", "symlink-is-unreadable", "fifo-is-unreadable", "unicode-digit"],
 )
 def test_an_exit_code_is_read_without_following_a_link_or_waiting(tmp_path, planted, code):
     """A session from before the upgrade keeps its exit file beside its
@@ -32,6 +32,8 @@ def test_an_exit_code_is_read_without_following_a_link_or_waiting(tmp_path, plan
         exit_file.symlink_to(tmp_path / "elsewhere")
     elif planted == "fifo":
         os.mkfifo(exit_file)
+    elif planted == "unicode-digit":
+        exit_file.write_text("²")
     row = {"log_path": str(tmp_path / "logs" / "s1.log"), "result_path": str(result)}
 
     assert dispatch._exit_code(row) == code
