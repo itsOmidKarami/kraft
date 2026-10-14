@@ -329,8 +329,9 @@ Page rules:
   `uv run python dev/check_docs_walls.py PAGE.md`.
 - A page shows its `description` as the lede under the title, so the first
   paragraph must carry on from it, not say it again. Delete a paragraph that
-  only restates it. `dev/check_docs_ledes.py` fails the `lint` job when the
-  paragraph's first sentence reuses 65% or more of the description's words.
+  only restates it. `dev/check_docs_ledes.py` fails the `lint` job when
+  65% or more of the content words in the paragraph's first sentence are
+  already in the description.
 - When you move or rename a page, or a heading that something links to, add
   an entry to `docsite/content/redirects.yml` in the same pull request. The
   file shows the two forms: an old page to its new address, and an old

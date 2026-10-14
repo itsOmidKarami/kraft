@@ -74,7 +74,3 @@ def test_main_names_the_page_and_says_what_to_do(cl, tmp_path, capsys):
     captured = capsys.readouterr()
     assert f"{page}: first paragraph repeats the description" in captured.out
     assert "Delete the paragraph" in captured.err
-
-
-def test_the_published_docsite_has_no_repeated_ledes(cl, capsys):
-    assert cl.main(["check"]) == 0, capsys.readouterr().out
