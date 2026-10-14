@@ -426,28 +426,46 @@ else:
 """
 
 
+#: Whether Kraft can unlock a mode-0 folder here: only through `O_PATH` and
+#: `/proc/self/fd` (`item_paths._unlock`); elsewhere it leaves one.
+_UNLOCKS_MODE_0 = hasattr(os, "O_PATH") and os.path.isdir("/proc/self/fd")
+_MODE_0 = pytest.mark.skipif(not _UNLOCKS_MODE_0, reason="Kraft leaves a mode-0 folder here")
+_LOCKED = {"locked": 0o555, "hidden": 0o000}
+
+
 @pytest.mark.parametrize(
-    ("which", "tree"),
+    ("which", "tree", "modes"),
     [
-        ("planted-summary", "sessions/s1/out/summary.md"),
-        ("worker-files", "sessions/s1/out/summary.md"),
-        ("archived-home", "sandbox-home/go/pkg/mod"),
-        ("abandoned-item", "docs/cache"),
+        ("planted-summary", "sessions/s1/out/summary.md", _LOCKED),
+        ("worker-files", "sessions/s1/out/summary.md", _LOCKED),
+        ("archived-home", "sandbox-home/go/pkg/mod", _LOCKED),
+        ("abandoned-item", "docs/cache", _LOCKED),
+        ("abandoned-item", "docs/cache", {"readable": 0o600}),
+        ("abandoned-item", "docs/cache", {"read-only": 0o400}),
     ],
-    ids=["planted-summary", "worker-files", "archived-home", "abandoned-item"],
+    ids=[
+        "planted-summary",
+        "worker-files",
+        "archived-home",
+        "abandoned-item",
+        "mode-600",
+        "mode-400",
+    ],
 )
-def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, which, tree):
+def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, which, tree, modes):
     """A worker, or a tool it ran (a Go module cache is read-only), can leave
-    a folder its owner cannot write or list. A daemon that is not root cannot
-    empty it as it is: Kraft gives its owner back write and search
-    permission and removes it, and never follows a link while doing so."""
+    a folder its owner cannot write, search or list. A daemon that is not
+    root cannot empty it as it is: Kraft sets it to mode 0700 and removes
+    it, and never follows a link while doing so. (A mode-0 folder only where
+    Kraft can unlock one, `_UNLOCKS_MODE_0`.)"""
     root = item_paths.item_dir(run_dirs, "w1") / tree
-    write(root, "locked/f", "x")
-    write(root, "hidden/g", "x")
+    modes = {n: m for n, m in modes.items() if m or _UNLOCKS_MODE_0}
     victim = write(tmp_path, "victim/keep.md", "untouched")
-    (root / "locked" / "link").symlink_to(victim.parent)
-    (root / "locked").chmod(0o555)
-    (root / "hidden").chmod(0o000)
+    for name in modes:
+        write(root, f"{name}/f", "x")
+    (root / next(iter(modes)) / "link").symlink_to(victim.parent)
+    for name, mode in modes.items():
+        (root / name).chmod(mode)
     try:
         done = run_unprivileged(
             _REMOVE, which, str(run_dirs.base), env={"KRAFT_HOME": str(tmp_path / "home")}
@@ -462,9 +480,27 @@ def test_a_folder_its_owner_cannot_write_is_still_removed(run_dirs, tmp_path, wh
             assert not os.path.lexists(root)
         assert victim.read_text() == "untouched"
     finally:
-        for left in (root / "locked", root / "hidden"):
-            if left.is_dir() and not left.is_symlink():
-                left.chmod(0o755)
+        for name in modes:
+            if (root / name).is_dir() and not (root / name).is_symlink():
+                (root / name).chmod(0o755)
+
+
+@pytest.mark.parametrize("top", ["link", "file"])
+def test_a_link_or_a_file_where_the_folder_should_be_is_left(run_dirs, tmp_path, top):
+    """`remove_tree` removes a folder: a link at its path is not followed nor
+    removed, and a file there is left too, as `shutil.rmtree` refuses both."""
+    victim = write(tmp_path, "victim/keep.md", "untouched")
+    home = item_paths.sandbox_homes(run_dirs, "w1")[1]
+    home.parent.mkdir(parents=True)
+    if top == "link":
+        home.symlink_to(victim.parent)
+    else:
+        home.write_text("x")
+
+    item_paths.remove_tree(home)
+
+    assert os.path.lexists(home)
+    assert victim.read_text() == "untouched"
 
 
 _SWAP = """
@@ -472,42 +508,57 @@ import os, sys
 from pathlib import Path
 from kraft import item_paths
 
-item, when, swap, target = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+item, when, swap, target, moment = Path(sys.argv[1]), *sys.argv[2:]
 real_open, swapped = os.open, []
 
-def swap_then_open(name, flags, *a, dir_fd=None, **kw):
-    # The worker's move, just as Kraft opens `when`: the folder `swap` (in
-    # `docs/`) is renamed beside itself and a link into the daemon's home
-    # put in its place.
-    if not swapped and dir_fd is not None and name == when:
-        swapped.append(name)
-        try:
-            os.rename(item / "docs" / swap, item / "docs" / (swap + ".moved"))
-            os.symlink(target, item / "docs" / swap)
-        except OSError as exc:
-            swapped.append(exc)
-    return real_open(name, flags, *a, dir_fd=dir_fd, **kw)
+def swap_now():
+    # The worker's move: the folder `swap` (in `docs/`) is renamed beside
+    # itself and a link into the daemon's home put in its place.
+    swapped.append(when)
+    try:
+        os.rename(item / "docs" / swap, item / "docs" / (swap + ".moved"))
+        os.symlink(target, item / "docs" / swap)
+    except OSError as exc:
+        swapped.append(exc)
 
-os.open = swap_then_open
+def swap_around_open(name, flags, *a, dir_fd=None, **kw):
+    # Just as Kraft opens `when`, or just after it opened it with `O_PATH`
+    # to unlock it.
+    if moment == "before" and not swapped and dir_fd is not None and name == when:
+        swap_now()
+    fd = real_open(name, flags, *a, dir_fd=dir_fd, **kw)
+    if moment == "after-o-path" and not swapped and name == when:
+        if flags & getattr(os, "O_PATH", 0):
+            swap_now()
+    return fd
+
+os.open = swap_around_open
 item_paths.remove_tree(item)
 print(swapped[1:] or "swapped" if swapped else "never swapped")
 """
 
 
 @pytest.mark.parametrize(
-    ("folder", "mode", "swap"),
-    [("run", 0o555, "a"), ("hidden", 0o000, "a"), ("hidden", 0o000, "a/hidden")],
-    ids=["read-only", "mode-0", "mode-0-folder-itself"],
+    ("folder", "mode", "swap", "moment"),
+    [
+        ("run", 0o555, "a", "before"),
+        pytest.param("hidden", 0o000, "a", "before", marks=_MODE_0),
+        pytest.param("hidden", 0o000, "a/hidden", "before", marks=_MODE_0),
+        pytest.param("hidden", 0o077, "a/hidden", "after-o-path", marks=_MODE_0),
+    ],
+    ids=["read-only", "mode-0", "mode-0-folder-itself", "mode-0-folder-itself-while-unlocked"],
 )
 def test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside(
-    run_dirs, tmp_path, folder, mode, swap
+    run_dirs, tmp_path, folder, mode, swap, moment
 ):
     """A worker plants `docs/a/<folder>/kraft.db` in a folder its owner cannot
     write or list, and as Kraft goes into it swaps `docs/a`, or the folder
-    itself, for a link into the daemon's home. Kraft removes what it found
-    through the descriptors it opened, and gives a folder back its
-    permissions through one too, so the daemon's own `~/.kraft/<folder>/`
-    keeps its `kraft.db` and its mode."""
+    itself, for a link into the daemon's home: before Kraft opens it, or
+    after Kraft opened it to unlock it (mode 0, or 077, with no access for
+    its owner) and before the chmod. Kraft removes
+    what it found through the descriptors it opened, and unlocks a folder
+    through one too, so the daemon's own `~/.kraft/<folder>/` keeps its
+    `kraft.db` and its mode."""
     item = item_paths.item_dir(run_dirs, "w1")
     planted = write(item, f"docs/a/{folder}/kraft.db", "worker's")
     home = tmp_path / "home"
@@ -516,7 +567,7 @@ def test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside(
     planted.parent.chmod(mode)
     victim.parent.chmod(0o500)
     try:
-        done = run_unprivileged(_SWAP, str(item), folder, swap, str(target))
+        done = run_unprivileged(_SWAP, str(item), folder, swap, str(target), moment)
 
         assert done.returncode == 0, done.stderr
         assert done.stdout.strip() == "swapped"
@@ -525,6 +576,10 @@ def test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside(
         if swap == "a":
             # Removed where it went, through the descriptors Kraft holds.
             assert not os.path.lexists(item / "docs" / "a.moved" / folder)
+        if moment == "after-o-path":
+            # Unlocked where it went, to 0700 whatever its own bits: a
+            # chmod that ever landed elsewhere could not widen access.
+            assert (item / "docs" / "a" / "hidden.moved").stat().st_mode & 0o777 == 0o700
     finally:
         victim.parent.chmod(0o755)
         for left in (item / "docs" / "a.moved" / folder, item / "docs" / "a" / "hidden.moved"):
@@ -532,22 +587,80 @@ def test_a_folder_swapped_for_a_link_while_it_is_removed_takes_nothing_outside(
                 left.chmod(0o755)
 
 
-_DEEP_REMOVE = """
-import resource, sys, time
+_NO_O_PATH = """
+import os, sys
+from pathlib import Path
+
+# A platform without `O_PATH`, with `fchmodat(AT_SYMLINK_NOFOLLOW)`: macOS.
+del os.O_PATH
+os.supports_follow_symlinks.add(os.chmod)
 from kraft import item_paths
 
+item, key = Path(sys.argv[1]), sys.argv[2]
+real_stat, seen = os.stat, []
+
+def stat_then_swap(name, *a, dir_fd=None, follow_symlinks=True, **kw):
+    st = real_stat(name, *a, dir_fd=dir_fd, follow_symlinks=follow_symlinks, **kw)
+    if name == "hidden":
+        seen.append(name)
+        if len(seen) == 2:
+            # The worker, between a check of the name and a change by it:
+            # the folder out, a hard link to the daemon's key in.
+            os.rename(item / "docs/a/hidden", item / "docs/a/hidden.moved")
+            os.link(key, item / "docs/a/hidden")
+    return st
+
+os.stat = stat_then_swap
+item_paths.remove_tree(item)
+"""
+
+
+def test_a_mode_0_folder_is_left_where_no_descriptor_can_unlock_it(run_dirs, tmp_path):
+    """Without `O_PATH`, the only way to change a folder Kraft cannot open is
+    by its name, and a worker can put a hard link to the daemon's private
+    key at that name between Kraft's look and its chmod. Kraft leaves the
+    folder rather than chmod anything by name."""
+    item = item_paths.item_dir(run_dirs, "w1")
+    hidden = write(item, "docs/a/hidden/f", "x").parent
+    key = write(tmp_path, "home/.ssh/id_ed25519", "KEY")
+    key.chmod(0o600)
+    hidden.chmod(0o077)
+    try:
+        done = run_unprivileged(_NO_O_PATH, str(item), str(key))
+
+        assert done.returncode == 0, done.stderr
+        assert key.stat().st_mode & 0o777 == 0o600
+        assert hidden.is_dir() and hidden.stat().st_mode & 0o777 == 0o077
+    finally:
+        for left in (hidden, hidden.with_name("hidden.moved")):
+            if left.is_dir() and not left.is_symlink():
+                left.chmod(0o755)
+
+
+_DEEP_REMOVE = """
+import os, resource, sys
+from kraft import item_paths
+
+real_open, opens = os.open, []
+
+def counting_open(*a, **kw):
+    opens.append(a[0])
+    return real_open(*a, **kw)
+
+os.open = counting_open
 resource.setrlimit(resource.RLIMIT_NOFILE, (64, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
-began = time.perf_counter()
 item_paths.remove_tree(sys.argv[1])
-print(time.perf_counter() - began)
+print(len(opens))
 """
 
 
 def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
     """A worker can nest folders in its `docs/` far deeper than the daemon's
     open-file limit. Removing them holds a bounded number of descriptors,
-    goes back up by `..` rather than reopening from the top, and removes
-    the item's folder whole."""
+    goes back up by `..` rather than reopening from the top (about two opens
+    a folder, where reopening would take some 12.5 million for 5,000), and
+    removes the item's folder whole. Counted, not timed, so a loaded machine
+    cannot fail it."""
     item = item_paths.item_dir(run_dirs, "w1")
     deep_chain(item / "docs", 5000, leaf=b"x")
 
@@ -561,4 +674,4 @@ def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
 
     assert done.returncode == 0, done.stderr
     assert not os.path.lexists(item)
-    assert float(done.stdout) < 3
+    assert int(done.stdout) < 3 * 5000

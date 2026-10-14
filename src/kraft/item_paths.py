@@ -381,11 +381,13 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
 
     A worker, or a tool it ran, can leave a folder its owner cannot write or
     list (`chmod 555`, `chmod 000`, a Go module cache), which a daemon that
-    is not root cannot empty. Such a folder is given back its owner's read,
-    write and search permission through a descriptor of the folder itself
-    (`_unlock`), never a path, and the removal retried; a folder Kraft
-    cannot fix that way (another user's) is left, as is everything above
-    it."""
+    is not root cannot empty. Such a folder is set to mode 0700 through a
+    descriptor of the folder itself, never a path (`_open_to_remove`,
+    `_unlock`), and the removal retried. The mode is that fixed one, never
+    the folder's own bits plus the owner's: should a chmod ever land on
+    something else, it narrows access rather than widening it. A folder
+    Kraft cannot fix that way (another user's, or a mode-0 one on a platform
+    without `O_PATH`) is left, as is everything above it."""
     path = os.path.abspath(os.fspath(path))
     parent, name = os.path.split(path)
     if name in ("", ".", ".."):
@@ -394,12 +396,17 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
         top = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
     except OSError:
         return
+
+    def leave(dir_fd: int, entry: str) -> None:
+        # `top` is Kraft's and stays: a retry there keeps its own bits.
+        _as_owner(dir_fd, lambda: os.rmdir(entry, dir_fd=dir_fd), kept=dir_fd == top)
+
     try:
         tree_walk.walk(
             top,
             lambda dir_fd, entry, st: _remove_entry_at(dir_fd, entry, st, at_top=dir_fd == top),
             open_dir=_open_to_remove,
-            leave=lambda dir_fd, entry: _as_owner(dir_fd, lambda: os.rmdir(entry, dir_fd=dir_fd)),
+            leave=leave,
             names=[name],
         )
     except OSError:
@@ -425,11 +432,12 @@ def _remove_entry_at(dir_fd: int, name: str, st: os.stat_result, *, at_top: bool
         return False
 
 
-def _as_owner(dir_fd: int, op) -> bool:
+def _as_owner(dir_fd: int, op, *, kept: bool = False) -> bool:
     """Run `op`, an unlink or rmdir in the folder `dir_fd`, and when it is
-    refused, give that folder its owner's read, write and search permission
-    through `dir_fd` itself (`fchmod`) and run it once more. True when the
-    name is gone."""
+    refused, set that folder to mode 0700 through `dir_fd` itself (`fchmod`)
+    and run it once more; a folder that is `kept` (Kraft's, above the tree)
+    gets its owner's rwx added to its own bits instead. True when the name
+    is gone."""
     try:
         op()
         return True
@@ -440,7 +448,10 @@ def _as_owner(dir_fd: int, op) -> bool:
     except OSError:
         return False
     try:
-        os.fchmod(dir_fd, stat.S_IMODE(os.fstat(dir_fd).st_mode) | stat.S_IRWXU)
+        mode = stat.S_IRWXU
+        if kept:
+            mode |= stat.S_IMODE(os.fstat(dir_fd).st_mode)
+        os.fchmod(dir_fd, mode)
         op()
     except FileNotFoundError:
         return True
@@ -450,10 +461,10 @@ def _as_owner(dir_fd: int, op) -> bool:
 
 
 def _open_to_remove(dir_fd: int, name: str) -> int | None:
-    """The folder `name` in `dir_fd`, opened with no link followed and given
-    its owner's read, write and search permission, so what is in it can be
-    listed and removed: a mode-0 folder through `_unlock` first. None, and
-    the folder left, when Kraft cannot open it that way."""
+    """The folder `name` in `dir_fd`, opened with no link followed and set to
+    mode 0700 when its owner lacks any of read, write and search, so what is
+    in it can be listed and removed: a mode-0 folder through `_unlock`
+    first. None, and the folder left, when Kraft cannot open it that way."""
     fd = tree_walk.open_child(dir_fd, name)
     if fd is None:
         if not _unlock(dir_fd, name):
@@ -462,58 +473,42 @@ def _open_to_remove(dir_fd: int, name: str) -> int | None:
         if fd is None:
             return None
     try:
-        mode = stat.S_IMODE(os.fstat(fd).st_mode)
-        if mode & stat.S_IRWXU != stat.S_IRWXU:
-            os.fchmod(fd, mode | stat.S_IRWXU)
+        if stat.S_IMODE(os.fstat(fd).st_mode) & stat.S_IRWXU != stat.S_IRWXU:
+            os.fchmod(fd, stat.S_IRWXU)
     except OSError:
         pass  # another user's: what can be removed in it still is
     return fd
 
 
 def _unlock(dir_fd: int, name: str) -> bool:
-    """Give the folder `name` in `dir_fd`, one Kraft cannot open (mode 0),
-    its owner's read, write and search permission without following a link
-    and without resolving any path a worker could swap a component of. True
-    when it did.
+    """Set the folder `name` in `dir_fd`, one Kraft cannot open (mode 0), to
+    mode 0700 without following a link and without resolving any name a
+    worker could swap between a check and the change. True when it did.
 
-    On Linux, the folder is opened with `O_PATH | O_NOFOLLOW`, which needs no
-    permission on it, checked to be a folder, and changed through
+    The folder is opened with `O_PATH | O_NOFOLLOW | O_DIRECTORY`, which needs
+    no permission on it, checked to be a folder, and changed through
     `/proc/self/fd/<n>`, which names the object that descriptor holds rather
-    than any path (glibc's `lchmod` does the same). Where the platform has
-    `fchmodat(AT_SYMLINK_NOFOLLOW)` (macOS), that, relative to `dir_fd`.
-    With neither, the folder is left: never a chmod by path."""
+    than any path (glibc's `lchmod` does the same). Linux only: elsewhere,
+    and where `/proc` is not mounted, the folder is left. A `fchmodat` by
+    name, even with `AT_SYMLINK_NOFOLLOW`, would land on whatever the worker
+    put at the name after Kraft looked, a hard link to a daemon's file
+    included."""
     o_path = getattr(os, "O_PATH", 0)
-    if o_path:
-        try:
-            pfd = os.open(
-                name, o_path | os.O_NOFOLLOW | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=dir_fd
-            )
-        except OSError:
-            pfd = None
-        if pfd is not None:
-            try:
-                info = os.fstat(pfd)
-                if stat.S_ISDIR(info.st_mode):
-                    os.chmod(f"/proc/self/fd/{pfd}", stat.S_IMODE(info.st_mode) | stat.S_IRWXU)
-                    return True
-            except OSError:
-                pass
-            finally:
-                os.close(pfd)
-    if os.chmod in os.supports_dir_fd and os.chmod in os.supports_follow_symlinks:
-        try:
-            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-            if stat.S_ISDIR(info.st_mode):
-                os.chmod(
-                    name,
-                    stat.S_IMODE(info.st_mode) | stat.S_IRWXU,
-                    dir_fd=dir_fd,
-                    follow_symlinks=False,
-                )
-                return True
-        except (OSError, NotImplementedError):
-            pass
-    return False
+    if not o_path:
+        return False
+    try:
+        pfd = os.open(name, o_path | os.O_NOFOLLOW | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError:
+        return False
+    try:
+        if not stat.S_ISDIR(os.fstat(pfd).st_mode):
+            return False
+        os.chmod(f"/proc/self/fd/{pfd}", stat.S_IRWXU)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(pfd)
 
 
 def _is_real_dir(path: str | os.PathLike[str]) -> bool:
