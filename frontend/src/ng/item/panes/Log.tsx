@@ -59,7 +59,7 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
       </div>
       {cut?.truncated && (
         <p className="item-muted">
-          {cut.truncated.lines} earlier lines are not shown. <a className="item-link" href={logTextUrl(workItemId, sessionId)} download={`${sessionId}.log`}>Download the whole log</a>
+          {cut.truncated.lines} earlier lines are not shown. <a className="item-link" href={logTextUrl(workItemId, sessionId)} download={`${workItemId}-${sessionId}.log`}>Download the whole log</a>
         </p>
       )}
       {body(false)}
