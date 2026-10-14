@@ -24,7 +24,7 @@ origin: src/kraft/adapters/subprocess.py §run_task -- a session's log, exit cod
 
 WHEN intake copies an attachment, the system SHALL copy it into
 `run/items/<id>/filed/`.
-enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[filed], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[older-attachments], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[run-dir-spelled-otherwise], tests/index/test_service.py::test_documents_for_work_item_shows_an_unindexed_attachment[stored-under-a-moved-run-dir]
+enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into_kraft_storage, tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[filed], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[older-attachments], tests/api/test_attachment_patch.py::test_an_attachment_reads_from_where_it_was_stored[run-dir-spelled-otherwise], tests/index/test_service.py::test_documents_for_work_item_shows_an_unindexed_attachment[stored-under-a-moved-run-dir], tests/test_builtins.py::test_an_attachment_from_another_worktree_is_copied_from_its_source[run-dir-spelled-otherwise]
 origin: src/kraft/executor/entry.py §_store_attachments -- outside `docs/`, which a sandbox mounts read-write, so a worker cannot rewrite what a person filed; an older item's copy stays in `attachments/<id>/` and is read there.
 
 ## REQ a-document-is-read-from-the-new-place-first

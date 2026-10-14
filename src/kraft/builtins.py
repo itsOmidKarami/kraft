@@ -679,8 +679,14 @@ async def ensure_worktree(
     # Kraft-eqgn, so a missing one means Kraft lost it, and the gate it justified
     # is trimmed. A worktree made anyway would take the early return above on a
     # retry and run without the document (Kraft-s7c04.29).
-    for a in attachments or []:
-        src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
+    # Each read where it is now (`item_paths.stored_attachment`): a run folder
+    # moved since filing leaves the row naming the old place.
+    attachments = [
+        {**a, "source": str(item_paths.stored_attachment(run_dirs, work_item_id, a, repo))}
+        for a in attachments or []
+    ]
+    for a in attachments:
+        src = Path(a["source"])
         if not src.is_file():
             raise FileNotFoundError(
                 f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
