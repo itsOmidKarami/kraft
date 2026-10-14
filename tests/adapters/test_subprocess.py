@@ -15,7 +15,7 @@ from pathlib import Path
 
 import psutil
 import pytest
-from support.harness import entry_of, fails_once, fake_docker_bin
+from support.harness import entry_of, fails_once, fake_docker_bin, own_files
 
 from kraft import events, logs, store
 from kraft.adapters import subprocess as sp
@@ -183,7 +183,7 @@ async def test_run_task_that_cannot_launch_is_a_config_error(
     status, row = await run(cmd, "s-mb", **({"cwd": tmp_path / cwd} if cwd else {}))
 
     assert (status, row["status"]) == ("config_error", "config_error")
-    log = (run_dirs.logs / "s-mb.log").read_text()
+    log = own_files(run_dirs, "s-mb").log.read_text()
     for phrase in phrases:
         assert phrase in log
 
@@ -251,9 +251,8 @@ async def test_run_task_leaves_the_exit_file_beside_the_result(run, run_dirs):
     status, _ = await run([sys.executable, "-c", "raise SystemExit(4)"], "s-exit")
 
     assert status == "failed"
-    # And no result file: the Kraft-avpe "no contract" signal survives.
-    assert not (run_dirs.results / "s-exit.json").exists()
-    assert (run_dirs.results / "s-exit.exit").read_text() == "4"
+    files = own_files(run_dirs, "s-exit")  # and no result: Kraft-avpe's "no contract"
+    assert (sp._resolve_result_file(files.result), files.exit.read_text()) == (None, "4")
 
 
 async def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(
@@ -274,7 +273,7 @@ async def test_run_task_aborts_before_popen_if_the_row_was_stopped_first(
     monkeypatch.setattr(sp.subprocess, "Popen", _boom)
 
     assert (await run(["true"]))[0] == "paused"
-    assert not (run_dirs.logs / "s1.log").exists(), "aborted before the log was even opened"
+    assert not own_files(run_dirs, "s1").log.exists(), "aborted before the log was even opened"
 
 
 # --- the log, live -------------------------------------------------------------------
@@ -334,7 +333,7 @@ async def test_log_is_readable_while_the_child_is_still_running(run, run_dirs):
     early = []
     deadline = time.monotonic() + 10
     while not task.done() and time.monotonic() < deadline:
-        early = list(logs.jsonl(run_dirs.logs / "s1.log"))
+        early = list(logs.jsonl(own_files(run_dirs, "s1").log))
         if early:
             break
         await asyncio.sleep(0.05)
@@ -488,7 +487,7 @@ async def test_run_task_records_usage_when_a_pause_cancels_it(run, database, run
     )
     await _running(database, "s-paused")
     # What the agent flushed on its way out, written where run_task looks.
-    (run_dirs.logs / "s-paused.log").write_text(
+    own_files(run_dirs, "s-paused").log.write_text(
         json.dumps(
             {
                 "type": "result",
@@ -736,7 +735,7 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
     assert seen["env"] == {"GIT_COMMITTER_NAME": "Daemon", "PYTHONDONTWRITEBYTECODE": "1"}
     assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]
-    assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"
+    assert seen["home"] == run_dirs.base / "items" / "w1" / "sandbox-home"
 
 
 async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(
@@ -755,10 +754,11 @@ async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     # An earlier launch's container id is not this launch's (Kraft-6ltwh).
-    sp.result_path_for(run_dirs, "s-daemon-down").with_suffix(".cid").write_text("old-id")
+    own_files(run_dirs, "s-daemon-down").folder.mkdir(parents=True)
+    own_files(run_dirs, "s-daemon-down").cid.write_text("old-id")
     status, row = await run(["echo", "hi"], "s-daemon-down", sandbox=DOCKER)
     assert (status, row["status"]) == ("config_error", "config_error")
-    assert "daemon" in (run_dirs.logs / "s-daemon-down.log").read_text()
+    assert "daemon" in own_files(run_dirs, "s-daemon-down").log.read_text()
 
 
 async def test_run_task_sandboxed_command_printing_dockers_words_is_its_own_failure(
@@ -773,7 +773,7 @@ async def test_run_task_sandboxed_command_printing_dockers_words_is_its_own_fail
     status, row = await run(cmd, "s-says-docker", sandbox=DOCKER)
 
     assert (status, row["status"]) == ("failed", "failed")
-    assert "Docker daemon" in (run_dirs.logs / "s-says-docker.log").read_text()
+    assert "Docker daemon" in own_files(run_dirs, "s-says-docker").log.read_text()
 
 
 async def test_run_task_nets_a_resumed_session_with_its_own_reader(run):
@@ -797,4 +797,4 @@ async def test_run_task_nets_a_resumed_session_with_its_own_reader(run):
 async def test_run_task_opens_the_session_log_private(run, run_dirs):
     """Kraft-9efnk.18: a session log is a whole agent session."""
     await run(["true"], "s-private")
-    assert (run_dirs.logs / "s-private.log").stat().st_mode & 0o777 == 0o600
+    assert own_files(run_dirs, "s-private").log.stat().st_mode & 0o777 == 0o600

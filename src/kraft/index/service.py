@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from kraft import config as config_mod
-from kraft import events
+from kraft import events, item_paths
 from kraft.events import _now
 from kraft.index import ingest
 from kraft.index.embed import Embedder
@@ -180,12 +180,38 @@ class Indexer:
         base = (self._run_dirs.worktrees / work_item_id).resolve()
         return ingest.read_inside(base, str(path.relative_to(base)))
 
+    def _read_summary(
+        self, ref: str, work_item_id: str, session_id: str, thread: int | None = None
+    ) -> str | None:
+        """The text of a session's summary ref, or None. Untrusted input: a
+        worker may still report its own. A ref under `items/` is read only
+        when it is exactly this item's session's own `out/summary.md`, or its
+        own escalation thread's (`thread`), in the item's folder; Kraft
+        records no other there. It is read from the item's folder down
+        (`item_paths.locate`), so a `run/items` that is a link still reads.
+        Any other ref is read inside the item's worktree, as before
+        (`_read_worktree_file`). Never through a symlink or a FIFO below
+        where the read starts."""
+        if self._run_dirs is None:
+            return None
+        if m := ingest.ITEM_SUMMARY.fullmatch(ref):
+            own = m["folder"] == session_id or (
+                thread is not None and m["folder"] == item_paths.thread_folder(thread)
+            )
+            if m["item"] != work_item_id or not own:
+                return None
+            root, rel = item_paths.locate(self._run_dirs, work_item_id, ref)
+            return ingest.read_inside(root.resolve(), rel)
+        if Path(ref).parts[:1] == ("items",):
+            return None
+        return self._read_worktree_file(ref, work_item_id, markdown=True)
+
     async def ingest_session_summary(self, session_id: str) -> bool:
         """Ingest the summary a finished worker session reported. Returns False
         (and logs) on anything unusable — the index never blocks the executor."""
         row = self._state.read(
             lambda c: c.execute(
-                "SELECT ws.work_item_id, ws.node_id, ws.hook_point, "
+                "SELECT ws.work_item_id, ws.node_id, ws.hook_point, ws.thread, "
                 "       ws.session_summary_ref, wi.repo "
                 "FROM worker_sessions ws JOIN work_items wi ON wi.id = ws.work_item_id "
                 "WHERE ws.id = ?",
@@ -195,8 +221,10 @@ class Indexer:
         if row is None or not row["session_summary_ref"]:
             return False
         ref = row["session_summary_ref"]
+        # Every session has a thread number; only an escalation turn's names a folder.
+        thread = row["thread"] if row["hook_point"] == "escalation" else None
         text = await asyncio.to_thread(
-            self._read_worktree_file, ref, row["work_item_id"], markdown=True
+            self._read_summary, ref, row["work_item_id"], session_id, thread
         )
         if text is None:
             logger.warning("session %s summary ref %r not readable; skipping", session_id, ref)
@@ -251,13 +279,14 @@ class Indexer:
     ) -> None:
         """Persist an approved gate artifact (spec/plan/chain_review/
         review_brief) the way a session summary is already persisted: read
-        straight off the worktree by the caller, upserted here, no git scan
-        involved.
+        by the caller from the item's `docs/` (or an older item's worktree),
+        upserted here, no git scan involved.
 
-        This is that artifact's only durable copy from here on: `.engineering/`
-        never lands in the connected repo's git history
-        (`forge._work_product_pathspec`), so once the worktree that holds it is
-        gone, this row is all there is.
+        The document stays in `docs/` until the item is abandoned, so this
+        row is what search finds; for an older item, whose document is in its
+        worktree's `.engineering/` and never in the connected repo's git
+        history (`forge._work_product_pathspec`), it is all that is left once
+        the worktree is gone.
         The caller (`kraft.api.routes.gates.approve_gate`) is what makes "gate approval" the right
         moment -- it is the first point the content is accepted rather than
         still being drafted, and reuses the same worktree-containment-checked
@@ -472,7 +501,8 @@ class Indexer:
     def _read_attachment(self, work_item_id: str, attachment: dict) -> str | None:
         """An unindexed attachment's text: from the item's own worktree while
         it has one, else from the copy Kraft stored at intake under
-        `run/attachments/<id>/`: before the item starts (the copy the
+        `run/items/<id>/filed/` (or `run/attachments/<id>/`, filed before
+        that folder): before the item starts (the copy the
         worktree will get), and after its worktree is removed (what it was
         filed with). Never the main checkout, which holds files no one
         attached (R11F-02). While the worktree exists it is the only source,
@@ -481,10 +511,8 @@ class Indexer:
             return None
         if (self._run_dirs.worktrees / work_item_id).exists():
             return self._read_worktree_file(attachment["path"], work_item_id)
-        source = attachment.get("source")
-        if not source:
-            return None
-        return ingest.read_inside(self._run_dirs.attachments / work_item_id, Path(source).name)
+        stored = item_paths.filed_copy(self._run_dirs, work_item_id, attachment.get("source"))
+        return ingest.read_inside(*stored) if stored else None
 
     def _synthesize_attachment_doc(
         self, work_item_id: str, repo: str, attachment: dict

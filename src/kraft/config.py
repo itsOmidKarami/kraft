@@ -683,9 +683,11 @@ def git_read(
     return out.stdout.strip() if strip else out.stdout
 
 
-#: Roots Kraft itself writes into and never means to commit. `.engineering/`
-#: is session notes and gate artifacts (`agent.py:artifact_path`); `docs/
-#: superpowers/` is the legacy convention the same content used to live under
+#: Roots Kraft itself wrote into and never means to commit. `.engineering/`
+#: is where session notes and gate artifacts went before they moved to
+#: `run/items/<id>/` (`item_paths`), and where a worktree made before that
+#: still holds them; `docs/superpowers/` is the older convention the same
+#: content used to live under
 #: (CLAUDE.md) -- both gitignored on `main`, both still landing in a spec/plan
 #: attachment a stale worktree copies in (Kraft-vu26). An untracked path under
 #: one is Kraft's own: `forge.git` keeps it out of every commit and

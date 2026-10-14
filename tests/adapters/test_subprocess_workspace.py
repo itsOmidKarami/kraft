@@ -5,7 +5,7 @@ import os
 import subprocess
 
 import pytest
-from support.harness import fake_docker_bin
+from support.harness import fake_docker_bin, own_files
 from support.workspace import member_checkout, workspace_item
 from support.worktree import make_item
 
@@ -96,7 +96,7 @@ async def test_a_sandboxed_launch_not_given_its_members_checkout_never_starts(
         sandbox=DOCKER,
     )
     assert status == "config_error"
-    assert "repos/pkg" in (run_dirs.logs / "s1.log").read_text()
+    assert "repos/pkg" in own_files(run_dirs, "s1").log.read_text()
 
 
 async def test_run_task_records_the_repository_a_fanned_out_run_is_for(

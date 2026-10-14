@@ -6,9 +6,8 @@ description: "Writes the implementation plan for a work item from its human-appr
 # Writing a plan, headless
 
 The spec for this work item is already written and already approved by a human:
-read `.engineering/specs/` for the document whose name matches this work item
-before you do anything else. If it is not there, the chain skipped the spec node
-because a human attached one at intake — look for the attached document instead.
+your instructions list this work item's documents, or the documents attached at
+intake. Read the spec before you do anything else.
 Your plan implements that spec and argues from it. If you find yourself
 disagreeing with the spec, say so in the plan; do not quietly design something
 else.

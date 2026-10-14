@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
-from kraft import caps, events, executor
+from kraft import caps, events, executor, item_paths
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -63,10 +64,10 @@ _PROMPT = (
 )
 
 
-def _artifact_line(rel: str | None) -> str:
-    if not rel:
+def _artifact_line(path: Path | None) -> str:
+    if path is None:
         return "There is no artifact document for this gate; read the worktree.\n"
-    return f"The document this gate is about: {rel} (relative to this worktree)\n"
+    return f"The document this gate is about: {path}\n"
 
 
 def _profile_fallback_refusal(
@@ -206,7 +207,10 @@ async def review(
         node_id=node.id,
         title=row["title"],
         description_line=f"Brief: {row['description']}\n" if row["description"] else "",
-        artifact_line=_artifact_line(rel),
+        # Absolute: a new document is in the item's folder, not this worktree.
+        artifact_line=_artifact_line(
+            item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
+        ),
     )
 
     await db.write(
@@ -366,7 +370,7 @@ async def review(
         )
         return "undecided", str(exc)
 
-    result_path = run_dirs.results / f"{session_id}.json"
+    result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
     # A verdict counts only from a session that finished thinking (`vocab.ADVANCING`),

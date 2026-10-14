@@ -110,6 +110,7 @@ async def run_checks() -> list[dict]:
     else:
         checks.extend(await _repo_checks())
         checks.append(await _orphan_check())
+    checks.append(_old_documents_check())
     return checks
 
 
@@ -1552,6 +1553,43 @@ async def _orphan_check() -> dict:
             f"{len(orphans)} under {worktrees} with no work item: {', '.join(orphans)}",
         )
     return _check("worktrees", True, str(worktrees))
+
+
+def _old_documents_check() -> dict:
+    """How many worktrees still hold a `.engineering/` folder: documents and
+    summaries written before they moved to `run/items/<id>/`. They are read
+    where they are, so this is never a failure; it says when the fallback
+    reads that keep them working (and the prompt's `git add -f` warning) can
+    go. Read off the disk, so it needs no server. A link named `.engineering`
+    is not counted and not followed."""
+    worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
+    try:
+        held = sum(
+            1
+            for d in worktrees.iterdir()
+            if d.is_dir() and not d.is_symlink() and _is_real_dir(d / ".engineering")
+        )
+    except FileNotFoundError:
+        held = 0
+    except OSError as exc:
+        return _check("old documents", True, f"{worktrees}: {exc}", warn=True)
+    if not held:
+        return _check("old documents", True, "0 worktrees hold documents in .engineering/")
+    return _check(
+        "old documents",
+        True,
+        f"{held} worktree(s) still hold documents in .engineering/: they are read where "
+        "they are, and the count drops as those items are archived",
+        warn=True,
+    )
+
+
+def _is_real_dir(path: Path) -> bool:
+    """A folder, not a link to one."""
+    try:
+        return stat.S_ISDIR(path.lstat().st_mode)
+    except OSError:
+        return False
 
 
 def _bundle_check() -> dict:

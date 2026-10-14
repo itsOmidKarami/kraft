@@ -53,7 +53,9 @@ def test_happy_path_via_api(client, repo, monkeypatch):
 
     # 4B: each agent session's summary is ingested and linked to the work item
     impl_session = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
-    assert impl_session["session_summary_ref"] == (f".engineering/sessions/{impl_session['id']}.md")
+    assert impl_session["session_summary_ref"] == (
+        f"items/{wid}/sessions/{impl_session['id']}/out/summary.md"
+    )
     for _ in range(100):
         docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
         if docs:
@@ -429,7 +431,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
             "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
         },
     ).json()["id"]
-    stored = client.app.state.run_dirs.attachments / wid
+    stored = client.app.state.run_dirs.items / wid / "filed"
     assert stored.is_dir()
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")

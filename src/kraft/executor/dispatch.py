@@ -16,7 +16,7 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import config as _config
-from kraft import events, node_runs, store
+from kraft import events, item_paths, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -79,6 +79,7 @@ from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 from kraft.worker.env import TEST_ENV
+from kraft.worker.worktree_read import read_no_follow
 
 logger = logging.getLogger(__name__)
 
@@ -679,7 +680,8 @@ def scope_results(
     scope."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.result_path "
+            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.log_path, "
+            "ws.result_path "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
             "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
@@ -714,7 +716,7 @@ def scope_results(
         if row["status"] not in COMMAND_FINISHED:
             continue
         entry: dict = {"command": command, **_scope_facts(table, command)}
-        if (code := _exit_code(row["result_path"])) is not None:
+        if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         entry["passed"] = row["status"] == SessionStatus.DONE
         entry["session_id"] = row["id"]
@@ -794,7 +796,8 @@ def scope_runs(
     `scope_results` reads it."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.result_path, e.seq "
+            "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.log_path, "
+            "ws.result_path, e.seq "
             "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
             "AND e.type = ? "
             "AND json_extract(e.payload, '$.session_id') = ws.id "
@@ -854,7 +857,7 @@ def scope_runs(
         }
         if (ran_in(row), repo, row["round"]) in picked:
             entry["selected"] = True
-        if (code := _exit_code(row["result_path"])) is not None:
+        if (code := _exit_code(row)) is not None:
             entry["exit_code"] = code
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
@@ -880,14 +883,23 @@ def scope_runs(
     return out
 
 
-def _exit_code(result_path: str | None) -> int | None:
-    """The code a task exited with, off the sidecar its launch wrapper writes
-    (`subprocess._wrap_with_exit_file`), or None when there is none to read."""
+def _exit_code(row) -> int | None:
+    """The code a session exited with, off the sidecar its launch wrapper
+    writes (`subprocess._wrap_with_exit_file`, `item_paths.exit_file`), or
+    None when there is none to read."""
     try:
-        raw = Path(result_path).with_suffix(".exit").read_text().strip() if result_path else ""
+        # No link followed, no wait on a FIFO: an older escalation thread's
+        # exit file is beside `results/`, which its codex turns may write.
+        raw = (
+            read_no_follow(item_paths.exit_file(row["log_path"], row["result_path"]))
+            .decode()
+            .strip()
+            if row["result_path"]
+            else ""
+        )
     except (OSError, UnicodeDecodeError):
         return None
-    return int(raw) if raw.lstrip("-").isdigit() else None
+    return item_paths.exit_code(raw)
 
 
 def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
@@ -1242,7 +1254,7 @@ async def _dispatch_task(
             )
             + (prompts.METHOD_NOTE if method_is_own else "")
             + prompts.scope_note(t, launch.repo_entry if launch else None)
-            + prompts.progress_note(t, work_item_row, worktree, db, sandbox)
+            + prompts.progress_note(t, work_item_row, worktree, db, sandbox, run_dirs=run_dirs)
             + prompts.review_threads_note(t, work_item_row, db, note, sandbox)
         )
     ) + prompts.BEAD_NOTE
@@ -1271,7 +1283,8 @@ async def _dispatch_task(
             instruction += prompts.carried_findings_note(carried or [])
         if AgentInput.PREVIOUS_REVIEW in t.inputs:
             instruction += prompts.previous_review_note(
-                prompts.last_review_session(db, work_item_row["id"], task.path)
+                prompts.last_review_session(db, work_item_row["id"], task.path),
+                run_dirs=run_dirs,
             )
     item_override = (
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
@@ -1308,6 +1321,14 @@ async def _dispatch_task(
         )
     except _agent.HarnessUnavailable:
         table = None
+    if t.produces:
+        # A re-run revises its document in place, so keep the one a gate or a
+        # person last saw first (`a-revised-document-keeps-its-earlier-
+        # version`); on a first run there is none and nothing is written. Once
+        # per dispatch, before any candidate: a fallback relaunch is the same
+        # revision, and the steer note below must name the `docs/` copy this
+        # seeds from an older worktree's.
+        item_paths.keep_version(run_dirs, work_item_row["id"], t.produces, worktree=worktree)
     cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
@@ -1657,7 +1678,14 @@ async def _launch_agent(
             method_text=inv.method_text,
             title=work_item_row["title"],
             task_instruction=(
-                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                prompts.steer_prefix(
+                    t.produces,
+                    work_item_row,
+                    worktree,
+                    note,
+                    run_dirs=run_dirs,
+                    source=note_source,
+                )
                 if note
                 else ""
             )
@@ -1858,7 +1886,7 @@ async def measure_node(
         else:
             session = _latest_session(db, work_item_id, node, failed[0])
             status = session["status"] if session is not None else "failed"
-            note = prompts.task_failure_note(failed[0].task.id, status, session)
+            note = prompts.task_failure_note(failed[0].task.id, status, session, run_dirs=run_dirs)
         return await run_recovery(
             db,
             run_dirs,

@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, node_runs, start_queue, storage, store
+from kraft import escalate, events, executor, item_paths, node_runs, start_queue, storage, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -486,9 +486,21 @@ async def abandon_work_item(wid: str, request: Request):
         storage.forget(st, wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
-    # a state the board cannot show.
-    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
+    # a state the board cannot show. In a thread: a large folder must not hold
+    # the event loop.
+    await asyncio.to_thread(_remove_item_files, st.run_dirs, wid)
+    storage.forget_documents(st, wid)
     return {"id": wid, "status": "abandoned", **removed}
+
+
+def _remove_item_files(run_dirs, wid: str) -> None:
+    """An abandoned item's own folder and an older item's attachment copies
+    (`item_paths.remove_tree`: no link followed, so a link a worker planted
+    in `docs/` or the sandbox home is removed, never what it points at, and a
+    read-only folder a tool left, such as a Go module cache, is removed
+    too)."""
+    item_paths.remove_tree(item_paths.item_dir(run_dirs, wid))
+    item_paths.remove_tree(item_paths.filed_dirs(run_dirs, wid)[1])
 
 
 def _archive_lock(st) -> asyncio.Lock:
@@ -758,7 +770,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
             409, "this run is rework after a gate rejection: it follows the note, not the plan"
         )
     worktree = st.run_dirs.worktrees / wid
-    tasks = progress_mod.tasks_for(row, worktree)
+    tasks = progress_mod.tasks_for(row, worktree, st.run_dirs)
     if not tasks:
         raise HTTPException(400, "this work item's plan has no '## Task N' headings")
     if not 1 <= body.task <= len(tasks):
@@ -770,7 +782,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "title": tasks[body.task - 1][0],
     }
     await st.db.write(lambda c: events.append(c, wid, WorkItemEvent.PLAN_PROGRESS, payload))
-    p = progress_mod.for_item(st.db, row, worktree)
+    p = progress_mod.for_item(st.db, row, worktree, st.run_dirs)
     return {"id": wid, "progress": p.model_dump() if p else None}
 
 

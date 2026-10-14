@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import stat
 from dataclasses import replace
 from pathlib import Path
 
-from kraft import events
+from kraft import events, item_paths
 from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
@@ -900,35 +901,53 @@ def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
     ]
 
 
-def result_files(conn: sqlite3.Connection, results: Path, work_item_id: str) -> list[Path]:
-    """The files in `results` that belong to this work item and exist: each of
-    its sessions' result file, review package and cut instruction. What a
-    sandboxed session of the item may read (`docker_argv`, Kraft-dni4n).
+def result_files(conn: sqlite3.Connection, run_dirs, work_item_id: str) -> list[Path]:
+    """The files of this work item's sessions that exist: each one's result,
+    summary, review package and cut instruction. What a sandboxed session of
+    the item may read, each mounted read-only as a file (`docker_argv`,
+    Kraft-dni4n); its own two are mounted read-write there instead.
 
-    From the item's session rows, never a name pattern: the folder is one
-    directory for every work item. A row's `result_path` is taken as recorded,
-    since an escalation turn's is its thread's; anything outside `results`,
-    missing, or not a plain file is left out, because docker makes a root-owned
-    directory of a mount source that is not there."""
+    From the item's session rows, never a name pattern. A newer session's
+    files are in its own folder under `run/items/<id>/sessions/`; an older
+    one's are in `run/results/`, named by its id, a folder every work item
+    shares. A row's `result_path` is taken as recorded (an escalation turn's
+    is its thread's while it runs), its summary beside it in its `out/`, and
+    its own instruction and review package in its own folder. Anything
+    outside those places, missing, or not a plain file is left out: docker
+    makes a root-owned directory of a mount source that is not there, and
+    mounts what a symlink points at."""
+    results = run_dirs.results
+    sessions = item_paths.item_dir(run_dirs, work_item_id) / "sessions"
     rows = conn.execute(
         "SELECT id, result_path FROM worker_sessions WHERE work_item_id = ? "
         "ORDER BY created_at, id",
         (work_item_id,),
     ).fetchall()
-    named = (
-        p
-        for r in rows
-        for p in (
-            Path(r["result_path"]),
+
+    def named(r) -> tuple[Path, ...]:
+        result = Path(r["result_path"])
+        own = item_paths.session_files(run_dirs, work_item_id, r["id"])
+        return (
+            result,
             results / f"{r['id']}.review.md",
             results / f"{r['id']}.instruction.md",
+            own.review,
+            own.instruction,
+            *([result.parent / "summary.md"] if result.parent.parent.parent == sessions else []),
         )
-    )
-    return [
-        p
-        for p in dict.fromkeys(named)
-        if p.parent == results and p.is_file() and not p.is_symlink()
-    ]
+
+    def inside(p: Path) -> bool:
+        return p.parent == results or p.is_relative_to(sessions)
+
+    return [p for p in dict.fromkeys(p for r in rows for p in named(r)) if inside(p) and _plain(p)]
+
+
+def _plain(path: Path) -> bool:
+    """`path` is a regular file and not a symlink."""
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
 
 
 def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: str) -> list:

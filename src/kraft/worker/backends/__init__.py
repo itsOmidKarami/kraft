@@ -36,10 +36,11 @@ class SandboxBackend(Protocol):
     async def owner_refusal(
         self, run_dirs, cwd: Path, work_item_id: str, result_path: Path, **kw
     ) -> str | None:
-        """Why a path this launch's container writes (its HOME, ref stores or
-        result file) belongs to someone it cannot write as, or None. Asked
-        before Kraft writes any of them; `config_error` when it answers.
-        `members=` as for `code_in`."""
+        """Why a path this launch's container writes (its HOME, ref stores,
+        result file, and the `rw_files=` and `rw_dirs=` `wrap` is given)
+        belongs to someone it cannot write as, or None. Asked before Kraft
+        writes any of them; `config_error` when it answers. `members=` as for
+        `code_in`."""
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         """Why a launch of `executable` cannot start, or None to go ahead:
@@ -63,8 +64,10 @@ class SandboxBackend(Protocol):
 
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox; `results` is the files of
-        the results folder it may read (`store.result_files`), None for none;
-        `ca_bundle=` is
+        its item's sessions it may read (`store.result_files`), None for none;
+        `rw_files=` the files it writes outside its worktree (its result and
+        summary) and `rw_dirs=` the folders (its item's `docs/`), each
+        writable and nothing else of the item's folder; `ca_bundle=` is
         what `prepare` returned, `sentinels=` each proxy-managed
         credential's variable and what it holds in the value's place,
         `workdir=` where under `cwd` the command runs when not at its top."""

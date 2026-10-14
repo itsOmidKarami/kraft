@@ -48,15 +48,16 @@ A sandboxed task runs `docker run --init` (or `podman run`) with every capabilit
 | The repository's refs | A private copy per worktree, under `$KRAFT_HOME/run/sandbox-git/`. See [Repository refs](/reference/configuration/sandbox/git-in-a-sandbox#repository-refs). |
 | Objects and LFS content | Your repository's `objects/` and `lfs/`, read-write: they are data a commit writes. `objects/info` (where alternates are named) and alternates themselves are read-only. |
 | Workspace members | Each member's own repository, the same way as the root's: a private copy of its refs, from which Kraft moves the item's branch in that repository, and its objects. See [Workspace members](/reference/configuration/sandbox/git-in-a-sandbox#workspace-members). |
-| `HOME`, results, git identity | See [Home, results and git identity](#home-results-and-git-identity). |
+| `HOME`, results, documents, git identity | See [Home, results and git identity](#home-results-and-git-identity). |
 | Credentials | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, and every name in `env_passthrough` and `env`, forwarded by name, so their values never appear on the `docker` command line or in `ps`. See [Forwarded credentials](#forwarded-credentials). |
 | Proxy and CA | The server's proxy variables and an extra CA. [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml#proxy) says which, and how. |
 | Tool policy | Enforced inside the container or refused. See [Tool policy](#tool-policy). |
 
 ## Home, results and git identity
 
-- **`HOME`.** `$KRAFT_HOME/run/sandbox-home/<work item>`, read-write and kept across sessions, so an agent CLI keeps its state and can resume a paused session. A CLI config directory Kraft owns (Cursor's) lives there too, one per item.
-- **Results.** From `$KRAFT_HOME/run/results`, only this [work item](/concepts/vocabulary#work-item)'s own files: its sessions' result files, review packages and long instructions, read-only, and the session's own result file, read-write. Nothing of another item's is mounted.
+- **`HOME`.** `$KRAFT_HOME/run/items/<work item id>/sandbox-home`, read-write and kept across sessions, so an agent CLI keeps its state and can resume a paused session. An item that ran sandboxed before Kraft kept one folder per item keeps its `$KRAFT_HOME/run/sandbox-home/<work item id>` while it exists. A CLI config directory Kraft owns (Cursor's) lives in the home too, one per item; Kraft never follows a link the worker put there.
+- **Results.** The session's own `result.json` and `summary.md`, each mounted read-write as a single file from its session folder's `out/`. Its earlier sessions' result files, summaries, review packages and long instructions are mounted read-only, file by file. No session folder is mounted, and nothing of another [work item](/concepts/vocabulary#work-item)'s.
+- **Documents.** The item's `docs/` folder, `$KRAFT_HOME/run/items/<work item id>/docs`, read-write, so the worker can write the spec or plan it was asked for (`$KRAFT_DOCS_DIR` names it). The item's `history/` and `filed/` folders, and the rest of its folder, are not mounted.
 - **Git identity.** `GIT_AUTHOR_*` and `GIT_COMMITTER_*` from the server's environment, else your `user.name` and `user.email` for the repository. Repository hooks never run in the container, as they never run on a worker's commits outside one.
 
 Abandoning or archiving an item removes its ref store and sandbox home.

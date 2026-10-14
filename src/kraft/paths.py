@@ -217,6 +217,14 @@ class RunDirs:
         return self.base / "attachments"
 
     @property
+    def items(self) -> Path:
+        """One folder per work item, `items/<id>/`: everything an item
+        produces but its worktree (its documents, their history, filed
+        attachments, session files and sandbox home). `kraft.item_paths`
+        names every path inside it."""
+        return self.base / "items"
+
+    @property
     def sockets(self) -> Path:
         """Each sandboxed session's egress socket, `sn/<short>/s.sock`
         (`worker.channel`): kept short, since a unix socket path may be at
@@ -243,6 +251,6 @@ class RunDirs:
         (`docker.Host.user_args`)."""
         self.base.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.base.chmod(0o700)
-        for d in (self.logs, self.results, self.worktrees, self.attachments):
+        for d in (self.logs, self.results, self.worktrees, self.attachments, self.items):
             d.mkdir(parents=True, exist_ok=True)
         return self

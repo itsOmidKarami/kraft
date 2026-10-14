@@ -615,42 +615,56 @@ async def test_the_board_and_the_brief_read_one_function(database):
     assert board._deferred_findings(st, "w1") == brief
 
 
-def test_previous_review_note_points_at_the_reviewers_own_last_session():
+@pytest.mark.parametrize(
+    ("ref", "given"),
+    [
+        (".engineering/sessions/abc.md", ".engineering/sessions/abc.md"),
+        ("items/w1/sessions/abc/out/summary.md", "{run}/items/w1/sessions/abc/out/summary.md"),
+    ],
+    ids=["older-ref-as-it-is", "item-folder-ref-absolute"],
+)
+def test_previous_review_note_points_at_the_reviewers_own_last_session(run_dirs, ref, given):
+    """A summary in its item's folder is named relative to the run folder,
+    which the agent does not stand in: it is handed the absolute path."""
     note = prompts.previous_review_note(
-        {
-            "result_path": "/run/results/abc.json",
-            "session_summary_ref": ".engineering/sessions/abc.md",
-        }
+        {"result_path": "/run/results/abc.json", "session_summary_ref": ref},
+        run_dirs=run_dirs,
     )
     assert "/run/results/abc.json" in note
-    assert ".engineering/sessions/abc.md" in note
+    assert f"summary at {given.format(run=run_dirs.base)}\n" in note
 
 
-def test_previous_review_note_drops_a_summary_it_does_not_have():
+def test_previous_review_note_drops_a_summary_it_does_not_have(run_dirs):
     """A dangling path is worse than a missing line: the agent burns a tool
     call discovering the file was never written."""
-    note = prompts.previous_review_note({"result_path": "/r.json", "session_summary_ref": None})
+    note = prompts.previous_review_note(
+        {"result_path": "/r.json", "session_summary_ref": None}, run_dirs=run_dirs
+    )
     assert "/r.json" in note
     assert "None" not in note
     assert "summary" not in note.lower()
 
 
-def test_previous_review_note_does_not_re_paste_findings():
+def test_previous_review_note_does_not_re_paste_findings(run_dirs):
     """carried_findings_note renders them verbatim immediately above."""
-    note = prompts.previous_review_note({"result_path": "/r.json", "session_summary_ref": None})
+    note = prompts.previous_review_note(
+        {"result_path": "/r.json", "session_summary_ref": None}, run_dirs=run_dirs
+    )
     assert "severity" not in note.lower()
     assert "[" not in note
 
 
-def test_fix_attempt_note_frames_a_skipped_finding_as_a_disagreement():
-    note = prompts.fix_attempt_note({"result_path": "/f.json", "session_summary_ref": None})
+def test_fix_attempt_note_frames_a_skipped_finding_as_a_disagreement(run_dirs):
+    note = prompts.fix_attempt_note(
+        {"result_path": "/f.json", "session_summary_ref": None}, run_dirs=run_dirs
+    )
     assert "/f.json" in note
     assert "disagreement" in note.lower()
 
 
-def test_both_notes_are_empty_without_a_previous_session():
-    assert prompts.previous_review_note(None) == ""
-    assert prompts.fix_attempt_note(None) == ""
+def test_both_notes_are_empty_without_a_previous_session(run_dirs):
+    assert prompts.previous_review_note(None, run_dirs=run_dirs) == ""
+    assert prompts.fix_attempt_note(None, run_dirs=run_dirs) == ""
 
 
 # --------------------------------------------------------------------------

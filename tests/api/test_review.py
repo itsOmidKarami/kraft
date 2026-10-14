@@ -275,7 +275,7 @@ def test_approve_that_the_gate_refuses_writes_no_review(client, gated):
     own must-fix/reject-target checks."""
     tid = _new_thread(client, gated, label="question").json()["id"]
     run_dir = Path(client.app.state.run_dirs.base)
-    brief = run_dir / "worktrees" / gated / ".engineering" / "review_briefs" / f"{gated}.md"
+    brief = run_dir / "items" / gated / "docs" / "review_brief.md"
     brief.unlink()
 
     r = client.post(

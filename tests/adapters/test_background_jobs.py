@@ -17,6 +17,7 @@ import shlex
 import subprocess
 
 import pytest
+from support.harness import own_files
 
 from kraft import store, usage
 from kraft.adapters import subprocess as sp
@@ -172,7 +173,7 @@ async def run_agent(database, run_dirs, tmp_path):
                 (SessionEvent.BACKGROUND_JOBS_ABANDONED,),
             ).fetchall()
         )
-        return status, (run_dirs.logs / "s1.log").read_text(), [json.loads(r[1]) for r in found]
+        return status, own_files(run_dirs, "s1").log.read_text(), [json.loads(r[1]) for r in found]
 
     return go
 

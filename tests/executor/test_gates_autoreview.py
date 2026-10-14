@@ -27,7 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from support.addons import drop_store, install_release, pinned_chain
-from support.harness import entry_of, fake_harness_home, write_agent_profiles
+from support.harness import entry_of, fake_harness_home, write_agent_profiles, write_own_result
 
 from kraft import events, executor, gate_review
 from kraft.adapters import agent as agent_mod
@@ -150,8 +150,11 @@ def _approving_agent(it, monkeypatch, *, on_dispatch=None):
     async def _capture(_db, _rd, **kw):
         if on_dispatch is not None:
             await on_dispatch()
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "looks right"})
+        write_own_result(
+            it.run_dirs,
+            kw["work_item_id"],
+            kw["session_id"],
+            {"status": "done", "verdict": "approve", "concerns": "looks right"},
         )
         return "done"
 
@@ -299,8 +302,11 @@ async def _review_spec_gate(it, monkeypatch):
 
     async def _capture(_db, _rd, **kw):
         launched.append(kw)
-        (it.run_dirs.results / f"{kw['session_id']}.json").write_text(
-            json.dumps({"status": "done", "verdict": "approve", "concerns": "fine"})
+        write_own_result(
+            it.run_dirs,
+            kw["work_item_id"],
+            kw["session_id"],
+            {"status": "done", "verdict": "approve", "concerns": "fine"},
         )
         return "done"
 

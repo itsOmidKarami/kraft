@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import item_paths, store
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -35,6 +37,7 @@ from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+from kraft.worker.worktree_read import open_dir_no_symlinks
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +53,18 @@ _CTX = (
     "Hook point: {hook_point}\n"
     "Worker session: {session_id}\n"
     "\n"
-    "When you are done, write a short session summary to "
-    ".engineering/sessions/{summary_name}.md under the repo, starting with YAML "
-    "front-matter carrying exactly these keys and values:\n"
+    "When you are done, write a short session summary to {summary_path}, "
+    "starting with YAML front-matter carrying exactly these keys and values:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
     "worker_session_id: {session_id}\n"
     "---\n"
-    'Then write that path, relative to the repo root, as "session_summary_ref" '
-    "in the JSON result file at $KRAFT_RESULT_PATH.\n"
     "\n"
-    'Report how it went as "status" in that same result file: "done" if you '
-    'finished the work; "done_with_concerns" if you finished it but have '
+    'Report how it went as "status" in the JSON result file at '
+    '$KRAFT_RESULT_PATH: "done" if you finished the work; '
+    '"done_with_concerns" if you finished it but have '
     'doubts about correctness, with why in a "concerns" field; "failed" if you '
     'could not complete the task; or "needs_context" if you were missing '
     'information nobody gave you, with what you need in a "question" field. '
@@ -85,12 +86,11 @@ _CTX = (
     "not push and do not merge: Kraft pushes the branch and opens, updates "
     "and merges the merge request itself.\n"
     "\n"
-    "Exception: `.engineering/` (your session summary, and any spec/plan/"
-    "review document a hook asked you to write) is gitignored on purpose. "
-    "Kraft reads those files straight off disk, never from git, so they must "
-    "not reach the merge request. If `git add` refuses one of those paths, "
-    "that is git working as intended — do not `git add -f` it or otherwise "
-    "force it in."
+    "Exception: `.engineering/` (any spec/plan/review document an earlier "
+    "run left there) is gitignored on purpose. Kraft reads those files "
+    "straight off disk, never from git, so they must not reach the merge "
+    "request. If `git add` refuses one of those paths, that is git working as "
+    "intended — do not `git add -f` it or otherwise force it in."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -117,15 +117,19 @@ _USAGE_REQUEST = (
 )
 
 
-def artifact_path(kind: str, work_item_id: str) -> str:
-    """Where a hook with `artifact: <kind>` must write its document.
+def artifact_path(run_dirs, kind: str, work_item_id: str) -> Path:
+    """Where a task producing `kind` must write its document: its item's
+    `docs/<kind>.md`, outside the repository, absolute.
 
     Derived on both sides — injected here, read back by
-    `GET /work-items/{wid}/artifact` — rather than stored on the work item.
-    Nothing to migrate, nothing to go stale, and a rerun after a rejected gate
-    revises the same file instead of leaving a stale pointer behind.
+    `GET /work-items/{wid}/artifact` through `item_paths.document` — rather
+    than stored on the work item. Nothing to migrate, nothing to go stale, and
+    a rerun after a rejected gate revises the same file instead of leaving a
+    stale pointer behind. An item that ran before the upgrade may still have
+    its document at `item_paths.legacy_document_name`, in its worktree; the
+    dispatch seeds `docs/` from it before a revision (`item_paths.keep_version`).
     """
-    return f".engineering/{kind}s/{work_item_id}.md"
+    return item_paths.path_of(run_dirs, work_item_id, item_paths.document_name(work_item_id, kind))
 
 
 #: The contract a hook with an `artifact:` binding is held to. Not part of the
@@ -133,8 +137,8 @@ def artifact_path(kind: str, work_item_id: str) -> str:
 #: result goes, how a reviewer finds it and what the chain does with it next
 #: (`artifact_notes`). Swapping the method must not be able to lose the contract.
 _ARTIFACT = (
-    "\n\nWrite your {kind} to {path}, relative to the repo root, creating that "
-    "directory if it does not exist, and to no other path. Start it with YAML "
+    "\n\nWrite your {kind} to {path}, creating that directory if it does not "
+    "exist, and to no other path. Start it with YAML "
     "front matter carrying exactly these keys:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
@@ -161,6 +165,38 @@ _MR_META_KEYS = (
     "assignees: [<a username the repo names, or an empty list>]\n"
     "reviewers: [<usernames CODEOWNERS names for these paths, or an empty list>]\n"
 )
+
+#: Every launch's list of its item's documents (`documents_note`).
+_DOCUMENTS = "\n\nThis work item's documents so far, by path:\n{lines}\n"
+
+
+def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> str:
+    """Where this item's documents are: each kind its chain produces or a gate
+    decides that is on disk, by absolute path (`item_paths.document`, the new
+    place first), then each document attached at intake, by its path in the
+    worktree, where `_copy_attachments` puts it. A later node used to find a
+    gate-written document by its place in the worktree; it is not there now.
+    "" when there is none, or no row."""
+    if work_item_row is None:
+        return ""
+    wid = work_item_row["id"]
+    chain = store.materialized_chain_of(work_item_row)
+    nodes = chain.chain.nodes if chain is not None else ()
+    kinds = dict.fromkeys(
+        [k for n in nodes for k in sorted(k for k in n.produces() if k)]
+        + [a for n in nodes if (a := getattr(n.node, "artifact", None))]
+    )
+    lines = [
+        f"{kind}: {item_paths.path_of(run_dirs, wid, name, worktree=worktree)}"
+        for kind in kinds
+        if (name := item_paths.document(run_dirs, wid, kind, worktree=worktree)) is not None
+    ]
+    raw = work_item_row["attachments"] if "attachments" in work_item_row.keys() else None
+    lines += [
+        f"{a['kind']}, attached at intake: {a['path']} in the worktree"
+        for a in (json.loads(raw) if raw else [])
+    ]
+    return _DOCUMENTS.format(lines="\n".join(lines)) if lines else ""
 
 
 class Invocation(NamedTuple):
@@ -460,7 +496,9 @@ def _envelope_is_error(
     return _base_status
 
 
-def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: str | None):
+def _resolve_status(
+    artifact: str | None, work_item_id: str, run_dirs, cwd: Path, reader: str | None
+):
     """`post_resolve` for an agent task: a bad envelope *or* a missing artifact.
 
     A binding that declares `artifact:` is held to producing it — the contract
@@ -479,7 +517,10 @@ def _resolve_status(artifact: str | None, work_item_id: str, cwd: Path, reader: 
         # stop reason generic, and 409s both /steer and /resume.
         if artifact is None or status not in ADVANCING:
             return status
-        if (Path(cwd) / artifact_path(artifact, work_item_id)).is_file():
+        # Either place: a worker re-adopted after the upgrade may be on
+        # instructions that named the worktree's `.engineering/`. Never
+        # through a link (`item_paths.document`).
+        if item_paths.document(run_dirs, work_item_id, artifact, worktree=Path(cwd)) is not None:
             return status
         return "failed"
 
@@ -532,7 +573,15 @@ def context_sections(
     intent_dir: str | None = None,
     #: `(source, text)` per steering profile, the repository's then the task's.
     steering: Sequence[tuple[str, str]] = (),
-    summary_name: str | None = None,  # else session_id: `escalate.thread_files`
+    #: Where the session writes its summary (`SessionFiles.summary`, an
+    #: escalation thread's shared one), absolute; None shows a placeholder
+    #: (the steering preview, which has no session).
+    summary_path: str | None = None,
+    #: Where it writes the `artifact` document (`artifact_path`), absolute;
+    #: None shows a placeholder, as for `summary_path`.
+    document_path: str | None = None,
+    #: The item's documents so far (`documents_note`), "" for none.
+    documents: str = "",
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -548,7 +597,7 @@ def context_sections(
                 node_id=node_id,
                 hook_point=hook_point,
                 session_id=session_id,
-                summary_name=summary_name or session_id,
+                summary_path=summary_path or "<session summary path>",
             ),
         )
     ]
@@ -560,7 +609,7 @@ def context_sections(
                 artifact,
                 _ARTIFACT.format(
                     kind=artifact,
-                    path=artifact_path(artifact, work_item_id),
+                    path=document_path or "<document path>",
                     work_item_id=work_item_id,
                     node_id=node_id,
                     hook_point=hook_point,
@@ -569,6 +618,11 @@ def context_sections(
                 + _artifact_notes.NOTES.get(artifact, ""),
             )
         )
+    if documents:
+        # Every launch, not only the node's own default instruction: a later
+        # node used to find a document by its place in the worktree, and it
+        # is not there any more.
+        sections.append(("documents", "kraft", documents))
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
@@ -634,15 +688,19 @@ def context_sections(
 INSTRUCTION_MAX_BYTES = 24 * 1024
 
 
-def _writable_dirs(run_dirs, name: str, cwd) -> str:
+def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd) -> str:
     """The `writable_dirs` value: a JSON array (also a TOML inline array) of
     the directories outside the worktree a worker must write (Kraft-rs9pk).
 
-    The result file's directory, under $KRAFT_HOME/run/results. And the
-    worktree's git common dir, where every commit writes -- the main
-    checkout's `.git`, outside a linked worktree -- asked of git rather than
-    guessed, and left out when git has none to give."""
-    dirs = [str(_subprocess.result_path_for(run_dirs, name).parent)]
+    The session's `out/`, which holds its result file and summary, and its
+    item's `docs/`. Never the session folder itself: it holds the log Kraft
+    reads usage and rate limits from and the exit code the host writes with
+    a plain `>`, and for `codex` this list is its OS sandbox's writable roots
+    (`harnesses/codex.yaml`), so a worker granted it could plant a link
+    there. And the worktree's git common dir, where every commit writes --
+    the main checkout's `.git`, outside a linked worktree -- asked of git
+    rather than guessed, and left out when git has none to give."""
+    dirs = [str(files.writable), str(item_paths.docs_dir(run_dirs, work_item_id))]
     common = git_read(
         Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
     )
@@ -683,23 +741,56 @@ def _config_dir(
     A sandboxed item gets a directory of its own inside its `sandbox_home`,
     which its sandboxes already mount: the shared one would be a directory
     one item's worker could rewrite under every other item's launches,
-    sandboxed or not."""
+    sandboxed or not. That home is the worker's to write, so nothing in it is
+    trusted: the directory is opened one component at a time with no link
+    followed (`open_dir_no_symlinks`), and each file is written relative to
+    it, so a link a worker planted is refused or replaced, never written
+    through. A refusal is `LaunchRefused`, naming the directory."""
     if h.config_env is None:
         return {}
-    directory = (
-        sandbox_home / ".kraft-harness-config" / h.id
-        if sandbox_home is not None
-        else run_dirs.base / "harness-config" / h.id
-    )
-    directory.mkdir(parents=True, exist_ok=True)
-    for name, text in h.config_files.items():
-        tmp = directory / f".{name}.{session_id}"
-        tmp.write_text(text)
-        os.replace(tmp, directory / name)
+    if sandbox_home is None:
+        directory = run_dirs.base / "harness-config" / h.id
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, text in h.config_files.items():
+            tmp = directory / f".{name}.{session_id}"
+            tmp.write_text(text)
+            os.replace(tmp, directory / name)
+        return {h.config_env: str(directory)}
+    directory = sandbox_home / ".kraft-harness-config" / h.id
+    try:
+        # The home itself is Kraft's (`item_paths.sandbox_home`, which takes
+        # no link for the old one); everything below it is the worker's.
+        sandbox_home.mkdir(parents=True, exist_ok=True)
+        dir_fd = open_dir_no_symlinks(sandbox_home, (".kraft-harness-config", h.id), create=True)
+        try:
+            for name, text in h.config_files.items():
+                _replace_at(dir_fd, name, f".{name}.{session_id}", text)
+        finally:
+            os.close(dir_fd)
+    except OSError as exc:
+        raise LaunchRefused(
+            f"cannot write {h.id}'s config into {directory}: {exc}; something in the "
+            f"sandbox home is not a plain folder or file (a link is never followed), "
+            f"so remove it and retry"
+        ) from exc
     return {h.config_env: str(directory)}
 
 
-def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
+def _replace_at(dir_fd: int, name: str, tmp: str, text: str) -> None:
+    """Write `text` to `name` in the folder `dir_fd` by way of `tmp`, a rename
+    so a reader never sees half a file. `tmp` is created with `O_CREAT |
+    O_EXCL | O_NOFOLLOW` after removing whatever held its name (the name,
+    never what a link there points at), and the rename replaces a link at
+    `name` rather than writing through it."""
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(tmp, dir_fd=dir_fd)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+
+
+def _bounded_instruction(path: Path, task_instruction: str) -> str:
     """`task_instruction`, or its head plus where the whole of it is written.
 
     One place for every note an agent is launched with, because
@@ -708,7 +799,9 @@ def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> st
     raw = task_instruction.encode()
     if len(raw) <= INSTRUCTION_MAX_BYTES:
         return task_instruction
-    path = run_dirs.results / f"{session_id}.instruction.md"
+    # The session's own folder, which a worker never writes: a sandbox mounts
+    # the file read-only.
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(task_instruction)
     head = raw[:INSTRUCTION_MAX_BYTES].decode(errors="ignore")
     head = head[: head.rfind("\n")] if "\n" in head else head
@@ -850,7 +943,9 @@ async def run_agent_task(
     repository: str | None = None,
     repo_entry: RepoEntry | None = None,
     time_cap=None,
-    files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
+    #: The session's files, else its own folder's (`item_paths.session_files`):
+    #: an escalation turn's result and summary are its thread's (Kraft-s7c04.54).
+    files: item_paths.SessionFiles | None = None,
     harness_id: str | None = None,  # the harnesses.yaml id; keys `rate_limit_hit`
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
@@ -866,7 +961,14 @@ async def run_agent_task(
             f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
         ) from None
 
-    task_instruction = _bounded_instruction(run_dirs, session_id, task_instruction)
+    files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
+    task_instruction = _bounded_instruction(files.instruction, task_instruction)
+    # Every launch is told where its item's documents are, whoever launched
+    # it: a node's own pass, a fix loop, an override, an escalation turn or a
+    # gate review.
+    item_row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -882,7 +984,9 @@ async def run_agent_task(
         method_text=method_text,
         intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
-        summary_name=files,
+        summary_path=str(files.summary),
+        document_path=str(artifact_path(run_dirs, artifact, work_item_id)) if artifact else None,
+        documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
     )
     options = {
         k: v
@@ -1065,7 +1169,7 @@ async def run_agent_task(
         rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
-        options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
+        options["writable_dirs"] = _writable_dirs(run_dirs, files, work_item_id, cwd)
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).
@@ -1117,6 +1221,8 @@ async def run_agent_task(
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
+            # Where its documents go: a sandbox mounts this folder read-write.
+            "KRAFT_DOCS_DIR": str(item_paths.docs_dir(run_dirs, work_item_id)),
             **(
                 {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
             ),
@@ -1124,7 +1230,7 @@ async def run_agent_task(
             **config_env,
             **rules_env,
         },
-        post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
+        post_resolve=_resolve_status(artifact, work_item_id, run_dirs, cwd, reader),
         round=round,
         head_sha=head_sha,
         thread=thread,

@@ -151,9 +151,9 @@ def render_package(change: Change, base: str, *, since: str | None = None) -> st
 
 
 def write_package(
-    results_dir: Path, worktree: Path, base: str, session_id: str, *, since: str | None = None
+    path: Path, worktree: Path, base: str, *, since: str | None = None
 ) -> Path | None:
-    """Write the package into `results_dir` and return its path, or None.
+    """Write the package to `path` and return it, or None.
 
     `since`, when given, narrows the range to `since..working tree` -- the head
     the previous review of this hook was taken at (Kraft-s7c04.1). `Commits` and
@@ -161,19 +161,17 @@ def write_package(
     another is a trap for whoever reads it next. `None` is the whole branch,
     exactly as before, and is what round 0 of every work item gets.
 
-    Named by the session, the way the result file beside it already is.
-    Naming it by the `base..HEAD` range instead looks like it distinguishes
-    more, and distinguishes less: `results_dir` is one directory for every work
-    item, and uncommitted work -- the normal mid-chain state this module exists
-    to show -- leaves HEAD equal to base, so two items branched from the same
-    commit collide, and one reviewer is handed the other item's diff. A session
-    id is unique per dispatch, so a re-measure after a fix cycle also keeps the
-    evidence the previous cycle was reviewed against.
+    One package per dispatch, at the path its session is given
+    (`SessionFiles.review`), never one per `base..HEAD` range: uncommitted
+    work -- the normal mid-chain state this module exists to show -- leaves
+    HEAD equal to base, so two items branched from the same commit would
+    share a name. Per dispatch, a re-measure after a fix cycle also keeps
+    the evidence the previous cycle was reviewed against.
     """
     change = read_change(worktree, since or base, context=PACKAGE_CONTEXT)
     if change is None:
         return None
-    path = results_dir / f"{session_id}.review.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_package(change, base, since=since))
     return path
 

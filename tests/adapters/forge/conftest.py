@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
+from support.harness import own_files
 
 from kraft import events
 from kraft.adapters import forge
@@ -109,7 +110,7 @@ class ForgeRun:
         return returned, row["status"] if row else None
 
     def log(self, sid: str) -> str:
-        return (self.run_dirs.logs / f"{sid}.log").read_text()
+        return own_files(self.run_dirs, sid).log.read_text()
 
     def events(self, type: str) -> list[dict]:
         evts = self.database.read(lambda c: events.read_after(c, 0, "w1"))
