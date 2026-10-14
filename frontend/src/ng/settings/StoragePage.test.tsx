@@ -19,6 +19,7 @@ describe("Settings › Storage, usage", () => {
   it.each([
     ["ok", 7 * GB, "is-ok", ""],
     ["over_quota", 9 * GB, "is-over_quota", "Over the quota: Kraft is warning; starts still go ahead."],
+    ["over_quota", 12 * GB, "is-over_quota", "Over the limit in items' documents, which archiving keeps: starts still go ahead. Abandoning an item removes its documents."],
     ["held", 12 * GB, "is-held", "Over the limit: starts are held until you make room."],
   ] as const)("%s: the bar takes the state's look and the page says what it means", async (state, used, cls, note) => {
     stubFetch({ "GET /storage": [200, storageUsage({ state, used_bytes: used })] });

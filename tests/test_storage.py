@@ -389,6 +389,18 @@ async def test_tick_without_a_limit_does_not_walk(tmp_path, stub_app, monkeypatc
     assert storage.usage(app.state) is None
 
 
+async def test_tick_with_no_measurement_acts_on_nothing(tmp_path, stub_app, monkeypatch):
+    """Shutdown can stop the first walk before it caches anything."""
+    app = stub_app(policy=_policy(100, 80, 0))
+
+    async def stopped(_app):
+        return None
+
+    monkeypatch.setattr(storage, "refresh", stopped)
+
+    assert await storage.tick(app) == []
+
+
 def _state(tmp_path, *, limit, quota, min_age_s) -> dict:
     return {
         "templates_dir": tmp_path / "templates",

@@ -131,6 +131,14 @@ def _storage_line(payload: dict) -> tuple[str, str] | None:
             else ""
         )
         return "held", f"{used}: starts that need a new worktree are held{waited}; {free}"
+    if s["state"] == "over_quota" and s["used_bytes"] > s["limit_bytes"]:
+        # Not held, yet over the limit: what is over it is items' documents,
+        # which archiving keeps, so archiving cannot make that room.
+        return "over_quota", (
+            f"{used}, over the limit in items' documents, which archiving keeps, so "
+            "starts still go ahead; kraft view storage lists them by item, and "
+            "abandoning an item removes its documents"
+        )
     if s["state"] == "over_quota":
         return "over_quota", f"{used}, over the {size(s['quota_bytes'])} quota; {free}"
     return "ok", f"{used}; kraft view storage lists it by item"

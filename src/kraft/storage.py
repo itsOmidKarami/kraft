@@ -360,7 +360,8 @@ async def tick(app) -> list[str]:
         return []
     await refresh(app)
     min_age = st.policy.storage_auto_cleanup_min_age_s
-    if min_age is None:
+    # No measurement when shutdown stopped the first walk: nothing to act on.
+    if min_age is None or usage(st) is None:
         return []
     # Read once: a reload that drops the limit mid-tick must not change the target.
     quota, limit = st.policy.storage_quota_bytes, st.policy.storage_limit_bytes

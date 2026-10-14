@@ -8,20 +8,21 @@ from kraft import doctor
 
 
 @pytest.mark.parametrize(
-    ("state", "ok", "warn", "says"),
+    ("state", "used", "ok", "warn", "says"),
     [
-        ("ok", True, False, "of 100K"),
-        ("over_quota", True, True, "over the 80K quota"),
-        ("held", False, False, "starts that need a new worktree are held"),
+        ("ok", 70, True, False, "of 100K"),
+        ("over_quota", 90, True, True, "over the 80K quota"),
+        ("over_quota", 120, True, True, "over the limit in items' documents"),
+        ("held", 120, False, False, "starts that need a new worktree are held"),
     ],
-    ids=["ok", "over-quota", "held"],
+    ids=["ok", "over-quota", "over-limit-in-documents", "held"],
 )
-def test_doctor_says_where_storage_stands(state, ok, warn, says):
+def test_doctor_says_where_storage_stands(state, used, ok, warn, says):
     payload = {
         "status": "degraded" if state == "held" else "ok",
         "storage": {
             "state": state,
-            "used_bytes": 90 * 1024,
+            "used_bytes": used * 1024,
             "quota_bytes": 80 * 1024,
             "limit_bytes": 100 * 1024,
         },

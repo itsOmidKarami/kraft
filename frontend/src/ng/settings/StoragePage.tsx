@@ -79,7 +79,7 @@ export function StoragePage() {
 
   // One live region, always mounted: a screen reader hears a change in it, not a relabelled button.
   const note =
-    measuring && data ? "Measuring…" : data?.state === "held" ? "Over the limit: starts are held until you make room." : data?.state === "over_quota" ? "Over the quota: Kraft is warning; starts still go ahead." : "";
+    measuring && data ? "Measuring…" : data?.state === "held" ? "Over the limit: starts are held until you make room." : data?.state === "over_quota" && limit != null && used > limit ? "Over the limit in items' documents, which archiving keeps: starts still go ahead. Abandoning an item removes its documents." : data?.state === "over_quota" ? "Over the quota: Kraft is warning; starts still go ahead." : "";
 
   return (
     <div className="ng-settings">
