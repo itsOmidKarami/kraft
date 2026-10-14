@@ -119,6 +119,33 @@ it learns nothing about which IDs exist. A worker inside a network sandbox
 reaches Kraft through its own channel, which still takes only its own item's
 whole ID.
 
+## Session IDs in a path
+
+A session ID is unique only within its work item, so a session's routes are
+under its item:
+
+| Route | What it does |
+|---|---|
+| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. |
+| `POST /api/work-items/{id}/sessions/{session}/permission` | A worker's [permission](/reference/permissions) ask. |
+| `POST /api/work-items/{id}/sessions/{session}/permission-hook` | A sandboxed worker's permission hook. |
+
+`{id}` may be the start of the item's ID, as above. `{session}` is always the
+whole session ID. A session of another item answers `404 unknown session`.
+
+The older routes, `/api/worker-sessions/{session}/log`, `/permission` and
+`/permission-hook`, still answer, for a client built before session IDs were
+per item. Given an ID exactly one session has, every ID from before then and
+most since, they answer as the route under its item does. Given one that no
+session or more than one session has, they answer `404`, ending
+`use /work-items/{wid}/sessions/{sid}`.
+
+A worker's own session travels in the `X-Kraft-Session-Id` header as
+`<work item id>/<session id>`, from [`KRAFT_SESSION_ID`](/reference/configuration/environment-variables#kraft_session_id).
+A bare ID is a session from before then. A value that is neither answers
+`400`. A sandboxed worker's channel admits only its own session's
+`permission` and `permission-hook` routes, by both whole IDs.
+
 ## Routes the pages document
 
 The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They do not document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
