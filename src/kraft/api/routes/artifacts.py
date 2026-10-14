@@ -427,7 +427,8 @@ def _worktree_document(st, wid: str, rel: str, text: str, truncated: bool, body=
 
 
 def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, missing: str) -> dict:
-    """Launch an editor on the file `rel_of(st, row)` names in `wid`'s worktree.
+    """Launch an editor on the document `rel_of(st, row)` names: in `wid`'s
+    folder, or in its worktree for an older one (`item_paths.locate`).
 
     The same loopback-only rule as `POST /documents/{id}/open`, checked first so a
     remote caller learns nothing about the item, and the walk the reads go
@@ -446,9 +447,8 @@ def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, mi
 
 @api_router.post("/work-items/{wid}/artifact/open")
 async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request):
-    """Launch an editor on the pending gate's document in the item's worktree. The
-    gate's artifact has no index row, so the path comes from the worktree the
-    way `GET /artifact` reads it."""
+    """Launch an editor on the pending gate's document. The gate's artifact
+    has no index row, so the path is found the way `GET /artifact` reads it."""
     return _open_in_worktree(
         request,
         wid,
@@ -527,13 +527,13 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
 
 @api_router.post("/work-items/{wid}/artifacts/{kind}/open")
 async def open_produced_artifact(wid: str, kind: str, body: OpenDocument, request: Request):
-    """Launch an editor on a task's produced document in the item's worktree."""
+    """Launch an editor on a task's produced document, where it is on disk."""
     return _open_in_worktree(
         request,
         wid,
         body.editor,
         lambda st, row: _produced_path(st, row, kind),
-        f"this work item has no {kind} in its worktree",
+        f"this work item has no {kind} on disk",
     )
 
 
@@ -542,11 +542,12 @@ async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:
 
     Approval, not the worktree's eventual removal, is the hook: it is the
     first moment the content is accepted rather than still being drafted, and
-    it is a point every artifact-carrying gate already passes through --
-    unlike worktree teardown, which today only happens on `abandon`. Nothing
-    Kraft wrote under `.engineering/` is committed
-    (`forge._work_product_pathspec`), so this is the artifact's only durable
-    copy once its worktree is eventually gone.
+    it is a point every artifact-carrying gate already passes through. The
+    document itself stays in the item's `docs/` until the item is abandoned
+    (an older item's, in its worktree's `.engineering/`, which is never
+    committed (`forge._work_product_pathspec`), goes with its worktree), so
+    this copy is what search finds, and what an older item has left once
+    archived.
 
     Best-effort end to end: a missing or unreadable artifact is
     `_read_worktree_artifact` recording why on the item's own timeline, and an

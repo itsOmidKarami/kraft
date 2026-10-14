@@ -279,13 +279,14 @@ class Indexer:
     ) -> None:
         """Persist an approved gate artifact (spec/plan/chain_review/
         review_brief) the way a session summary is already persisted: read
-        straight off the worktree by the caller, upserted here, no git scan
-        involved.
+        by the caller from the item's `docs/` (or an older item's worktree),
+        upserted here, no git scan involved.
 
-        This is that artifact's only durable copy from here on: `.engineering/`
-        never lands in the connected repo's git history
-        (`forge._work_product_pathspec`), so once the worktree that holds it is
-        gone, this row is all there is.
+        The document stays in `docs/` until the item is abandoned, so this
+        row is what search finds; for an older item, whose document is in its
+        worktree's `.engineering/` and never in the connected repo's git
+        history (`forge._work_product_pathspec`), it is all that is left once
+        the worktree is gone.
         The caller (`kraft.api.routes.gates.approve_gate`) is what makes "gate approval" the right
         moment -- it is the first point the content is accepted rather than
         still being drafted, and reuses the same worktree-containment-checked

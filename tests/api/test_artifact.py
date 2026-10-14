@@ -192,6 +192,11 @@ def test_gate_artifact_open_refuses_what_the_read_refuses(
     assert client.get(f"/api/work-items/{wid}/{route}").status_code == 404
     r = client.post(f"/api/work-items/{wid}/{route}/open", json={"editor": "code"})
     assert r.status_code == 404, r.text
+    missing = {
+        "artifact": "this work item's gate has no artifact",
+        "artifacts/spec": "this work item has no spec on disk",
+    }
+    assert r.json()["detail"] == missing[route]
     assert launched == []
 
 
