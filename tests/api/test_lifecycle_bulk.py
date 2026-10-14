@@ -156,7 +156,7 @@ def test_bulk_cancel_with_a_reason_cancels_each_item(client, repo):
     assert r.json()["results"] == [{"id": wid, "ok": True, "status": "abandoned"}]
 
 
-@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:8]], ids=["whole", "start"])
+@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:5]], ids=["whole", "start"])
 def test_bulk_archive_takes_only_ended_items(client, repo, typed):
     active = _post_default(client, repo)
     _poll_events(client, active, "gate_requested")

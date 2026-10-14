@@ -19,7 +19,8 @@ def run_dir(monkeypatch, tmp_path):
     return base
 
 
-# A worker's own id: 32 characters, as Kraft mints them.
+# A worker's own id, one from before 8-character ids: 32 characters, so its
+# first eight are a start of it, not the whole id.
 OWN = "abcd1111" + "0" * 24
 
 

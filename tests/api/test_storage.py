@@ -153,7 +153,7 @@ def test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one(client, rep
     for sid, w in (("s-a", first), ("s-b", second)):
         permissions.seed_session(sid=sid, wid=w)
 
-    r = client.post("/api/storage/preview", json={"ids": [wid[:8], "abcd11"]})
+    r = client.post("/api/storage/preview", json={"ids": [wid[:5], "abcd11"]})
 
     assert r.status_code == 200, r.text
     assert [(i["id"], i["archivable"], i["refusal"]) for i in r.json()["items"]] == [

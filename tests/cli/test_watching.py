@@ -87,7 +87,7 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     assert [line["n"] for line in lines] == sorted(line["n"] for line in lines)
 
 
-@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:8]], ids=["whole", "start"])
+@pytest.mark.parametrize("typed", [lambda w: w, lambda w: w[:5]], ids=["whole", "start"])
 def test_events_follow_filters_by_item_and_stops_on_completion(
     app, monkeypatch, capsys, make_item, repo, typed
 ):

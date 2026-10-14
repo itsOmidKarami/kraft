@@ -18,7 +18,7 @@ def _create(client, repo, **body):
         (None, lambda w: w, 422, "no work item"),
         ("abandoned", lambda w: w, 422, "abandoned"),
         ("completed", lambda w: w, 201, None),
-        ("completed", lambda w: w[:8], 201, None),
+        ("completed", lambda w: w[:5], 201, None),
     ],
     ids=["unknown", "abandoned", "completed", "completed-by-its-start"],
 )

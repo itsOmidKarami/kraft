@@ -486,7 +486,7 @@ def _archived(wid) -> bool:
 
 @pytest.mark.parametrize(
     "typed",
-    [lambda w: [w], lambda w: [w[:8]], lambda w: [w[:8], w]],
+    [lambda w: [w], lambda w: [w[:5]], lambda w: [w[:5], w]],
     ids=["whole", "start", "same-item-twice"],
 )
 def test_archive_needs_a_yes_and_then_archives(app, repo, make_item, capsys, typed):

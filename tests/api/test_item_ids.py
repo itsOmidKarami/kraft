@@ -73,7 +73,7 @@ def test_an_action_on_the_start_of_an_id_acts_on_the_whole_item(client, repo):
     carry the whole id, not only the lookup succeed."""
     wid = _paused(client, repo)
 
-    r = client.patch(f"/api/work-items/{wid[:8]}", json={"budget_usd": 5})
+    r = client.patch(f"/api/work-items/{wid[:5]}", json={"budget_usd": 5})
 
     assert r.status_code == 200, r.text
     assert r.json()["id"] == wid

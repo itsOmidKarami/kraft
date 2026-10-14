@@ -91,7 +91,7 @@ def test_pausing_a_blocked_item_puts_it_back_and_keeps_what_it_comes_after(clien
 
 
 @pytest.mark.parametrize(
-    "body", [lambda dep: {}, lambda dep: {"dependency": dep[:8]}], ids=["every", "by-its-start"]
+    "body", [lambda dep: {}, lambda dep: {"dependency": dep[:5]}], ids=["every", "by-its-start"]
 )
 def test_unblock_drops_what_the_item_waits_on_and_it_is_released(client, repo, body):
     from functools import partial
