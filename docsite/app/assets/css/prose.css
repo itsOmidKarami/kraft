@@ -11,7 +11,9 @@
     radial-gradient(farthest-side at 100% 50%, color-mix(in oklab, var(--ui-text) 30%, transparent), transparent) right / 0.75rem 100% no-repeat scroll;
 }
 
-/* The landscape diagrams (public/diagrams/*.svg, 1100 to 1650px wide) shrank
+/* The landscape diagrams (public/diagrams/*.svg, 1100 to 1650px wide; only a
+   release up to v2.0.0 still has them, and its build takes them from the tag:
+   main's diagrams are markup, Diagram*.vue, which fit a phone) shrank
    to 343px on a phone, 4 to 5px text. Under 640px they keep a width where
    the text can be read and scroll sideways inside their own box,
    .diagram-scroll (ProseImg.vue wraps the image in it; structure.svg and

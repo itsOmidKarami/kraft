@@ -2,7 +2,7 @@
 // resolve inside the site's own app. Make each one absolute.
 //
 // - raw/<page>.md (what llms.txt, "Copy page" and "Open in Claude/ChatGPT"
-//   serve) keeps `[x](/reference/harnesses)` and `![x](/diagrams/y.svg)`,
+//   serve) keeps `[x](/reference/harnesses)` and `![x](/assets/y.png)`,
 //   which resolve at the domain root, outside a build under /next/.
 // - llms-full.txt joins every page into one file, so a page's own `#anchor`
 //   links all landed on the landing page.

@@ -6,10 +6,8 @@ git worktree. Its state is two SQLite databases under `$KRAFT_HOME/run/`:
 `orchestrator.db`, the record of every work item, and `index.db`, a search
 index that Kraft can rebuild at any time.
 
-![Kraft's components](docsite/public/diagrams/components.svg)
-
-The full page, with the parts, how a work item moves from filing to merge, the
-trust boundaries and what is kept on disk, lives on the docs site:
+The full page, with a diagram of the parts, how a work item moves from filing
+to merge, the trust boundaries and what is kept on disk, lives on the docs site:
 [Architecture](https://kraft-sdlc.dev/project/architecture).
 Its source is
 [`docsite/content/6.project/5.architecture.md`](docsite/content/6.project/5.architecture.md).
@@ -32,8 +30,9 @@ For how one work item moves from filing to merge, and its seven statuses, see
 For the vocabulary, see
 [Concepts](https://kraft-sdlc.dev/concepts/vocabulary).
 
-The diagrams are Mermaid sources in `docsite/diagrams/`, rendered to SVG with
-`just docs-diagrams`.
+The docs site's diagrams are written in the pages' Markdown, drawn by the
+`Diagram*.vue` components in `docsite/app/components/`; CONTRIBUTING.md's
+"User-facing docs" says how.
 
 ## Closed sets
 
