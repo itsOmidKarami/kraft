@@ -11,3 +11,135 @@
 .hero-sans {
   font-family: 'IBM Plex Sans', var(--font-sans, sans-serif);
 }
+
+/* The landing page (content/index.md). Its sections carry `landing` in their
+   `ui.root`. These rules are outside any cascade layer, so they win over the
+   Nuxt UI theme's Tailwind utilities (which are layered) without !important.
+   Nothing else uses these classes: the release docs' older index.md only uses
+   hero-mono and the stage strip. */
+.landing [data-slot='container'] {
+  padding-block: 3rem;
+  row-gap: 2rem;
+}
+
+.landing [data-slot='wrapper'],
+.landing [data-slot='title'],
+.landing [data-slot='description'] {
+  text-align: left;
+}
+
+.landing [data-slot='title'] {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* Hero copy and section descriptions stop at a readable measure. */
+.landing [data-slot='description'] {
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+
+.landing [data-slot='links'] {
+  justify-content: flex-start;
+}
+
+/* The hero: no dead band above the headline, which is sized to the page and
+   not to a poster. */
+.landing-hero [data-slot='container'] {
+  padding-block: 3.5rem 2.5rem;
+}
+
+.landing-hero [data-slot='title'] {
+  max-width: 26ch;
+  font-size: clamp(2.125rem, 1.25rem + 3vw, 3.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.landing-hero [data-slot='description'] {
+  font-size: clamp(1.125rem, 1rem + 0.4vw, 1.3125rem);
+  color: var(--ui-text-toned);
+}
+
+/* The install command, the page's first action: a code block (so it keeps
+   its copy button) only as wide as the command. */
+.landing-hero [data-slot='body'] {
+  margin-top: 2rem;
+}
+
+.landing-hero [data-slot='body'] > * {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+}
+
+.landing-hero [data-slot='body'] pre {
+  /* At 13px the whole command and the copy button fit a 390px phone. */
+  font-size: clamp(0.8125rem, 0.65rem + 0.6vw, 1rem);
+  padding-block: 0.875rem;
+}
+
+.landing-hero [data-slot='footer'] {
+  margin-top: 1.5rem;
+}
+
+/* A short list of points under a section's top part (what a session can't
+   do, in the hero; search and analytics, under the screenshots): columns
+   separated by a rule, not cards. */
+.landing [data-slot='container'] > p {
+  margin: 0 0 -1rem;
+  color: var(--ui-text-toned);
+}
+
+.landing [data-slot='container'] > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.5rem 2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing [data-slot='container'] > ul > li {
+  margin: 0;
+  padding: 1rem 0 0;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-text-toned);
+}
+
+.landing [data-slot='container'] > ul strong,
+.landing-shot strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
+}
+
+/* Close-ups side by side from a tablet up; LandingShot.vue gives each a share
+   of the row that makes their heights match. */
+.landing-shots {
+  display: grid;
+  gap: 2.5rem;
+}
+
+@media (min-width: 768px) {
+  .landing-shots {
+    display: flex;
+    align-items: flex-start;
+    gap: 2rem;
+  }
+
+  .landing-shots > * {
+    min-width: 0;
+  }
+}
+
+.landing-start [data-slot='container'] > p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ui-text-muted);
+}
