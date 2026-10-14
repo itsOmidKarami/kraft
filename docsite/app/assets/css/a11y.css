@@ -1,10 +1,10 @@
 /* Keyboard focus. The browser's own ring is 1px and Nuxt UI draws a different
    one per component (a 2px ring on a solid button, none on a ghost one), so a
-   focused control was hard to find, thinnest on the version banner's buttons.
+   focused control was hard to find.
    One ring for everything: 2px, set off from the edge, in the primary colour.
    Unlayered, so it wins over Nuxt UI's utility classes (@layer utilities). It
-   is violet-600 on white (6.1:1) and violet-400 on the dark page (6.1:1), and
-   on the banner's amber it is above 3:1, the bar for a UI component. */
+   is violet-600 on white (6.1:1) and violet-400 on the dark page (6.1:1), above
+   3:1, the bar for a UI component. */
 :focus-visible {
   outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
