@@ -508,18 +508,21 @@ async def test_escalation_running_reports_a_pending_or_running_session(database,
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
     assert escalate.escalation_running(database, wid) is None
-    await database.write(
-        lambda c: store.create_session(
-            c,
-            id="s1",
-            work_item_id=wid,
-            node_id="implementation",
-            hook_point="escalation",
-            log_path=str(run_dirs.logs / "s1.log"),
-            result_path=str(run_dirs.logs / "s1.json"),
+    # The second live at once is the newer: it is answered, though its id
+    # sorts after the older's.
+    for sid in ("s1", "z-newer"):
+        await database.write(
+            lambda c, sid=sid: store.create_session(
+                c,
+                id=sid,
+                work_item_id=wid,
+                node_id="implementation",
+                hook_point="escalation",
+                log_path=str(run_dirs.logs / f"{sid}.log"),
+                result_path=str(run_dirs.logs / f"{sid}.json"),
+            )
         )
-    )
-    assert escalate.escalation_running(database, wid) == "s1"
+        assert escalate.escalation_running(database, wid) == sid
 
 
 async def test_last_escalation_status_is_the_newest_sessions_status(database, run_dirs):
@@ -538,7 +541,7 @@ async def test_last_escalation_status_is_the_newest_sessions_status(database, ru
             result_path=str(run_dirs.logs / "s1.json"),
         )
     )
-    await database.write(lambda c: store.session_exited(c, "s1", "needs_context"))
+    await database.write(lambda c: store.session_exited(c, "s1", "needs_context", work_item_id=wid))
     assert escalate.last_escalation_status(database, wid) == "needs_context"
 
 

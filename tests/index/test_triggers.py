@@ -97,7 +97,9 @@ async def test_session_exit_with_ref_ingests_summary(tmp_path, database, conn):
             )
         )
         await database.write(
-            lambda c: store.session_exited(c, "s1", "done", ".engineering/sessions/s1.md")
+            lambda c: store.session_exited(
+                c, "s1", "done", ".engineering/sessions/s1.md", work_item_id="w1"
+            )
         )
         for _ in range(50):
             if ix.search("drain"):

@@ -9,4 +9,4 @@ def test_session_exited_refuses_a_stray_status(tmp_path):
     schema.insert_item(conn)
     schema.insert_session(conn)
     with pytest.raises(ValueError, match="SessionStatus"):
-        store.session_exited(conn, "s1", "ci_pending")
+        store.session_exited(conn, "s1", "ci_pending", work_item_id="w1")

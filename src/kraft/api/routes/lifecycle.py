@@ -1316,7 +1316,12 @@ async def _retry(wid: str, body: Retry, request: Request):
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
-    caller_session_id = request.headers.get("x-kraft-session-id")
+    # The caller as this item's session, bare, as every event records one:
+    # `<wid>/<sid>` names it only when `wid` is this item, and a bare id is
+    # unique on its own: `deps.caller_ref` takes one only at the 32
+    # characters of a session from before per-item ids.
+    caller = deps.caller_ref(request)
+    caller_session_id = caller[1] if caller is not None and caller[0] in (None, wid) else None
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
         # Not the escalation calling on itself -- a stranger's retry (a human,
@@ -2283,7 +2288,9 @@ async def stop_escalation(wid: str, request: Request):
     if running is None:
         raise HTTPException(409, "no escalation turn is running")
     row = st.db.read(
-        lambda c: c.execute("SELECT pid FROM worker_sessions WHERE id = ?", (running,)).fetchone()
+        lambda c: c.execute(
+            "SELECT pid FROM worker_sessions WHERE work_item_id = ? AND id = ?", (wid, running)
+        ).fetchone()
     )
     await st.db.write(lambda c: store.stop_escalation_session(c, wid, running))
     _terminate(row["pid"] if row else None)

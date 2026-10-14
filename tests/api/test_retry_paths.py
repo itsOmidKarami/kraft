@@ -255,7 +255,7 @@ def _escalation_running(wid, sid="s-esc"):
         conn.commit()
     finally:
         conn.close()
-    return {"x-kraft-session-id": sid}
+    return {"x-kraft-session-id": f"{wid}/{sid}"}
 
 
 def _self_retry_requests(client, wid):
@@ -284,6 +284,42 @@ def test_a_deferred_self_retry_carries_the_validated_override(client, repo, walk
     assert request["override"]["task_config"] == {"effort": "low"}
     assert request["override"]["path"] == path
     assert '"effort":"low"' in request["override"]["chain"]
+
+
+_OLD_ESC = "8cbfe6e27c1044b3e445c0f0d726357d"
+
+
+@pytest.mark.parametrize(
+    ("running", "caller", "own"),
+    [
+        ("e5c4l2", "{wid}/e5c4l2", True),
+        (_OLD_ESC, _OLD_ESC, True),
+        ("e5c4l2", "w-other/e5c4l2", False),
+        ("e5c4l2", "e5c4l2", None),
+    ],
+    ids=["qualified", "bare", "same-id-other-item", "bare-per-item-id"],
+)
+def test_an_escalation_retrying_its_own_item_is_told_apart_by_item_and_id(
+    client, repo, walked, running, caller, own
+):
+    """`<wid>/<sid>` is this item's escalation turn only when `wid` is this
+    item: another item's session with the same id is a stranger, whose retry
+    stops the turn and runs. A bare id is its own only as a pre-upgrade
+    one's 32 characters; a bare per-item id says nothing of its item, so it
+    is refused (`own` None) rather than taken for this item's. The deferral
+    records the bare id, as every event records a session."""
+    wid = _stopped_at(client, repo, "verification")
+    _escalation_running(wid, running)
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={},
+        headers={"x-kraft-session-id": caller.format(wid=wid)},
+    )
+
+    assert r.status_code == (400 if own is None else 200), r.text
+    asked = [q["session_id"] for q in _self_retry_requests(client, wid)]
+    assert asked == ([running] if own else [])
 
 
 def test_a_deferred_self_retry_refuses_an_override_out_of_bounds(client, repo, walked):

@@ -39,7 +39,7 @@ export function scopePane({ item, node, step, task, scope, round, now, crumbs, t
     sub: runs.length > 1 && s ? <>{lead} · <AttemptMenu sessions={runs} at={s} onAt={(n) => setAttempt(n === runs.at(-1)!.attempt ? undefined : n)} now={now} inRound /> · {stateWords(chip)}</> : `${lead} · ${stateWords(chip)}`,
     tabs,
     body: on === "log" && s
-      ? <Log key={s.id} sessionId={s.id} running={s.status === "running"} title={chip.command} crumb={[...crumbs.map((c) => c.label), task, ...repo].join(" › ")} />
+      ? <Log key={s.id} workItemId={item.id} sessionId={s.id} running={s.status === "running"} title={chip.command} crumb={[...crumbs.map((c) => c.label), task, ...repo].join(" › ")} />
       : (
         <dl className="item-facts ip-facts">
           {fact("status", statusWords(chip))}

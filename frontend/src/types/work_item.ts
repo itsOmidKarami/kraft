@@ -527,7 +527,7 @@ export interface WorkItemUsage {
   by_node: (UsageRollup & { node: string })[];
 }
 
-/** One line of a worker session's log (GET /worker-sessions/{id}/log?format=jsonl). */
+/** One line of a worker session's log (GET /work-items/{wid}/sessions/{sid}/log?format=jsonl). */
 export interface LogLine {
   n: number;
   t: string | null;

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import type { LogLine } from "../../../types";
+import { logUrl } from "../../../api";
 import { request } from "../../http";
 
 export const LOG_POLL_MS = 3000;
 
-/** A worker session's log (`GET /worker-sessions/{id}/log?format=jsonl`), read
+/** A worker session's log (`GET /work-items/{wid}/sessions/{sid}/log?format=jsonl`), read
  *  again every few seconds while the session runs. The same read as the desktop
  *  Log pane, which keeps its own inside the pane. */
-export function useLog(sessionId: string | null, running: boolean) {
+export function useLog(workItemId: string, sessionId: string | null, running: boolean) {
   const [lines, setLines] = useState<LogLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -16,7 +17,7 @@ export function useLog(sessionId: string | null, running: boolean) {
     if (!sessionId) return;
     let live = true;
     const read = () =>
-      request<{ lines: LogLine[] }>(`/worker-sessions/${encodeURIComponent(sessionId)}/log?format=jsonl`).then((r) => {
+      request<{ lines: LogLine[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
         if (!live) return;
         if (r.status === 200) { setLines(r.body.lines.filter((l) => !l.truncated)); setError(null); }
         else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
@@ -27,6 +28,6 @@ export function useLog(sessionId: string | null, running: boolean) {
       live = false;
       if (t) clearInterval(t);
     };
-  }, [sessionId, running]);
+  }, [workItemId, sessionId, running]);
   return { lines, error };
 }

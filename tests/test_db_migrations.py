@@ -255,6 +255,23 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             *replace,
             ("'queued', 'blocked'", "                      'rate_limited', 'waiting', 'queued')),"),
         )
+    if version < 55:
+        # The (work item, id) key: older versions keyed a session by `id` alone,
+        # with no index on it. `repository` loses its comma (harmless when it was
+        # already dropped, version < 52).
+        drop_lines = (
+            *drop_lines,
+            "PRIMARY KEY (work_item_id, id)",
+            "-- a session's id is unique only within",
+            "-- and a row from before that keeps",
+            "idx_worker_sessions_id",
+            "-- a flat `/worker-sessions/{sid}` route",
+        )
+        replace = (
+            *replace,
+            ("-- unique only with work_item_id", "  id             TEXT PRIMARY KEY,"),
+            ("repository     TEXT,", "  repository     TEXT"),
+        )
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(

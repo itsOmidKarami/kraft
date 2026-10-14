@@ -123,9 +123,11 @@ export function nodeRunSpan(
   return { from, to: null };
 }
 
-/** A 32-hex id as `first8…last5` (README §5): short enough never to be
- *  ellipsized, both ends kept so two ids still tell apart. Shorter ids pass
- *  through. Render the full id in a `title` beside it. */
+/** A 32-hex id (every item filed before 8-character ids) as `first8…last5`
+ *  (README §5): short enough never to be ellipsized, both ends kept so two
+ *  ids still tell apart. Shorter ids, an 8-character work item id or a
+ *  6-character session id, pass through whole. Render the full id in a
+ *  `title` beside it. */
 export function shortId(id: string): string {
   return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-5)}` : id;
 }
@@ -143,8 +145,10 @@ export const plainMarkdown = (s: string) =>
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
     .replace(/\*\*|__|`|\*/g, "");
 
-/** A title that is only an id: `8cbfe6e2…6357d`, a 32-hex, `Session <id>`. */
-const ID_TITLE = /^[0-9a-f]{8}…?[0-9a-f]{4,}$/;
+/** A title that is only an id: `8cbfe6e2…6357d`, a 32-hex, `Session <id>`,
+ *  or a whole 8-character base32 id (`k7m2x9qa`). That last one must hold a
+ *  digit, so a one-word title such as `standard` is not taken for an id. */
+const ID_TITLE = /^(?:[0-9a-f]{8}…?[0-9a-f]{4,}|(?=[0-9a-hjkmnp-tv-z]*\d)[0-9a-hjkmnp-tv-z]{8})$/;
 
 /** The first line of a body a person would call its opening: past front
  *  matter, headings, quotes, rules and table rows, as plain text, cut at its

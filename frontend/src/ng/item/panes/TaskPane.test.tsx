@@ -10,13 +10,15 @@ afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => usePaneMemory.setState({ pane: { open: true, userCollapsed: false } }));
 
 const sess = (hook_point: string, attempt: number, over: Partial<WorkerSession> = {}) =>
-  ({ id: `${hook_point}-${attempt}`, node_id: hook_point.split(".")[0] === "escalation" ? "verification" : hook_point.split(".")[0], hook_point, status: "done", attempt, round: attempt - 1, thread: 1, created_at: `2026-09-13T09:0${attempt}:00Z`, started_at: null, exited_at: null, wall_ms: 60_000, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0.1, head_sha: "abc1234567890", ...over }) as WorkerSession;
+  ({ id: `${hook_point}-${attempt}`, work_item_id: "w1", node_id: hook_point.split(".")[0] === "escalation" ? "verification" : hook_point.split(".")[0], hook_point, status: "done", attempt, round: attempt - 1, thread: 1, created_at: `2026-09-13T09:0${attempt}:00Z`, started_at: null, exited_at: null, wall_ms: 60_000, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0.1, head_sha: "abc1234567890", ...over }) as WorkerSession;
 const item = detail({ worker_sessions: [sess("verification.review.code_review", 1), sess("verification.review.code_review", 2, { status: "failed", harness: "codex" }), sess("escalation", 1, { node_id: "verification", status: "needs_context" })] });
 function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname + l.search}</output>; }
 const mount = (path: string, it = item, events: unknown[] = [], routes: Parameters<typeof stubFetch>[0] = {}) => {
   stubFetch({ ...routes, "GET /work-items/w1/events": [200, events], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
     { document_id: "d1", title: "Review notes", path: "a.md", kind: "reviews", worker_session_id: "verification.review.code_review-1", hook_point: "verification.review.code_review", attempt: 1 },
     { document_id: "d2", title: "Other", path: "b.md", kind: "plans", worker_session_id: "x", hook_point: "plan.write.plan", attempt: 1 },
+    // Another item's session with the same id, linked here by its summary's front matter.
+    { document_id: "d3", title: "Another item's notes", path: "items/w2/sessions/s/out/summary.md", kind: "sessions", worker_session_id: "verification.review.code_review-1", session_work_item_id: "w2", hook_point: "escalation", attempt: 1 },
   ] }] });
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -74,6 +76,7 @@ describe("task pane", () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
     expect(await within(pane("code_review")).findByRole("button", { name: /Review notes/ })).toBeInTheDocument();
     expect(within(pane("code_review")).queryByRole("button", { name: /Other/ })).toBeNull();
+    expect(within(pane("code_review")).queryByRole("button", { name: /Another item's notes/ })).toBeNull();
   });
 
   // The work brief's session note only says where the brief is: Output opens the brief itself.
@@ -181,7 +184,7 @@ describe("task pane", () => {
     it("reads the attempt's log on the Log tab", async () => {
       mount(`${url}&tab=log`, reviewed);
       expect(within(pane("auto_review")).getByRole("tab", { name: "Log" })).toHaveAttribute("aria-selected", "true");
-      await waitFor(() => expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toContain("/api/worker-sessions/plan_approval.auto_review-2/log?format=jsonl"));
+      await waitFor(() => expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toContain("/api/work-items/w1/sessions/plan_approval.auto_review-2/log?format=jsonl"));
     });
 
     it("offers no Skip or Retry: /skip and /retry refuse a path under a gate", () => {

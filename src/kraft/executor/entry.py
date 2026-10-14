@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from kraft import events, item_paths, store
+from kraft import events, ids, item_paths, store
 from kraft.adapters import beads
 from kraft.config import git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -68,6 +69,37 @@ def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItem
     dry run and the real one disagree about what gets trimmed.
     """
     return WorkItemTarget.for_repository("target", base_branch=base_branch)
+
+
+def work_item_id_taken_on_disk(run_dirs, repo: str, candidate: str) -> bool:
+    """Whether something already answers to `candidate` outside the database:
+    a folder an item with this id would use (a crashed intake's leftovers,
+    old layout or new), or a branch the repo knows that the item would be
+    given, `kraft/<id>` or `kraft/<slug>-<id>` (`store.branch_name`), here or
+    as last fetched from `origin`."""
+    folders = (
+        item_paths.item_dir(run_dirs, candidate),
+        run_dirs.worktrees / candidate,
+        item_paths.filed_dirs(run_dirs, candidate)[1],
+        item_paths.sandbox_homes(run_dirs, candidate)[0],
+    )
+    if any(os.path.lexists(f) for f in folders):
+        return True
+    if not Path(repo).is_dir():
+        return False
+    refs = git_read(
+        Path(repo),
+        "for-each-ref",
+        "--format=%(refname)",
+        "refs/heads/kraft/",
+        "refs/remotes/origin/kraft/",
+        expected_failure=True,
+    )
+    for ref in (refs or "").splitlines():
+        last = ref.rsplit("/", 1)[-1]
+        if last == candidate or last.endswith(f"-{candidate}"):
+            return True
+    return False
 
 
 async def intake(
@@ -143,7 +175,16 @@ async def intake(
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
     title, description = one_line_title(title, description)
-    work_item_id = uuid.uuid4().hex
+    # Drawn before the row is written, since attachments are stored under it
+    # first: a draw racing another to the same 40 bits is refused by the
+    # primary key, loudly, and never overwrites anything.
+    work_item_id = ids.mint(
+        ids.WORK_ITEM_LENGTH,
+        lambda c: (
+            work_item_id_taken_on_disk(run_dirs, repo, c)
+            or db.read(lambda conn: store.work_item_id_taken(conn, c))
+        ),
+    )
     # A daemon's cwd is an accident of how it was launched — launchd, a login
     # item, `kraft admin start` typed in $HOME — and nothing records it, so the work
     # item's own repo is the default bd workspace (Kraft-ibwj). KRAFT_BD_CWD

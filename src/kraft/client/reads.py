@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from kraft import auth
+from kraft import auth, ids
 from kraft.client import context, transport
 from kraft.paths import RunDirs, default_run_dir
 from kraft.vocab import ThreadState, WorkItemStatus
@@ -182,7 +182,20 @@ async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[di
     )
 
 
-async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
+def _log_path(work_item_id: str | None, session_id: str) -> str:
+    """Session `session_id` of `work_item_id`'s log route, or, with no item
+    in hand, the flat route, which answers only an id one session has."""
+    if work_item_id is None:
+        return f"/worker-sessions/{transport.segment(session_id)}/log"
+    return (
+        f"/work-items/{transport.segment(work_item_id)}"
+        f"/sessions/{transport.segment(session_id)}/log"
+    )
+
+
+async def log_backlog(
+    work_item_id: str | None, session_id: str, limit: int | None = None
+) -> list[dict]:
     """The lines already written to one worker session's log, oldest first.
 
     Here rather than in `cli.py` because this module is the only one that is
@@ -196,9 +209,7 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
     when it had to. `limit` is the reader's own cut, the marker the server's:
     it stays whenever the slice reaches back to it, so the cap is never silent.
     """
-    payload = await transport._get(
-        f"/worker-sessions/{transport.segment(session_id)}/log", format="jsonl"
-    )
+    payload = await transport._get(_log_path(work_item_id, session_id), format="jsonl")
     lines = payload.get("lines", [])
     if limit is None:
         return lines
@@ -209,17 +220,17 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
     return kept
 
 
-async def log_next_line(session_id: str) -> int:
+async def log_next_line(work_item_id: str | None, session_id: str) -> int:
     """The number the log's next line will get: a follow's cursor for "only
     what is written from now on", which no backlog line can give when none
     was printed (`-n 0`)."""
-    payload = await transport._get(
-        f"/worker-sessions/{transport.segment(session_id)}/log", format="jsonl"
-    )
+    payload = await transport._get(_log_path(work_item_id, session_id), format="jsonl")
     return payload["next_line"]
 
 
-async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
+async def stream_log(
+    work_item_id: str | None, session_id: str, after_line: int = 0
+) -> AsyncIterator[dict]:
     """Follow one worker session's log until the session stops.
 
     The server's `_tail` sends `data: {json}` frames and one terminal
@@ -238,7 +249,7 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
         try:
             async with session.stream(
                 "GET",
-                transport._api(f"/worker-sessions/{transport.segment(session_id)}/log"),
+                transport._api(_log_path(work_item_id, session_id)),
                 params={"format": "jsonl", "follow": "true"},
                 timeout=None,
             ) as response:
@@ -297,12 +308,23 @@ async def permission_request(
     Cursor's 10 s hook timeout, so the hook answers rather than being killed.
     """
     failure = "unavailable" if mode == "enforce" else "deny"
-    sid = os.environ.get("KRAFT_SESSION_ID")
-    if not sid:
+    ref = os.environ.get("KRAFT_SESSION_ID")
+    if not ref:
         return {"behavior": failure, "message": "not a Kraft worker session"}
     try:
+        wid, sid = ids.parse_session_ref(ref)
+    except ValueError as exc:
+        return {"behavior": failure, "message": f"KRAFT_SESSION_ID: {exc}"}
+    # `<wid>/<sid>` since per-item ids; a session launched before them has a
+    # bare id, unique on its own, which the flat route still answers.
+    path = (
+        f"/worker-sessions/{transport.segment(sid)}/permission"
+        if wid is None
+        else f"/work-items/{transport.segment(wid)}/sessions/{transport.segment(sid)}/permission"
+    )
+    try:
         status, body = await transport._post(
-            f"/worker-sessions/{transport.segment(sid)}/permission",
+            path,
             {
                 "tool_name": tool_name,
                 "input": input,

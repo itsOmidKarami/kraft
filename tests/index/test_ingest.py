@@ -284,6 +284,21 @@ def test_links_from_front_matter_full():
     assert session_rows[0].work_item_id is None
 
 
+@pytest.mark.parametrize(
+    ("work_item_ids", "item"),
+    [(["w1"], "w1"), ("w1", "w1"), (["w1", "w1"], "w1"), (["w1", "w2"], None), ([], None)],
+    ids=["one", "scalar", "one-twice", "two", "none"],
+)
+def test_a_front_matter_session_takes_its_only_item(work_item_ids, item):
+    """A session id is unique only within its item: the session row takes
+    the item `work_item_ids` names when it names exactly one."""
+    links = ingest.links_from_front_matter(
+        {"work_item_ids": work_item_ids, "worker_session_id": "abc123"}
+    )
+    (session,) = [x for x in links if x.worker_session_id]
+    assert (session.worker_session_id, session.session_work_item_id) == ("abc123", item)
+
+
 def test_links_from_front_matter_scalar_work_item_id():
     links = ingest.links_from_front_matter({"work_item_ids": "w1"})
     assert [x.work_item_id for x in links] == ["w1"]

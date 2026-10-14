@@ -99,14 +99,23 @@ def _session(wid: str, sid: str | None) -> None:
 
 
 @pytest.mark.parametrize(
-    ("then", "orphaned"),
-    [(None, ["s-ended"]), ("s-retried", []), ("completed", [])],
-    ids=["still-stopped", "retried-since", "completed"],
+    ("ref", "then", "orphaned"),
+    [
+        ("w-o/s-ended", None, ["w-o/s-ended"]),
+        ("w-o/s-ended", "s-retried", []),
+        ("w-o/s-ended", "completed", []),
+        # Another item's session of the same id is not this one.
+        ("w-x/s-ended", None, []),
+    ],
+    ids=["still-stopped", "retried-since", "completed", "same-id-other-item"],
 )
-def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(client, then, orphaned):
+def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(
+    client, ref, then, orphaned
+):
     """`kraft admin doctor` failed on "orphaned agent sessions" until the
     next restart, though the documented retry had run the item to the end:
-    `/health` read the list startup made, never what became of it."""
+    `/health` read the list startup made, never what became of it. Startup
+    names each `<wid>/<sid>`: a session id is unique only within its item."""
     from kraft.worker.reattach import ReattachSummary
 
     _session("w-o", "s-ended")
@@ -114,7 +123,7 @@ def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(clien
         _session("w-o", None)
     elif then:
         _session("w-o", then)
-    client.app.state.reattach_summary = ReattachSummary(scanned=1, unknown=["s-ended"])
+    client.app.state.reattach_summary = ReattachSummary(scanned=1, unknown=[ref])
 
     assert client.get("/api/health").json()["reattach_summary"]["unknown"] == orphaned
 

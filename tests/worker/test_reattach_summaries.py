@@ -50,13 +50,13 @@ async def test_a_session_resolved_after_a_restart_records_the_summary_kraft_aske
             result_path=str(files.result),
         )
     )
-    await database.write(lambda c: store.session_running(c, "s1", *DEAD))
+    await database.write(lambda c: store.session_running(c, "s1", *DEAD, work_item_id="w1"))
 
     summary_, resumed = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
     for task in resumed.values():  # an escalation's resume, not under test here
         task.cancel()
 
-    assert summary_.resolved_from_file == ["s1"]
+    assert summary_.resolved_from_file == ["w1/s1"]
     row = database.read(
         lambda c: c.execute("SELECT * FROM worker_sessions WHERE id = 's1'").fetchone()
     )

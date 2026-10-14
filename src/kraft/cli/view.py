@@ -181,14 +181,18 @@ def _print_event(event: dict, as_json: bool) -> None:
     print(json.dumps(event) if as_json else render.event_line([event], headers=False), flush=True)
 
 
-async def _logs_session(work_item_id: str | None, follow: bool) -> str:
+async def _logs_session(work_item_id: str | None, follow: bool) -> tuple[str, str]:
     """The session `view logs` reads with no `--session`: the newest one, or,
     while the item is stopped, the one that stopped it, as the board's stop
     card names it. An auto-escalation starts the moment an item stops, so the
     newest log was the escalation's and not why it stopped (R12a-03). `-f`
     still follows the newest, the one that can still write. Whichever of the
-    two it passes over is named on stderr, with how to read it."""
+    two it passes over is named on stderr, with how to read it.
+
+    Returns `(work item id, session id)`: the item's whole id, as the server
+    answers it, since a session id is unique only within its item."""
     item = await client.get_work_item(work_item_id, full=True)
+    wid = item["id"]
     sessions = item.get("worker_sessions") or []
     if not sessions:
         raise ValueError("no worker session has run for this work item yet")
@@ -206,27 +210,33 @@ async def _logs_session(work_item_id: str | None, follow: bool) -> str:
             newest,
         )
     if stopped is newest:
-        return newest["id"]
+        return wid, newest["id"]
     shown, other = (newest, stopped) if follow else (stopped, newest)
     print(
         f"showing {shown['hook_point']} ({shown['status']}); "
         f"the session that stopped the item is {stopped['hook_point']} ({stopped['status']}), "
         f"the newest is {newest['hook_point']} ({newest['status']}): "
-        f"kraft view logs --session {other['id']}",
+        f"kraft view logs {wid} --session {other['id']}",
         file=sys.stderr,
     )
-    return shown["id"]
+    return wid, shown["id"]
 
 
 def _cmd_logs(ns: argparse.Namespace) -> None:
     async def run() -> None:
-        session_id = ns.session or await _logs_session(ns.id, ns.follow)
-        lines = await client.log_backlog(session_id, ns.n)
+        if ns.session:
+            # A session id is unique only within its item: the one named, or
+            # the one this worktree is. With neither, the flat route, which
+            # answers an id only one session has.
+            wid, session_id = ns.id or client.resolve_context()[0], ns.session
+        else:
+            wid, session_id = await _logs_session(ns.id, ns.follow)
+        lines = await client.log_backlog(wid, session_id, ns.n)
         for entry in lines:
             _print_log(entry, ns.json)
         if ns.follow:
-            seen = lines[-1]["n"] + 1 if lines else await client.log_next_line(session_id)
-            async for entry in client.stream_log(session_id, after_line=seen):
+            seen = lines[-1]["n"] + 1 if lines else await client.log_next_line(wid, session_id)
+            async for entry in client.stream_log(wid, session_id, after_line=seen):
                 _print_log(entry, ns.json)
 
     asyncio.run(run())

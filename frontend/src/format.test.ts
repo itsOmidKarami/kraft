@@ -44,6 +44,7 @@ describe("shortId", () => {
   it("keeps the first 8 and last 5 of a 32-hex id and passes short ids through", () => {
     expect(shortId("8cbfe6e27c1044b3e445c0f0d726357d")).toBe("8cbfe6e2…6357d");
     expect(shortId("ses_b71e0")).toBe("ses_b71e0");
+    expect(shortId("k7m2x9qa")).toBe("k7m2x9qa");
   });
 });
 
@@ -225,6 +226,7 @@ describe("cleanTitle (W13 · B.3)", () => {
 describe("docTitle (W11 · H)", () => {
   it("passes a real title through unchanged", () => {
     expect(docTitle({ title: "WS transport design", content: "Something else entirely." })).toBe("WS transport design");
+    expect(docTitle({ title: "standard", content: "Something else entirely." })).toBe("standard");
   });
 
   it("titles a heading-less summary with its first sentence", () => {
@@ -243,7 +245,7 @@ describe("docTitle (W11 · H)", () => {
 
   it("treats `Session <id>`, a short id and the session's own id as no title", () => {
     const content = "Rebased onto main and re-ran the verify node's tests.";
-    for (const title of ["Session 8cbfe6e27c1044b3e445c0f0d726357d", "8cbfe6e2…6357d", "s-123"]) {
+    for (const title of ["Session 8cbfe6e27c1044b3e445c0f0d726357d", "8cbfe6e2…6357d", "k7m2x9qa", "Session k7m2x9qa", "s-123"]) {
       expect(docTitle({ title, content, worker_session_id: "s-123" })).toBe(content);
     }
   });

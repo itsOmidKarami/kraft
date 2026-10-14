@@ -134,7 +134,9 @@ async def test_cache_tokens_still_count_against_a_budget(item_on, budget):
         **cost,
     }
     await it.database.write(
-        lambda c: store.session_exited(c, "s", "done", None, usage.from_envelope(envelope))
+        lambda c: store.session_exited(
+            c, "s", "done", None, usage.from_envelope(envelope), work_item_id=it.id
+        )
     )
 
     breach = _breach(it)
@@ -218,7 +220,7 @@ async def test_a_running_sessions_estimate_trips_a_usd_cap(item_on):
     # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
     # round $2.00, comfortably over the $1 cap.
     live = usage.Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
-    await it.database.write(lambda c: store.session_progress(c, sid, live))
+    await it.database.write(lambda c: store.session_progress(c, sid, live, work_item_id=it.id))
 
     breach = _breach(it)
     assert breach is not None
@@ -374,7 +376,9 @@ async def _codex_exited(it, sid: str, launched: str | None) -> None:
     its output names no model and no cost -- through the real session writer."""
     await it.session(sid, "ship.main.go", harness="codex", model=launched)
     spent = usage.Usage(tokens_in=1_000_000, tokens_out=0)
-    await it.database.write(lambda c: store.session_exited(c, sid, "done", None, spent))
+    await it.database.write(
+        lambda c: store.session_exited(c, sid, "done", None, spent, work_item_id=it.id)
+    )
 
 
 async def test_a_codex_session_counts_toward_the_item_cap_at_its_launch_models_estimate(item_on):

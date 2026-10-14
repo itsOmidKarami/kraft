@@ -57,7 +57,9 @@ async def _turn(
     if paused:
         await database.write(lambda c: store.pause_work_item(c, "w1", [sid]))
     seen = _usage.read(tmp_path / f"{sid}.log", tmp_path / f"{sid}.json", "claude-stream-json")
-    await database.write(lambda c: store.session_exited(c, sid, "done", None, seen))
+    await database.write(
+        lambda c: store.session_exited(c, sid, "done", None, seen, work_item_id="w1")
+    )
 
 
 def _spent(database, sid):
@@ -130,17 +132,22 @@ async def test_a_paused_estimate_is_not_doubled_by_a_resumed_reset(database, tmp
             result_path=str(tmp_path / "a.json"),
         )
     )
-    await database.write(lambda c: store.session_running(c, "a", 1, 1.0))
+    await database.write(lambda c: store.session_running(c, "a", 1, 1.0, work_item_id="w1"))
     # claude-opus-5: $5/M input (prices.json) -- 100,000 input tokens is $0.50.
     await database.write(
         lambda c: store.session_progress(
-            c, "a", _usage.Usage(tokens_in=100_000, tokens_out=None, model="claude-opus-5")
+            c,
+            "a",
+            _usage.Usage(tokens_in=100_000, tokens_out=None, model="claude-opus-5"),
+            work_item_id="w1",
         )
     )
     await database.write(lambda c: store.pause_work_item(c, "w1", ["a"]))
     seen_a = _usage.read(tmp_path / "a.log", tmp_path / "a.json", "claude-stream-json")
     assert seen_a is None  # no envelope at all -- the live tick's numbers stand
-    await database.write(lambda c: store.session_exited(c, "a", "failed", None, seen_a))
+    await database.write(
+        lambda c: store.session_exited(c, "a", "failed", None, seen_a, work_item_id="w1")
+    )
 
     a_cost, a_estimated = database.read(
         lambda c: c.execute(
@@ -232,7 +239,9 @@ async def test_a_resumed_codex_thread_is_netted_by_codex_s_reader(database, tmp_
             await database.write(lambda c: store.pause_work_item(c, "w1", [sid]))
         seen = _usage.read(log, tmp_path / f"{sid}.json", "codex-json")
         await database.write(
-            lambda c: store.session_exited(c, sid, "done", None, seen, reader="codex-json")
+            lambda c: store.session_exited(
+                c, sid, "done", None, seen, reader="codex-json", work_item_id="w1"
+            )
         )
 
     await codex_turn("a", 100, 10, paused=True)

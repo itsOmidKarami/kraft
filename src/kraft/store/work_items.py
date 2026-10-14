@@ -31,9 +31,12 @@ def branch_name(title: str, work_item_id: str) -> str:
     """`kraft/<slug>-<id[:8]>` — readable, unique, always a legal git ref.
 
     The `[a-z0-9-]` charset is what makes the result legal by construction: no
-    `..`, no `@{`, no `.lock`, no control characters, no trailing dot. Two items
-    collide only if their ids share an 8-hex prefix, and then `git worktree add
-    -b` fails loudly rather than silently sharing a branch.
+    `..`, no `@{`, no `.lock`, no control characters, no trailing dot. An
+    8-character id is its own suffix whole, and intake draws again for an id a
+    `kraft/` branch already ends with (`entry.work_item_id_taken_on_disk`).
+    Two older 32-character ids collide only if they share an 8-hex prefix, and
+    then `git worktree add -b` fails loudly rather than silently sharing a
+    branch.
 
     A title that slugs to nothing — punctuation only, wholly non-ASCII, empty —
     falls back to `kraft/<id>`, which is what every branch looked like before
@@ -521,6 +524,17 @@ def match_work_item_ids(conn: sqlite3.Connection, given: str) -> list[str]:
     return [r["id"] for r in rows]
 
 
+def work_item_id_taken(conn: sqlite3.Connection, candidate: str) -> bool:
+    """Whether an item has the id `candidate`, or an older, longer id that
+    starts with it: that item would stop answering to `candidate` as a prefix
+    (`match_work_item_ids`) the moment a new item took it."""
+    row = conn.execute(
+        "SELECT 1 FROM work_items WHERE substr(id, 1, ?) = ? LIMIT 1",
+        (len(candidate), candidate),
+    ).fetchone()
+    return row is not None
+
+
 def any_unfinished(conn: sqlite3.Connection, ids: list[str]) -> bool:
     """Whether any of `ids` is not `completed` yet."""
     return any(
@@ -709,8 +723,9 @@ def end_work_item(
     now = _now()
     for sid in session_ids or []:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
     node_id = conn.execute(
@@ -839,8 +854,9 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     events.append(conn, work_item_id, WorkItemEvent.PAUSE_REQUESTED, {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
-            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-            (now, sid),
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+            "WHERE work_item_id = ? AND id = ?",
+            (now, work_item_id, sid),
         )
         events.append(conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": sid})
 

@@ -22,6 +22,7 @@ subject of the client certificate it presents (`worker.ca`).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import shutil
 import socket
@@ -30,7 +31,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kraft import events
+from kraft import events, ids
 from kraft.vocab import SandboxEvent
 from kraft.worker import ca
 from kraft.worker.egress import EgressProxy, EgressSession, PhaseLists
@@ -39,7 +40,7 @@ from kraft.worker.sandbox import SandboxNotReady
 
 #: The longest a unix socket path may be, less its terminating NUL.
 _SUN_PATH_MAX = (104 if sys.platform == "darwin" else 108) - 1
-#: How much of the session id names its socket directory: at most, and at
+#: How many characters name a session's socket directory: at most, and at
 #: least (fewer would make two live sessions' sockets likely to collide).
 _SHORT_MAX, _SHORT_MIN = 16, 8
 _SOCKET = "s.sock"
@@ -67,6 +68,8 @@ class ChannelRegistry:
         self._run_dirs = run_dirs
         self._db = db
         self._proxy = proxy or EgressProxy()
+        #: By `ids.qualified(work_item_id, session_id)`, which is also the
+        #: CN of a TLS-transport session's client certificate (`worker.ca`).
         self._open: dict[str, _Channel] = {}
 
     @property
@@ -83,24 +86,34 @@ class ChannelRegistry:
         finally:
             channel.serving.discard(task)
 
-    async def serve_tls(self, session_id: str, reader, writer) -> None:
-        """A TLS connection whose certificate names `session_id`: served if
-        that is an open TLS-transport session, else closed with nothing
+    async def serve_tls(self, cn: str, reader, writer) -> None:
+        """A TLS connection whose certificate's CN is `cn`: served if that
+        names an open TLS-transport session, else closed with nothing
         written (no HTTP framing is owed to a stale relay)."""
-        if self.tls_session(session_id) is None:
+        if self.tls_session(cn) is None:
             writer.close()
             return
-        await self._serve(self._open[session_id], reader, writer)
+        await self._serve(self._open[cn], reader, writer)
 
-    def tls_session(self, session_id: str) -> EgressSession | None:
+    def tls_session(self, cn: str) -> EgressSession | None:
         """The session a client certificate's subject names, if it is open
-        and registered for the TLS transport; None refuses the connection."""
-        channel = self._open.get(session_id)
+        and registered for the TLS transport; None refuses the connection.
+        The CN is the session's `ids.qualified` name, the registry's key: a
+        relay started before per-item ids presents its bare session id,
+        which is still its key."""
+        channel = self._open.get(cn)
         return channel.session if channel is not None and channel.path is None else None
 
-    def socket_path(self, session_id: str) -> Path:
+    def socket_path(self, session_id: str, *, work_item_id: str) -> Path:
         """`run/sn/<short>/s.sock`, or `SandboxNotReady` naming the path when
-        even the shortest name would not fit a unix socket path."""
+        even the shortest name would not fit a unix socket path.
+
+        `<short>` is as many characters as fit, 16 at most: for a session
+        minted before per-item ids the start of its bare id, where its relay,
+        started before the upgrade, already looks; for any other the start of
+        a hash of `<wid>/<sid>`, so neither an id unique only within its item
+        nor a 32-character item id that leaves no room for the session can
+        make two sessions share a folder."""
         base = self._run_dirs.sockets
         room = min(_SUN_PATH_MAX - len(f"{base}/") - len(f"/{_SOCKET}"), _SHORT_MAX)
         if room < _SHORT_MIN:
@@ -108,7 +121,12 @@ class ChannelRegistry:
                 f"the egress socket under {base} would be too long for a unix socket "
                 f"({_SUN_PATH_MAX} bytes at most): move KRAFT_HOME somewhere shorter"
             )
-        return base / session_id[:room] / _SOCKET
+        if ids.qualified(work_item_id, session_id) == session_id:
+            short = session_id[:room]
+        else:
+            ref = ids.session_ref(work_item_id, session_id)
+            short = hashlib.sha256(ref.encode()).hexdigest()[:room]
+        return base / short / _SOCKET
 
     async def open(
         self,
@@ -137,12 +155,16 @@ class ChannelRegistry:
             credentials=credentials,
             run_dirs=self._run_dirs,
         )
+        key = ids.qualified(work_item_id, session_id)
         if transport == "tls":
-            if session_id in self._open:
-                raise SandboxNotReady(f"session {session_id} already has an egress channel")
-            self._open[session_id] = _Channel(session)
+            if key in self._open:
+                raise SandboxNotReady(
+                    f"session {ids.session_ref(work_item_id, session_id)} already has an "
+                    "egress channel"
+                )
+            self._open[key] = _Channel(session)
             return None
-        path = self.socket_path(session_id)
+        path = self.socket_path(session_id, work_item_id=work_item_id)
         if any(c.path == path for c in self._open.values()):
             raise SandboxNotReady(f"another session's egress socket is already at {path}")
         # Only the daemon's user may reach a session's socket. An existing
@@ -155,15 +177,18 @@ class ChannelRegistry:
         channel.server = await asyncio.start_unix_server(
             lambda r, w: self._serve(channel, r, w), path=str(path)
         )
-        self._open[session_id] = channel
+        self._open[key] = channel
         return path
 
-    async def close(self, session_id: str, *, keep_dir: bool = False) -> None:
-        """Stop the listener and remove its directory (with `keep_dir`, only
-        its socket). Best-effort and bounded, like a sandbox's `close`:
-        nothing here may hold up the rest of a session's teardown. A no-op
-        for a session with no channel."""
-        channel = self._open.pop(session_id, None)
+    async def close(self, session_id: str, *, work_item_id: str) -> None:
+        """Stop the listener and remove its directory. Best-effort and
+        bounded, like a sandbox's `close`: nothing here may hold up the rest
+        of a session's teardown. A no-op for a session with no channel."""
+        await self._close(ids.qualified(work_item_id, session_id))
+
+    async def _close(self, key: str, *, keep_dir: bool = False) -> None:
+        """`close` by registry key; with `keep_dir`, only the socket goes."""
+        channel = self._open.pop(key, None)
         if channel is None:
             return
         for task in channel.serving:
@@ -187,8 +212,8 @@ class ChannelRegistry:
         session may outlive the daemon, and its relay bind-mounts that
         directory; a new one after a restart would be an inode it never
         sees."""
-        for session_id in list(self._open):
-            await self.close(session_id, keep_dir=True)
+        for key in list(self._open):
+            await self._close(key, keep_dir=True)
 
     def sweep(self) -> list[str]:
         """Remove every socket directory no open channel owns: what dead

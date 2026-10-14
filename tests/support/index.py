@@ -33,8 +33,8 @@ def seed_session(
             ),
             c.execute(
                 "UPDATE worker_sessions SET session_summary_ref=?, thread=COALESCE(?, thread) "
-                "WHERE id=?",
-                (ref, thread, sid),
+                "WHERE work_item_id=? AND id=?",
+                (ref, thread, wid, sid),
             ),
         )
     )

@@ -149,8 +149,8 @@ def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
     if boundary is not None and last is not None and last["seq"] > boundary["seq"]:
         session = st.db.read(
             lambda c: c.execute(
-                "SELECT status FROM worker_sessions WHERE id = ?",
-                (last["payload"].get("session_id"),),
+                "SELECT status FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+                (wid, last["payload"].get("session_id")),
             ).fetchone()
         )
         escalated = _turn_live(session["status"] if session else None, last["created_at"])
@@ -357,7 +357,8 @@ async def list_work_items(request: Request):
         ).fetchall()
         escalations = c.execute(
             "SELECT e.work_item_id, e.seq, e.created_at, s.status AS session_status FROM events e "
-            "LEFT JOIN worker_sessions s ON s.id = json_extract(e.payload, '$.session_id') "
+            "LEFT JOIN worker_sessions s ON s.work_item_id = e.work_item_id "
+            "AND s.id = json_extract(e.payload, '$.session_id') "
             "WHERE e.seq IN (SELECT MAX(seq) FROM events WHERE type = ? "
             "GROUP BY work_item_id)",
             (EscalationEvent.ESCALATION_MESSAGE,),
@@ -375,7 +376,7 @@ async def list_work_items(request: Request):
         tasks = c.execute(
             "SELECT s.work_item_id, s.hook_point FROM worker_sessions s"
             " JOIN work_items w ON w.id = s.work_item_id AND w.current_node_id = s.node_id"
-            " WHERE s.hook_point != 'escalation' ORDER BY s.created_at"
+            " WHERE s.hook_point != 'escalation' ORDER BY s.created_at, s.rowid"
         ).fetchall()
         # `actions`' second facts, each one grouped query rather than the
         # per-item read a door makes.
@@ -753,7 +754,7 @@ def _running_session(st, wid: str) -> dict | None:
             "JOIN work_items w ON w.id = s.work_item_id "
             f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
             "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') "
-            "ORDER BY s.created_at DESC LIMIT 1",
+            "ORDER BY s.created_at DESC, s.rowid DESC LIMIT 1",
             (wid,),
         ).fetchone()
     )
@@ -1220,7 +1221,8 @@ async def get_work_item(wid: str, request: Request):
     row = deps._work_item_row(st, wid)
     sessions = st.db.read(
         lambda c: c.execute(
-            "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at", (wid,)
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at, rowid",
+            (wid,),
         ).fetchall()
     )
     skipped = st.db.read(lambda c: store.skipped_paths(c, wid))

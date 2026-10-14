@@ -27,10 +27,20 @@ from kraft.vocab import LIVE, SessionEvent
 logger = logging.getLogger(__name__)
 
 
-def _session_row(st, sid: str):
+_SESSION_COLUMNS = "id, work_item_id, node_id, hook_point, log_path, status"
+
+#: Where a flat route's 404 points: a session id is unique only within its item.
+NESTED_ROUTE = "use /work-items/{wid}/sessions/{sid}"
+
+
+def _session_row(st, wid: str, sid: str):
+    """Session `sid` of work item `wid`, both matched whole. `wid` is whole
+    by the time a handler runs (`api.item_ids`, which rewrites only the path
+    segment after `/work-items/`, never `{sid}`)."""
     row = st.db.read(
         lambda c: c.execute(
-            "SELECT id, log_path, status FROM worker_sessions WHERE id = ?", (sid,)
+            f"SELECT {_SESSION_COLUMNS} FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (wid, sid),
         ).fetchone()
     )
     if row is None:
@@ -38,7 +48,23 @@ def _session_row(st, sid: str):
     return row
 
 
-async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
+def _flat_session_row(st, sid: str):
+    """The one session whose id is `sid`, for a `/worker-sessions/{sid}/...`
+    route a client built before per-item ids calls: every id minted before
+    them is unique, and so are most since. An id no session or several
+    sessions have is a 404 naming the nested route, never the first match."""
+    rows = st.db.read(
+        lambda c: c.execute(
+            f"SELECT {_SESSION_COLUMNS} FROM worker_sessions WHERE id = ? LIMIT 2", (sid,)
+        ).fetchall()
+    )
+    if len(rows) != 1:
+        held = "no session has" if not rows else "more than one work item has a session with"
+        raise HTTPException(404, f"{held} the id {sid!r}: {NESTED_ROUTE}")
+    return rows[0]
+
+
+async def _tail(st, wid: str, sid: str, path: Path, *, poll_s: float = 0.4):
     """SSE tail: every structured line, then new ones until the session ends.
 
     Stops one poll *after* the session stops being pending or running, so the
@@ -61,27 +87,39 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
         # not *finished* -- a session still in 'pending' has an agent about to
         # write to this log, and a stream opened on it used to get one poll and
         # an end event
-        running = _session_row(st, sid)["status"] in LIVE
+        running = _session_row(st, wid, sid)["status"] in LIVE
         await asyncio.sleep(poll_s)
     yield "event: end\ndata: {}\n\n"
 
 
 # The jsonl view: design 6c.
-@api_router.get("/worker-sessions/{sid}/log")
-async def get_log(sid: str, request: Request, format: str | None = None, follow: bool = False):
+@api_router.get("/work-items/{wid}/sessions/{sid}/log")
+async def get_log(
+    wid: str, sid: str, request: Request, format: str | None = None, follow: bool = False
+):
     """Plain text by default (the modal's copy button); `format=jsonl` for the
     filterable, followable view.
 
     The jsonl views are bounded (`logs.MAX_LOG_BYTES`, with a marker row when
     they had to be); plain text is the whole file, streamed from disk, which is
     what that marker points a reader at."""
-    st = request.app.state
-    row = _session_row(st, sid)
+    return await _log(request.app.state, _session_row(request.app.state, wid, sid), format, follow)
+
+
+@api_router.get("/worker-sessions/{sid}/log")
+async def get_log_flat(sid: str, request: Request, format: str | None = None, follow: bool = False):
+    """`get_log` for a client built before per-item ids: a session id only one
+    session has (`_flat_session_row`)."""
+    return await _log(request.app.state, _flat_session_row(request.app.state, sid), format, follow)
+
+
+async def _log(st, row, format: str | None, follow: bool):
+    wid, sid = row["work_item_id"], row["id"]
     path = Path(row["log_path"])
     if format == "jsonl":
         if follow:
             return StreamingResponse(
-                _tail(st, sid, path),
+                _tail(st, wid, sid, path),
                 media_type="text/event-stream",
                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
             )
@@ -179,8 +217,8 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
 
 
 # Kraft-oor; `enforce` mode is Kraft-4in7z.
-@api_router.post("/worker-sessions/{sid}/permission")
-async def permission_request(sid: str, body: PermissionAsk, request: Request):
+@api_router.post("/work-items/{wid}/sessions/{sid}/permission")
+async def permission_request(wid: str, sid: str, body: PermissionAsk, request: Request):
     """Answer a worker's permission prompt from its task's grant.
 
     The grant is the task's resolved policy, as its launch resolved it
@@ -201,14 +239,19 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     Every decision appends an event. That is the whole point -- it is the only
     way the orchestrator ever learns what a worker decided it was allowed to do.
     """
-    st = request.app.state
-    row = st.db.read(
-        lambda c: c.execute(
-            "SELECT work_item_id, node_id, hook_point FROM worker_sessions WHERE id = ?", (sid,)
-        ).fetchone()
-    )
-    if row is None:
-        raise HTTPException(404, "unknown session")
+    return await _permission(request.app.state, _session_row(request.app.state, wid, sid), body)
+
+
+@api_router.post("/worker-sessions/{sid}/permission")
+async def permission_request_flat(sid: str, body: PermissionAsk, request: Request):
+    """`permission_request` for a session whose `KRAFT_SESSION_ID` is a bare
+    id, from before per-item ids: an id only one session has
+    (`_flat_session_row`)."""
+    return await _permission(request.app.state, _flat_session_row(request.app.state, sid), body)
+
+
+async def _permission(st, row, body: PermissionAsk) -> dict:
+    sid = row["id"]
     task = row["hook_point"]
     grant = None
     # The exception behind an unresolvable policy: for the log and the
@@ -281,8 +324,8 @@ class HookCall(BaseModel):
 
 
 # Sandbox part 2, P5.
-@api_router.post("/worker-sessions/{sid}/permission-hook")
-async def permission_hook(sid: str, body: HookCall, request: Request):
+@api_router.post("/work-items/{wid}/sessions/{sid}/permission-hook")
+async def permission_hook(wid: str, sid: str, body: HookCall, request: Request):
     """`kraft admin permission-hook`, run by the daemon for a session whose
     hook cannot run Kraft itself: a sandboxed one, through the worker API's
     `kraft` shim. The same `permission_hooks.answer`
@@ -292,16 +335,23 @@ async def permission_hook(sid: str, body: HookCall, request: Request):
     Fail-closed is the session's, never the caller's: its task's policy
     holds an allowlist (what sets `KRAFT_PERMISSION_FAIL_CLOSED` on a host
     launch), or cannot be resolved at all -- not knowing is not a grant."""
+    return await _permission_hook(
+        request.app.state, _session_row(request.app.state, wid, sid), body
+    )
+
+
+@api_router.post("/worker-sessions/{sid}/permission-hook")
+async def permission_hook_flat(sid: str, body: HookCall, request: Request):
+    """`permission_hook` for a session launched before per-item ids, by an id
+    only one session has (`_flat_session_row`)."""
+    return await _permission_hook(
+        request.app.state, _flat_session_row(request.app.state, sid), body
+    )
+
+
+async def _permission_hook(st, row, body: HookCall) -> dict:
     if body.harness not in permission_hooks.TRANSLATORS:
         raise HTTPException(422, f"no permission hook for harness {body.harness!r}")
-    st = request.app.state
-    row = st.db.read(
-        lambda c: c.execute(
-            "SELECT work_item_id, node_id, hook_point FROM worker_sessions WHERE id = ?", (sid,)
-        ).fetchone()
-    )
-    if row is None:
-        raise HTTPException(404, "unknown session")
     try:
         fail_closed = _resolved_tools(st, row)[0] is not None
     except Exception:  # noqa: BLE001 -- the gate logs why when it is asked
@@ -310,7 +360,7 @@ async def permission_hook(sid: str, body: HookCall, request: Request):
 
     async def ask(tool, input, tool_use_id, **kw) -> dict:
         asked = PermissionAsk(tool_name=tool, input=input, tool_use_id=tool_use_id, **kw)
-        return await permission_request(sid, asked, request)
+        return await _permission(st, row, asked)
 
     out, code = await permission_hooks.answer(
         body.harness,

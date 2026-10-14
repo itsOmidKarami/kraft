@@ -12,7 +12,13 @@ import asyncio
 import json
 
 import pytest
-from support.permissions import PATH, ask, events_of, seed_session, templates
+from support.permissions import (
+    PATH,
+    ask,
+    events_of,
+    seed_session,
+    templates_dir,  # noqa: F401 -- the fixture
+)
 
 from kraft import harness, permission_hooks
 from kraft.adapters import hook_install
@@ -20,11 +26,6 @@ from kraft.adapters import hook_install
 #: A push to `seed_session`'s item's own branch, from its title and id.
 _PUSH = {"command": "git push origin kraft/t-w1"}
 _LS = {"command": "ls"}
-
-
-@pytest.fixture
-def templates_dir(tmp_path, monkeypatch):
-    return templates(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize(

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import item_paths, store
+from kraft import ids, item_paths, store
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -56,10 +56,10 @@ _CTX = (
     "When you are done, write a short session summary to {summary_path}, "
     "starting with YAML front-matter carrying exactly these keys and values:\n"
     "---\n"
-    "work_item_ids: [{work_item_id}]\n"
+    'work_item_ids: ["{work_item_id}"]\n'
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
-    "worker_session_id: {session_id}\n"
+    'worker_session_id: "{session_id}"\n'
     "---\n"
     "\n"
     'Report how it went as "status" in the JSON result file at '
@@ -141,7 +141,7 @@ _ARTIFACT = (
     "exist, and to no other path. Start it with YAML "
     "front matter carrying exactly these keys:\n"
     "---\n"
-    "work_item_ids: [{work_item_id}]\n"
+    'work_item_ids: ["{work_item_id}"]\n'
     "node_id: {node_id}\n"
     "hook_point: {hook_point}\n"
     "kind: {kind}s\n"
@@ -726,10 +726,13 @@ def log_reader(h: _harness.Harness) -> str | None:
 
 
 def _config_dir(
-    run_dirs, h: _harness.Harness, session_id: str, sandbox_home: Path | None = None
+    run_dirs, h: _harness.Harness, name: str, sandbox_home: Path | None = None
 ) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
-    written, or `{}` for a harness that declares none (Kraft-bosip).
+    written, or `{}` for a harness that declares none (Kraft-bosip). `name`
+    is the session's `ids.qualified` name, which tags each temporary file:
+    the shared directory is every item's, and a session id is unique only
+    within its item.
 
     One directory per harness under $KRAFT_HOME/run, not per launch: the CLI
     keeps its chats there too, and `resume` must find the chat an earlier
@@ -751,10 +754,10 @@ def _config_dir(
     if sandbox_home is None:
         directory = run_dirs.base / "harness-config" / h.id
         directory.mkdir(parents=True, exist_ok=True)
-        for name, text in h.config_files.items():
-            tmp = directory / f".{name}.{session_id}"
+        for file, text in h.config_files.items():
+            tmp = directory / f".{file}.{name}"
             tmp.write_text(text)
-            os.replace(tmp, directory / name)
+            os.replace(tmp, directory / file)
         return {h.config_env: str(directory)}
     directory = sandbox_home / ".kraft-harness-config" / h.id
     try:
@@ -763,8 +766,8 @@ def _config_dir(
         sandbox_home.mkdir(parents=True, exist_ok=True)
         dir_fd = open_dir_no_symlinks(sandbox_home, (".kraft-harness-config", h.id), create=True)
         try:
-            for name, text in h.config_files.items():
-                _replace_at(dir_fd, name, f".{name}.{session_id}", text)
+            for file, text in h.config_files.items():
+                _replace_at(dir_fd, file, f".{file}.{name}", text)
         finally:
             os.close(dir_fd)
     except OSError as exc:
@@ -1164,7 +1167,8 @@ async def run_agent_task(
             allowed_tools,
             tuple(deny_tools),
             directory=rules_dir,
-            session_id=session_id,
+            # The folder is every item's: named for the item too.
+            session_id=ids.qualified(work_item_id, session_id),
         )
         rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
@@ -1199,7 +1203,7 @@ async def run_agent_task(
     config_env = _config_dir(
         run_dirs,
         h,
-        session_id,
+        ids.qualified(work_item_id, session_id),
         _backends.for_sandbox(sandbox).home(run_dirs, work_item_id)
         if sandbox and h.config_env is not None
         else None,
@@ -1220,7 +1224,9 @@ async def run_agent_task(
         # make this adapter vendor-aware, against conceptual model §1.2.
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
-            "KRAFT_SESSION_ID": session_id,
+            # `<wid>/<sid>`: a session id is unique only within its item, and
+            # an escalation turn has no KRAFT_WORK_ITEM_ID to say which.
+            "KRAFT_SESSION_ID": ids.session_ref(work_item_id, session_id),
             # Where its documents go: a sandbox mounts this folder read-write.
             "KRAFT_DOCS_DIR": str(item_paths.docs_dir(run_dirs, work_item_id)),
             **(

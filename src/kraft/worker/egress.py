@@ -33,11 +33,11 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 import httpx
 
-from kraft import store
+from kraft import ids, store
 from kraft.worker import callback, inject, session_mcp
 
 #: The most a request line plus its headers may be.
@@ -513,9 +513,7 @@ class EgressProxy:
                     writer, session, f"{api_method} {path}", "not this session's to call"
                 )
             try:
-                reply = await self._call(
-                    self._app, api_method, path, scope.session_id, json=payload
-                )
+                reply = await self._call(self._app, api_method, path, _caller(scope), json=payload)
             except TimeoutError:
                 return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
@@ -564,33 +562,36 @@ class EgressProxy:
             }
             try:
                 reply = await self._call(
-                    self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
+                    self._mcp_app, method, "/mcp", _caller(scope), content=body, headers=passed
                 )
             except TimeoutError:
                 return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         kind = reply.headers.get("content-type", "application/json")
         await _respond(writer, reply.status_code, reply.reason_phrase, kind, reply.content)
 
-    async def _ask_permission(self, session_id: str, ask: dict) -> tuple[int, object]:
+    async def _ask_permission(self, caller: str, ask: dict) -> tuple[int, object]:
         """The session MCP server's permission ask: the daemon's own
-        permission route, the gate the host's MCP tool asks."""
-        path = f"/api/worker-sessions/{session_id}/permission"
+        permission route, the gate the host's MCP tool asks. `caller` is the
+        `X-Kraft-Session-Id` this proxy set on the `/mcp` call (`_caller`),
+        so always `<wid>/<sid>`; a bare id still reaches the flat route."""
+        path = _permission_path(caller, "permission")
         # Inside an /mcp call's own bound: shorter, so the tool denies first.
         reply = await self._call(
-            self._app, "POST", path, session_id, json=ask, timeout=CALL_TIMEOUT * 0.8
+            self._app, "POST", path, caller, json=ask, timeout=CALL_TIMEOUT * 0.8
         )
         return reply.status_code, reply.json()
 
     async def _call(
-        self, asgi, method: str, path: str, session_id: str, *, timeout: float | None = None, **kw
+        self, asgi, method: str, path: str, caller: str, *, timeout: float | None = None, **kw
     ) -> httpx.Response:
-        """`method path` in-process on `asgi` as `session_id`, with the
+        """`method path` in-process on `asgi` as the session `caller` names
+        (`ids.session_ref`: the proxy itself holds no item), with the
         daemon's own token: the one way a worker's callback reaches Kraft.
         `TimeoutError` after `timeout` (`CALL_TIMEOUT`)."""
         headers = {
             **kw.pop("headers", {}),
             "Authorization": f"Bearer {self._app.state.mcp_token}",
-            "X-Kraft-Session-Id": session_id,
+            "X-Kraft-Session-Id": caller,
         }
         # Each app by the name it answers to: the session MCP server by
         # `kraft`, the only Host it accepts; the daemon by 127.0.0.1, since a
@@ -706,8 +707,23 @@ def _events(form, scope) -> _Call | str:
 def _permission_hook(form, scope) -> _Call | str:
     if not form.get("harness") or "stdin" not in form:
         return "permission-hook needs a harness and its stdin"
-    path = f"/api/worker-sessions/{scope.session_id}/permission-hook"
+    path = _permission_path(_caller(scope), "permission-hook")
     return "POST", path, {"harness": form["harness"], "stdin": form["stdin"]}
+
+
+def _caller(scope: callback.SessionScope) -> str:
+    """The channel's session as `X-Kraft-Session-Id` carries it."""
+    return ids.session_ref(scope.work_item_id, scope.session_id)
+
+
+def _permission_path(caller: str, route: str) -> str:
+    """The daemon's `permission` or `permission-hook` route for `caller`:
+    under its item, or the flat route for a bare id from before per-item ids.
+    Each id is its own path segment, never the reference whole."""
+    wid, sid = ids.parse_session_ref(caller)
+    if wid is None:
+        return f"/api/worker-sessions/{quote(sid, safe='')}/{route}"
+    return f"/api/work-items/{quote(wid, safe='')}/sessions/{quote(sid, safe='')}/{route}"
 
 
 _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {

@@ -186,7 +186,7 @@ async def test_a_paused_row_and_its_event_never_disagree(database):
     )
     await database.write(lambda c: store.pause_work_item(c, "w", ["s1"]))
     # the SIGTERMed child's exit arrives afterwards
-    await database.write(lambda c: store.session_exited(c, "s1", "failed"))
+    await database.write(lambda c: store.session_exited(c, "s1", "failed", work_item_id="w"))
     row = database.read(
         lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
     )
@@ -222,9 +222,9 @@ async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     pending = database.read(lambda c: store.running_sessions_for_node(c, "w"))
     await database.write(lambda c: store.pause_work_item(c, "w", [r["id"] for r in pending]))
     # the launch completes a moment later
-    await database.write(lambda c: store.session_running(c, "s1", 999, 1.0))
+    await database.write(lambda c: store.session_running(c, "s1", 999, 1.0, work_item_id="w"))
     assert [r["id"] for r in pending] == ["s1"]
-    assert database.read(lambda c: store.session_status(c, "s1")) == "paused"
+    assert database.read(lambda c: store.session_status(c, "s1", work_item_id="w")) == "paused"
 
 
 @_PAST_THE_RESUME_WAIT
@@ -706,7 +706,7 @@ def _paused_in_verification(client, repo, task="verification.review.code_review"
                 result_path="/r",
             )
         )
-        await db.write(lambda c: store.session_exited(c, f"s-{wid}", "paused"))
+        await db.write(lambda c: store.session_exited(c, f"s-{wid}", "paused", work_item_id=wid))
 
     client.portal.call(seed)
     return wid

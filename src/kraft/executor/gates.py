@@ -959,7 +959,11 @@ async def auto_escalate_stuck(
         # names its cause for the human it is for.
         return status
     current_session_id = _current_run_escalation_session_id(evts)
-    if current_session_id and escalate.session_status(db, current_session_id) == "needs_context":
+    if (
+        current_session_id
+        and escalate.session_status(db, current_session_id, work_item_id=work_item_id)
+        == "needs_context"
+    ):
         # The *escalation session itself* asked a question and is waiting on
         # a human to answer it -- distinct from the guard above, which only
         # catches a chain node's own needs_context stop (Kraft-b52cm). Scoped

@@ -206,16 +206,17 @@ class Indexer:
             return None
         return self._read_worktree_file(ref, work_item_id, markdown=True)
 
-    async def ingest_session_summary(self, session_id: str) -> bool:
-        """Ingest the summary a finished worker session reported. Returns False
+    async def ingest_session_summary(self, work_item_id: str, session_id: str) -> bool:
+        """Ingest the summary a finished worker session of `work_item_id`
+        reported (a session id is unique only within its item). Returns False
         (and logs) on anything unusable — the index never blocks the executor."""
         row = self._state.read(
             lambda c: c.execute(
                 "SELECT ws.work_item_id, ws.node_id, ws.hook_point, ws.thread, "
                 "       ws.session_summary_ref, wi.repo "
                 "FROM worker_sessions ws JOIN work_items wi ON wi.id = ws.work_item_id "
-                "WHERE ws.id = ?",
-                (session_id,),
+                "WHERE ws.work_item_id = ? AND ws.id = ?",
+                (work_item_id, session_id),
             ).fetchone()
         )
         if row is None or not row["session_summary_ref"]:
@@ -242,6 +243,7 @@ class Indexer:
                 node_id=row["node_id"],
                 hook_point=row["hook_point"],
                 worker_session_id=session_id,
+                session_work_item_id=row["work_item_id"],
             )
         )
         doc = ingest.ScannedDoc(
@@ -351,7 +353,7 @@ class Indexer:
                 self._wakeup.clear()
                 new = self._state.read(lambda c: events.read_after(c, self._cursor))
                 repos: list[str] = []
-                summaries: list[str] = []
+                summaries: list[tuple[str, str]] = []
                 for ev in new:
                     self._cursor = ev["seq"]
                     payload = ev["payload"]
@@ -371,12 +373,12 @@ class Indexer:
                         if row is not None and row["repo"] not in repos:
                             repos.append(row["repo"])
                     elif ev["type"] == SessionEvent.WORKER_SESSION_EXITED:
-                        summaries.append(payload["session_id"])
-                for sid in summaries:
+                        summaries.append((ev["work_item_id"], payload["session_id"]))
+                for wid, sid in summaries:
                     try:
-                        await self.ingest_session_summary(sid)
+                        await self.ingest_session_summary(wid, sid)
                     except Exception:  # noqa: BLE001
-                        logger.exception("session summary ingest failed for %s", sid)
+                        logger.exception("session summary ingest failed for %s/%s", wid, sid)
                 for repo in repos:
                     try:
                         await self.rescan_repo(repo)
@@ -389,7 +391,13 @@ class Indexer:
 
     # ---- queries ----
 
-    _LINK_COLS = ("work_item_id", "node_id", "hook_point", "worker_session_id")
+    _LINK_COLS = (
+        "work_item_id",
+        "node_id",
+        "hook_point",
+        "worker_session_id",
+        "session_work_item_id",
+    )
 
     def _links_for(self, doc_ids: list[str]) -> dict[str, list[dict]]:
         """All links for a set of documents in one query — never one per row."""
@@ -412,15 +420,17 @@ class Indexer:
         content — the UI fetches that per document via GET /documents/{id}."""
         # The work-item rows and the node/hook/session row are siblings (04 §6),
         # so the triple has to be joined in from the document's session row
-        # rather than read off the row that matched work_item_id.
+        # rather than read off the row that matched work_item_id. Only an item
+        # row matches, so a summary is listed once.
         rows = self._conn.execute(
             "SELECT d.id AS document_id, d.repo, d.title, d.kind, d.source_kind, d.path, "
-            "       d.indexed_at, s.node_id, s.hook_point, s.worker_session_id "
+            "       d.indexed_at, s.node_id, s.hook_point, s.worker_session_id, "
+            "       s.session_work_item_id "
             "FROM document_links l "
             "JOIN documents d ON d.id = l.document_id "
             "LEFT JOIN document_links s ON s.document_id = l.document_id "
             "     AND s.worker_session_id IS NOT NULL "
-            "WHERE l.work_item_id = ?",
+            "WHERE l.work_item_id = ? AND l.worker_session_id IS NULL",
             (work_item_id,),
         ).fetchall()
         docs = [{**{k: r[k] for k in r.keys()}, "attachment_kind": None} for r in rows]
@@ -429,11 +439,29 @@ class Indexer:
         # W13 A: the run a session summary came from. worker_sessions lives in
         # the state db, not the index, so the join is a keyed lookup rather
         # than SQL. Artifacts and attachments have no session: all three null.
-        runs = self._session_runs(
-            [d["worker_session_id"] for d in docs if d.get("worker_session_id")]
-        )
+        # A session with no item is looked for among the document's own
+        # items' sessions only.
+        unpaired = [
+            d["document_id"]
+            for d in docs
+            if d.get("worker_session_id") and d.get("session_work_item_id") is None
+        ]
+        own = {
+            doc: frozenset(link["work_item_id"] for link in links if link["work_item_id"])
+            for doc, links in self._links_for(unpaired).items()
+        }
+        keys = {
+            d["document_id"]: (
+                d.get("session_work_item_id"),
+                d["worker_session_id"],
+                own.get(d["document_id"], frozenset()),
+            )
+            for d in docs
+            if d.get("worker_session_id")
+        }
+        runs = self._session_runs(list(keys.values()))
         for d in docs:
-            run = runs.get(d.get("worker_session_id"))
+            run = runs.get(keys.get(d["document_id"]))
             d["attempt"] = run["attempt"] if run else None
             d["round"] = run["round"] if run else None
             d["session_status"] = run["status"] if run else None
@@ -443,21 +471,54 @@ class Indexer:
         docs.sort(key=lambda d: d["indexed_at"], reverse=True)
         return docs
 
-    def _session_runs(self, session_ids: list[str]) -> dict[str, dict]:
-        """attempt/round/status per worker session id, for the ids given."""
-        if not session_ids:
-            return {}
-        marks = ",".join("?" * len(session_ids))
-        rows = self._state.read(
-            lambda c: c.execute(
-                f"SELECT id, attempt, round, status FROM worker_sessions WHERE id IN ({marks})",
-                session_ids,
-            ).fetchall()
-        )
-        return {
-            r["id"]: {"attempt": r["attempt"], "round": r["round"], "status": r["status"]}
-            for r in rows
-        }
+    def _session_runs(
+        self, sessions: list[tuple[str | None, str, frozenset[str]]]
+    ) -> dict[tuple[str | None, str, frozenset[str]], dict]:
+        """attempt/round/status per `(work item id, session id, document's
+        items)` given, keyed the same way. A session id is unique only within
+        its item, so a pair with its item is looked up by both. One with none
+        (a link written before `session_work_item_id`, or a summary git
+        scanned that names no one item) is looked up by id among the
+        sessions of its document's own items, never another item's: a
+        pre-upgrade id is unique on its own, and an id more than one of
+        those items' sessions has answers nothing rather than a guess."""
+        paired = sorted({(w, s) for w, s, _ in sessions if w is not None})
+        bare = sorted({s for w, s, _ in sessions if w is None})
+        scope = sorted({i for w, _, items in sessions if w is None for i in items})
+        rows = []
+        if paired:
+            pairs = ",".join("(?, ?)" for _ in paired)
+            args = [x for pair in paired for x in pair]
+            rows += self._state.read(
+                lambda c: c.execute(
+                    "SELECT work_item_id, id, attempt, round, status FROM worker_sessions "
+                    f"WHERE (work_item_id, id) IN (VALUES {pairs})",
+                    args,
+                ).fetchall()
+            )
+        by_pair = {(r["work_item_id"], r["id"]): r for r in rows}
+        by_id: dict[str, list] = {}
+        if bare and scope:
+            marks, items = ",".join("?" * len(bare)), ",".join("?" * len(scope))
+            for r in self._state.read(
+                lambda c: c.execute(
+                    "SELECT work_item_id, id, attempt, round, status FROM worker_sessions "
+                    f"WHERE id IN ({marks}) AND work_item_id IN ({items})",
+                    [*bare, *scope],
+                ).fetchall()
+            ):
+                by_id.setdefault(r["id"], []).append(r)
+        found = {}
+        for key in set(sessions):
+            wid, sid, items = key
+            if wid is not None:
+                r = by_pair.get((wid, sid))
+            else:
+                mine = [r for r in by_id.get(sid, []) if r["work_item_id"] in items]
+                r = mine[0] if len(mine) == 1 else None
+            if r is not None:
+                found[key] = {"attempt": r["attempt"], "round": r["round"], "status": r["status"]}
+        return found
 
     def _attachment_docs(self, work_item_id: str) -> list[dict]:
         """Intake attachments (Kraft-dgh), joined at read time rather than stored

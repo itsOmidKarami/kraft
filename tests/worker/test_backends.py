@@ -13,7 +13,7 @@ import pytest
 from support.harness import entry_of, own_files
 
 from kraft import builtins as kraft_builtins
-from kraft import events, store
+from kraft import events, ids, store
 from kraft.adapters import subprocess as sp
 from kraft.config import ConfigError
 from kraft.executor.context import LaunchContext
@@ -72,13 +72,14 @@ class Remote:
     def code_in(self, run_base, cwd, branch, **kw):
         return None
 
-    def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+    def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
         self.wrapped_with.append(kw.get("ca_bundle"))
         self.wrapped_env.append(env)
         self.calls.append("wrap")
-        return ["env", f"KRAFT_RESULT_PATH={self.outbox / f'{session_id}.json'}", *cmd]
+        sent = self.outbox / f"{ids.qualified(work_item_id, session_id)}.json"
+        return ["env", f"KRAFT_RESULT_PATH={sent}", *cmd]
 
-    def client_cwd(self, session_id):
+    def client_cwd(self, session_id, *, work_item_id):
         return None
 
     def launch_failed(self, cidfile):
@@ -90,27 +91,27 @@ class Remote:
     def code_out_item(self, run_base, work_item_id):
         return []
 
-    async def collect(self, session_id, result_path):
-        sent = self.outbox / f"{session_id}.json"
+    async def collect(self, session_id, result_path, *, work_item_id):
+        sent = self.outbox / f"{ids.qualified(work_item_id, session_id)}.json"
         if sent.exists():
             shutil.copyfile(sent, result_path)
 
-    async def oom_killed(self, session_id):
+    async def oom_killed(self, session_id, *, work_item_id):
         return None
 
-    async def close(self, session_id):
+    async def close(self, session_id, *, work_item_id):
         self.closed.append(session_id)
         self.calls.append("close")
 
     async def egress_transport(self):
         return self.transport
 
-    async def open_session(self, session_id, sandbox, sock_path):
+    async def open_session(self, session_id, sandbox, sock_path, *, work_item_id):
         self.calls.append("open_session")
         self.sock_path = sock_path
         return self.route if sandbox.get("network") else {}
 
-    async def close_session(self, session_id):
+    async def close_session(self, session_id, *, work_item_id):
         self.calls.append("close_session")
 
     async def sweep(self, keep_sessions):
@@ -134,8 +135,8 @@ def remote(tmp_path, monkeypatch):
 def docker_closed(monkeypatch):
     closed = []
 
-    async def teardown(session_id):
-        closed.append(session_id)
+    async def teardown(name):
+        closed.append(name)
 
     monkeypatch.setattr(docker_backend, "teardown", teardown)
     return closed
@@ -221,7 +222,7 @@ async def test_reattach_closes_a_session_that_recorded_no_backend_everywhere(
 
     await reattach.reattach(database, run_dirs)
 
-    assert (remote.closed, docker_closed) == (["s1"], ["s1"])
+    assert (remote.closed, docker_closed) == (["s1"], ["w1-s1"])
 
 
 async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
@@ -231,7 +232,7 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
     committed must reach the repository all the same."""
     published = []
 
-    async def fail(session_id, result_path):
+    async def fail(session_id, result_path, *, work_item_id):
         raise OSError("copy-out failed")
 
     monkeypatch.setattr(
@@ -339,7 +340,7 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
         "transport": transport,
     }
     assert (remote.sock_path is None) == (transport == "tls")
-    assert not channels.socket_path("s1").exists()
+    assert not channels.socket_path("s1", work_item_id="w1").exists()
 
 
 async def test_a_launch_under_a_kit_gets_its_lists_without_the_harness_hosts(
@@ -369,11 +370,21 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     remote.transport = "tls"
     seen = {}
 
-    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
+        cn = ids.qualified(work_item_id, session_id)
         seen["sentinels"] = kw["sentinels"]
-        seen["rules"] = channels.tls_session(session_id).credentials
-        seen["mints_in"] = channels.tls_session(session_id).run_dirs
-        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        seen["rules"] = channels.tls_session(cn).credentials
+        seen["mints_in"] = channels.tls_session(cn).run_dirs
+        inner = Remote.wrap(
+            remote,
+            cmd,
+            cwd,
+            sandbox,
+            results_dir,
+            env,
+            session_id=session_id,
+            work_item_id=work_item_id,
+        )
         return ["sh", "-c", 'echo "key=${ANTHROPIC_API_KEY-unset}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
@@ -411,9 +422,19 @@ async def test_an_install_only_credential_is_absent_from_an_agent_session(
     remote.transport = "tls"
     seen = {}
 
-    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
-        seen.update(sentinels=kw["sentinels"], rules=channels.tls_session(session_id).credentials)
-        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
+        session = channels.tls_session(ids.qualified(work_item_id, session_id))
+        seen.update(sentinels=kw["sentinels"], rules=session.credentials)
+        inner = Remote.wrap(
+            remote,
+            cmd,
+            cwd,
+            sandbox,
+            results_dir,
+            env,
+            session_id=session_id,
+            work_item_id=work_item_id,
+        )
         return ["sh", "-c", 'echo "reg=${REG_TOKEN-unset}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
@@ -444,8 +465,17 @@ async def test_a_bound_credentials_source_is_absent_from_an_agent_session(
     entry = entry_of({"path": "/r", "env_passthrough": passthrough})
     remote.transport = "tls"
 
-    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
-        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id, work_item_id, **kw):
+        inner = Remote.wrap(
+            remote,
+            cmd,
+            cwd,
+            sandbox,
+            results_dir,
+            env,
+            session_id=session_id,
+            work_item_id=work_item_id,
+        )
         return ["sh", "-c", f'echo "src=${{{source}-unset}}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
@@ -488,7 +518,7 @@ async def test_a_launch_that_raises_after_its_channel_opened_still_closes_it(
     with pytest.raises(RuntimeError, match=f"{broken} broke"):
         await _run_on_remote(database, run_dirs, tmp_path, _POLICED)
     assert remote.calls[-1] == "close_session"
-    assert not channels.socket_path("s1").exists()
+    assert not channels.socket_path("s1", work_item_id="w1").exists()
 
 
 async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
@@ -508,9 +538,11 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     live = (os.getpid(), psutil.Process().create_time())
     await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
     deny_all = {"phase": "runtime", "allow": [], "deny": ["**"]}
-    await database.write(lambda c: store.set_session_egress(c, "s1", deny_all))
+    await database.write(
+        lambda c: store.set_session_egress(c, "s1", deny_all, work_item_id=item.id)
+    )
     # A dead session's directory, which no adopted session owns.
-    dead = channels.socket_path("gone-session").parent
+    dead = channels.socket_path("gone-session", work_item_id="w1").parent
     dead.mkdir(parents=True)
     # A doctor in another process may be mid-probe in here.
     probing = dead.with_name("probe-x")
@@ -519,16 +551,17 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     _, tasks = await reattach.reattach(database, run_dirs)
     await adopted.wait()
     assert not dead.exists() and probing.exists()
-    reader, writer = await asyncio.open_unix_connection(str(channels.socket_path("s1")))
+    path = channels.socket_path("s1", work_item_id=item.id)
+    reader, writer = await asyncio.open_unix_connection(str(path))
     writer.write(b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
     answer = await asyncio.wait_for(reader.read(), 5)
     writer.close()
     release.set()
-    await tasks["s1"]
+    await tasks["w1-s1"]
 
     assert b"a.io is on the deny list" in answer
     assert remote.calls[-2:] == ["close", "close_session"]
-    assert not channels.socket_path("s1").exists()
+    assert not path.exists()
 
 
 class _Unreadable:
@@ -572,7 +605,7 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     rule |= {"sentinel": "sk-sentinel", "format": "%s"}
     egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
     egress |= {"credentials": [rule]} | ({"repo": launched_in} if launched_in else {})
-    await database.write(lambda c: store.set_session_egress(c, "s1", egress))
+    await database.write(lambda c: store.set_session_egress(c, "s1", egress, work_item_id=item.id))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-daemon")
     monkeypatch.setenv("MY_KEY", "sk-passthrough")
     resolved = _Unreadable() if entry == "unreadable" else entry and entry_of(entry)
@@ -584,12 +617,12 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
 
     _, tasks = await reattach.reattach(database, run_dirs, launch_factory=launch)
 
-    (injected,) = channels.tls_session("s1").credentials
+    (injected,) = channels.tls_session("w1-s1").credentials
     assert (injected.to_json(), injected.value) == (rule, value)
     assert asked == ([launched_in] if launched_in else [])
-    assert not channels.socket_path("s1").parent.exists()
+    assert not channels.socket_path("s1", work_item_id=item.id).parent.exists()
     release.set()
-    await tasks["s1"]
+    await tasks["w1-s1"]
 
 
 async def test_reattach_reads_a_bound_credential_under_its_source(channels, monkeypatch):
@@ -606,7 +639,7 @@ async def test_reattach_reads_a_bound_credential_under_its_source(channels, monk
         "s1", "w1", json.dumps(egress), lambda path: LaunchContext(repo_entry=entry)
     )
 
-    (injected,) = channels.tls_session("s1").credentials
+    (injected,) = channels.tls_session("w1-s1").credentials
     assert (injected.to_json(), injected.value) == (rule, "sk-bound")
 
 
@@ -617,7 +650,9 @@ async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(
     await item.session("s1", "implementation.main.implement", running=DEAD, sandbox="remote")
     await item.session("s2", "implementation.main.implement", running=DEAD, sandbox="remote")
     await database.write(
-        lambda c: store.set_session_egress(c, "s1", {"phase": "runtime", "allow": [], "deny": []})
+        lambda c: store.set_session_egress(
+            c, "s1", {"phase": "runtime", "allow": [], "deny": []}, work_item_id=item.id
+        )
     )
 
     await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)

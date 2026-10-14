@@ -283,6 +283,11 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
     assert await walk(fake, it) == "needs_human"
     # A fix-loop breach marks the node's measuring sessions the same way.
     await it.session("s-loop", "ci.main.ci", "capped_out")
+    # So does another item's, whose session has the timed-out one's id: a
+    # session id is unique only within its item.
+    (waited,) = [s["id"] for s in it.sessions("ci") if s["id"] != "s-loop"]
+    other = await item_on([forge_node("ci", "mr.ci", **_wait())], wid="w2")
+    await other.session(waited, "ci.main.ci", "capped_out")
 
     (node,) = it.database.read(lambda c: store.usage_rollup(c, it.id))["by_node"]
     ci = next(
@@ -291,8 +296,8 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
         if n["node"] == "ci"
     )
 
-    for rollup in (node, ci):
-        assert (rollup["capped_out"], rollup["wait_timed_out"]) == (1, 1), rollup
+    assert (node["capped_out"], node["wait_timed_out"]) == (1, 1), node
+    assert (ci["capped_out"], ci["wait_timed_out"]) == (2, 1), ci
 
 
 # --- one scheduler, every wait kind --------------------------------------------

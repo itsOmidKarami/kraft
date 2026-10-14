@@ -35,6 +35,11 @@ class LinkRow:
     node_id: str | None = None
     hook_point: str | None = None
     worker_session_id: str | None = None
+    #: The item `worker_session_id` belongs to, from the session's own
+    #: database row, never from front matter: a session id is unique only
+    #: within its item. None when unknown (a summary git scanned, or a link
+    #: written before the column), looked up by the session id alone.
+    session_work_item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,18 +128,28 @@ def _str_or_none(value) -> str | None:
 
 def links_from_front_matter(fm: dict) -> list[LinkRow]:
     """Linkage rows described by a summary's front-matter (04 §6). One row per
-    work item, plus one carrying the node/hook/session triple."""
+    work item, plus one carrying the node/hook/session triple.
+
+    A session id is unique only within its item, so the session row takes
+    its item from `work_item_ids` when that names exactly one; naming
+    several or none, it says nothing of whose session it is."""
     raw = fm.get("work_item_ids")
     if isinstance(raw, str):
         raw = [raw]
     elif not isinstance(raw, list):
         raw = []
-    links = [LinkRow(work_item_id=w) for w in (_str_or_none(x) for x in raw) if w]
+    items = [w for w in (_str_or_none(x) for x in raw) if w]
+    links = [LinkRow(work_item_id=w) for w in items]
     node = _str_or_none(fm.get("node_id"))
     hook = _str_or_none(fm.get("hook_point"))
     session = _str_or_none(fm.get("worker_session_id"))
     if node or hook or session:
-        links.append(LinkRow(node_id=node, hook_point=hook, worker_session_id=session))
+        only = items[0] if session and len(set(items)) == 1 else None
+        links.append(
+            LinkRow(
+                node_id=node, hook_point=hook, worker_session_id=session, session_work_item_id=only
+            )
+        )
     return links
 
 
@@ -241,7 +256,7 @@ def replace_links(conn, document_id: str, links) -> None:
     for link in links:
         conn.execute(
             "INSERT INTO document_links (id, document_id, work_item_id, node_id, "
-            "hook_point, worker_session_id) VALUES (?,?,?,?,?,?)",
+            "hook_point, worker_session_id, session_work_item_id) VALUES (?,?,?,?,?,?,?)",
             (
                 uuid.uuid4().hex,
                 document_id,
@@ -249,6 +264,7 @@ def replace_links(conn, document_id: str, links) -> None:
                 link.node_id,
                 link.hook_point,
                 link.worker_session_id,
+                link.session_work_item_id,
             ),
         )
 

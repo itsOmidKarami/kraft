@@ -626,7 +626,9 @@ async def test_needs_context_question_ignores_a_judge_session(tmp_path, database
         )
     )
     await database.write(
-        lambda c: store.session_exited(c, "judge1", "needs_context", question="which cap?")
+        lambda c: store.session_exited(
+            c, "judge1", "needs_context", question="which cap?", work_item_id=wid
+        )
     )
     assert dispatch.needs_context_question(database, wid, node, 0) is None
 
@@ -677,7 +679,9 @@ def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
                     result_path="/r",
                 )
             )
-            await database.write(lambda c: store.session_exited(c, "prior-fix", "done"))
+            await database.write(
+                lambda c: store.session_exited(c, "prior-fix", "done", work_item_id=wid)
+            )
             cap = policy.resolve_cap(pol, "verify.fix_loop")
             await database.write(lambda c: store.bump_counter(c, wid, "verify.fix_loop", cap))
 

@@ -50,9 +50,19 @@ def _amp(run, tmp_path, **kw):
     return run(harness="amp", command="amp", run_dirs=RunDirs(base=tmp_path), **kw)
 
 
-def test_an_amp_launch_gets_its_own_settings_file(run, tmp_path):
-    seen = _amp(run, tmp_path, deny_tools=("Bash",))
-    path = tmp_path / "harness-config" / "amp" / "s1.json"
+@pytest.mark.parametrize(
+    ("session_id", "file"),
+    [
+        ("s1", "w1-s1.json"),
+        ("8cbfe6e27c1044b3e445c0f0d726357d", "8cbfe6e27c1044b3e445c0f0d726357d.json"),
+    ],
+    ids=["per-item-session", "older-session"],
+)
+def test_an_amp_launch_gets_its_own_settings_file(run, tmp_path, session_id, file):
+    """Its own in a folder every item shares: named for its item too, unless
+    it is a session from before per-item ids, whose id is its own."""
+    seen = _amp(run, tmp_path, deny_tools=("Bash",), session_id=session_id)
+    path = tmp_path / "harness-config" / "amp" / file
     assert seen["cmd"][:4] == ["amp", "--no-archive-after-execute", "--settings-file", str(path)]
     assert json.loads(path.read_text())["amp.permissions"][0]["action"] == "reject"
 

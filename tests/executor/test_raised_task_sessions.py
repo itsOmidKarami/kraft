@@ -13,6 +13,7 @@ import pytest
 from support.harness import entry_of
 
 from kraft import builtins as _builtins
+from kraft import ids
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
 
@@ -62,6 +63,8 @@ async def test_a_task_that_raises_leaves_its_session_and_the_reason(
     [row] = it.sessions("implementation")
     assert (row["hook_point"], row["status"]) == (f"implementation.main.{task['id']}", status)
     assert f"{type(exc).__name__}: {exc}" in Path(row["log_path"]).read_text()
+    # Minted by the dispatch (the forge's row) or the raise's record of it (the builtin's).
+    assert len(row["id"]) == ids.SESSION_LENGTH and set(row["id"]) <= set(ids.ALPHABET)
 
 
 async def test_a_raise_during_a_resumed_wait_closes_that_wait_s_row(item_on, monkeypatch):

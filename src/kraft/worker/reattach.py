@@ -11,7 +11,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import caps, events, item_paths, store
+from kraft import caps, events, ids, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -67,6 +67,10 @@ _REATTACH_GRACE_RETRY_DELAY_S = 2.0
 
 @dataclass
 class ReattachSummary:
+    """What startup found of the sessions that were running. Every session
+    is named `<wid>/<sid>` (`ids.session_ref`): a session id is unique only
+    within its item."""
+
     scanned: int = 0
     adopted: list[str] = field(default_factory=list)
     resolved_from_file: list[str] = field(default_factory=list)
@@ -78,19 +82,25 @@ def still_orphaned(conn, unknown: list[str]) -> list[str]:
     """Those of `unknown` (sessions startup could not confirm, which stopped
     their items) that still stand: the item is still stopped, and has started
     no session since. A retry that went on to complete must not leave
-    `/health`, and so `kraft admin doctor`, failing until the next restart."""
+    `/health`, and so `kraft admin doctor`, failing until the next restart.
+
+    Each is a `<wid>/<sid>` reference startup built (`ids.session_ref`): a
+    session id is unique only within its item. The summary lives in this
+    process alone, so no reference in it predates that."""
     if not unknown:
         return []
-    marks = ",".join("?" * len(unknown))
+    refs = [ids.parse_session_ref(ref) for ref in unknown]
+    marks = ",".join("?" * len(refs))
     rows = conn.execute(
-        f"SELECT s.id FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
+        f"SELECT s.work_item_id, s.id FROM worker_sessions s "
+        f"JOIN work_items w ON w.id = s.work_item_id "
         f"WHERE s.id IN ({marks}) AND w.status = ? AND NOT EXISTS ("
         "SELECT 1 FROM worker_sessions n WHERE n.work_item_id = s.work_item_id "
         "AND n.rowid > s.rowid)",
-        (*unknown, WorkItemStatus.NEEDS_HUMAN),
+        (*(sid for _w, sid in refs), WorkItemStatus.NEEDS_HUMAN),
     ).fetchall()
-    kept = {r["id"] for r in rows}
-    return [sid for sid in unknown if sid in kept]
+    kept = {(r["work_item_id"], r["id"]) for r in rows}
+    return [ref for ref, pair in zip(unknown, refs, strict=True) if pair in kept]
 
 
 def _reap(pid: int) -> None:
@@ -178,6 +188,8 @@ async def _exit_from_file(
     status: str,
     reader: str | None,
     summary: str | None = None,
+    *,
+    work_item_id: str,
 ) -> None:
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
@@ -193,7 +205,9 @@ async def _exit_from_file(
     fields = read_result_fields(result_path, summary=summary)
     seen = _usage.read(log_path, result_path, reader)
     # The same reader, holding an adopted turn to `run_task`'s rule.
-    status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
+    status = await fail_abandoned_jobs(
+        db, session_id, log_path, status, reader, work_item_id=work_item_id
+    )
     await db.write(
         lambda c: store.session_exited(
             c,
@@ -204,6 +218,7 @@ async def _exit_from_file(
             concerns=fields["concerns"],
             question=fields["question"],
             reader=reader,
+            work_item_id=work_item_id,
         )
     )
 
@@ -230,7 +245,7 @@ async def _resume_adopted_escalation(
     Reconstructs the same "seq right before dispatch" cursor those live
     callers compute themselves, from this session's own `escalation_message`
     event -- `session_id` there is this session's own `worker_sessions.id`
-    (`escalate.dispatch` mints one `uuid.uuid4().hex` and uses it as both).
+    (`escalate.dispatch` mints one id, `store.new_session_id`, and uses it as both).
     `events.read_after` is exclusive of its own `after_seq`, so using this
     event's own `seq` as the cursor correctly excludes it while including
     everything the turn produced after it -- the same events a live caller's
@@ -446,7 +461,10 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
             sandboxed=row["sandbox"] is not None,
         )
     except Exception:  # noqa: BLE001 -- never at the cost of the adoption itself
-        logger.exception("straggler sweep after re-adopted session %s failed", row["id"])
+        logger.exception(
+            "straggler sweep after re-adopted session %s failed",
+            ids.session_ref(row["work_item_id"], row["id"]),
+        )
 
 
 async def _adopt(
@@ -456,6 +474,7 @@ async def _adopt(
     poll_s: float = 0.1,
     progress_s: float = 5.0,
     *,
+    work_item_id: str,
     run_dirs=None,
     policy: _policy.Policy | None = None,
     launch_factory: Callable[[str], LaunchContext] | None = None,
@@ -463,7 +482,10 @@ async def _adopt(
     on_approve: OnApprove | None = None,
 ) -> None:
     row = db.read(
-        lambda c: c.execute("SELECT * FROM worker_sessions WHERE id = ?", (session_id,)).fetchone()
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (work_item_id, session_id),
+        ).fetchone()
     )
     log_path = Path(row["log_path"])
     result_path = Path(row["result_path"])
@@ -496,18 +518,25 @@ async def _adopt(
         try:
             log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
             if live is not None:
-                await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
+                await db.write(
+                    lambda c, u=live: store.session_progress(
+                        c, session_id, u, work_item_id=work_item_id
+                    )
+                )
         except Exception:
-            logger.exception("usage progress tick failed for adopted session %s", session_id)
+            logger.exception(
+                "usage progress tick failed for adopted session %s",
+                ids.session_ref(work_item_id, session_id),
+            )
     # What the session started into its own process group can outlive it and
     # still be writing the worktree when the sweep commits it, as `run_task`
     # ends it for a session it launched (R11E-03). Sessions start with
     # `start_new_session=True`, so the pid is the group's id.
     await _kill_group(pid, _KILL_GRACE_S, reap=lambda: _reap(pid))
     for backend in _backends.for_session(row["sandbox"]):
-        await backend.collect(session_id, result_path)
+        await backend.collect(session_id, result_path, work_item_id=work_item_id)
     # Before `_guarded_adopt`'s `finally` closes the sandbox, which removes it.
-    oom = await _oom_killed(row["sandbox"], session_id)
+    oom = await _oom_killed(row["sandbox"], work_item_id, session_id)
     if run_dirs is not None:
         # Before the exit is resolved: what runs next reads the item branch.
         await _sync_item_refs(db, run_dirs, row["work_item_id"])
@@ -519,7 +548,14 @@ async def _adopt(
     if oom is not None:
         status = await record_oom_kill(db, row["work_item_id"], session_id, log_path, oom, status)
     await _exit_from_file(
-        db, session_id, log_path, result_path, status, reader, _asked_summary(db, run_dirs, row)
+        db,
+        session_id,
+        log_path,
+        result_path,
+        status,
+        reader,
+        _asked_summary(db, run_dirs, row),
+        work_item_id=work_item_id,
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
@@ -547,7 +583,7 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
     session_id = row["id"]
 
     def _capped(c):
-        store.session_exited(c, session_id, "capped_out")
+        store.session_exited(c, session_id, "capped_out", work_item_id=row["work_item_id"])
         events.append(
             c,
             row["work_item_id"],
@@ -594,6 +630,7 @@ async def _guarded_adopt(
             db,
             session_id,
             pid,
+            work_item_id=work_item_id,
             run_dirs=run_dirs,
             policy=policy,
             launch_factory=launch_factory,
@@ -604,7 +641,7 @@ async def _guarded_adopt(
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.exception("adopted session %s crashed", session_id)
+        logger.exception("adopted session %s crashed", ids.session_ref(work_item_id, session_id))
         reason = f"reattach crashed: {exc!r}"
         try:
             await db.write(
@@ -622,7 +659,7 @@ async def _guarded_adopt(
         # that was never sandboxed, which is why this does not first work out
         # whether this one was: deciding that per call path is how the third
         # path got missed twice.
-        await asyncio.shield(_close_sandbox(sandbox, session_id, egress=egress))
+        await asyncio.shield(_close_sandbox(sandbox, work_item_id, session_id, egress=egress))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
     # After the sandbox is closed, as dispatch sweeps once its launch is over;
@@ -630,29 +667,38 @@ async def _guarded_adopt(
     if adopted and run_dirs is not None:
         row = db.read(
             lambda c: c.execute(
-                "SELECT * FROM worker_sessions WHERE id = ?", (session_id,)
+                "SELECT * FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+                (work_item_id, session_id),
             ).fetchone()
         )
         await _sweep_after(db, run_dirs, row, launch_factory)
 
 
-async def _oom_killed(kind: str | None, session_id: str) -> _backends.OomKill | None:
+async def _oom_killed(
+    kind: str | None, work_item_id: str, session_id: str
+) -> _backends.OomKill | None:
     """Whether a session row's sandbox was killed under its memory limit, or None."""
     for backend in _backends.for_session(kind):
-        if (oom := await backend.oom_killed(session_id)) is not None:
+        oom = await backend.oom_killed(session_id, work_item_id=work_item_id)
+        if oom is not None:
             return oom
     return None
 
 
-async def _close_sandbox(kind: str | None, session_id: str, *, egress: bool = False) -> None:
+async def _close_sandbox(
+    kind: str | None, work_item_id: str, session_id: str, *, egress: bool = False
+) -> None:
     """Close the sandbox a session row ran in (`worker_sessions.sandbox`),
-    and under `network:` its route out after it: relay, then channel."""
+    and under `network:` its route out after it: relay, then channel. Each
+    is found by the names the backend builds from `ids.qualified`, so a
+    session started before per-item ids is closed under the names it
+    started with."""
     for backend in _backends.for_session(kind):
         try:
-            await backend.close(session_id)
+            await backend.close(session_id, work_item_id=work_item_id)
         finally:
             if egress:
-                await close_egress(backend, session_id)
+                await close_egress(backend, session_id, work_item_id=work_item_id)
 
 
 def _launch_environ(row: dict, launch_factory) -> dict[str, str]:
@@ -680,7 +726,10 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str, launch
     route out: it fails closed, and this says why."""
     channels = _channel.current()
     if channels is None:
-        logger.warning("adopted session %s: no egress channel to re-open", session_id)
+        logger.warning(
+            "adopted session %s: no egress channel to re-open",
+            ids.session_ref(work_item_id, session_id),
+        )
         return
     try:
         row = json.loads(egress)
@@ -695,7 +744,11 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str, launch
             credentials=tuple(InjectRule.from_json(r, environ) for r in row.get("credentials", ())),
         )
     except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
-        logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)
+        logger.warning(
+            "adopted session %s: egress channel not re-opened: %s",
+            ids.session_ref(work_item_id, session_id),
+            exc,
+        )
 
 
 async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
@@ -736,6 +789,8 @@ async def reattach(
         ).fetchall()
     )
     summary = ReattachSummary(scanned=len(rows))
+    #: By `ids.qualified`: a session id is unique only within its item, and
+    #: the caller merges these into `app.state.tasks` beside other items'.
     adopted_tasks: dict[str, asyncio.Task] = {}
     pending_escalation_resumes: list[dict] = []
 
@@ -748,7 +803,7 @@ async def reattach(
     # Resolved for every row up front, once each, so the grace retry below can
     # be a single sleep for the whole scan.
     adopt = {
-        r["id"]: (
+        (r["work_item_id"], r["id"]): (
             r["status"] != SessionStatus.PENDING
             and r["pid"] is not None
             and _identity_ok(r["pid"], r["pid_start_time"])
@@ -777,7 +832,7 @@ async def reattach(
     grace = [
         r
         for r in rows
-        if not adopt[r["id"]]
+        if not adopt[(r["work_item_id"], r["id"])]
         and r["status"] != SessionStatus.PENDING
         and r["pid"] is not None
         and _is_young(r["started_at"])
@@ -785,7 +840,7 @@ async def reattach(
     if grace:
         await asyncio.sleep(grace_retry_delay_s)
         for r in grace:
-            adopt[r["id"]] = _identity_ok(r["pid"], r["pid_start_time"])
+            adopt[(r["work_item_id"], r["id"])] = _identity_ok(r["pid"], r["pid_start_time"])
 
     # A container whose teardown failed or timed out before this start is
     # still writing its worktree, and no row names it any more. Swept before
@@ -794,7 +849,7 @@ async def reattach(
     # Every row's container is kept too, not only an adopted one's: the loop
     # below closes each in turn, after asking whether its memory limit
     # killed it -- which the sweep would otherwise have removed first.
-    keep = {r["id"] for r in rows}
+    keep = {(r["work_item_id"], r["id"]) for r in rows}
     for backend in _backends.every():
         if orphans := await backend.sweep(keep):
             logger.warning(
@@ -803,16 +858,22 @@ async def reattach(
 
     for r in rows:
         sid = r["id"]
-        adopting = adopt[sid]
+        adopting = adopt[(r["work_item_id"], sid)]
         oom = None
         if not adopting:
             # Asked before the close below removes the evidence.
             if r["status"] != SessionStatus.PENDING:
-                oom = await _oom_killed(r["sandbox"], sid)
-            await _close_sandbox(r["sandbox"], sid, egress=r["egress"] is not None)
+                oom = await _oom_killed(r["sandbox"], r["work_item_id"], sid)
+            await _close_sandbox(
+                r["sandbox"], r["work_item_id"], sid, egress=r["egress"] is not None
+            )
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == SessionStatus.PENDING:
-            await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
+            await db.write(
+                lambda c, sid=sid, r=r: store.session_unknown(
+                    c, sid, work_item_id=r["work_item_id"]
+                )
+            )
             await db.write(
                 lambda c, r=r: store.mark_needs_human(
                     c,
@@ -822,15 +883,19 @@ async def reattach(
                     kind=StopKind.INFRA,
                 )
             )
-            summary.unknown.append(sid)
+            summary.unknown.append(ids.session_ref(r["work_item_id"], sid))
             continue
 
         pid = r["pid"]
         if adopting:
             if r["egress"] is not None:
                 await _reopen_egress(sid, r["work_item_id"], r["egress"], launch_factory)
-            await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
-            adopted_tasks[sid] = asyncio.create_task(
+            await db.write(
+                lambda c, sid=sid, r=r: store.session_reattached(
+                    c, sid, work_item_id=r["work_item_id"]
+                )
+            )
+            adopted_tasks[ids.qualified(r["work_item_id"], sid)] = asyncio.create_task(
                 _guarded_adopt(
                     db,
                     sid,
@@ -846,7 +911,7 @@ async def reattach(
                     egress=r["egress"] is not None,
                 )
             )
-            summary.adopted.append(sid)
+            summary.adopted.append(ids.session_ref(r["work_item_id"], sid))
             continue
 
         # A dead process whose identity cannot be confirmed still left its
@@ -865,7 +930,11 @@ async def reattach(
                 db, r["work_item_id"], sid, Path(r["log_path"]), oom, status
             )
         if status is not None:
-            await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
+            await db.write(
+                lambda c, sid=sid, r=r: store.session_reattached(
+                    c, sid, work_item_id=r["work_item_id"]
+                )
+            )
             await _exit_from_file(
                 db,
                 sid,
@@ -874,8 +943,9 @@ async def reattach(
                 status,
                 _reader_of(r),
                 _asked_summary(db, run_dirs, r),
+                work_item_id=r["work_item_id"],
             )
-            summary.resolved_from_file.append(sid)
+            summary.resolved_from_file.append(ids.session_ref(r["work_item_id"], sid))
             await _sweep_after(db, run_dirs, r, launch_factory)
             if r["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
                 # Deferred: starting this task now would let its own
@@ -888,7 +958,9 @@ async def reattach(
         else:
             reason = _identity_mismatch_reason(pid, r["pid_start_time"])
             await db.write(
-                lambda c, sid=sid, reason=reason: store.session_unknown(c, sid, reason=reason)
+                lambda c, sid=sid, reason=reason, r=r: store.session_unknown(
+                    c, sid, reason=reason, work_item_id=r["work_item_id"]
+                )
             )
             await db.write(
                 lambda c, r=r, reason=reason: store.mark_needs_human(
@@ -899,7 +971,7 @@ async def reattach(
                     kind=StopKind.INFRA,
                 )
             )
-            summary.unknown.append(sid)
+            summary.unknown.append(ids.session_ref(r["work_item_id"], sid))
 
     # Every adopted session's channel is open again by now; any other socket
     # directory is a dead session's.
@@ -915,7 +987,7 @@ async def reattach(
 
     for pending in pending_escalation_resumes:
         sid = pending["session_id"]
-        adopted_tasks[sid] = asyncio.create_task(
+        adopted_tasks[ids.qualified(pending["work_item_id"], sid)] = asyncio.create_task(
             _guarded_resume_adopted_escalation(
                 db,
                 run_dirs,

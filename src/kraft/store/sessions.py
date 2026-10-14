@@ -6,7 +6,7 @@ import stat
 from dataclasses import replace
 from pathlib import Path
 
-from kraft import events, item_paths
+from kraft import events, ids, item_paths
 from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
@@ -79,7 +79,7 @@ def create_session(
         existing = conn.execute(
             "SELECT id, log_path, result_path FROM worker_sessions WHERE work_item_id = ? "
             "AND node_id = ? AND hook_point = ? AND round = ? AND status = ? "
-            "ORDER BY created_at DESC LIMIT 1",
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (work_item_id, node_id, hook_point, round, SessionStatus.WAITING),
         ).fetchone()
         if existing is not None:
@@ -124,7 +124,10 @@ def create_session(
             repository,
         ),
     )
-    (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
+    (attempt,) = conn.execute(
+        "SELECT attempt FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (work_item_id, id),
+    ).fetchone()
     # Announce the session here, where every session is born, rather than in
     # session_running — only the subprocess adapter calls that, so a builtin hook
     # (create_session -> session_exited) never told the SPA the session existed.
@@ -145,6 +148,23 @@ def create_session(
         },
     )
     return id, log_path, result_path
+
+
+def new_session_id(conn: sqlite3.Connection, work_item_id: str) -> str:
+    """6 characters no other session of `work_item_id` has. Unique only
+    within the item: the table's key is (work item, id), and a session is
+    always looked up with its item. Drawn before the row is written, which
+    `create_session` does later: a draw that raced another for the same id
+    of the same item is refused by the key, loudly."""
+
+    def taken(candidate: str) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+            (work_item_id, candidate),
+        ).fetchone()
+        return row is not None
+
+    return ids.mint(ids.SESSION_LENGTH, taken)
 
 
 def next_attempt(conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_point: str) -> int:
@@ -191,7 +211,7 @@ def escalation_threads(conn: sqlite3.Connection, work_item_id: str) -> list[dict
     can render thread headers without scanning every session/event itself."""
     rows = conn.execute(
         "SELECT * FROM worker_sessions WHERE work_item_id = ? AND hook_point = 'escalation' "
-        "ORDER BY thread, created_at",
+        "ORDER BY thread, created_at, rowid",
         (work_item_id,),
     ).fetchall()
     threads: dict[int, list[sqlite3.Row]] = {}
@@ -376,7 +396,7 @@ def reusable_session(
         "  AND sibling.head_sha = worker_sessions.head_sha "
         "  AND sibling.status != 'done'"
         ") "
-        "ORDER BY created_at DESC LIMIT 1",
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (
             work_item_id,
             node_id,
@@ -469,18 +489,20 @@ def latest_session_per_task_at_current_node(
     return out
 
 
-def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -> None:
+def session_running(
+    conn: sqlite3.Connection, session_id, pid, pid_start_time, *, work_item_id: str
+) -> None:
     # `status != 'paused'`: a pause that landed while this session was still
     # pending must not be undone by the launch finishing.
     conn.execute(
         "UPDATE worker_sessions SET status = 'running', pid = ?, pid_start_time = ?, "
-        "started_at = ? WHERE id = ? AND status != ?",
-        (pid, pid_start_time, _now(), session_id, SessionStatus.PAUSED),
+        "started_at = ? WHERE work_item_id = ? AND id = ? AND status != ?",
+        (pid, pid_start_time, _now(), work_item_id, session_id, SessionStatus.PAUSED),
     )
     row = conn.execute(
         "SELECT work_item_id, node_id, hook_point, round, attempt, thread FROM worker_sessions "
-        "WHERE id = ?",
-        (session_id,),
+        "WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
     ).fetchone()
     events.append(
         conn,
@@ -511,25 +533,33 @@ def _tokens(usage: Usage) -> tuple[int, ...]:
 _DISPLAY_MODELS = {"auto"}
 
 
-def _with_launch_model(conn: sqlite3.Connection, session_id, usage: Usage | None):
+def _with_launch_model(
+    conn: sqlite3.Connection, session_id, usage: Usage | None, *, work_item_id: str
+):
     """`usage` with the model the session was launched with (`create_session`)
     when its own output named none, or only a display name -- codex and cursor
     report tokens under no model, and pricing needs one (Kraft-9efnk.10). A
     model the output did name is never replaced."""
     if usage is None or (usage.model and usage.model.lower() not in _DISPLAY_MODELS):
         return usage
-    row = conn.execute("SELECT model FROM worker_sessions WHERE id = ?", (session_id,)).fetchone()
+    row = conn.execute(
+        "SELECT model FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
+    ).fetchone()
     return replace(usage, model=row["model"] if row is not None else None)
 
 
-def _warn_unpriced(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
+def _warn_unpriced(
+    conn: sqlite3.Connection, session_id, usage: Usage, *, work_item_id: str
+) -> None:
     """Say once per item that a session's spend has no dollar figure: no
     reported cost and no `prices.json` rate for its model (or no model). The
     item and daily dollar caps count it as $0 -- it warns, never stops
     (Kraft-9efnk.10, option A2); a per-scope `budget_usd` refuses on it
     (`caps.budget_breach`)."""
     row = conn.execute(
-        "SELECT work_item_id, harness FROM worker_sessions WHERE id = ?", (session_id,)
+        "SELECT work_item_id, harness FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
     ).fetchone()
     if (
         row is None
@@ -557,7 +587,9 @@ def _warn_unpriced(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
     )
 
 
-def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
+def session_progress(
+    conn: sqlite3.Connection, session_id, usage: Usage, *, work_item_id: str
+) -> None:
     """Live token counts, model and an estimated cost for a session that is
     still running (Kraft-54dk, Kraft-wz83s).
 
@@ -582,12 +614,19 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     update: a paused or finished session's numbers are settled, and a late
     progress write must not reopen them.
     """
-    usage = _with_launch_model(conn, session_id, usage)
+    usage = _with_launch_model(conn, session_id, usage, work_item_id=work_item_id)
     estimate = _usage.estimate_cost(usage, usage.model)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-        "cost_estimated = ? WHERE id = ? AND status = 'running'",
-        (usage.model, *_tokens(usage), estimate, int(estimate is not None), session_id),
+        "cost_estimated = ? WHERE work_item_id = ? AND id = ? AND status = 'running'",
+        (
+            usage.model,
+            *_tokens(usage),
+            estimate,
+            int(estimate is not None),
+            work_item_id,
+            session_id,
+        ),
     )
 
 
@@ -598,7 +637,12 @@ CLAUDE_READER = "claude-stream-json"
 
 
 def _own_share(
-    conn: sqlite3.Connection, session_id, usage: Usage | None, reader: str | None
+    conn: sqlite3.Connection,
+    session_id,
+    usage: Usage | None,
+    reader: str | None,
+    *,
+    work_item_id: str,
 ) -> tuple[Usage | None, bool]:
     """`(usage less what an earlier session of this item and task already
     recorded, netting_failed)`, when this one resumed that one's CLI session
@@ -625,8 +669,9 @@ def _own_share(
     thread resumed is netted by codex's reader, not claude's. None, a harness
     with no log schema, has no CLI session to net against."""
     me = conn.execute(
-        "SELECT rowid, work_item_id, hook_point, log_path FROM worker_sessions WHERE id = ?",
-        (session_id,),
+        "SELECT rowid, work_item_id, hook_point, log_path FROM worker_sessions "
+        "WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
     ).fetchone()
     if usage is None or reader is None or me is None or not me["log_path"]:
         return usage, False
@@ -685,6 +730,8 @@ def record_pause_usage(
     session_id,
     usage: Usage | None,
     reader: str | None = CLAUDE_READER,
+    *,
+    work_item_id: str,
 ) -> None:
     """Model, tokens and cost for a session a human interrupted (Kraft-s7c04.18).
 
@@ -711,17 +758,25 @@ def record_pause_usage(
     Guarded on `status = 'paused'` for the reason `session_progress` guards on
     `'running'`: a row that has moved on has settled numbers.
     """
-    usage, netted_unknown = _own_share(conn, session_id, usage, reader)
-    usage = _with_launch_model(conn, session_id, usage)
+    usage, netted_unknown = _own_share(conn, session_id, usage, reader, work_item_id=work_item_id)
+    usage = _with_launch_model(conn, session_id, usage, work_item_id=work_item_id)
     if usage is None:
         return
     cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
     if cost is None and not netted_unknown and usage.total:
-        _warn_unpriced(conn, session_id, usage)
+        _warn_unpriced(conn, session_id, usage, work_item_id=work_item_id)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-        "cost_estimated = ? WHERE id = ? AND status = ?",
-        (usage.model, *_tokens(usage), cost, estimated, session_id, SessionStatus.PAUSED),
+        "cost_estimated = ? WHERE work_item_id = ? AND id = ? AND status = ?",
+        (
+            usage.model,
+            *_tokens(usage),
+            cost,
+            estimated,
+            work_item_id,
+            session_id,
+            SessionStatus.PAUSED,
+        ),
     )
 
 
@@ -735,6 +790,7 @@ def session_exited(
     concerns: str | None = None,
     question: str | None = None,
     reader: str | None = CLAUDE_READER,
+    work_item_id: str,
 ) -> None:
     """`reader` is the log schema `usage` was read with (`_own_share`).
 
@@ -746,8 +802,9 @@ def session_exited(
     status = SessionStatus(status)
     now = _now()
     row = conn.execute(
-        "SELECT work_item_id, started_at, created_at, status FROM worker_sessions WHERE id = ?",
-        (session_id,),
+        "SELECT work_item_id, started_at, created_at, status FROM worker_sessions "
+        "WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
     ).fetchone()
     # Pausing SIGTERMs the child, so the adapter — or reattach, adopting a child
     # that dies after a restart — arrives here a moment later with 'failed'. A
@@ -761,13 +818,14 @@ def session_exited(
         # `reattach._exit_from_file` for free: it reads the same usage and
         # reaches the same branch.
         if row is not None:
-            record_pause_usage(conn, session_id, usage, reader)
+            record_pause_usage(conn, session_id, usage, reader, work_item_id=work_item_id)
         return
     # COALESCE: a None ref must not erase one an earlier resolution already stored.
     conn.execute(
         "UPDATE worker_sessions SET status = ?, exited_at = ?, "
-        "session_summary_ref = COALESCE(?, session_summary_ref) WHERE id = ?",
-        (status, now, summary_ref, session_id),
+        "session_summary_ref = COALESCE(?, session_summary_ref) "
+        "WHERE work_item_id = ? AND id = ?",
+        (status, now, summary_ref, work_item_id, session_id),
     )
     # Wall time runs from the moment the process started, not from row creation:
     # a session that waited behind a lock did not spend that time working.
@@ -777,8 +835,8 @@ def session_exited(
         payload["concerns"] = concerns
     if question:
         payload["question"] = question
-    usage, netted_unknown = _own_share(conn, session_id, usage, reader)
-    usage = _with_launch_model(conn, session_id, usage)
+    usage, netted_unknown = _own_share(conn, session_id, usage, reader, work_item_id=work_item_id)
+    usage = _with_launch_model(conn, session_id, usage, work_item_id=work_item_id)
     if usage is not None:
         # The exit envelope's own figure settles the row when it reported one
         # (`_settle_cost`); when it did not, a fresh final-tokens estimate
@@ -789,11 +847,11 @@ def session_exited(
         # earlier turn's own spend (`_settle_cost`'s docstring).
         cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
         if cost is None and not netted_unknown and usage.total:
-            _warn_unpriced(conn, session_id, usage)
+            _warn_unpriced(conn, session_id, usage, work_item_id=work_item_id)
         conn.execute(
             f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-            "cost_estimated = ?, wall_ms = ? WHERE id = ?",
-            (usage.model, *_tokens(usage), cost, estimated, wall_ms, session_id),
+            "cost_estimated = ?, wall_ms = ? WHERE work_item_id = ? AND id = ?",
+            (usage.model, *_tokens(usage), cost, estimated, wall_ms, work_item_id, session_id),
         )
         payload |= {
             "model": usage.model,
@@ -801,7 +859,10 @@ def session_exited(
             "cost_usd": cost,
         }
     else:
-        conn.execute("UPDATE worker_sessions SET wall_ms = ? WHERE id = ?", (wall_ms, session_id))
+        conn.execute(
+            "UPDATE worker_sessions SET wall_ms = ? WHERE work_item_id = ? AND id = ?",
+            (wall_ms, work_item_id, session_id),
+        )
     # The design calls this event worker_session_completed; this codebase has
     # always called the same moment worker_session_exited, so the usage rides
     # that rather than a second event meaning the same thing.
@@ -815,53 +876,61 @@ def stop_escalation_session(conn: sqlite3.Connection, work_item_id: str, session
     work_items UPDATE that function also does."""
     now = _now()
     conn.execute(
-        "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
-        (now, session_id),
+        "UPDATE worker_sessions SET status = 'paused', exited_at = ? "
+        "WHERE work_item_id = ? AND id = ?",
+        (now, work_item_id, session_id),
     )
     events.append(
         conn, work_item_id, SessionEvent.WORKER_SESSION_PAUSED, {"session_id": session_id}
     )
 
 
-def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None = None) -> None:
+def session_unknown(
+    conn: sqlite3.Connection, session_id, *, reason: str | None = None, work_item_id: str
+) -> None:
     """`reason`, when given, is why reattach's own identity check failed
     (Kraft-s7c04.51) -- distinct from the `work_item_needs_human` reason a
     caller writes right after this, which explains the *stop* rather than
     the identity check itself."""
     conn.execute(
-        "UPDATE worker_sessions SET status = 'unknown', exited_at = ? WHERE id = ?",
-        (_now(), session_id),
+        "UPDATE worker_sessions SET status = 'unknown', exited_at = ? "
+        "WHERE work_item_id = ? AND id = ?",
+        (_now(), work_item_id, session_id),
     )
-    row = conn.execute(
-        "SELECT work_item_id FROM worker_sessions WHERE id = ?", (session_id,)
-    ).fetchone()
     payload = {"session_id": session_id, **({"reason": reason} if reason else {})}
-    events.append(conn, row["work_item_id"], SessionEvent.SESSION_UNKNOWN, payload)
+    events.append(conn, work_item_id, SessionEvent.SESSION_UNKNOWN, payload)
 
 
-def set_session_egress(conn: sqlite3.Connection, session_id: str, egress: dict) -> None:
+def set_session_egress(
+    conn: sqlite3.Connection, session_id: str, egress: dict, *, work_item_id: str
+) -> None:
     """The egress lists a session under `network:` launched with, and its
     channel's `transport` ("unix" or "tls"), for reattach to re-open its
     channel with (`worker_sessions.egress`)."""
     conn.execute(
-        "UPDATE worker_sessions SET egress = ? WHERE id = ?", (json.dumps(egress), session_id)
+        "UPDATE worker_sessions SET egress = ? WHERE work_item_id = ? AND id = ?",
+        (json.dumps(egress), work_item_id, session_id),
     )
 
 
-def session_reattached(conn: sqlite3.Connection, session_id) -> None:
+def session_reattached(conn: sqlite3.Connection, session_id, *, work_item_id: str) -> None:
     row = conn.execute(
-        "SELECT work_item_id, pid FROM worker_sessions WHERE id = ?", (session_id,)
+        "SELECT pid FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
     ).fetchone()
     events.append(
         conn,
-        row["work_item_id"],
+        work_item_id,
         SessionEvent.SESSION_REATTACHED,
         {"session_id": session_id, "pid": row["pid"]},
     )
 
 
-def session_status(conn: sqlite3.Connection, session_id: str) -> str | None:
-    row = conn.execute("SELECT status FROM worker_sessions WHERE id = ?", (session_id,)).fetchone()
+def session_status(conn: sqlite3.Connection, session_id: str, *, work_item_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT status FROM worker_sessions WHERE work_item_id = ? AND id = ?",
+        (work_item_id, session_id),
+    ).fetchone()
     return row["status"] if row else None
 
 
@@ -883,7 +952,7 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     return conn.execute(
         "SELECT s.id, s.pid FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
         f"WHERE s.work_item_id = ? AND s.status IN ({in_list(LIVE)}) "
-        "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
+        "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') ORDER BY s.rowid",
         (work_item_id,),
     ).fetchall()
 
@@ -895,7 +964,7 @@ def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
         r["id"]
         for r in conn.execute(
             "SELECT id FROM worker_sessions WHERE work_item_id = ? "
-            f"AND status IN ({in_list(LIVE)})",
+            f"AND status IN ({in_list(LIVE)}) ORDER BY rowid",
             (work_item_id,),
         ).fetchall()
     ]
@@ -957,7 +1026,7 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
     return conn.execute(
         "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
         f"AND status IN ({in_list(LIVE)}) "
-        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?) ORDER BY rowid",
         (work_item_id, path, path + ".", path + "."),
     ).fetchall()
 

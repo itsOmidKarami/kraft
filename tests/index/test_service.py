@@ -119,7 +119,7 @@ async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):
     await _seed_session(database, "s1", "w1", ".engineering/sessions/s1.md")
 
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is True
+    assert await ix.ingest_session_summary("w1", "s1") is True
 
     hits = ix.search("adapter")
     assert [h["path"] for h in hits] == [".engineering/sessions/s1.md"]
@@ -141,7 +141,7 @@ async def test_ingest_session_summary_from_worktree(tmp_path, database, conn):
     assert sorted(r["work_item_id"] for r in rows if r["work_item_id"]) == ["w1", "w2"]
 
     # idempotent
-    assert await ix.ingest_session_summary("s1") is True
+    assert await ix.ingest_session_summary("w1", "s1") is True
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     assert (
         conn.execute(
@@ -158,7 +158,7 @@ async def test_ingest_session_summary_missing_file_is_false(tmp_path, database, 
     await _seed_work_item(database, str(repo))
     await _seed_session(database, "s1", "w1", ".engineering/sessions/nope.md")
     ix = Indexer(conn, database, repos_env="", run_dirs=RunDirs(tmp_path / "run").ensure())
-    assert await ix.ingest_session_summary("s1") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
@@ -172,8 +172,8 @@ async def test_ingest_session_summary_rejects_path_escape(tmp_path, database, co
     await _seed_session(database, "s1", "w1", "../../secret.md")
     await _seed_session(database, "s2", "w1", "/etc/hosts")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is False
-    assert await ix.ingest_session_summary("s2") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
+    assert await ix.ingest_session_summary("w1", "s2") is False
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
@@ -215,7 +215,7 @@ async def test_a_summary_ref_reads_only_a_markdown_file_in_its_own_worktree(
     wt.mkdir()
     await _seed_session(database, "s1", "w1", plant(repo, wt))
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
-    assert await ix.ingest_session_summary("s1") is False
+    assert await ix.ingest_session_summary("w1", "s1") is False
     assert ix.search("ghp_x") == []
 
 
@@ -234,7 +234,7 @@ async def test_a_summary_swapped_for_a_fifo_is_skipped_at_once(tmp_path, databas
     await _seed_session(database, "s1", "w1", ".engineering/sessions/s1.md")
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
     try:
-        assert await asyncio.wait_for(ix.ingest_session_summary("s1"), 5) is False
+        assert await asyncio.wait_for(ix.ingest_session_summary("w1", "s1"), 5) is False
     finally:  # free a blocked reader: a writer ends its wait
         os.close(os.open(fifo, os.O_RDWR | os.O_NONBLOCK))
 
@@ -252,7 +252,7 @@ async def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path, 
 
     ix = Indexer(conn, database, repos_env="", run_dirs=rd)
     await ix.startup_scan()
-    await ix.ingest_session_summary("s1")
+    await ix.ingest_session_summary("w1", "s1")
 
     hit = ix.search("linked")[0]
     assert {ln["work_item_id"] for ln in hit["links"] if ln["work_item_id"]} == {"w1"}

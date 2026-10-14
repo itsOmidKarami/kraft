@@ -647,7 +647,7 @@ def last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | 
             "SELECT head_sha, result_path, session_summary_ref FROM worker_sessions "
             "WHERE work_item_id = ? AND hook_point = ? "
             f"AND head_sha IS NOT NULL AND status IN ({marks(_REVIEWED_STATUS)}) "
-            "ORDER BY created_at DESC LIMIT 1",
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (work_item_id, task_hook, *_REVIEWED_STATUS),
         ).fetchone()
     )

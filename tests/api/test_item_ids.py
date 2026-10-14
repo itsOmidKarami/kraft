@@ -88,7 +88,7 @@ def test_a_worker_naming_its_own_item_by_its_start_is_refused(client):
     r = client.patch(
         f"/api/work-items/{FIRST[:8]}",
         json={"budget_usd": 5},
-        headers={"X-Kraft-Session-Id": "s-own"},
+        headers={"X-Kraft-Session-Id": f"{FIRST}/s-own"},
     )
 
     assert r.status_code == 403, r.text

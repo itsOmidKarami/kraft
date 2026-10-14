@@ -456,7 +456,7 @@ def test_run_agent_task_forwards_to_run_task(run, overrides, key, expected):
 def test_identify_as_worker_sets_the_work_item_env_var(run, identify, work_item_id):
     env = run(identify_as_worker=identify)["env"]
     assert env.get("KRAFT_WORK_ITEM_ID") == work_item_id
-    assert env["KRAFT_SESSION_ID"] == "s1"
+    assert env["KRAFT_SESSION_ID"] == "w1/s1"
 
 
 # --- the system prompt ---------------------------------------------------------------

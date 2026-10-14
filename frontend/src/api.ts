@@ -136,16 +136,18 @@ export const getAnalytics = (params: { range: string; repo?: string; template?: 
   return req<Analytics>(`/analytics?${qs}`);
 };
 
-export const logUrl = (sessionId: string) => `/worker-sessions/${sessionId}/log`;
+/** A session's log route: under its item, since a session id is unique only within it. */
+export const logUrl = (workItemId: string, sessionId: string) =>
+  `/work-items/${encodeURIComponent(workItemId)}/sessions/${encodeURIComponent(sessionId)}/log`;
 
 /** SSE tail; the server closes the stream when the session stops running. */
-export const logStreamUrl = (sessionId: string) =>
-  `${apiUrl(logUrl(sessionId))}?format=jsonl&follow=1`;
+export const logStreamUrl = (workItemId: string, sessionId: string) =>
+  `${apiUrl(logUrl(workItemId, sessionId))}?format=jsonl&follow=1`;
 
 /** The log as plain text, whole -- `getLogLines` truncates each line for
  *  rendering, and a copied log has to be the file. */
-export const getLogText = async (sessionId: string): Promise<string> => {
-  const res = await fetch(apiUrl(logUrl(sessionId)), { headers: { accept: "text/plain" } });
+export const getLogText = async (workItemId: string, sessionId: string): Promise<string> => {
+  const res = await fetch(apiUrl(logUrl(workItemId, sessionId)), { headers: { accept: "text/plain" } });
   if (!res.ok) throw new Error(`could not read the log (${res.status})`);
   return res.text();
 };
@@ -154,7 +156,7 @@ export const getLogText = async (sessionId: string): Promise<string> => {
  *  reader's cap (Kraft-2vvus), `getLogText` buffering the whole file into
  *  the page is the same choke it was meant to avoid; a `download` link lets
  *  the browser stream it from disk instead. */
-export const logTextUrl = (sessionId: string) => apiUrl(logUrl(sessionId));
+export const logTextUrl = (workItemId: string, sessionId: string) => apiUrl(logUrl(workItemId, sessionId));
 
 export const search = (params: {
   q: string;

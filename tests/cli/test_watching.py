@@ -77,7 +77,7 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
                 await asyncio.sleep(0.2)
             else:
                 raise AssertionError("no worker session appeared in 30s")
-            return [line async for line in client.stream_log(sessions[-1]["id"])]
+            return [line async for line in client.stream_log(wid, sessions[-1]["id"])]
 
         lines = asyncio.run(asyncio.wait_for(collect(), timeout=90))
 
@@ -152,7 +152,8 @@ def _serves(monkeypatch, *sessions, status="active", stop=None):
     first, and is `status` with `stop`: what `view logs` picks its default from."""
 
     async def fake_item(work_item_id=None, *, full=False):
-        return {"status": status, "stop": stop, "worker_sessions": list(sessions)}
+        whole = f"{work_item_id}-whole"
+        return {"id": whole, "status": status, "stop": stop, "worker_sessions": list(sessions)}
 
     monkeypatch.setattr(client, "get_work_item", fake_item)
 
@@ -170,7 +171,8 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
 
     async def fake_get(path, **params):
-        assert path == "/worker-sessions/sess-1/log"
+        # Under the item's whole id, as the server answered it.
+        assert path == f"/work-items/{wid}-whole/sessions/sess-1/log"
         return {
             "session_id": "sess-1",
             "status": "stopped",
@@ -185,6 +187,32 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
     cli.main(["view", "logs", wid])
     out = capsys.readouterr().out
     assert "first" in out and "second" in out
+
+
+@pytest.mark.parametrize(
+    ("named", "path"),
+    [(True, "/work-items/{}/sessions/s9/log"), (False, "/worker-sessions/s9/log")],
+    ids=["under-the-item", "no-item-to-name"],
+)
+def test_logs_of_a_named_session_read_it_under_its_item(
+    app, monkeypatch, capsys, make_item, repo, tmp_path, named, path
+):
+    """A session id is unique only within its item: `--session` is read
+    under the item named, and only with no item and no worktree to name one
+    by the flat route, which answers an id one session has."""
+    wid = make_item(repo)
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    monkeypatch.chdir(tmp_path)
+    asked = []
+
+    async def fake_get(p, **params):
+        asked.append(p)
+        return {"lines": [{"n": 0, "t": None, "src": "stdout", "text": "hi"}]}
+
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    cli.main(["view", "logs", *([wid] if named else []), "--session", "s9"])
+    assert asked == [path.format(wid)]
+    assert "hi" in capsys.readouterr().out
 
 
 _IMPL = _session("s-impl", "implementation", "implementation.main.implement", "done")
@@ -232,11 +260,11 @@ def test_logs_defaults_to_the_session_that_stopped_the_item(
         asked.append(path)
         return {"lines": []}
 
-    async def fake_next_line(session_id):
+    async def fake_next_line(work_item_id, session_id):
         return 0
 
-    async def fake_stream(session_id, after_line=0):
-        asked.append(f"follow {session_id}")
+    async def fake_stream(work_item_id, session_id, after_line=0):
+        asked.append(f"follow {work_item_id}/{session_id}")
         return
         yield
 
@@ -246,11 +274,15 @@ def test_logs_defaults_to_the_session_that_stopped_the_item(
     monkeypatch.setattr(client, "stream_log", fake_stream)
     cli.main(["view", "logs", wid, *(["-f"] if follow else [])])
 
-    assert asked == [f"/worker-sessions/{shown}/log", *([f"follow {shown}"] if follow else [])]
+    whole = f"{wid}-whole"
+    assert asked == [
+        f"/work-items/{whole}/sessions/{shown}/log",
+        *([f"follow {whole}/{shown}"] if follow else []),
+    ]
     err = capsys.readouterr().err
-    assert ("kraft view logs --session" in err) is (named is not None)
+    assert ("--session" in err) is (named is not None)
     if named:
-        assert f"kraft view logs --session {named}" in err
+        assert f"kraft view logs {whole} --session {named}" in err
 
 
 def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
@@ -399,7 +431,7 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
         rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
         return {"lines": rows, "next_line": 5}
 
-    async def fake_stream(session_id, after_line=0):
+    async def fake_stream(work_item_id, session_id, after_line=0):
         asked.append(after_line)
         yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
 
@@ -500,14 +532,14 @@ def test_log_backlog_limits_live_in_client(monkeypatch):
     the same way rather than copying the path (spec F §2.3)."""
 
     async def fake_get(path, **params):
-        assert path == "/worker-sessions/sess-1/log" and params == {"format": "jsonl"}
+        assert path == "/work-items/w1/sessions/sess-1/log" and params == {"format": "jsonl"}
         return {"lines": [{"n": i, "text": f"line{i}"} for i in range(5)]}
 
     monkeypatch.setattr(client.transport, "_get", fake_get)
-    assert len(asyncio.run(client.log_backlog("sess-1"))) == 5
-    assert [e["n"] for e in asyncio.run(client.log_backlog("sess-1", 2))] == [3, 4]
+    assert len(asyncio.run(client.log_backlog("w1", "sess-1"))) == 5
+    assert [e["n"] for e in asyncio.run(client.log_backlog("w1", "sess-1", 2))] == [3, 4]
     # 0 means none, and must not read as "no limit"
-    assert asyncio.run(client.log_backlog("sess-1", 0)) == []
+    assert asyncio.run(client.log_backlog("w1", "sess-1", 0)) == []
 
 
 def test_log_backlog_keeps_the_truncation_marker_the_cap_put_there(monkeypatch):
@@ -521,10 +553,10 @@ def test_log_backlog_keeps_the_truncation_marker_the_cap_put_there(monkeypatch):
 
     monkeypatch.setattr(client.transport, "_get", fake_get)
     # the cap hid what -n would have shown: the marker says so
-    assert asyncio.run(client.log_backlog("sess-1", 3)) == [marker, *rows]
-    assert asyncio.run(client.log_backlog("sess-1")) == [marker, *rows]
+    assert asyncio.run(client.log_backlog("w1", "sess-1", 3)) == [marker, *rows]
+    assert asyncio.run(client.log_backlog("w1", "sess-1")) == [marker, *rows]
     # -n itself hid lines the reader asked not to see: no marker to explain
-    assert asyncio.run(client.log_backlog("sess-1", 2)) == rows[1:]
+    assert asyncio.run(client.log_backlog("w1", "sess-1", 2)) == rows[1:]
 
 
 def test_events_follow_json_is_one_object_per_line(app, monkeypatch, capsys, make_item, repo):

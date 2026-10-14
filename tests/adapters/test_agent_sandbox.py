@@ -79,7 +79,7 @@ def test_an_amp_rules_file_is_mounted_read_only_in_the_sandbox(run, tmp_path):
         sandbox=DOCKER,
         deny_tools=("Bash",),
     )
-    assert seen["ro_paths"] == (str(tmp_path / "harness-config" / "amp" / "s1.json"),)
+    assert seen["ro_paths"] == (str(tmp_path / "harness-config" / "amp" / "w1-s1.json"),)
 
 
 @pytest.mark.parametrize(
@@ -106,7 +106,7 @@ def test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own(run, tmp_path, home):
         (".kraft-harness-config", True),
         (".kraft-harness-config/cursor", True),
         (".kraft-harness-config/cursor/cli-config.json", False),
-        (".kraft-harness-config/cursor/.cli-config.json.s1", False),
+        (".kraft-harness-config/cursor/.cli-config.json.w1-s1", False),
     ],
     ids=["config-folder", "harness-folder", "config-file", "temporary-file"],
 )

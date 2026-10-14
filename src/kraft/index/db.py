@@ -8,7 +8,7 @@ import sqlite_vec
 
 logger = logging.getLogger(__name__)
 
-INDEX_SCHEMA_VERSION = 3
+INDEX_SCHEMA_VERSION = 4
 
 INDEX_SCHEMA_SQL = """
 CREATE TABLE documents (
@@ -61,7 +61,13 @@ CREATE TABLE document_links (
   work_item_id      TEXT,
   node_id           TEXT,
   hook_point        TEXT,
-  worker_session_id TEXT
+  worker_session_id TEXT,
+  -- The session's own work item: a session id is unique only within its
+  -- item. From the session's database row, or from front matter naming one
+  -- item. NULL on a link written before this column (a pre-upgrade session
+  -- id, unique on its own) and on a scanned summary naming several items,
+  -- whose session is looked up among those items only.
+  session_work_item_id TEXT
 );
 
 CREATE INDEX idx_document_links_work_item ON document_links(work_item_id);
@@ -107,6 +113,7 @@ _MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE documents ADD COLUMN origin TEXT NOT NULL DEFAULT 'git_scan' "
         "CHECK (origin IN ('git_scan', 'event_ingest'))",
     ],
+    3: ["ALTER TABLE document_links ADD COLUMN session_work_item_id TEXT"],
 }
 
 

@@ -10,6 +10,16 @@ def _names(conn: sqlite3.Connection) -> set[str]:
     return {r["name"] for r in conn.execute("SELECT name FROM sqlite_master").fetchall()}
 
 
+def _schema_without(*needles: str) -> str:
+    """`INDEX_SCHEMA_SQL` less every line holding one of `needles`, and less
+    v4's `session_work_item_id`, which every older version lacks."""
+    lines = index_db.INDEX_SCHEMA_SQL.replace(
+        "worker_session_id TEXT,", "worker_session_id TEXT"
+    ).splitlines()
+    dropped = (*needles, "session_work_item_id TEXT")
+    return "\n".join(ln for ln in lines if not any(n in ln for n in dropped))
+
+
 def test_open_index_creates_schema_from_empty(tmp_path):
     conn = index_db.open_index(tmp_path / "index.db")
     try:
@@ -86,13 +96,9 @@ def test_fresh_index_has_vector_tables(tmp_path):
 def test_v1_index_migrates_forward_keeping_documents(tmp_path):
     path = tmp_path / "index.db"
     conn = index_db.connect(path)
-    schema = "\n".join(
-        ln
-        for ln in index_db.INDEX_SCHEMA_SQL.splitlines()
-        # crude but sufficient: strip the 4C tables and the v3 `origin` column,
-        # keep everything else -- what a genuine pre-4C, pre-origin file had.
-        if "document_chunks" not in ln and "document_vectors" not in ln and "origin" not in ln
-    )
+    # crude but sufficient: strip the 4C tables and the v3 `origin` column,
+    # keep everything else -- what a genuine pre-4C, pre-origin file had.
+    schema = _schema_without("document_chunks", "document_vectors", "origin")
     stmts = [s.strip() for s in schema.split(";") if s.strip()]
     conn.executescript(";\n".join(s for s in stmts if "chunk" not in s and "vec0" not in s) + ";")
     conn.execute("PRAGMA user_version = 1")
@@ -120,8 +126,7 @@ def test_v2_index_migrates_forward_defaulting_origin_to_git_scan(tmp_path):
     plain `ADD COLUMN` gives them, not a guess."""
     path = tmp_path / "index.db"
     conn = index_db.connect(path)
-    schema = "\n".join(ln for ln in index_db.INDEX_SCHEMA_SQL.splitlines() if "origin" not in ln)
-    conn.executescript(schema)
+    conn.executescript(_schema_without("origin"))
     conn.execute("PRAGMA user_version = 2")
     conn.execute(
         "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
@@ -136,6 +141,36 @@ def test_v2_index_migrates_forward_defaulting_origin_to_git_scan(tmp_path):
         assert conn.execute("PRAGMA user_version").fetchone()[0] == index_db.INDEX_SCHEMA_VERSION
         row = conn.execute("SELECT origin FROM documents WHERE id='d1'").fetchone()
         assert row["origin"] == "git_scan"
+    finally:
+        conn.close()
+
+
+def test_v3_index_migrates_forward_keeping_its_links_with_no_session_item(tmp_path):
+    """A link written before `session_work_item_id` keeps its session id and
+    has no item: its session id is a pre-upgrade one, found by id alone."""
+    path = tmp_path / "index.db"
+    conn = index_db.connect(path)
+    conn.executescript(_schema_without())
+    conn.execute("PRAGMA user_version = 3")
+    conn.execute(
+        "INSERT INTO documents (id, repo, source_kind, kind, title, path, content, "
+        "content_hash, metadata_json, indexed_at) VALUES "
+        "('d1','/r','session_summary','sessions','S','.engineering/sessions/s.md','b','h','{}','t')"
+    )
+    conn.execute(
+        "INSERT INTO document_links (id, document_id, worker_session_id) "
+        "VALUES ('l1', 'd1', '8cbfe6e27c1044b3e445c0f0d726357d')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn = index_db.open_index(path)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == index_db.INDEX_SCHEMA_VERSION
+        row = conn.execute(
+            "SELECT worker_session_id, session_work_item_id FROM document_links"
+        ).fetchone()
+        assert tuple(row) == ("8cbfe6e27c1044b3e445c0f0d726357d", None)
     finally:
         conn.close()
 

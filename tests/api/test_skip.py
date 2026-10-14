@@ -391,7 +391,11 @@ def test_skipping_a_task_stops_only_its_own_session(client, repo, monkeypatch):
                     result_path="/r",
                 )
             )
-            await db.write(lambda c, sid=sid, pid=pid: store.session_running(c, sid, pid, 1.0))
+            await db.write(
+                lambda c, sid=sid, pid=pid: store.session_running(
+                    c, sid, pid, 1.0, work_item_id=wid
+                )
+            )
         await db.write(
             lambda c: c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (wid,))
         )

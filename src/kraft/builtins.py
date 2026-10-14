@@ -912,6 +912,7 @@ async def run_setup_command(
                 None,
                 env=proxy_env,
                 session_id=setup_id,
+                work_item_id=worktree.name,
                 refs=refs,
                 # The entry's `env:` by name too: its values are in the
                 # client's own env (`worker_env` below), never on argv.
@@ -924,11 +925,14 @@ async def run_setup_command(
             )
         except BaseException as exc:
             if network:
-                await _subprocess.close_egress(backend, setup_id)
+                await _subprocess.close_egress(backend, setup_id, work_item_id=worktree.name)
             if isinstance(exc, _sandbox.SandboxNotReady):
                 raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
             raise
-        run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
+        run = dict(
+            args=argv,
+            cwd=backend.client_cwd(setup_id, work_item_id=worktree.name) or worktree,
+        )
     else:
         run = dict(args=cmd, shell=True, cwd=worktree)
     oom = None
@@ -952,14 +956,16 @@ async def run_setup_command(
     finally:
         if sandbox:
             try:
-                oom = await backend.oom_killed(setup_id)
+                oom = await backend.oom_killed(setup_id, work_item_id=worktree.name)
             finally:
                 # The command, then its route out (spec §4).
                 try:
-                    await backend.close(setup_id)
+                    await backend.close(setup_id, work_item_id=worktree.name)
                 finally:
                     if network:
-                        await _subprocess.close_egress(backend, setup_id)
+                        await _subprocess.close_egress(
+                            backend, setup_id, work_item_id=worktree.name
+                        )
     # Kraft never stops a setup command itself, so an unconfirmed kill counts.
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
@@ -2062,6 +2068,7 @@ async def finish_session(
     result_path: Path,
     *,
     session_id: str,
+    work_item_id: str,
     status: str,
     log: str,
     findings: list[dict] | None = None,
@@ -2110,7 +2117,7 @@ async def finish_session(
         # Best-effort, the same call `_watch_log` makes about its own sidecar: a
         # missing time column is cosmetic, not a reason to fail the node.
         logger.warning("no log time sidecar for session %s", session_id)
-    await db.write(lambda c: store.session_exited(c, session_id, status))
+    await db.write(lambda c: store.session_exited(c, session_id, status, work_item_id=work_item_id))
     return status
 
 
@@ -2148,7 +2155,13 @@ async def _record_done(
         repository=repository,
     )
     return await finish_session(
-        db, log_path, result_path, session_id=session_id, status=status, log=log
+        db,
+        log_path,
+        result_path,
+        session_id=session_id,
+        work_item_id=work_item_id,
+        status=status,
+        log=log,
     )
 
 
