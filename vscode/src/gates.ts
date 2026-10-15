@@ -167,9 +167,9 @@ export function registerGates(
   const toast = (all: [WorkItem, Announcement][]) => {
     const plan = toastPlan(all);
     if ("summary" in plan) {
-      const buttons = plan.nextGate ? ["Next Gate"] : [];
-      void (plan.level === "warning" ? vscode.window.showWarningMessage(plan.summary, ...buttons) : vscode.window.showInformationMessage(plan.summary, ...buttons)).then((pick) => {
+      void (plan.level === "warning" ? vscode.window.showWarningMessage(plan.summary, ...plan.buttons) : vscode.window.showInformationMessage(plan.summary, ...plan.buttons)).then((pick) => {
         if (pick === "Next Gate") void vscode.commands.executeCommand("kraft.approveNextGate");
+        if (pick === "Show Board") void vscode.commands.executeCommand("kraft.board.focus");
       });
       return;
     }

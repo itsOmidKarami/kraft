@@ -187,7 +187,16 @@ describe("a burst of announcements", () => {
     const exec = vi.spyOn(vscode.commands, "executeCommand");
     changes.forEach((cb) => cb("all"));
     await new Promise((r) => setTimeout(r));
-    expect([toast.mock.calls, exec.mock.calls.map((c) => c[0])]).toEqual([[["2 items need you", "Next Gate"]], ["kraft.approveNextGate"]]);
+    expect([toast.mock.calls, exec.mock.calls.map((c) => c[0])]).toEqual([[["2 items need you", "Next Gate", "Show Board"]], ["kraft.approveNextGate"]]);
+  });
+
+  it("Show Board focuses the board", async () => {
+    const { changes } = setup({ others: [other] });
+    vi.spyOn(vscode.window, "showInformationMessage").mockResolvedValue("Show Board" as never);
+    const exec = vi.spyOn(vscode.commands, "executeCommand");
+    changes.forEach((cb) => cb("all"));
+    await new Promise((r) => setTimeout(r));
+    expect(exec.mock.calls.map((c) => c[0])).toEqual(["kraft.board.focus"]);
   });
 });
 

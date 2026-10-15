@@ -131,8 +131,8 @@ describe("toastPlan", () => {
   it.each([
     ["none: nothing", [], { each: [] }],
     ["one: as it is", [g("a")], { each: [g("a")] }],
-    ["two gates: one summary, Next Gate offered", [g("a"), g("b")], { summary: "2 items need you", level: "information", nextGate: true }],
-    ["a fault among them: a warning", [g("a"), fail], { summary: "2 items need you", level: "warning", nextGate: true }],
-    ["stops only: no Next Gate", [fail, fail], { summary: "2 items need you", level: "warning", nextGate: false }],
+    ["two gates: one summary, Next Gate and Show Board offered", [g("a"), g("b")], { summary: "2 items need you", level: "information", buttons: ["Next Gate", "Show Board"] }],
+    ["a fault among them: a warning", [g("a"), fail], { summary: "2 items need you", level: "warning", buttons: ["Next Gate", "Show Board"] }],
+    ["stops only: Show Board only", [fail, fail], { summary: "2 items need you", level: "warning", buttons: ["Show Board"] }],
   ])("%s", (_, found, want) => expect(toastPlan(found.map((f) => [...f]) as never)).toEqual(want));
 });

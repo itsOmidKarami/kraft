@@ -202,8 +202,8 @@ export const ELSEWHERE_HEADING = "Threads on files not in this comparison";
 const firstLine = (body: string) => body.trim().split("\n")[0];
 
 /** The document listing threads not drawn on a file; `lineOf` is each thread's zero-based line. */
-export function otherThreadsText(id: string, threads: ReviewThread[], places: ReadonlyMap<string, Place>): { text: string; lineOf: Map<string, number> } {
-  const lines = [`# ${id}: threads not on a file in this review`];
+export function otherThreadsText(title: string, threads: ReviewThread[], places: ReadonlyMap<string, Place>): { text: string; lineOf: Map<string, number> } {
+  const lines = [`# ${title}: threads not on a file in this review`];
   const lineOf = new Map<string, number>();
   for (const [kind, heading] of [["whole", WHOLE_HEADING], ["elsewhere", ELSEWHERE_HEADING]] as const) {
     const group = threads.filter((t) => places.get(t.id)?.kind === kind);

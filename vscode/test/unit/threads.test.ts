@@ -189,9 +189,9 @@ describe("otherThreadsText", () => {
   const places = new Map<string, Place>([["a", { kind: "elsewhere" }], ["b", { kind: "whole" }], ["c", { kind: "elsewhere" }]]);
 
   it("lists the whole change, then the files not in this comparison", () => {
-    const { text, lineOf } = otherThreadsText("K-1", threads, places);
+    const { text, lineOf } = otherThreadsText("Cache embeddings", threads, places);
     expect(text).toBe([
-      "# K-1: threads not on a file in this review", "",
+      "# Cache embeddings: threads not on a file in this review", "",
       "## On the whole change", "", "- overall", "",
       "## Threads on files not in this comparison", "", "- x.py:3 (base): on x", "- y.py: on y", "",
     ].join("\n"));
@@ -199,7 +199,7 @@ describe("otherThreadsText", () => {
   });
 
   it("leaves out an empty group's heading", () =>
-    expect(otherThreadsText("K-1", threads, new Map([["a", { kind: "elsewhere" }]])).text).not.toContain("On the whole change"));
+    expect(otherThreadsText("Cache embeddings", threads, new Map([["a", { kind: "elsewhere" }]])).text).not.toContain("On the whole change"));
 });
 
 it("syncPlan draws the new, redraws the moved, updates the rest and drops the gone", () => {

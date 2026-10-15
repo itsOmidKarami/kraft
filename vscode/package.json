@@ -403,12 +403,22 @@
       {
         "view": "kraft.board",
         "contents": "No Kraft work in this repo.\n[File Work Item…](command:kraft.fileWork)\n[Show all repos](command:kraft.toggleAllRepos)",
-        "when": "kraft.welcome == here || kraft.welcome == connect && kraft.readOnly"
+        "when": "kraft.welcome == here && !kraft.readOnly"
+      },
+      {
+        "view": "kraft.board",
+        "contents": "No Kraft work in this repo.\n[Show all repos](command:kraft.toggleAllRepos)",
+        "when": "kraft.welcome == here && kraft.readOnly || kraft.welcome == connect && kraft.readOnly"
       },
       {
         "view": "kraft.board",
         "contents": "No Kraft work yet, in any repo.\n[File Work Item…](command:kraft.fileWork)",
-        "when": "kraft.welcome == all"
+        "when": "kraft.welcome == all && !kraft.readOnly"
+      },
+      {
+        "view": "kraft.board",
+        "contents": "No Kraft work yet, in any repo.",
+        "when": "kraft.welcome == all && kraft.readOnly"
       },
       {
         "view": "kraft.board",
