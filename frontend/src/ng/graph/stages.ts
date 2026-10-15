@@ -39,7 +39,7 @@ export function foldStages(nodes: ChainNode[], open: ReadonlySet<string>, select
   const cur = currentStage(stages);
   return stages.flatMap((s, i): RowEntry[] => {
     if ((i >= cur && i <= cur + ahead) || open.has(s.key) || s.nodes.some((n) => n.id === selected)) return s.nodes;
-    const words = s.gate ? gateWords(s.gate.id) : nodeWords(s.key);
+    const words = s.gate ? gateWords(s.gate) : nodeWords(s.key);
     return [{ kind: "fold", key: s.key, words, nodes: s.nodes, passed: i < cur }];
   });
 }
@@ -64,7 +64,7 @@ export function rowSeams<S extends { at: number }>(nodes: ChainNode[], row: RowE
 export function stripRow(nodes: ChainNode[], open: ReadonlySet<string>, viewing: string): RowEntry[] {
   return stagesOf(nodes).flatMap((s): RowEntry[] => {
     if (open.has(s.key) || s.nodes.some((n) => n.id === viewing)) return s.nodes;
-    const words = s.gate ? gateWords(s.gate.id) : nodeWords(s.key);
+    const words = s.gate ? gateWords(s.gate) : nodeWords(s.key);
     return [{ kind: "fold", key: s.key, words, nodes: s.nodes, passed: s.nodes.every((n) => n.state === "done") }];
   });
 }

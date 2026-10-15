@@ -12,7 +12,7 @@ import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { DocViewer } from "../DocViewer";
-import { gateAction, nameOf } from "../../board/rowText";
+import { gateName, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
@@ -23,7 +23,7 @@ const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
   // As the header's badge says it: filed and never started, not paused.
   if (neverStarted(item)) return "not started";
-  if (st === "needs_you" && item.stop?.kind === "gate") return `waiting for you to ${gateAction(item.pending_gate ?? item.stop.node ?? "")}`;
+  if (st === "needs_you" && item.stop?.kind === "gate") return `waiting for you to ${gateName(item.chain_definition.nodes, item.pending_gate ?? item.stop.node ?? "")}`;
   const step = item.summary?.step;
   const live = !["done", "archived", "cancelled"].includes(st);
   return [st.replace("_", " "), live && step ? `step ${step.index} of ${step.count}` : "", live && item.current_node_id ? nameOf(item.chain_definition.nodes, item.current_node_id) : ""].filter(Boolean).join(" · ");

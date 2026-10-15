@@ -14,16 +14,22 @@ const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 /** A node id as words for a row's tail: `merge_request` or `merge-request` reads "merge request". */
 export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 
-/** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
-export const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
+type Named = { id: string; kind?: string; artifact?: string | null };
+
+/** What a gate decides, in words: its document's kind ("spec"), else its id without a trailing "approval". */
+export const gateWords = (g: Named) => nodeWords(g.artifact || g.id.replace(/[_-]approval$/, ""));
 
 /** What a reader calls a node: a gate by what it decides ("approve spec"), any other node in words. The id stays
  *  for places where the id is the point (config, the chain editor, CLI hints). */
-export const gateAction = (id: string) => `approve ${gateWords(id)}`;
-export const displayName = (n: { id: string; kind?: string }) => (n.kind === "gate" ? gateAction(n.id) : nodeWords(n.id));
+export const displayName = (n: Named) => (n.kind === "gate" ? `approve ${gateWords(n)}` : nodeWords(n.id));
 
-/** `displayName` for a node known by id: found in the chain for its kind, else its id in words. */
-export const nameOf = (nodes: { id: string; kind?: string }[] | undefined, id: string) => displayName(nodes?.find((n) => n.id === id) ?? { id });
+/** `displayName` for a node known by id: found in the chain for its kind and artifact, else its id in words. */
+export const nameOf = (nodes: Named[] | undefined, id: string) => displayName(nodes?.find((n) => n.id === id) ?? { id });
+
+/** `nameOf` for an id known to be a gate (`pending_gate`), whether or not the chain lists it as one. */
+export const gateName = (nodes: Named[] | undefined, id: string) => displayName({ ...(nodes?.find((n) => n.id === id) ?? { id }), kind: "gate" });
+
+export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
 
 /** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
@@ -33,12 +39,12 @@ const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
-  const node = nodeWords(nodeOf(i));
+  const node = nameOf(i.chain_definition?.nodes, nodeOf(i));
   const tail = (() => {
     switch (i.display_status) {
       case "needs_you":
         switch (i.stop?.kind) {
-          case "gate": return `approve ${gateWords(i.pending_gate ?? nodeOf(i))}`;
+          case "gate": return gateName(i.chain_definition?.nodes, i.pending_gate ?? nodeOf(i));
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
           // A cap or budget stop's reason goes on to what was not interrupted: the row keeps its first sentence.
           case "cap":

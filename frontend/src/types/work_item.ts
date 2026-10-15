@@ -12,6 +12,9 @@ export interface ChainNode {
    *  deciding that document and the node that would write it
    *  (`ResolvedNode.covered_by`, Kraft-ene04). Absent on a legacy node. */
   covered_by?: string | null;
+  /** On a gate, the kind of document it decides ("spec"): what names it to a
+   *  reader. Null on an exec node and on a gate that decides none. */
+  artifact?: string | null;
   tasks: string[];
   /** Ordered groups of concurrent tasks. Always present on a materialized
    *  chain (`store.node_view`); `tasks` is the same list flattened, in

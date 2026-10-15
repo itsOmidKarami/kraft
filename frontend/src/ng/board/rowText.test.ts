@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail } from "../item/testkit";
-import { admittedRowAction, displayName, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
+import { admittedRowAction, displayName, gateName, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -124,15 +124,29 @@ describe("glyphOf and ticksOf", () => {
 
 describe("displayName", () => {
   it.each([
-    ["a gate, by what it decides", { id: "spec_approval", kind: "gate" }, "approve spec"],
+    ["a gate, by the document it decides", { id: "spec_approval", kind: "gate", artifact: "spec" }, "approve spec"],
+    ["a gate whose artifact is not its id's prefix", { id: "final_review", kind: "gate", artifact: "review_brief" }, "approve review brief"],
+    ["a gate with a longer id", { id: "chain_revision_approval", kind: "gate", artifact: "chain_revision" }, "approve chain revision"],
+    ["a gate deciding no document, by its id", { id: "final_review", kind: "gate" }, "approve final review"],
+    ["an exec node whose id ends in approval, in words", { id: "external_approval", kind: "exec" }, "external approval"],
     ["any other node, in words", { id: "merge_request", kind: "exec" }, "merge request"],
   ])("names %s", (_, node, name) => {
     expect(displayName(node)).toBe(name);
   });
 
-  it("finds the kind in the chain, and falls back to the id in words", () => {
-    const nodes = [{ id: "plan_approval", kind: "gate" }];
+  it("finds the kind and artifact in the chain, and falls back to the id in words", () => {
+    const nodes = [{ id: "plan_approval", kind: "gate", artifact: "plan" }];
     expect(nameOf(nodes, "plan_approval")).toBe("approve plan");
     expect(nameOf(nodes, "open_draft")).toBe("open draft");
+    expect(gateName(nodes, "plan_approval")).toBe("approve plan");
+    expect(gateName(nodes, "spec_approval")).toBe("approve spec");
+  });
+});
+
+describe("a gate row", () => {
+  it("is named by its artifact on the board too", () => {
+    const nodes = [{ id: "final_review", kind: "gate", artifact: "review_brief" }] as WorkItem["chain_definition"]["nodes"];
+    const r = row("needs_you", { stop: stop("gate", { node: "final_review" }), pending_gate: "final_review", chain_definition: { nodes } as WorkItem["chain_definition"] });
+    expect(reasonTail(r, NOW)).toBe("approve review brief");
   });
 });

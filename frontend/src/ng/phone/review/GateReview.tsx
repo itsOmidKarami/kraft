@@ -18,7 +18,7 @@ import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
-import { gateAction } from "../../board/rowText";
+import { capitalise, gateName } from "../../board/rowText";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -124,7 +124,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
 
   return (
     <>
-      <ScreenHeader id={gate && <>{gateAction(gate).replace(/^./, (c) => c.toUpperCase())}{waiting && <> <span className="ph-pillbadge">NEEDS YOU</span></>}</>} />
+      <ScreenHeader id={gate && <>{capitalise(gateName(item.chain_definition.nodes, gate))}{waiting && <> <span className="ph-pillbadge">NEEDS YOU</span></>}</>} />
       <div className="ph-content">
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>

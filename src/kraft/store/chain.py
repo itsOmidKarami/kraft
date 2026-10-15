@@ -535,6 +535,8 @@ def node_view(node) -> dict:
         # intake preview strikes through (Kraft-ene04). Declared, not decided:
         # on an item's own chain the covered nodes are already gone.
         "covered_by": node.covered_by,
+        # The document a gate decides, which names it to a reader: "approve spec".
+        "artifact": gate.artifact if gate is not None else None,
         # A gate has none (`GateNode`); the UI draws the kind's own for null.
         "icon": getattr(node.node, "icon", None),
     }

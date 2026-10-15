@@ -11,7 +11,7 @@ import { OpenInEditor } from "../item/DocViewer";
 import { editorName, useEditors } from "../item/editors";
 import { copyPath } from "../ui/copyPath";
 import { FileTree } from "./FileTree";
-import { gateWords } from "../board/rowText";
+import { capitalise, gateName } from "../board/rowText";
 import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
@@ -56,7 +56,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
   return (
     <div ref={ref} className="rv-gate" role="dialog" aria-modal="true" aria-label={`Gate review: ${gate}`}>
       <div className="rv-gate-head">
-        <h2 className="rv-gate-title">Approve {gateWords(gate)}</h2>
+        <h2 className="rv-gate-title">{capitalise(gateName(item.chain_definition.nodes, gate))}</h2>
         <span className="rv-mono rv-muted">{gate}</span>
         <span className="rv-gate-tag">WAITING FOR YOU</span>
         {pending > 0 && <span className="rv-muted">{pending} {pending === 1 ? "comment" : "comments"} pending</span>}

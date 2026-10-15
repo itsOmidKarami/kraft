@@ -68,7 +68,7 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         id: `${section}:${i.id}`,
         section,
         // The gate as the board words it: "Review spec", not "Review spec_approval" (#502 review).
-        label: `Review ${gateWords(i.pending_gate)}`,
+        label: `Review ${gateWords(i.chain_definition?.nodes.find((n) => n.id === i.pending_gate) ?? { id: i.pending_gate })}`,
         subLead: i.title,
         sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,

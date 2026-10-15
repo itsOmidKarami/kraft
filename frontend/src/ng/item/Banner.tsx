@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
-import { gateAction, nameOf } from "../board/rowText";
+import { gateName, nameOf } from "../board/rowText";
 import { admits, budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
@@ -27,7 +27,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
-        <span className="item-banner-text">Waiting for you to {gateAction(gate)}.{note && <span className="item-banner-note">{note}</span>}</span>
+        <span className="item-banner-text">Waiting for you to {gateName(item.chain_definition.nodes, gate)}.{note && <span className="item-banner-note">{note}</span>}</span>
         <Button variant="primary" onClick={() => navigate(gateReviewUrl(item.id, gate))}>Review and decide</Button>
       </div>
     );
