@@ -45,6 +45,21 @@ beforeEach(() => {
 });
 
 describe("Config tab", () => {
+  it.each([
+    { id: "a node field", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.implement", kind: "change" as const, summary: "harness", fields: ["harness"] }], marked: true },
+    { id: "another field's change", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.implement", kind: "change" as const, summary: "model", fields: ["model"] }], marked: false },
+    { id: "another node's change", path: "implementation.main.implement", label: "harness", changes: [{ path: "implementation.main.verify", kind: "change" as const, summary: "harness", fields: ["harness"] }], marked: false },
+    { id: "a chain policy key, reported by the group", path: "", label: "attempts", changes: [{ path: "", kind: "change" as const, summary: "policy", fields: ["policy"] }], marked: true, set: true },
+    { id: "a chain policy key it does not set", path: "", label: "attempts", changes: [{ path: "", kind: "change" as const, summary: "policy", fields: ["policy"] }], marked: false },
+  ])("marks a row the draft changed: $id", async ({ path, label, changes, marked, set }) => {
+    const model = structuredClone(DEFAULT_VIEW.result.model);
+    if (set) model["chains/default.yaml"].policy = { max_attempts: 3 };
+    mount(path, { changes, model });
+    await configTab();
+    await showDefaults();
+    expect(rowOf(label).classList.contains("is-changed")).toBe(marked);
+  });
+
   it("lists the server's rows in its order, each with its source chip, folds the unset ones, and brings one out when it becomes an override", async () => {
     mount("implementation.main.implement");
     await configTab();

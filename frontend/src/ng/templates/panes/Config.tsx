@@ -2,7 +2,7 @@ import { Fragment, useContext, useState } from "react";
 import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
-import { authoredAt, chainCapGroups, settingRows, sourceWord } from "../draft/view";
+import { authoredAt, chainCapGroups, rowChanged, settingRows, sourceWord } from "../draft/view";
 import { fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
 import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
@@ -74,6 +74,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
   const [err, setErr] = useState<string | null>(null);
   const readOnly = useContext(ReadOnly);
   const label = meta.label;
+  const changed = rowChanged(ctx.r, ctx.path, row.field, row.source);
   // `on_base_changed` is edited by its one key (the server writes the mapping).
   const target = row.field === "on_base_changed" ? "on_base_changed.restart_from" : row.field;
   const save = (text: string) => {
@@ -91,7 +92,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
     setEditing(Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
   };
   return (
-    <div className={`cfg-row${own ? " is-own" : ""}`}>
+    <div className={`cfg-row${own ? " is-own" : ""}${changed ? " is-changed" : ""}`}>
       <span className="cfg-k">{label}</span>
       {meta.kind === "bool" && !readOnly ? (
         // A yes/no field is a switch: one click sets it.

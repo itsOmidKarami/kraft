@@ -91,6 +91,10 @@ export function chainCapGroups(r: Result, scope: Scope): { head: string; rows: {
   ];
 }
 
+/** Whether the draft changed this Config row: a change at its path names the field, or names `policy` (a policy key is reported by the group) and the row is a `policy.*` key the file sets. */
+export const rowChanged = (r: Result, path: string, field: string, source?: string) =>
+  r.changes.some((c) => c.path === path && ((c.fields ?? []).includes(field) || (field.startsWith("policy.") && source === "chain" && (c.fields ?? []).includes("policy"))));
+
 /** The header's two numbers. A YAML syntax error counts as a problem. */
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });
 
