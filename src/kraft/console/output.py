@@ -14,6 +14,9 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, RichLog, Static
 
+#: Lines kept: a chatty command must not grow the panel without bound.
+MAX_LINES = 5000
+
 
 class OutputPanel(ModalScreen[None]):
     """Modal, so it holds the focus while open: its `x` never reaches the
@@ -27,7 +30,7 @@ class OutputPanel(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="output"):
-            yield RichLog(id="output-log", wrap=True)
+            yield RichLog(id="output-log", wrap=True, max_lines=MAX_LINES)
             with Horizontal(id="output-bar"):
                 yield Button("Stop", id="stop", disabled=True)
                 yield Static("x stops the command · Esc closes", id="output-keys")
@@ -44,7 +47,8 @@ class OutputPanel(ModalScreen[None]):
 
     def write_line(self, line: str) -> None:
         # from_ansi, not markup: a child's own colours draw, and `[/]` is text.
-        self.query_one(RichLog).write(Text.from_ansi(line))
+        # The `\r` of CRLF output would blank the line: from_ansi keeps what follows the last one.
+        self.query_one(RichLog).write(Text.from_ansi(line.removesuffix("\r")))
 
     def end(self, code: int) -> None:
         theme = self.app.current_theme

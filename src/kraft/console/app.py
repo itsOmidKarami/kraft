@@ -192,7 +192,8 @@ class KraftConsole(App):
             await self.push_screen(panel)
         panel.begin(argv)
         code = await run.finish()
-        # Not in a `finally`: a command cut off by quitting is left for `on_unmount`.
+        # Not in a `finally`: only quitting cancels this worker, and `on_unmount` ends
+        # the command then; a future cancel path must clear `self.command` itself.
         self.command = None
         panel.end(code)
         return code
