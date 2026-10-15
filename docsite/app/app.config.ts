@@ -82,6 +82,21 @@ export default defineAppConfig({
         statusMessage: 'font-mono tracking-tight',
       },
     },
+    // Docus's page is two grids, one inside the other (layouts/docs.vue is the
+    // outer, Docus's own page the inner), and both turn on at lg (1024px). The
+    // inner one's right column is the page's table of contents: 120px wide at
+    // 1024px, where "Questions" broke as "Question / s". Up to xl (1280px) the
+    // inner page stays a column, and the contents are the "On this page" bar
+    // above it, as on a phone (assets/css/layout.css draws the bar at those
+    // widths). From xl the contents column is 14rem, not two tenths of the
+    // page: 163px at 1280px broke names like merge_request_feedback. The outer grid is set back to a grid in layouts/docs.vue.
+    page: {
+      slots: {
+        root: 'lg:flex lg:gap-0 xl:grid xl:grid-cols-[minmax(0,1fr)_14rem] xl:gap-10',
+        center: 'lg:col-span-1',
+        right: 'lg:col-span-1 lg:order-first xl:order-last',
+      },
+    },
     // The page body is a size container, so a table can ask how wide the text
     // column is (prose.css) instead of how wide the window is: the sidebar and
     // the contents column take 400px of a 1024px window.
