@@ -38,6 +38,18 @@ describe("Harnesses list (M.1)", () => {
     expect(screen.getByRole("link", { name: /^claude(?!-)/ })).toHaveTextContent("problem");
   });
 
+  it("reads an unset tool list as every tool, and choosing it again posts nothing", async () => {
+    const { calls } = list(ans(hview(resolved({ allowed_tools: null }))));
+    const row = await screen.findByRole("button", { name: /allowed tools/ });
+    expect(row).toHaveTextContent("Every tool");
+    await userEvent.click(row);
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Allowed tools" })).getByRole("button", { name: "Every tool" }));
+    await userEvent.click(screen.getByRole("button", { name: /allowed tools/ }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Allowed tools" })).getByRole("button", { name: "Restrict to a list" }));
+    expect(screen.getByLabelText("Allowed tools", { selector: "input" })).toHaveValue("");
+    expect(posts(calls)).toHaveLength(0);
+  });
+
   it("changes escalation, tools and grants through the desktop's ops", async () => {
     const { calls } = list();
     await userEvent.click(await screen.findByRole("button", { name: /escalation runs on/ }));
@@ -47,6 +59,7 @@ describe("Harnesses list (M.1)", () => {
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
     expect(posts(calls)[0].body).toEqual({ ops: [{ op: "set_escalation", harness: "codex", grants: ["git-commit", "git-rebase"] }] });
     await userEvent.click(screen.getByRole("button", { name: /allowed tools/ }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Allowed tools" })).getByRole("button", { name: "Restrict to a list" }));
     const box = screen.getByLabelText("Allowed tools", { selector: "input" });
     await userEvent.clear(box);
     await userEvent.type(box, "git, shell{Enter}");

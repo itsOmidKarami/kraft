@@ -1,9 +1,11 @@
+import { useState } from "react";
+import { Button } from "../ui/Button";
 import { PillInput } from "../ui/PillInput";
 import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { Head, Note, SelectRow } from "../templates/panes/controls";
 import type { ConfigDraft } from "../templates/draft/useConfigDraft";
-import { ACCESS_WORD, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
+import { ACCESS_WORD, TOOLS_EVERY, TOOLS_RESTRICT, ESCALATION_PATH, type HProblem, type Resolved } from "./model";
 import type { Published } from "./usePublishedPolicy";
 import { problemText } from "../templates/problems";
 
@@ -28,6 +30,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
   /** A tab this component does not draw (the YAML view). */
   children?: React.ReactNode;
 }) {
+  const [restricting, setRestricting] = useState(false);
   const available = r.harnesses.filter((h) => h.state === "available").length;
   const tasks = new Set(r.harnesses.flatMap((h) => h.tasks.filter((t) => !t.fallback).map((t) => `${t.chain}/${t.path}`))).size;
   const profiles = Object.keys(r.profiles).length;
@@ -79,13 +82,23 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
       {tab === "config" && (
         <>
           <Head>Tools</Head>
-          <PillInput
-            label="allowed tools"
-            values={r.allowed_tools ?? []}
-            added={published ? (r.allowed_tools ?? []).filter((t) => !(published.tools ?? []).includes(t)) : []}
-            empty="Empty allows no tools. Remove the list in YAML to allow every tool."
-            onChange={(tools) => void draft.ops([{ op: "set_allowed_tools", tools }])}
-          />
+          {r.allowed_tools == null && !restricting ? (
+            <>
+              <p className="pill-empty">{TOOLS_EVERY}: no list limits the agent.</p>
+              <Button onClick={() => setRestricting(true)}>{TOOLS_RESTRICT}</Button>
+            </>
+          ) : (
+            <>
+              <PillInput
+                label="allowed tools"
+                values={r.allowed_tools ?? []}
+                added={published ? (r.allowed_tools ?? []).filter((t) => !(published.tools ?? []).includes(t)) : []}
+                empty="Empty allows no tools."
+                onChange={(tools) => void draft.ops([{ op: "set_allowed_tools", tools }])}
+              />
+              <Button onClick={() => { setRestricting(false); if (r.allowed_tools != null) void draft.ops([{ op: "set_allowed_tools", tools: null }]); }}>Allow {TOOLS_EVERY.toLowerCase()}</Button>
+            </>
+          )}
           <Note>The built-in tools an agent may use. Layers below can only narrow it; a repo adds deny tools in Repos. A harness that can't enforce a list refuses to launch under one.</Note>
           <Head>Escalation</Head>
           <SelectRow
