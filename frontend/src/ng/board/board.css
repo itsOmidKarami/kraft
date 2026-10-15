@@ -175,6 +175,7 @@
 .composer-x:hover { color: var(--text); }
 .composer-add { padding: 3px 9px; border: 1.5px dashed var(--stroke); border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; }
 .composer-add:hover { background: var(--surface-2); color: var(--text); }
+.composer .glyph-box.mark-add { border-color: var(--stroke); background: var(--bg); color: var(--text-sub); }
 .composer-gap { flex: 1; }
 .composer-run { font-size: var(--fs-meta); color: var(--text-sub); }
 .composer-ticks { width: 150px; }
