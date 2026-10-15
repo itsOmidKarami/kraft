@@ -123,7 +123,7 @@ describe("Analytics (J): each tile reads one field", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "Chain" })).getByRole("radio", { name: /quick-task/ }));
     await waitFor(() => expect(asked(calls)).toHaveLength(3));
     expect(asked(calls).map((c) => [c.query.get("repo"), c.query.get("template")])).toEqual([[null, null], ["/code/kraft-plugins", null], ["/code/kraft-plugins", "quick-task"]]);
-    expect(await screen.findByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins&chain=quick-task");
+    expect(await screen.findByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins&chain=quick-task&gate=plan_approval");
   });
 
   it("says when nothing completed, with no zero-height chart", async () => {
