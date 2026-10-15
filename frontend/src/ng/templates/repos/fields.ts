@@ -52,6 +52,9 @@ export const FIELDS: RepoField[] = [
 
 export const FORGES = ["gitlab", "github", "none"];
 
+/** The forge choices, with a value outside the list (the test double `fake`) kept so the control shows what the entry says. */
+export const forgeOptions = (v: unknown): string[] => (typeof v === "string" && v && !FORGES.includes(v) ? [v, ...FORGES] : FORGES);
+
 /** The entry's value at a field's key (`policy.x` reads inside `policy:`). */
 export function valueOf(r: RepoView, f: RepoField): unknown {
   if (f.key.startsWith("policy.")) return (r.entry.policy as Record<string, unknown> | null | undefined)?.[f.key.slice(7)];

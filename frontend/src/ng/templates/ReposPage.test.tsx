@@ -348,6 +348,17 @@ describe("Repos page: the Config rows", () => {
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { test_command: null } }]);
   });
 
+  it("highlights the forge the entry names, `fake` included, not the first choice", async () => {
+    cleanPreview();
+    const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, forge: "fake" } } : r));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    const forge = screen.getByRole("radiogroup", { name: "forge" });
+    expect(within(forge).getByRole("radio", { name: "fake" })).toBeChecked();
+    expect(within(forge).getByRole("radio", { name: "gitlab" })).not.toBeChecked();
+  });
+
   it("clears a value this repo sets with Reset, which sends null", async () => {
     cleanPreview();
     mount();
