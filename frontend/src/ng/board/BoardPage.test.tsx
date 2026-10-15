@@ -138,7 +138,7 @@ describe("BoardPage", () => {
     board();
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
@@ -146,7 +146,7 @@ describe("BoardPage", () => {
     vi.spyOn(api, "getRepos").mockRejectedValue(new Error("down"));
     board();
     await act(async () => {});
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
   });
 
   it("files the store's items in the four groups and caps Done at show_done, with show all", async () => {
@@ -168,6 +168,21 @@ describe("BoardPage", () => {
     expect(await screen.findByText("2 NEED YOU")).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("link", { name: "completed and cancelled · auto-archive after 30 days" }));
     expect(where()).toBe("/archived");
+  });
+
+  it("draws only the groups that hold rows, and one line with Clear when a filter leaves none", async () => {
+    put(item("n1", "needs_you"), item("d3", "done"));
+    board();
+    const user = userEvent.setup();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(screen.queryByRole("region", { name: "Running" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Not started" })).toBeNull();
+    await user.type(screen.getByRole("searchbox", { name: "Filter" }), "zzz");
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(screen.getAllByText(/No match for “zzz”/)).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).toBe("/");
+    expect(await screen.findByRole("region", { name: "Needs you" })).toBeInTheDocument();
   });
 
   it("filters by text, repo crumb and Chain menu, and groups and sorts from their menus, all in the URL", async () => {
@@ -272,7 +287,7 @@ describe("BoardPage", () => {
     board("/?new=1");
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByText("No work items yet.")).toBeInTheDocument();
   });
 
   it("shows the skeleton while the first read runs with nothing loaded, and not once rows are there", async () => {

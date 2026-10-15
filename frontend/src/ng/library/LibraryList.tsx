@@ -120,7 +120,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
       <Popover anchor={filterBtn} open={filterOpen} onClose={() => { setFilterOpen(false); filterBtn.current?.focus(); }} role="dialog" label="Show kinds">
         <div className="lib-filter">
           <p className="menu-title">Show kinds</p>
-          {SECTIONS.map((s) => (
+          {SECTIONS.filter((s) => rows.some((x) => x.section === s)).map((s) => (
             <label key={s} className="lib-filter-row">
               <input type="checkbox" checked={!hidden.has(s)} onChange={() => toggle(s)} />
               <span>{SECTION_LABEL[s]}</span>

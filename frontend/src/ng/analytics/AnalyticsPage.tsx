@@ -6,7 +6,7 @@ import type { Analytics } from "../../types";
 import { chainOf } from "../board/model";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
-import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES } from "./shared";
+import { DEFAULT_RANGE, EMPTY_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES } from "./shared";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 
@@ -94,6 +94,7 @@ export function AnalyticsPage() {
   const totalCost = report?.by_node.reduce((s, n) => s + n.cost_usd, 0) ?? 0;
   const topStop = report?.stop_reasons[0]?.n || 1;
   const gates = report ? gateRows(report) : [];
+  const emptyRange = !!report && t!.completed === 0 && report.by_node.length === 0;
   const topWait = Math.max(1, ...gates.map((g) => g.total_ms));
 
   return (
@@ -104,7 +105,8 @@ export function AnalyticsPage() {
       <HeaderTail><span className="an-scope">· Items created in the last {rangeLabel}</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
       {!report && !error && <p className="an-empty">Loading…</p>}
-      {report && t && (
+      {report && t && emptyRange && <p className="an-empty">{EMPTY_RANGE}</p>}
+      {report && t && !emptyRange && (
         <>
           <Section id="an-overview" bare title="Overview">
             <div className="an-kpis">

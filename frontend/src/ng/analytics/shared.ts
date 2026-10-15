@@ -10,6 +10,9 @@ export const RANGES = [
 ];
 export const DEFAULT_RANGE = "8w";
 
+/** What both layouts say, in place of every figure, when the range holds no completed item and no node ran. */
+export const EMPTY_RANGE = "Nothing has completed in this range yet.";
+
 /** The gates items waited at, each with the times that gate was rejected. */
 export const gateRows = (r: Analytics) => {
   const rejected = new Map(r.rejected_gates_by_gate.map((g) => [g.gate, g.n]));

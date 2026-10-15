@@ -14,6 +14,7 @@ import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { itemPath, reviewPath, type CardButton } from "./actions";
 import { Card } from "./Card";
+import { NoMatch } from "../../ui/NoMatch";
 import { useListLoad, useNow } from "./useListLoad";
 import { OLDER_SERVER, olderServer, restartWords, useHealth } from "../../shell/health";
 import "./board.css";
@@ -119,7 +120,7 @@ export function Board() {
             {noRepos ? <>No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</> : "Nothing here. Tap + to file one."}
           </p>
         )}
-        {!empty && shown.length === 0 && <p className="ph-empty">Nothing here for this filter.</p>}
+        {!empty && shown.length === 0 && <NoMatch className="ph-empty" onClear={() => set({ f: "", repo: "" })} />}
         {shown.map((g) => (
           <section key={g.key} className="ph-group" aria-label={g.label}>
             <h2 className={`ph-group-head${g.key === "needs" ? " ph-is-hot" : ""}`}>{g.label}<span>{g.total}</span></h2>

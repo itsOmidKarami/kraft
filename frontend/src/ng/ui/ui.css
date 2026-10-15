@@ -132,3 +132,9 @@
 .reason + .btn { flex: none; white-space: nowrap; }
 .reason.is-below { flex: 1 0 100%; order: 1; text-align: left; }
 .reason.is-quiet { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
+
+.not-found { padding: 28px 24px; font-size: var(--fs-meta); color: var(--text-sub); }
+.not-found h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.not-found code { font: inherit; font-family: ui-monospace, Menlo, monospace; }
+.not-found p { margin: 0 0 10px; }
+.not-found a { color: var(--text); text-decoration: underline; }

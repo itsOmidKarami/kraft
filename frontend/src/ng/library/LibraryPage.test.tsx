@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as d from "../templates/draft/draftApi";
-import { libView } from "./fixture";
+import { libView, LIB_MODEL } from "./fixture";
 import { draftWith, mount, ok, setup, where } from "./testSupport";
 
 const list = () => screen.findByRole("listbox", { name: "Library components" });
@@ -70,7 +70,9 @@ describe("Library page: the list", () => {
 
   it("says when the ref names nothing", async () => {
     mount("/templates/library/tasks.nope");
-    expect(await screen.findByText(/There is no component called tasks.nope/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No component called tasks.nope" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the Library" })).toHaveAttribute("href", "/templates/library");
+    expect(document.querySelector(".lib-ref")).toBeNull();
   });
 
   it("hides a kind the filter turns off, remembers it, and still renders when storage throws", async () => {
@@ -88,6 +90,17 @@ describe("Library page: the list", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     mount();
     expect(await screen.findByRole("group", { name: "Steering" })).toBeInTheDocument();
+  });
+
+  it("offers only the kinds the library has in the filter", async () => {
+    const u = userEvent.setup();
+    draftWith({ model: { "library.yaml": { ...LIB_MODEL, steps: {} } } });
+    mount();
+    await list();
+    await u.click(screen.getByRole("button", { name: "Filter kinds" }));
+    const kinds = within(screen.getByRole("dialog", { name: "Show kinds" })).getAllByRole("checkbox").map((c) => c.closest("label")!.textContent);
+    expect(kinds.some((k) => /Steps/.test(k!))).toBe(false);
+    expect(kinds.some((k) => /Tasks/.test(k!))).toBe(true);
   });
 
   it("searches by name, and / focuses the search, ↓ walks the rows", async () => {

@@ -19,10 +19,10 @@ const REPORT: Analytics = {
   stop_reasons: [{ label: "agent needs context", n: 2 }],
 };
 
-const show = async (r: Analytics) => {
+const show = async (r: Analytics, heading = "Overview") => {
   vi.spyOn(api, "getAnalytics").mockResolvedValue(r);
   render(<AnalyticsPage />);
-  await screen.findByRole("heading", { name: "Overview" });
+  await screen.findByText(heading);
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -132,15 +132,21 @@ describe("ng AnalyticsPage", () => {
   });
 
   it("collapses an empty section to one line under its heading, in no panel", async () => {
-    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 0, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
+    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 1, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
     expect(screen.getByText("Nothing merged in this range.")).toBeInTheDocument();
     expect(screen.getByText("No gate waits in this range.")).toBeInTheDocument();
     expect(screen.getAllByText("Nothing here yet.")).toHaveLength(2);
     expect(screen.getByText("Nothing stopped for a person in this range.")).toBeInTheDocument();
     expect(screen.getByText("no previous period")).toBeInTheDocument();
-    expect(screen.getByText("nothing completed yet")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Merged items per week" })).toBeNull();
     expect(document.querySelector(".an-panel")).toBeNull();
+  });
+
+  it("says one line, with no figures or headings, when the range holds no completed item and no node ran", async () => {
+    await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 0, completed_prev: null, cost_usd: 0 }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] }, "Nothing has completed in this range yet.");
+    expect(screen.getByText("Nothing has completed in this range yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Lead time")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "By node" })).toBeNull();
   });
 
   it("names a long repo and node once, whole in its title", async () => {
