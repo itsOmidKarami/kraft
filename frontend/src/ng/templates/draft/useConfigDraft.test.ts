@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../../store";
 import * as d from "./draftApi";
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { DraftView } from "./types";
@@ -47,6 +48,23 @@ describe("useConfigDraft", () => {
     const h = renderHook(() => useConfigDraft("policy", "policy"));
     await waitFor(() => expect(h.result.current.status).toBe("error"));
     expect(h.result.current.error).toBe("could not reach the Kraft server");
+  });
+
+  it("puts the detail in error when an op cannot reach the server (status 0)", async () => {
+    const h = await mount();
+    vi.spyOn(d, "postOps").mockImplementation(() => answer({ detail: "could not reach the Kraft server" }, 0) as never);
+    await act(async () => void (await h.result.current.ops([{ op: "set_value", scope: "x", key: "k", value: 1 } as never])));
+    expect(h.result.current.error).toBe("could not reach the Kraft server");
+  });
+
+  it("reads again when the app comes back online after the load failed", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => answer({ detail: "down" }, 0) as never);
+    useStore.setState({ loadError: "down", connection: "open" } as never);
+    const h = renderHook(() => useConfigDraft("policy", "policy"));
+    await waitFor(() => expect(h.result.current.status).toBe("error"));
+    vi.mocked(d.getDraft).mockImplementation(() => answer(VIEW));
+    act(() => useStore.setState({ loadError: null } as never));
+    await waitFor(() => expect(h.result.current.status).toBe("ready"));
   });
 
   it("replaces the view with an op's answer, and says a draft changed", async () => {

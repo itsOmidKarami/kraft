@@ -3,7 +3,7 @@ import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 import { REREAD_EVENTS } from "./rereadEvents";
 
-type Connection = "connecting" | "open" | "reconnecting";
+export type Connection = "connecting" | "open" | "reconnecting";
 
 interface State {
   workItems: Record<string, WorkItem>;

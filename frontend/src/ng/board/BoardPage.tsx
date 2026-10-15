@@ -220,9 +220,9 @@ export function BoardPage() {
 
   // Over first-run as over the board: a server older than its interface says so either way (R11a-11).
   const restart = olderServer(health) && (
-    <div className="board-offline board-restart" role="alert">
-      <span className="board-offline-mark" aria-hidden>!</span>
-      <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
+    <div className="ng-offline ng-offline-warn" role="alert">
+      <span className="ng-offline-mark" aria-hidden>!</span>
+      <span className="ng-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
     </div>
   );
   // FirstRun's last step opens the composer, which lives on the board.

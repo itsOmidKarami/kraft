@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Answer } from "../../http";
 import { detailOf } from "../../http";
+import { useOnRecovered } from "../../offline";
 import * as d from "./draftApi";
 import type { Area, DraftView, Op, OpsView, Scope, StaleBody } from "./types";
 import { normalise, type NodeA } from "./view";
@@ -54,6 +55,9 @@ export function useConfigDraft(area: Area, key: string) {
     else if ((a.status === 0 || a.status >= 300) && live.current) setStatus("error");
     return a;
   }, false), [area, key, enqueue]);
+
+  // A page that errored while the server was down reads again once it is back.
+  useOnRecovered(() => { if (status === "error") void load(); });
 
   useEffect(() => {
     live.current = true;

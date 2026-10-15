@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../../store";
 import { item, view } from "./fixtures";
 import * as api from "./itemDraftApi";
 import type { MarkedOp } from "./types";
@@ -66,6 +67,16 @@ describe("useItemDraft", () => {
     await act(async () => void (await result.current.edit((o) => o)));
     expect(result.current.error).toBe("ops.0.op: bad");
     expect(result.current.view?.ops).toEqual([]);
+  });
+
+  it("is an error when the server cannot be reached (status 0), and reads again once the app is back online", async () => {
+    m.getDraft.mockResolvedValue(ok({ detail: "could not reach" }, 0));
+    useStore.setState({ loadError: "down", connection: "open" } as never);
+    const { result } = renderHook(() => useItemDraft(item()));
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    m.getDraft.mockResolvedValue(ok(view()));
+    act(() => useStore.setState({ loadError: null } as never));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
   });
 
   it("will not edit before the draft has loaded, rather than send a list it never saw", async () => {
