@@ -5,7 +5,7 @@ import { admittedRowAction } from "../../board/rowText";
  *  chosen from the same `admittedRowAction` the desktop row uses, so the two cannot
  *  disagree about which items have a button. */
 export type CardButton =
-  | { kind: "review"; label: string; gate: string; primary: true }
+  | { kind: "review"; label: string; gate: string }
   | { kind: "answer"; label: string }
   | { kind: "open"; label: string }
   | { kind: "raise"; label: string }
@@ -15,7 +15,7 @@ export function cardButtons(item: WorkItem): CardButton[] {
   const a = admittedRowAction(item);
   if (!a) return [];
   // A gate is decided inside its review, as on the desktop row; the card only opens it.
-  if (a.kind === "gate") return [{ kind: "review", label: a.label, gate: a.gate, primary: true }];
+  if (a.kind === "gate") return [{ kind: "review", label: a.label, gate: a.gate }];
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {

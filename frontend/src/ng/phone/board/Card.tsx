@@ -1,7 +1,8 @@
 import { ago, repoName, shortId } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { chainOf, groupOf } from "../../board/model";
-import { reasonTail, ticksOf } from "../../board/rowText";
+import { CUE_ICON } from "../../board/cue";
+import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
 import { cardButtons, type CardButton } from "./actions";
@@ -22,6 +23,8 @@ export interface CardProps {
 export function Card({ item, now, offline, busy, error, onOpen, onButton }: CardProps) {
   const g = stateGlyph(item);
   const hot = groupOf(item) === "needs";
+  const cue = hot ? stopCueOf(item) : null;
+  const Cue = cue ? CUE_ICON[cue] : null;
   const buttons = cardButtons(item);
   return (
     <article className="ph-card" data-row={item.id}>
@@ -36,12 +39,15 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
         <span className="ph-ticks" aria-hidden="true">
           {ticksOf(item).map((t, k) => <span key={k} className={`ph-tick ph-tick-${t.state}${t.gate ? " ph-tick-gate" : ""}`} />)}
         </span>
-        <span className={`ph-card-tail${hot ? " ph-is-hot" : ""}`}>{reasonTail(item, now)}</span>
+        <span className={`ph-card-tail${hot ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}`}>
+          {Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}
+          {reasonTail(item, now)}
+        </span>
       </button>
       {buttons.length > 0 && (
         <div className="ph-card-actions">
           {buttons.map((b) => (
-            <Button key={b.kind} className={`ph-btn ph-card-btn${"primary" in b ? " ph-btn-primary" : ""}`} variant={"primary" in b ? "primary" : "secondary"} disabled={offline || busy} onClick={() => onButton(b)}>
+            <Button key={b.kind} className="ph-btn ph-card-btn" variant="secondary" disabled={offline || busy} onClick={() => onButton(b)}>
               {b.label}
             </Button>
           ))}

@@ -1,7 +1,7 @@
 import { ago, elapsed, plural, until, usd } from "../../../format";
 import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
 import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED } from "../../item/status";
-import { gateMessage, materialized } from "../../item/chainValues";
+import { doneText, gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
 import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
@@ -136,7 +136,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${item.current_node_id}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
     case "paused": return item.current_node_id ? { tone: "warn", title: "Paused", where: `at ${item.current_node_id}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
-    case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: "All nodes passed.", facts: spent(item) };
+    case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: doneText(item), facts: spent(item) };
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
       const at = str(ev?.payload.node_id) ?? item.current_node_id;

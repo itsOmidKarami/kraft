@@ -1,3 +1,4 @@
+import { doneText } from "./chainValues";
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
@@ -217,7 +218,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     ];
     return {
       tone: "neutral", glyph: <CircleCheck size={14} aria-hidden />, title: "Done",
-      text: mr ? undefined : "The chain finished. No merge request was opened.",
+      text: doneText(item),
       facts,
       actions: when(admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
     };

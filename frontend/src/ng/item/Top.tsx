@@ -66,8 +66,8 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   );
 }
 
-/** The brief: two lines, "more · edit"; edit is a field in the same spot (Decisions §2). */
-export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSaved: () => void }) {
+/** The brief: two lines, "more · edit"; edit is a field in the same spot (Decisions §2). An ended item's brief is read-only: the API refuses the patch. */
+export function Brief({ id, brief, ended = false, onSaved }: { id: string; brief: string; ended?: boolean; onSaved: () => void }) {
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(brief);
@@ -107,8 +107,8 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
       {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{more ? brief : plainMarkdown(brief)}</p> : null}
       <div className="item-brief-links">
         {(long || more) && <button type="button" className="item-link" aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</button>}
-        {(long || more) && <span aria-hidden> · </span>}
-        <button type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>
+        {(long || more) && !ended && <span aria-hidden> · </span>}
+        {!ended && <button type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>}
       </div>
     </div>
   );

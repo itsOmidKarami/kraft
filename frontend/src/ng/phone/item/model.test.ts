@@ -128,7 +128,8 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
     expect(cardOf(mk("paused"))).toMatchObject({ title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
-    expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged" });
+    expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });
+    expect(cardOf(mk("done"))).toMatchObject({ text: "The chain finished. No merge request was opened." });
   });
   it("names the closer of a closed MR and the reason of a cancel from the events", () => {
     const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;

@@ -9,6 +9,7 @@ import { useSelect } from "./draft/select";
 import { LeaveGuard } from "./draft/LeaveDialog";
 import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
+import { ENDED } from "./chainValues";
 import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 import { ESCALATION } from "./nodeGraph";
@@ -72,7 +73,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
       <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} bodyActs />
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
-        {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
+        {!nodeView && <Brief id={item.id} brief={item.description ?? ""} ended={ENDED.has(item.display_status ?? "")} onSaved={reload} />}
         <DiffLine id={item.id} version={runVersion(item)} files={files} review={!reviewedBelow(item)} />
       </div>
       <Banner item={item} onRaise={raise} reload={reload} />

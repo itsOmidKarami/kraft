@@ -1,10 +1,10 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import { CircleAlert, CircleHelp, Clock, Pause, TriangleAlert } from "../icons";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
+import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
-import { admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction, type StopCue } from "./rowText";
+import { admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
 import { Ticks } from "./Ticks";
 
 export interface RowProps {
@@ -22,8 +22,6 @@ export interface RowProps {
   /** The archived view's own action and tail (H): Restore, "archived by you". */
   own?: { label: string; run: () => void; tail: string; age: string };
 }
-
-const CUE_ICON: Record<StopCue, typeof Clock> = { failed: CircleAlert, paused: Pause, gate: Clock, question: CircleHelp, limit: TriangleAlert, other: TriangleAlert };
 
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
