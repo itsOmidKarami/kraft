@@ -16,6 +16,16 @@ const ICON: Record<string, ReactNode> = {
 const belowText = (b: Below, unit: "min" | "usd" | "tok") =>
   `${b.via ? b.via.split(".").pop() : b.path.split(".").pop() || b.chain} ${show(unit, b.value)} · ${b.via ? "library" : `chain ${b.chain}`}`;
 
+/** The same line from several tasks is said once, with how many. */
+const belowLines = (below: Below[], unit: "min" | "usd" | "tok") => {
+  const lines = new Map<string, { text: string; exceeds: boolean; n: number }>();
+  for (const b of below) {
+    const text = belowText(b, unit), seen = lines.get(text);
+    if (seen) { seen.n += 1; seen.exceeds ||= !!b.exceeds; } else lines.set(text, { text, exceeds: !!b.exceeds, n: 1 });
+  }
+  return [...lines.values()];
+};
+
 function Scope({ id, name, sub, count, fold = 0, children }: { id: string; name: string; sub: string; count: number; /** Set when nothing in the scope is set: how many caps it folds. */ fold?: number; children: ReactNode }) {
   if (fold)
     return (
@@ -66,7 +76,7 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
                 <PolicyCell draft={ctx.draft} k={mk} label={`${LEVEL_LABEL[level].name} ${label.name} maximum`} value={c.maximum.value} bound change={changes.get(mk.key)} problem={problemAt(ctx, mk.key)} inherited={c.maximum.source && c.maximum.source !== level ? c.maximum.source : null} />
                 {showBelow && (
                   <span className="pol-below">
-                    {(c.below ?? []).map((b, k) => <span key={k} className={b.exceeds ? "is-bad" : undefined}>{belowText(b, label.unit as "min")}{b.exceeds ? " !" : ""}</span>)}
+                    {belowLines(c.below ?? [], label.unit as "min").map((l) => <span key={l.text} className={l.exceeds ? "is-bad" : undefined}>{l.text}{l.n > 1 ? ` ×${l.n}` : ""}{l.exceeds ? " !" : ""}</span>)}
                   </span>
                 )}
               </div>

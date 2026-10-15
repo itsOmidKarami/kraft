@@ -54,6 +54,9 @@ export function Loops({ ctx }: { ctx: Ctx }) {
       <section className="pol-card" aria-label="Every fix loop">
         <h3 className="pol-h2">Every fix loop</h3>
         <div className="pol-loops">
+          <div className="pol-loop is-head" aria-hidden>
+            <span className="pol-colh">loop</span><span className="pol-colh">attempts</span><span className="pol-colh">wall clock</span><span />
+          </div>
           <div className="pol-loop is-default" role="group" aria-label="Loops without their own entry">
             <span className="pol-k">every loop without its own entry</span>
             <PolicyCell draft={draft} k={KEYS.loopAttempts} label="default loop attempts" value={p.loops.default.attempts} change={changes.get(KEYS.loopAttempts.key)} problem={problemAt(ctx, KEYS.loopAttempts.key)} />

@@ -67,3 +67,5 @@
   .rp-row-cfg > .rp-k { padding-top: 0; }
   .rp-row-cfg > .rp-src { padding-top: 0; }
 }
+/* A path is cut from the left: the end of it is what names the repo. */
+.rp-path { display: block; direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -58,6 +58,13 @@ const openConfig = async () => {
 };
 
 describe("Repos page: the table", () => {
+  it("opens the only repo when none is chosen, replacing the list's URL", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos: [REPOS[1]], detected: [] } as never })));
+    mount("/settings/repos");
+    expect(await screen.findByRole("complementary", { name: /pane/ })).toBeInTheDocument();
+    await waitFor(() => expect(where).toBe("/settings/repos/platform"));
+  });
+
   it("lists the repos with chain, whether each can run work, tests and state, the open count and the detected ones", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/platform", kind: "change", summary: "policy", fields: ["policy"] }, { path: "/src/docs-site", kind: "add", summary: "" }] }, true)));
     mount();

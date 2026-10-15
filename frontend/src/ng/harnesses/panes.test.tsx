@@ -19,7 +19,7 @@ describe("harness pane", () => {
     serve(view(resolved()));
     renderPage("?harness=gemini");
     const p = await pane("gemini");
-    expect(within(p).getByText("Not on PATH")).toBeInTheDocument();
+    expect(within(p).getByText(/^harness · gemini · Not on PATH · Never · \d+ tasks$/)).toBeInTheDocument();
     expect(within(p).getByRole("switch", { name: "Disable gemini" })).toBeChecked();
     expect(within(p).getByRole("button", { name: /^executable, .*\. Edit$/ })).toBeInTheDocument();
     expect(within(p).getByRole("button", { name: "default model, not set. Edit" })).toBeInTheDocument();
@@ -142,6 +142,7 @@ describe("a profile's lane under a harness", () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude&lane=strong");
     const p = await pane("strong");
+    expect(within(p).getByText("Used by 2 tasks.")).toBeInTheDocument();
     const model = await open(p, "model", "combobox");
     await userEvent.clear(model);
     await userEvent.type(model, "opus{Enter}");
@@ -190,6 +191,12 @@ describe("profile and entry panes", () => {
     const p = await pane("strong");
     expect(within(p).getByRole("link", { name: `default › ${TASKS.implementer.path}` })).toHaveAttribute("href", "/templates/chains/default/nodes/implement");
     expect(p).toHaveTextContent("agent profile · 2 providers");
+  });
+
+  it.each([["strong", "Used by 2 tasks."], ["fast", "Used by 0 tasks."]])("an entry pane counts the tasks that use it: %s", async (profile, words) => {
+    serve(view(resolved()));
+    renderPage(`?profile=${profile}&lane=claude`);
+    expect(within(await pane("claude")).getByText(words)).toBeInTheDocument();
   });
 
   it("an entry pane lists the harnesses it runs on with their access words, and removing sends a null patch", async () => {

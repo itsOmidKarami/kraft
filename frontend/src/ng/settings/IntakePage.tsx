@@ -15,7 +15,7 @@ import { subscribeLive } from "../live";
 import { checkText, hhmm, nextCheck } from "./intake/checks";
 import { CRON_PRESETS, cronProblem, describeCron } from "./intake/cron";
 import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule, scheduleProblemText } from "./intake/types";
-import { pickup, REMOVE_SCHEDULE } from "./intake/pickup";
+import { BEADS_DOCS, pickup, REMOVE_SCHEDULE } from "./intake/pickup";
 import { repoChoice, repoLabel, type NamedRepo } from "./intake/repos";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
 import "./settings.css";
@@ -123,6 +123,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       <Switch label="enabled" checked={data.enabled} onChange={(on) => void send(draft, { op: "set_intake", patch: { enabled: on } })} />
                     </div>
                     <p className="ink-sentence">{pickup(data)}</p>
+                    <p className="ink-note">Issues come from <a className="ink-link" href={BEADS_DOCS} target="_blank" rel="noopener noreferrer">beads</a>, the optional bd tracker; a repo without one has nothing to pick up.</p>
                     <PickupRows draft={draft} i={data} repos={repos} changes={changes} />
                   </section>
 
@@ -171,7 +172,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               crumbs={[{ label: "Auto-intake", onClick: () => setSel(null) }]}
               icon="clock"
               title={chosen.title || "untitled"}
-              sub="schedule · schedules: in intake.yaml"
+              sub="schedule"
               onCollapse={() => setPaneOpen(false)}
               onExpand={() => setPaneOpen(true)}
               footer={<><span className="bp-gap" /><Button variant="danger" onClick={() => setRemoving(chosen)}>Remove schedule</Button></>}
@@ -216,7 +217,7 @@ function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: Intak
   const changed = (file: string, key: string) => changes.has(`${file}|${key}`);
   return (
     <div>
-      <Row k="check every (min)" changed={changed("intake.yaml", "interval_s")}>
+      <Row k="check every" changed={changed("intake.yaml", "interval_s")}>
         <ValueCell label="check every, minutes" value={String(toMinutes(i.interval_s))} display={showMinutes(i.interval_s)} onCommit={(t) => { const v = intervalFromText(t); return "error" in v ? v.error : set({ interval_s: v.seconds }); }} />
       </Row>
       <Row k="priority at or below" changed={changed("intake.yaml", "priority_ceiling")}>

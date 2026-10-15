@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { subscribeLive } from "../../live";
 import { checkText, hhmm } from "../../settings/intake/checks";
-import { pickup, REMOVE_SCHEDULE } from "../../settings/intake/pickup";
+import { INTAKE_SUB, pickup, REMOVE_SCHEDULE } from "../../settings/intake/pickup";
 import { CRON_PRESETS, cronProblem, describeCron } from "../../settings/intake/cron";
 import { repoChoice, repoLabel, type NamedRepo } from "../../settings/intake/repos";
 import { intakeOf, problemsOfSchedule, scheduleProblemText, type Check, type IntakeResolved, type Schedule } from "../../settings/intake/types";
@@ -77,7 +77,7 @@ export function IntakeScreen() {
   };
 
   return (
-    <AreaScreen title="Auto-intake" sub="Picks up ready beads on a timer, and files scheduled items." draft={draft}>
+    <AreaScreen title="Auto-intake" sub={INTAKE_SUB} draft={draft}>
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">Auto-intake could not be read.</p>}
       {r && !data && <p className="ph-error" role="alert">intake.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. {repairElsewhere("intake.yaml")}</p>}
       {data && (

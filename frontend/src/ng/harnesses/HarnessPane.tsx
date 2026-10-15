@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
 import { useState } from "react";
 import { ModelField } from "./fields";
-import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
+import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, entryUsers, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
 
@@ -25,19 +25,22 @@ type Common = {
 };
 
 /** Model and effort of one provider entry of a profile (shared by the harness's lane pane and the profile's entry pane). */
-export function EntryEditor({ draft, profile, provider, entry, status, changed }: {
+export function EntryEditor({ draft, profile, provider, entry, status, changed, used }: {
   draft: ConfigDraft;
   profile: string;
   provider: string;
   entry: EntryView;
   status?: ProviderStatus;
   changed: boolean;
+  /** Tasks that run on this entry. */
+  used: number;
 }) {
   const { run, error } = useRun(draft);
   const efforts = status?.efforts ?? [];
   return (
     <>
       <ModelField label="model" value={entry.model ?? ""} suggestions={status?.models} changed={changed} onCommit={(model) => void run(entryOp(profile, provider, { ...entry, model }))} />
+      <p className="hn-field-help hn-used-by">Used by {used} {used === 1 ? "task" : "tasks"}.</p>
       {efforts.length > 0 ? (
         <div className="hn-field">
           <span className="hn-field-label" id={`eff-${profile}-${provider}`}>effort</span>
@@ -89,7 +92,7 @@ function HarnessFields({ draft, h, status, changed, onYaml }: { draft: ConfigDra
         </div>
       </div>
       <ModelField label={HARNESS_FIELD.executable} value={h.executable ?? ""} placeholder={status?.executable ?? "the provider's own"} changed={changed} clearable onCommit={(v) => patch({ executable: v || null })} />
-      <div className="hn-field"><p className="hn-field-help"><span className={`hn-chip${h.executable_found ? "" : " is-bad"}`}>{executableWord(h.executable_found)}</span> {HARNESS_FIELD.provider} {h.provider ?? "unknown"}</p></div>
+      <Kv k={HARNESS_FIELD.provider} v={h.provider ?? "unknown"} />
       <ModelField label={HARNESS_FIELD.model} value={h.defaults.model ?? ""} suggestions={status?.models} changed={changed} clearable onCommit={(v) => setDefault("model", v)} />
       {(efforts.length > 0 || h.defaults.effort) && (
         <div className="hn-field">
@@ -131,7 +134,7 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
         <Head>{lane} on {h.id}</Head>
         {entry ? (
           <>
-            <EntryEditor draft={c.draft} profile={lane} provider={h.provider ?? ""} entry={entry} status={status} changed={c.changes.has(`profiles.${lane}`)} />
+            <EntryEditor draft={c.draft} profile={lane} provider={h.provider ?? ""} entry={entry} status={status} changed={c.changes.has(`profiles.${lane}`)} used={entryUsers(c.r, lane, h.provider ?? "")} />
             <Note>Shared by every {h.provider} harness. Editing it here edits the profile.</Note>
           </>
         ) : (
@@ -153,7 +156,7 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       crumbs={[{ label: "Harnesses", onClick: () => onLane(null) }]}
       icon="bot"
       title={h.id}
-      sub={`harness · ${h.provider} · ${h.tasks.filter((t) => !t.fallback).length} tasks`}
+      sub={`harness · ${h.provider} · ${executableWord(h.executable_found)} · ${ACCESS_WORD[h.state]} · ${h.tasks.filter((t) => !t.fallback).length} tasks`}
       prob={prob ? { msg: problemText(prob), fix: prob.fix } : undefined}
       onCollapse={c.onCollapse}
       onExpand={c.onExpand}
@@ -164,7 +167,6 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
         <Segmented label={ACCESS_SECTION} options={ACCESS} value={h.state} onChange={(state) => void run({ op: "set_access", harness: h.id, state })} />
         <p className={`hn-field-help${c.changes.has(`access.${h.id}`) ? " is-changed" : ""}`}>{ACCESS_HELP[h.state]}</p>
       </div>
-      <Note>Whether the CLI is installed is separate: it is shown beside this on every lane.</Note>
       {c.r.escalation_effective.harness === h.id && <Note>Escalation turns run on this harness (area pane → Escalation).</Note>}
       {error && <p className="hn-error" role="alert">{error}</p>}
 
