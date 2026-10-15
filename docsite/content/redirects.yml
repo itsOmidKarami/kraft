@@ -597,6 +597,6 @@
 /guides/adding-a-harness#set-up-amp-or-cursor-credentials: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
 /reference/cli/admin#migrating-a-pre-v1-template-configuration: /guides/run/upgrade-from-0-x-or-a-release-candidate#migrating-a-home-from-0x
 /reference/triggers#cron-entries: /reference/triggers#cron-syntax
-/get-started/first-work-item#_6-try-the-real-chain-and-its-gates: /get-started/the-real-chain#_6-try-the-real-chain-and-its-gates
-/get-started/first-work-item#_7-review-before-it-merges: /get-started/the-real-chain#_7-review-before-it-merges
+/get-started/first-work-item#_6-try-the-real-chain-and-its-gates: /get-started/the-real-chain#_1-try-the-real-chain-and-its-gates
+/get-started/first-work-item#_7-review-before-it-merges: /get-started/the-real-chain#_2-review-before-it-merges
 /get-started/first-work-item#next-steps: /get-started/the-real-chain#next-steps
