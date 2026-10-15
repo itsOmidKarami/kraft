@@ -14,11 +14,15 @@ from textual.app import App
 from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, HelpPanel
 
-from kraft import client
+from kraft import cli, client
 from kraft.console import app as console_app
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.live import Link
 from kraft.console.screens import VIEWS
+
+OTHER_INSTANCE = client.ClientError(
+    "kraft: the server at x is a different instance", kind=client.Failure.OTHER_INSTANCE
+)
 
 
 def _text(app, selector: str) -> str:
@@ -257,3 +261,39 @@ def test_no_key_does_two_things_on_one_view(name):
             key = binding.key.removeprefix("shift+").lower()
             actions.setdefault(key, set()).add(binding.action)
     assert {key: found for key, found in actions.items() if len(found) > 1} == {}
+
+
+@pytest.mark.parametrize(
+    ("env", "ttys", "health", "said"),
+    [
+        ({"KRAFT_WORK_ITEM_ID": "w1"}, (True, True), None, "a worker does not open the console"),
+        ({}, (False, True), None, "console needs a terminal"),
+        ({}, (True, False), None, "console needs a terminal"),
+        ({}, (True, True), OTHER_INSTANCE, "is a different instance"),
+        ({}, (True, True), None, None),
+    ],
+    ids=["worker", "stdin-piped", "stdout-piped", "other-instance", "no-server-opens"],
+)
+def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, ttys, health, said):
+    """Spec §3. With no server answering it still opens, and says so inside."""
+    opened = []
+    monkeypatch.setattr(KraftConsole, "run", lambda self: opened.append(self))
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: ttys[0], raising=False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: ttys[1], raising=False)
+    if health is not None:
+
+        async def refuse():
+            raise health
+
+        monkeypatch.setattr(client, "health", refuse)
+    if said is None:
+        cli.main(["console"])
+        assert len(opened) == 1
+        return
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["console"])
+    assert caught.value.code == 1
+    assert said in capsys.readouterr().err
+    assert opened == []

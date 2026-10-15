@@ -5,7 +5,9 @@ line (and, from PR 2b, the prompt) stays on every view."""
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from collections.abc import Iterable
 from typing import ClassVar
 
@@ -258,3 +260,20 @@ class KraftConsole(App):
             "repos": "",
         }
         return [(name, counts[name]) for name in TABS]
+
+
+def main() -> None:
+    """`kraft console`: refuse where a terminal UI cannot work (spec §3), else
+    run. A refusal is a ValueError, which `kraft` prints as `kraft: ...`."""
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise ValueError("a worker does not open the console")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ValueError("console needs a terminal to draw in — try `kraft view list` in a pipe")
+    try:
+        asyncio.run(client.health())
+    except client.ClientError as exc:
+        # Another instance on this port would be shown as this machine's; no
+        # server at all still opens, and says so.
+        if exc.kind == client.Failure.OTHER_INSTANCE:
+            raise
+    KraftConsole().run()

@@ -37,7 +37,15 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_text, adder in _GROUPS:
         group = subs.add_parser(name, help=help_text)
         adder(group.add_subparsers(dest="verb", required=True), common_parser)
+    subs.add_parser("console", help="open the terminal UI").set_defaults(func=_console)
     return parser
+
+
+def _console(ns: argparse.Namespace) -> None:
+    # Imported here, so no other verb loads Textual.
+    from kraft.console import app
+
+    app.main()
 
 
 #: The four groups, in help order. `build_parser` walks this, so adding a group
