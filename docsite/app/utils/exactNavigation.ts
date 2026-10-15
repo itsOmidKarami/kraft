@@ -60,11 +60,15 @@ function mark(items: ContentNavigationItem[], marks: Record<string, string>): Co
 // link is active on its own page alone, and Nuxt UI then gives it
 // aria-current="page".
 export function exactNavigation(items: ContentNavigationItem[] | null | undefined): ContentNavigationItem[] {
-  const marks = useRuntimeConfig().public.docs.unreleased?.routes ?? {}
+  const docs = useRuntimeConfig().public.docs
+  const marks = docs.unreleased?.routes ?? {}
+  // A release's own index (and an older major's) says where these pages sit
+  // in the sidebar, so only main's build and a local one are grouped.
+  const grouped = docs.version === 'next' || docs.version === ''
   const exact = (list: ContentNavigationItem[]): ContentNavigationItem[] => list.map(item => ({
     ...item,
     exact: true,
     ...(item.children ? { children: exact(item.children) } : {}),
   }))
-  return exact(mark(groupReference(items || []), marks))
+  return exact(mark(grouped ? groupReference(items || []) : items || [], marks))
 }
