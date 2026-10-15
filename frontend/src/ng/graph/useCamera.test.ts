@@ -1,15 +1,17 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { currentCam, fitCam, openingView, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
+import { currentCam, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
 import { useCamera } from "./useCamera";
 
 describe("camera maths", () => {
-  it("fits a wide world by width, centred, the chain 10px above centre", () => {
-    // (1040 − 40) / 2000 = 0.5 < (440 − 40) / 250.
-    expect(fitCam({ W: 2000, H: 250 }, { w: 1040, h: 440 }, "chain")).toEqual({ s: 0.5, tx: 20, ty: 157.5 - 10 });
+  it("fits a wide world by width, centred, the chain's row of nodes and labels at the middle of the view", () => {
+    // (1040 − 40) / 2000 = 0.5 < (440 − 40) / 250; the row (node centre 96, labels to 108 and beyond) sits at 220: 220 − 108 · 0.5.
+    expect(fitCam({ W: 2000, H: 250 }, { w: 1040, h: 440 }, "chain")).toEqual({ s: 0.5, tx: 20, ty: 220 - 54 });
   });
   it("fits a tall world by height", () => {
     expect(fitCam({ W: 400, H: 1040 }, { w: 1000, h: 560 }, "node").s).toBe(0.5);
+    // A chain row would sit at 280 − 54 = 226, past the foot of the view: the world stays inside it (560 − 520).
+    expect(fitCam({ W: 400, H: 1040 }, { w: 1000, h: 560 }, "chain").ty).toBe(40);
   });
   it("never fits above 100% or below 30%", () => {
     expect(fitCam({ W: 100, H: 100 }, { w: 1000, h: 1000 }, "chain").s).toBe(1);
@@ -18,7 +20,7 @@ describe("camera maths", () => {
   it("keeps the fitted node canvas 20px off the left edge", () => {
     expect(fitCam({ W: 10000, H: 100 }, { w: 1000, h: 500 }, "node").tx).toBe(20);
     // An editor's fit (Templates prototype fit1): an 80% floor, a long chain starting 12px in.
-    expect(fitCam({ W: 2600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.8, left: 12 })).toEqual({ s: 0.8, tx: 12, ty: (700 - 200) / 2 - 10 });
+    expect(fitCam({ W: 2600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.8, left: 12 })).toEqual({ s: 0.8, tx: 12, ty: 350 - 108 * 0.8 });
     expect(fitCam({ W: 400, H: 250 }, { w: 1000, h: 700 }, "chain", { floor: 0.8, left: 12 }).tx).toBe(300);
   });
   // WI-16: a failed or finished chain too wide for its floor opens on the node that matters, never past either end.
@@ -60,11 +62,6 @@ describe("camera maths", () => {
     expect(revealCam(cam, { x0: -20, x1: 0, y0: -40, y1: 0 }, view)).toEqual({ tx: 34, ty: 44, s: 0.5 });
     expect(revealCam(cam, { x0: 0, x1: 10, y0: 600, y1: 620 }, view).ty).toBe(300 - 24 - 310);
   });
-  it("opens on the current node only while one is in progress", () => {
-    for (const s of ["running", "waiting", "needs_you", "escalated", "paused"]) expect(openingView(s, true)).toBe("current");
-    for (const s of ["queued", "done", "cancelled", "archived", "failed"]) expect(openingView(s, true)).toBe("fit");
-    expect(openingView("running", false)).toBe("fit");
-  });
 });
 
 function mount(opts: Parameters<typeof useCamera>[0]) {
@@ -92,6 +89,12 @@ describe("useCamera", () => {
     const click = { stopPropagation: () => (click.stopped = true), stopped: false };
     h.result.current.bind.onClickCapture(click as never);
     expect(click.stopped).toBe(true);
+  });
+  it("slides the view by a pan, which frees fit", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
+    act(() => h.result.current.pan(-100));
+    expect(h.result.current.mode).toBe("free");
+    expect(h.result.current.cam.tx).toBe(20 - 100);
   });
   it("keeps the current node clear of an overlaid pane, while fit keeps the full width (Kraft-gvfm2)", () => {
 
@@ -130,7 +133,7 @@ describe("useCamera", () => {
   it("zooms at the cursor on ⌘-wheel and pans on a plain wheel", () => {
     const { el, h } = mount({ canvas: "chain", world: { W: 100, H: 100 }, opening: "fit" });
     act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: 50, metaKey: false })));
-    expect(h.result.current.cam.ty).toBe(170 - 10 - 50);
+    expect(h.result.current.cam.ty).toBe(220 - 108 - 50);
     act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: -400, ctrlKey: true, clientX: 0, clientY: 0 })));
     expect(h.result.current.cam.s).toBe(2);
   });

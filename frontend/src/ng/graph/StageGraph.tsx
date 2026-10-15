@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { ChevronLeft, ChevronRight } from "../icons";
 import { DRAG_THRESHOLD } from "./camera";
 import type { FitRule } from "./camera";
 import { arcShapes, L, layout, seamX, type ChainArc, type ChainNode, type Seam } from "./layout";
@@ -18,9 +19,10 @@ type Props = {
   arcs?: ChainArc[];
   seams?: Seam[];
   opening?: "fit" | "current";
-  /** With `fit`'s floor, a chain too wide to show whole opens centred on the node the run stopped on, or the last one. */
-  focus?: "stopped" | "last";
-  /** Px the docked pane takes on the right (rule F.6). */
+  /** With `fit`'s floor, a chain too wide to show whole opens centred on the node the run stands on (running, waiting or
+   *  stopped), or on the last one. */
+  focus?: "current" | "last";
+  /** Px the docked pane takes on the right (rule F.6): the canvas ends where the pane starts, so nothing is drawn under it. */
   reserve?: number;
   /** Px an overlaid pane covers on the right: the current-node framing keeps clear of it (Kraft-gvfm2). */
   cover?: number;
@@ -47,8 +49,8 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
   const shapes = useMemo(() => arcShapes(lay, arcs), [lay, arcs]);
   // Where the run stands: the running node, else the one it stopped on (failed) or waits at (a gate).
   const cur = lay.items.find((i) => i.node.state === "current") ?? lay.items.find((i) => i.node.state === "failed" || i.node.state === "amber");
-  const focusAt = (focus === "last" ? lay.items.at(-1) : focus === "stopped" ? cur : undefined)?.cx;
-  const camera = useCamera({ canvas: "chain", world: lay, opening, reserve, cover, fit: fit && focusAt != null ? { ...fit, focus: focusAt } : fit, current: cur && { cx: cur.cx, cy: L.CY } });
+  const focusAt = (focus === "last" ? lay.items.at(-1) : focus === "current" ? cur : undefined)?.cx;
+  const camera = useCamera({ canvas: "chain", world: lay, opening, cover, fit: fit && focusAt != null ? { ...fit, focus: focusAt } : fit, current: cur && { cx: cur.cx, cy: L.CY } });
 
   // Keyboard stops in visual order: a seam at `at` sits before node `at`.
   const stops = useMemo(() => {
@@ -84,7 +86,18 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
   const onClick = (e: MouseEvent) => {
     if (!(e.target as Element).closest("button")) onBackground?.();
   };
-  const { cam } = camera;
+  const { cam, view } = camera;
+  // Nodes the view cuts off at either edge, for the cues that slide the chain to them.
+  const edge = (side: "left" | "right") => {
+    const out = view ? lay.items.filter((i) => (side === "left" ? cam.tx + (i.cx - i.w / 2) * cam.s < 0 : cam.tx + (i.cx + i.w / 2) * cam.s > view.w)) : [];
+    const far = out[side === "left" ? 0 : out.length - 1];
+    // Up to three quarters of the view, no further than brings the far one in with 24px to spare.
+    const dx = view && far ? Math.min(view.w * 0.75, side === "left" ? 24 - (cam.tx + (far.cx - far.w / 2) * cam.s) : cam.tx + (far.cx + far.w / 2) * cam.s - (view.w - 24)) : 0;
+    return { n: out.length, dx: side === "left" ? dx : -dx };
+  };
+  const before = edge("left"), after = edge("right");
+  // Above the row, so a cue never covers the node the view cuts through.
+  const cueTop = Math.max(8, cam.ty + (L.CY - L.BOX / 2) * cam.s - 40);
   const [drag, setDrag] = useState<{ id: string; to: number } | null>(null);
   const dragged = useRef(false);
   const viewport = useRef<HTMLElement | null>(null);
@@ -130,7 +143,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
   })() : null;
 
   return (
-    <div role="group" aria-label={name} className="canvas" data-pan {...camera.bind} ref={bindRef} onClick={onClick} onKeyDown={onKeyDown} onClickCapture={(e) => {
+    <div role="group" aria-label={name} className="canvas" style={{ right: reserve }} data-pan {...camera.bind} ref={bindRef} onClick={onClick} onKeyDown={onKeyDown} onClickCapture={(e) => {
       // A drag is never a click (W3 rule B.2), for a node drag as for a pan.
       if (dragged.current) { e.stopPropagation(); dragged.current = false; return; }
       camera.bind.onClickCapture(e);
@@ -196,7 +209,9 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
           );
         })}
       </div>
-      <div className="canvas-zoom" style={{ right: reserve + 12 }}>
+      {before.n > 0 && <button type="button" className="canvas-more is-left" style={{ top: cueTop }} aria-label={`${before.n} earlier ${before.n === 1 ? "node" : "nodes"} off-screen`} onPointerDown={(e) => e.stopPropagation()} onClick={() => camera.pan(before.dx)}><ChevronLeft size={12} aria-hidden="true" />+{before.n}</button>}
+      {after.n > 0 && <button type="button" className="canvas-more is-right" style={{ top: cueTop }} aria-label={`${after.n} more ${after.n === 1 ? "node" : "nodes"} off-screen`} onPointerDown={(e) => e.stopPropagation()} onClick={() => camera.pan(after.dx)}>+{after.n}<ChevronRight size={12} aria-hidden="true" /></button>}
+      <div className="canvas-zoom">
         <ZoomControls scale={cam.s} mode={camera.mode} onIn={camera.zoomIn} onOut={camera.zoomOut} onReset={camera.reset} onFit={camera.fit} onCurrent={camera.toCurrent} fitLabel="Fit the chain" />
       </div>
     </div>
