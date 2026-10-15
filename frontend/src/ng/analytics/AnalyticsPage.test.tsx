@@ -83,7 +83,7 @@ describe("ng AnalyticsPage", () => {
     }
     expect(css).toMatch(/\.an-page\s*\{[^}]*max-width: 1180px/);
     expect(css).toMatch(/\.an-panel\s*\{[^}]*border: 1px solid[^}]*border-radius: 12px/);
-    expect(css).toMatch(/\.an-section h2\s*\{[^}]*font-size: 16px/);
+    expect(css).toMatch(/\.an-section h2\s*\{[^}]*font-size: var\(--fs-h2\)/);
   });
 
   it("asks for the last eight weeks first, and for the range the person picks", async () => {

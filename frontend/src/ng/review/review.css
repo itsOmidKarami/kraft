@@ -13,17 +13,17 @@
 .is-plain-code :is(.tok-kw, .tok-str, .tok-num, .tok-com, .tok-name) { color: inherit; font-style: inherit; font-weight: inherit; }
 
 /* Toolbar (prototype 352–410). */
-.rv-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; padding: 10px 16px; font-size: 12.5px; color: var(--text-muted); }
+.rv-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; padding: 10px 16px; font-size: var(--fs-meta); color: var(--text-muted); }
 .rv-compare { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.rv-word { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); font: 500 12.5px ui-monospace, Menlo, monospace; cursor: pointer; }
+.rv-word { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); font: 500 var(--fs-meta) ui-monospace, Menlo, monospace; cursor: pointer; }
 .rv-word:is(:hover, :focus-visible), .rv-word[aria-expanded="true"] { border-color: var(--border); background: var(--line); }
-.rv-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.rv-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: var(--fs-label); cursor: pointer; white-space: nowrap; }
 .rv-pill:is(:hover, :focus-visible), .rv-pill[aria-expanded="true"] { background: var(--line); color: var(--text); }
 .rv-tree-toggle { border: 1px solid var(--border); }
 .rv-spacer { flex: 1 1 auto; }
 .rv-tools { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
 .rv-checklist { display: flex; flex-direction: column; min-width: 240px; }
-.rv-check { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12.5px; text-align: left; cursor: pointer; }
+.rv-check { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .rv-check:is(:hover, :focus-visible) { background: var(--line); }
 .rv-check-label { flex: 1 1 auto; }
 .rv-check-count { color: var(--text-muted); font-size: var(--fs-meta); }
@@ -33,24 +33,24 @@
 .rv-tick { flex: none; width: 16px; text-align: center; }
 .rv-mono { font-family: ui-monospace, Menlo, monospace; }
 .rv-muted { color: var(--text-muted); }
-.rv-error { margin: 0; font-size: 12px; color: var(--bad); }
+.rv-error { margin: 0; font-size: var(--fs-label); color: var(--bad); }
 .rv-bar-error { padding: 4px 16px; }
-.rv-add { color: color-mix(in oklab, var(--diff-add-theme) 80%, var(--text)); font: 11px ui-monospace, Menlo, monospace; }
-.rv-del { color: color-mix(in oklab, var(--diff-del-theme) 80%, var(--text)); font: 11px ui-monospace, Menlo, monospace; }
+.rv-add { color: color-mix(in oklab, var(--diff-add-theme) 80%, var(--text)); font: var(--fs-label) ui-monospace, Menlo, monospace; }
+.rv-del { color: color-mix(in oklab, var(--diff-del-theme) 80%, var(--text)); font: var(--fs-label) ui-monospace, Menlo, monospace; }
 
 /* The body: the tree and the diff column, the page's only scrollers. */
 /* The prototype's two panels: the tree and the diff, each a rounded card. */
 .rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; gap: 12px; padding: 0 16px; }
 .rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-.rv-empty { padding: 28px; font-size: 12.5px; color: var(--text-muted); }
+.rv-empty { padding: 28px; font-size: var(--fs-meta); color: var(--text-muted); }
 .rv-empty p { margin: 0 0 12px; }
 
 /* File tree (prototype 412–417). Under 1024 it opens over the diff (R7). */
 .rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .rv-body.is-overlay .rv-tree { position: absolute; inset: 0 auto 0 16px; z-index: 5; width: min(300px, calc(100% - 40px)); box-shadow: 4px 0 18px color-mix(in oklab, var(--side) 50%, transparent); }
-.rv-tree-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; font-size: 12px; color: var(--text-sub); }
+.rv-tree-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; font-size: var(--fs-label); color: var(--text-sub); }
 .rv-tree-count { flex: 1 1 auto; }
-.rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }
+.rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-label); }
 .rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
 .rv-tree-empty { margin: 8px 6px; font-size: var(--fs-meta); color: var(--text-muted); }
 .rv-folder-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -77,21 +77,21 @@
 .rv-files[data-colours="safe"] { --rv-add: var(--diff-add-safe); --rv-del: var(--diff-del-safe); }
 .rv-files[data-colours="plain"] { --rv-add: var(--diff-add-plain); --rv-del: var(--diff-del-plain); }
 .rv-file { border-bottom: 1px solid var(--line); }
-.rv-file-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; }
+.rv-file-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: var(--fs-label); }
 .rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
-.rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; }
+.rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-label); }
 .rv-file-note { color: var(--text-muted); white-space: nowrap; }
 .rv-file-threads { padding: 1px 7px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: var(--fs-meta); white-space: nowrap; }
-.rv-viewed-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-sub); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.rv-viewed-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-sub); font-size: var(--fs-label); white-space: nowrap; cursor: pointer; }
 .rv-viewed-btn[aria-pressed="true"] { color: var(--text); }
 .rv-viewed-btn:is(:hover, :focus-visible) { background: var(--line); }
-.rv-collapsed { display: block; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; text-align: left; cursor: pointer; }
+.rv-collapsed { display: block; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--text-muted); font-size: var(--fs-label); text-align: left; cursor: pointer; }
 .rv-collapsed:is(:hover, :focus-visible) { color: var(--text-sub); }
-.rv-file-msg { margin: 0; padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
+.rv-file-msg { margin: 0; padding: 10px 12px; color: var(--text-muted); font-size: var(--fs-label); }
 /* A file's lines scroll sideways inside the file (wrap off); its threads and composer keep to the visible width. */
 .rv-body-file { overflow-x: auto; overflow-y: hidden; container-type: inline-size; }
-.rv-lines { width: max-content; min-width: 100%; font: 12px/1.6 ui-monospace, Menlo, monospace; }
+.rv-lines { width: max-content; min-width: 100%; font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; }
 .rv-files.is-wrap .rv-lines { width: auto; }
 .rv-lines:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .rv-hunk { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: var(--fs-meta); white-space: pre; }
@@ -130,14 +130,14 @@
 .rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: var(--font-sans); }
 
 /* Threads and the composer (prototype 433–486). */
-.rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; color: var(--text-sub); }
+.rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: var(--fs-meta); color: var(--text-sub); }
 .rv-thread + .rv-thread, .rv-thread + .rv-composer { margin-top: 8px; }
 /* A resolved thread steps back by its frame, not its text: an opacity took its 12px text under 4.5:1. */
 .rv-thread.is-resolved { border-style: dashed; border-color: var(--line); background: transparent; }
-.rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
 .rv-who { color: var(--text); font-weight: 500; }
 .rv-status { color: var(--text-muted); }
-.rv-tag { padding: 1px 7px; border-radius: 5px; font: 600 10px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
+.rv-tag { padding: 1px 7px; border-radius: 5px; font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
 .rv-tag.is-must_fix { background: color-mix(in oklab, var(--bad) 12%, transparent); color: color-mix(in oklab, var(--bad) 80%, var(--text)); }
 .rv-tag.is-question { background: color-mix(in oklab, var(--info) 12%, transparent); color: color-mix(in oklab, var(--info) 80%, var(--text)); }
 .rv-tag.is-nit { background: var(--surface-2); color: var(--text-muted); }
@@ -146,39 +146,39 @@
 .rv-reply { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0 12px; border-left: 2px solid var(--line); }
 .rv-reply.is-agent { border-left-color: var(--border); }
 .rv-reply-edit { display: flex; flex-direction: column; gap: 6px; }
-.rv-links { display: flex; gap: 6px; font-size: 12px; color: var(--text-muted); }
-.rv-link { padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.rv-links { display: flex; gap: 6px; font-size: var(--fs-label); color: var(--text-muted); }
+.rv-link { padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: var(--fs-label); cursor: pointer; }
 .rv-link:is(:hover, :focus-visible) { color: var(--text); }
-.rv-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
-.rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 13px/1.5 var(--font-sans); resize: vertical; }
-.rv-textarea.rv-mono { font: 12px/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }
+.rv-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
+.rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); resize: vertical; }
+.rv-textarea.rv-mono { font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }
 .rv-chips { display: inline-flex; gap: 4px; }
 .rv-chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: var(--fs-meta); cursor: pointer; }
 .rv-chip.is-on, .rv-chip[aria-pressed="true"] { border-color: var(--text-sub); background: var(--line); color: var(--text); }
 .rv-chip:is(:hover, :focus-visible) { background: var(--line); }
 .rv-preview { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
-.rv-suggest { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: 12px/1.6 ui-monospace, Menlo, monospace; }
-.rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: 11.5px var(--font-sans); }
-.rv-moved { margin: 0; padding: 4px 10px; font-size: 12px; line-height: 1.45; color: var(--warn); }
+.rv-suggest { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; }
+.rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: var(--fs-label) var(--font-sans); }
+.rv-moved { margin: 0; padding: 4px 10px; font-size: var(--fs-label); line-height: 1.45; color: var(--warn); }
 .rv-suggest-line { display: flex; gap: 8px; padding: 0 10px; white-space: pre-wrap; }
 .rv-suggest-line.is-del { background: color-mix(in oklab, var(--diff-del-theme) 9%, transparent); }
 .rv-suggest-line.is-add { background: color-mix(in oklab, var(--diff-add-theme) 9%, transparent); }
 .rv-suggest .rv-textarea { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 /* The composer's "Comment on lines −2 to +2": each end coloured by its side. */
 .rv-range-name { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-weight: 500; color: var(--text); }
-.rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-label); }
 .rv-elsewhere { margin: 0 16px 24px; }
 .rv-whole { margin-top: 16px; }
-.rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.rv-elsewhere h2 { margin: 0 0 8px; font-size: var(--fs-label); font-weight: 500; color: var(--text-muted); }
 
 /* Bottom bar and Finish your review (prototype 496–526). */
-.rv-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; margin: 12px 16px 16px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; }
+.rv-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; margin: 12px 16px 16px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: var(--fs-meta); }
 .rv-bar > .rv-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-bar-title { color: var(--text); font-weight: 500; white-space: nowrap; }
 /* The buttons keep their one line at 900px; the summary beside them gives way first (GR-9). */
 .rv-bar .btn { flex: none; white-space: nowrap; }
 .rv-finish { display: flex; flex-direction: column; gap: 12px; }
-.rv-finish-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: 12.5px; }
+.rv-finish-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: var(--fs-meta); }
 .rv-finish-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .rv-finish-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-sub); }
 .rv-outcomes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
@@ -189,24 +189,24 @@
 .rv-outcome:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rv-outcome input { margin: 3px 0 0; accent-color: var(--text); }
 .rv-outcome-text { display: flex; flex-direction: column; gap: 3px; }
-.rv-outcome-label { color: var(--text); font-weight: 500; font-size: 13px; }
-.rv-outcome-sub { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.rv-outcome-label { color: var(--text); font-weight: 500; font-size: var(--fs-meta); }
+.rv-outcome-sub { color: var(--text-muted); font-size: var(--fs-label); line-height: 1.5; }
 .rv-outcome.is-on .rv-outcome-sub { color: var(--text-sub); }
 
 /* Gate review overlay (prototype 292–321): a layer over the review page. */
 .rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
-.rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
-.rv-gate-title { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
+.rv-gate-title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .rv-gate-next { flex: none; margin: 0; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-sub); }
 .rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: color-mix(in oklab, var(--warn) 80%, var(--text)); font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
 .rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
-.rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: 13.5px; line-height: 1.65; }
+.rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: var(--fs-meta); line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }
 .rv-gate-doc-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
 .rv-gate-doc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.rv-gate-doc-title { color: var(--text); font-size: 16px; font-weight: 600; }
+.rv-gate-doc-title { color: var(--text); font-size: var(--fs-h2); font-weight: 600; }
 .rv-gate-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
-.rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: 12px; color: var(--text-sub); }
+.rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: var(--fs-label); color: var(--text-sub); }
 .rv-gate-side-head > span:first-child { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--text-muted); }
 .rv-gate-side > .rv-tree { flex: 1 1 0; width: auto; border: 0; border-radius: 0; }
 .rv-gate-side > .rv-tree .rv-tree-head { display: none; }

@@ -1,20 +1,20 @@
 /* BD-2: a centred hero (the three steps as a diagram, the agent-session route),
    then the setup panel for the step you are on. */
 .ng-firstrun { max-width: 900px; margin: 0 auto; padding: 40px 24px 28px; }
-.ng-firstrun h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
-.ng-firstrun h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.ng-firstrun h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-sub); }
-.ng-firstrun p { margin: 0; font-size: 12.5px; color: var(--text-sub); }
-.ng-firstrun code { font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); }
+.ng-firstrun h1 { margin: 0 0 8px; font-size: var(--fs-h1); font-weight: 600; }
+.ng-firstrun h2 { margin: 0; font-size: var(--fs-body); font-weight: 600; }
+.ng-firstrun h3 { margin: 0 0 4px; font-size: var(--fs-label); font-weight: 600; color: var(--text-sub); }
+.ng-firstrun p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
+.ng-firstrun code { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .fr-hero { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
 .fr-lead { max-width: 480px; }
-.fr-steps { display: flex; justify-content: center; margin: 26px 0 22px; padding: 0; list-style: none; font-size: 12.5px; color: var(--text-muted); }
+.fr-steps { display: flex; justify-content: center; margin: 26px 0 22px; padding: 0; list-style: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .fr-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 150px; }
 .fr-steps li + li::before { content: ""; position: absolute; top: 22px; right: calc(50% + 32px); width: calc(100% - 64px); border-top: 1px dashed var(--border); }
 .fr-steps .fr-step-on { color: var(--text); font-weight: 500; }
 .fr-step-name { margin-top: 6px; }
 .fr-step-sub { font-size: var(--fs-meta); font-weight: 400; color: var(--text-muted); }
-.fr-circle { display: inline-grid; place-items: center; flex: none; box-sizing: border-box; width: 44px; height: 44px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-sub); font: 600 11px/1 inherit; }
+.fr-circle { display: inline-grid; place-items: center; flex: none; box-sizing: border-box; width: 44px; height: 44px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-sub); font: 600 var(--fs-label)/1 inherit; }
 .fr-done { background: var(--text); border-color: var(--text); color: var(--bg); }
 .fr-current { border: 2px solid var(--focus); color: var(--text); }
 .fr-todo { border-style: dashed; color: var(--text-muted); }
@@ -35,24 +35,24 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .fr-main .field { align-self: stretch; }
 .fr-main .field input { font-family: ui-monospace, Menlo, monospace; }
 .fr-aside { padding: 18px 16px; border-left: 1px solid var(--line); background: var(--surface-2); border-radius: 0 10px 10px 0; }
-.fr-aside p { font-size: 12px; color: var(--text-muted); }
+.fr-aside p { font-size: var(--fs-label); color: var(--text-muted); }
 .fr-try { display: flex; align-items: center; gap: 6px; }
-.fr-try-path { padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; cursor: pointer; text-align: left; overflow-wrap: anywhere; min-width: 0; }
+.fr-try-path { padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; cursor: pointer; text-align: left; overflow-wrap: anywhere; min-width: 0; }
 .fr-try-path:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .fr-probes { align-self: stretch; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 6px; }
-.fr-probes li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; font-size: 12px; }
+.fr-probes li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; font-size: var(--fs-label); }
 .fr-probes li + li { border-top: 1px solid var(--line); }
 .fr-probes li > span:first-child { color: var(--text-sub); font-family: ui-monospace, Menlo, monospace; }
 .fr-probes li > span:last-child { font-family: ui-monospace, Menlo, monospace; text-align: right; overflow-wrap: anywhere; }
 .fr-pending { color: var(--text-muted); font-style: italic; }
-.fr-cmd { align-self: stretch; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-.fr-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 12.5px; }
+.fr-cmd { align-self: stretch; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fr-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--fs-meta); }
 .fr-facts dt { color: var(--text-sub); }
 .fr-facts dd { margin: 0; }
 .fr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
-.fr-ok { font-size: 12px; color: var(--ok); }
-.fr-why { flex: 1 1 220px; font-size: 12px; line-height: 1.45; color: var(--warn); }
-.fr-link { font-size: 12.5px; color: var(--text-sub); }
+.fr-ok { font-size: var(--fs-label); color: var(--ok); }
+.fr-why { flex: 1 1 220px; font-size: var(--fs-label); line-height: 1.45; color: var(--warn); }
+.fr-link { font-size: var(--fs-meta); color: var(--text-sub); }
 .fr-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .fr-main .btn { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 767px) {

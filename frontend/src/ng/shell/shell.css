@@ -1,9 +1,9 @@
 /* The app frame. Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
-.ng-skip { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 6px 12px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 12.5px; }
+.ng-skip { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 6px 12px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); }
 .ng-skip:focus { top: 8px; }
 .ng-shell { display: flex; min-height: 100vh; }
 .ng-frame { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
-.ng-header { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ng-header { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: var(--fs-label); }
 .ng-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
 .ng-crumbs-nav { flex: 0 1 auto; min-width: 0; }
 /* A page's own crumbs and state after the shell's (a chain's switcher, draft state). */
@@ -24,8 +24,8 @@
 .ng-main { flex: 1 1 auto; min-width: 0; }
 .ng-main:focus { outline: none; }
 .ng-placeholder { max-width: 560px; padding: 28px 24px; }
-.ng-placeholder h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; }
-.ng-placeholder p { margin: 0 0 12px; font-size: 12.5px; color: var(--text-sub); }
+.ng-placeholder h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; }
+.ng-placeholder p { margin: 0 0 12px; font-size: var(--fs-meta); color: var(--text-sub); }
 
 /* Sidebar. Layout width comes from <html data-sidebar>, which boot sets before
    its first await; with the attribute absent it is pinned. Unpinned takes no
@@ -39,12 +39,12 @@
 .ng-side { position: relative; z-index: 20; flex: none; width: var(--ng-side-w); }
 .ng-side-edge { display: none; position: absolute; inset: 0 auto 0 0; width: 8px; }
 :root[data-sidebar="rail"] .ng-side-edge { display: block; }
-.ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; }
+.ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: var(--fs-meta); }
 :root[data-sidebar="rail"] .ng-sidebar { transform: translateX(-100%); box-shadow: 0 0 0 1px transparent, 16px 0 40px transparent; transition: transform 120ms ease 180ms, box-shadow 160ms ease 180ms; }
 :root[data-sidebar="rail"] .ng-side:is(:hover, :has(:focus-visible)) .ng-sidebar { transform: none; transition-delay: 0s; box-shadow: 0 0 0 1px var(--border), 16px 0 40px var(--side-shade); }
 .ng-side-label { white-space: nowrap; }
 .ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
-.ng-side-brand { font-weight: 600; font-size: 13px; }
+.ng-side-brand { font-weight: 600; font-size: var(--fs-meta); }
 .ng-side-live { font-size: var(--fs-meta); }
 .ng-side-live.ok, .ng-side-live-dot.ok { color: var(--ok); }
 .ng-side-live.warn, .ng-side-live-dot.warn { color: var(--warn); }

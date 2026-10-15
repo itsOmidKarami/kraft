@@ -27,6 +27,17 @@ describe("ng CSS", () => {
     expect(bad).toEqual([]);
   });
 
+  it("sizes type with the theme's font tokens, never a px literal", () => {
+    const bad: string[] = [];
+    for (const file of cssFiles(here)) {
+      if (file.includes(`${sep}theme${sep}`)) continue;
+      const css = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of css.matchAll(/\bfont(?:-size)?:\s*([^;{}]+)[;}]/g))
+        if (/^[^/]*?\d\.?\d*px/.test(m[1])) bad.push(`${relative(here, file)}: ${m[0].trim()}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
   it("shrinks the repo crumb before the work item title", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     const shrink = (sel: string) => Number(new RegExp(`${sel}\\s*{[^}]*flex-shrink:\\s*(\\d+)`).exec(css)?.[1]);

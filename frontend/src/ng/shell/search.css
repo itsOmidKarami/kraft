@@ -1,10 +1,10 @@
 .ng-search-backdrop { align-items: flex-start; padding-top: 10vh; }
 .ng-search { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 76vh; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 .ng-search-bar { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 48px; border-bottom: 1px solid var(--line); color: var(--text-muted); flex: none; }
-.ng-search-bar input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; font-size: 14px; color: var(--text); }
+.ng-search-bar input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; font-size: var(--fs-body); color: var(--text); }
 .ng-search-bar input:focus-visible { outline: none; }
 .ng-search-bar:focus-within { box-shadow: inset 0 -2px 0 var(--focus); }
-.ng-search-mode { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
+.ng-search-mode { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
 .ng-search-mode:focus-visible, .ng-search-filter:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* The tabs, and Filters at the right of their row with how many are on. */
 .ng-search-tabrow { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); flex: none; }
@@ -26,19 +26,19 @@
 .ng-search-ico { margin-top: 2px; color: var(--text-muted); }
 .ng-search-ico.is-gate { color: var(--warn); }
 .ng-search-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ng-search-tag { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: 10.5px/16px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
+.ng-search-tag { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: var(--fs-label)/16px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
 .ng-search-where { font-size: var(--fs-meta); line-height: 18px; color: var(--text-muted); white-space: nowrap; }
-.ng-search-key { grid-column: 5; font-size: 12px; line-height: 18px; color: var(--text-muted); }
+.ng-search-key { grid-column: 5; font-size: var(--fs-label); line-height: 18px; color: var(--text-muted); }
 .ng-search-row[aria-selected="true"], .ng-search-chip[aria-selected="true"] { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--focus); }
-.ng-search-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+.ng-search-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); color: var(--text); }
 .ng-search-sub { display: flex; min-width: 0; font-size: var(--fs-meta); color: var(--text-muted); white-space: nowrap; }
 /* A gate row's item title gives way before its id and repo do. */
 .ng-search-sublead { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ng-search-subrest { flex: none; }
-.ng-search-snippet { font-size: 12px; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ng-search-snippet { font-size: var(--fs-label); color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ng-search-snippet mark, .ng-search-title mark, .ng-search-sublead mark { background: transparent; color: var(--text); font-weight: 600; text-decoration: underline; }
 .ng-search-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 6px; }
-.ng-search-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--text-sub); cursor: pointer; }
+.ng-search-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; }
 .ng-search-note { margin: 0; padding: 4px 8px 8px; font-size: var(--fs-meta); color: var(--text-muted); }
 .ng-search-bad { color: var(--bad); }
 .ng-search-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-muted); flex: none; }
