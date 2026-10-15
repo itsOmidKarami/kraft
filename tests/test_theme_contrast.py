@@ -75,8 +75,18 @@ def test_mono_and_none_accent_is_the_text_colour():
             assert re.fullmatch(r"#[0-9a-f]{6}", v)
 
 
-def test_the_checked_in_theme_css_is_the_generators_output():
-    assert gen.OUT.read_text() == gen.render(BLOCKS, ACCENTS, CODE), "run dev/gen_theme.py"
+@pytest.mark.parametrize(
+    ("path", "written"),
+    [
+        (gen.OUT, lambda: gen.render(BLOCKS, ACCENTS, CODE)),
+        (gen.CONSOLE_OUT, lambda: gen.render_console(BLOCKS, ACCENTS)),
+    ],
+    ids=["web", "console"],
+)
+def test_the_checked_in_theme_css_is_the_generators_output(path, written):
+    """The web's `theme.css` and the console's `theme.py` are one generator's
+    output, so the two surfaces cannot drift apart in colour."""
+    assert path.read_text() == written(), "run dev/gen_theme.py"
 
 
 @pytest.mark.parametrize(("scheme", "mode"), sorted(CODE))
