@@ -104,8 +104,12 @@ describe("Auto-intake (N.2)", () => {
     await userEvent.click(await screen.findByRole("switch", { name: /enabled/ }));
     await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_intake", patch: { enabled: false } }]));
     await userEvent.click(screen.getByRole("button", { name: /^repos/ }));
-    await userEvent.type(screen.getByLabelText("Repos", { selector: "input" }), "/src/a, , /src/b,{Enter}");
-    await waitFor(() => expect(ops(calls)[1]).toEqual({ op: "set_intake", patch: { repos: ["/src/a", "/src/b"] } }));
+    await userEvent.type(screen.getByLabelText("Repos", { selector: "input" }), "/src/nowhere{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("“/src/nowhere” is not a repo");
+    expect(ops(calls)).toHaveLength(1);
+    await userEvent.clear(screen.getByLabelText("Repos", { selector: "input" }));
+    await userEvent.type(screen.getByLabelText("Repos", { selector: "input" }), "/src/platform, , /src/docs,{Enter}");
+    await waitFor(() => expect(ops(calls)[1]).toEqual({ op: "set_intake", patch: { repos: ["/src/platform", "/src/docs"] } }));
   });
 
   it("lists the schedules as cron, repo, chain and filed paused, and links each to its page", async () => {
@@ -138,8 +142,8 @@ describe("a schedule (N.2)", () => {
   it("shows name, cron in words, repo, chain, description and that it is filed paused", async () => {
     sched();
     expect(await screen.findByRole("heading", { level: 1, name: "Dependency check" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^cron/ })).toHaveTextContent("0 9 * * 1-5");
-    expect(screen.getByRole("button", { name: /^cron/ })).toHaveTextContent("weekdays 09:00 UTC");
+    expect(screen.getByRole("button", { name: /^runs/ })).toHaveTextContent("0 9 * * 1-5");
+    expect(screen.getByRole("button", { name: /^runs/ })).toHaveTextContent("weekdays 09:00 UTC");
     expect(screen.getByRole("button", { name: /^repo/ })).toHaveTextContent("platform");
     expect(screen.getByRole("button", { name: /^chain/ })).toHaveTextContent("default");
     expect(screen.getByRole("button", { name: /^description/ })).toHaveTextContent("Update pinned dependencies.");
@@ -148,11 +152,9 @@ describe("a schedule (N.2)", () => {
 
   it("each edit is a set_schedule patch of that one field", async () => {
     const { calls } = sched();
-    await userEvent.click(await screen.findByRole("button", { name: /^cron/ }));
-    const box = screen.getByLabelText("cron", { selector: "input" });
-    await userEvent.clear(box);
-    await userEvent.type(box, "30 6 * * *{Enter}");
-    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_schedule", index: 0, patch: { cron: "30 6 * * *" } }]));
+    await userEvent.click(await screen.findByRole("button", { name: /^runs/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Hourly" }));
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_schedule", index: 0, patch: { cron: "0 * * * *" } }]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await userEvent.click(screen.getByRole("button", { name: /^repo/ }));
     await userEvent.click(screen.getByRole("radio", { name: "docs-site" }));
@@ -161,6 +163,20 @@ describe("a schedule (N.2)", () => {
     await userEvent.click(screen.getByRole("button", { name: /^chain/ }));
     await userEvent.click(screen.getByRole("radio", { name: "docs_only" }));
     await waitFor(() => expect(ops(calls)[2]).toEqual({ op: "set_schedule", index: 0, patch: { chain: "docs_only" } }));
+  });
+
+  it("a custom cron is checked in words before any call, then written", async () => {
+    const { calls } = sched();
+    await userEvent.click(await screen.findByRole("button", { name: /^runs/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Custom cron…" }));
+    const box = screen.getByLabelText("Cron", { selector: "input" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "61 9 * * *{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The minute can be 0 to 59; 61 is outside that.");
+    expect(posts(calls)).toEqual([]);
+    await userEvent.clear(box);
+    await userEvent.type(box, "30 6 * * *{Enter}");
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_schedule", index: 0, patch: { cron: "30 6 * * *" } }]));
   });
 
   it("an empty name is refused before any call; an empty description is allowed", async () => {
@@ -181,7 +197,7 @@ describe("a schedule (N.2)", () => {
   // R12c-07: the marks read `triggers.N.field`; intake.yaml's draft reports `schedules.N.field`.
   it("marks the field the draft changed, and only it", async () => {
     sched(0, ans(view({}, { changes: [{ path: "schedules.0.cron", kind: "change", before: "0 9 * * 1", after: "0 7 * * 1", file: "intake.yaml" }] as never })));
-    expect(await screen.findByRole("button", { name: /^cron/ })).toHaveTextContent("(changed)");
+    expect(await screen.findByRole("button", { name: /^runs/ })).toHaveTextContent("(changed)");
     expect(screen.getByRole("button", { name: /^chain/ })).not.toHaveTextContent("(changed)");
   });
 

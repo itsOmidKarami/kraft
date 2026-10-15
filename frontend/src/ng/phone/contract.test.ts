@@ -67,6 +67,7 @@ const ALLOWED = [
   "settings/intake/checks", // the check sentence and its time
   "settings/intake/cron", // a cron in words
   "settings/intake/pickup", // the pickup rule in one sentence
+  "settings/intake/repos", // a repo as the pickers name it
   "settings/intake/types", // the intake draft's resolve and a check row
   "settings/intake/units", // minutes on the page, seconds on the wire
   "harnesses/model", // the harnesses draft's resolve, as types and pure helpers

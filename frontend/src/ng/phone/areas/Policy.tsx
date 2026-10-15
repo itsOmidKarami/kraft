@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { plural } from "../../../format";
 import { detailOf, request } from "../../http";
-import { problemAt, type Ctx } from "../../settings/policy/ctx";
+import { outerValue, problemAt, scopeUnset, type Ctx } from "../../settings/policy/ctx";
 import { capKey, KEYS, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
-import { SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
+import { LOOP_WINS, SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, policyOf } from "../../settings/policy/types";
 import { parse, parseAge, parseSize, raw, show, sourceWord, UNIT_WORD } from "../../settings/policy/units";
 import type { Change } from "../../templates/draft/types";
@@ -11,7 +12,7 @@ import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfi
 import { problemText } from "../../templates/problems";
 import { TabStrip } from "../ui/Rows";
 import { AreaScreen } from "./AreaScreen";
-import { Group, useEditor, type Edit, type RowSpec } from "./kit";
+import { Group, repairElsewhere, useEditor, type Edit, type RowSpec } from "./kit";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] : undefined);
@@ -47,7 +48,7 @@ export function PolicyScreen() {
     <AreaScreen title="Policy" sub={SECTIONS.find((s) => s.id === section)!.sub} draft={draft}>
       <TabStrip label="Policy section" value={section} onChange={(id) => navigate(`/settings/policy/${id}`, { replace: true })} tabs={SECTIONS.map((s) => ({ id: s.id, label: s.label }))} />
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">The policy could not be read.</p>}
-      {r && !ctx && <p className="ph-error" role="alert">policy.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. Open YAML to repair it.</p>}
+      {r && !ctx && <p className="ph-error" role="alert">policy.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. {repairElsewhere("policy.yaml")}</p>}
       {here.length > 0 && <Group title="Problems" rows={here.map((x, i): RowSpec => ({ key: `p${i}`, label: problemText(x), sub: x.field ?? x.path, chips: [{ label: "problem", tone: "bad" }] }))} />}
       {ctx && (section === "limits" ? <Limits ctx={ctx} edit={edit} /> : section === "loops" ? <Loops ctx={ctx} edit={edit} /> : <Housekeeping ctx={ctx} edit={edit} />)}
       {node}
@@ -129,11 +130,6 @@ function pair({ ctx, edit }: Edits, label: string, dk: KeySpec, dv: number | nul
   };
 }
 
-const outerValue = (ctx: Ctx): number | null => {
-  const m = ctx.draft.view!.result.model["policy.yaml"] as { budget?: { work_item_usd?: number | null } } | undefined;
-  return m?.budget?.work_item_usd ?? null;
-};
-
 function Limits(e: Edits) {
   const { ctx } = e;
   const caps = ctx.p.limits.caps;
@@ -143,21 +139,36 @@ function Limits(e: Edits) {
         single(e, KEYS.daily, "per day", (ctx.p.limits.daily_usd.value as number | null) ?? null, { sub: "since local midnight" }),
         single(e, KEYS.outer, "per item", outerValue(ctx), { sub: ctx.p.limits.work_item_usd.binding ? `binding: ${ctx.p.limits.work_item_usd.binding.key} ${show("usd", ctx.p.limits.work_item_usd.binding.value)}` : "a second dollar cap on each item; the lower one wins" }),
       ]} />
-      {LEVELS.filter((l) => caps[l]).map((level) => (
-        <Group
-          key={level}
-          title={LEVEL_LABEL[level].name}
-          note={LEVEL_LABEL[level].sub}
-          foot={level === "tasks" ? "A wait's timeout is its task's wall clock, so this maximum is also the longest any wait may wait." : undefined}
-          rows={Object.keys(caps[level]).map((cap) => {
-            const c = caps[level][cap];
-            const label = CAP_LABEL[cap] ?? { name: cap, unit: "min" as const };
-            const row = pair(e, label.name, capKey("default", level, cap), c.default.value, capKey("maximum", level, cap), c.maximum.value, c.maximum.source && c.maximum.source !== level ? `max from ${c.maximum.source.replace("_", " ")}` : undefined);
-            return { ...row, key: `${level}.${cap}` };
-          })}
-        />
-      ))}
+      {LEVELS.filter((l) => caps[l]).map((level) => {
+        const group = (
+          <Group
+            title={LEVEL_LABEL[level].name}
+            note={LEVEL_LABEL[level].sub}
+            foot={level === "tasks" ? "A wait's timeout is its task's wall clock, so this maximum is also the longest any wait may wait." : undefined}
+            rows={Object.keys(caps[level]).map((cap) => {
+              const c = caps[level][cap];
+              const label = CAP_LABEL[cap] ?? { name: cap, unit: "min" as const };
+              const row = pair(e, label.name, capKey("default", level, cap), c.default.value, capKey("maximum", level, cap), c.maximum.value, c.maximum.source && c.maximum.source !== level ? `max from ${c.maximum.source.replace("_", " ")}` : undefined);
+              return { ...row, key: `${level}.${cap}` };
+            })}
+          />
+        );
+        return scopeUnset(ctx, level) ? <Unset key={level} name={LEVEL_LABEL[level].name} count={Object.keys(caps[level]).length}>{group}</Unset> : <Fragment key={level}>{group}</Fragment>;
+      })}
     </>
+  );
+}
+
+/** A scope that sets nothing, as one line ("tasks · 4 unset caps · show"); open, its group. */
+function Unset({ name, count, children }: { name: string; count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ph-unset">
+      <button type="button" className="ph-unset-btn" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="ph-unset-name">{name}</span> {plural(count, "unset cap")} · {open ? "hide" : "show"}
+      </button>
+      {open && children}
+    </div>
   );
 }
 
@@ -189,7 +200,7 @@ function Loops(e: Edits) {
         pair(e, "attempts", KEYS.attemptsDefault, p.limits.max_attempts.default.value, KEYS.attemptsMax, p.limits.max_attempts.maximum.value),
         pair(e, "wall clock", KEYS.wallDefault, p.limits.timeout_minutes.default.value, KEYS.wallMax, p.limits.timeout_minutes.maximum.value),
       ]} />
-      <Group title="Every fix loop" note="The loops in published chains, and the numbers each one runs on." rows={[
+      <Group title="Every fix loop" note={`The loops in published chains, and the numbers each one runs on. ${LOOP_WINS}`} rows={[
         single(e, KEYS.loopAttempts, "loops without their own: attempts", p.loops.default.attempts),
         single(e, KEYS.loopWall, "loops without their own: wall clock", p.loops.default.wall_clock_s),
         ...p.loops.live.map((l): RowSpec => ({

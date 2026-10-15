@@ -1,4 +1,5 @@
 import type { Problem, Result } from "../../templates/draft/types";
+import { cronProblem } from "./cron";
 
 export interface Schedule {
   index: number;
@@ -33,3 +34,6 @@ export interface Check {
 }
 
 export const problemsOfSchedule = (r: Result, index: number): Problem[] => r.problems.filter((p) => p.schedule === index);
+
+/** What a schedule's problem says: a cron the scheduler refuses is explained in words, not in the server's. */
+export const scheduleProblemText = (p: Problem, s: Schedule): string => (p.field === "cron" ? cronProblem(s.cron) ?? p.message : p.message);
