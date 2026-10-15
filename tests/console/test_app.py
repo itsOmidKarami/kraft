@@ -16,6 +16,7 @@ from textual.widgets import ContentSwitcher, Footer, HelpPanel
 
 from kraft import cli, client
 from kraft.console import app as console_app
+from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.live import Link
 from kraft.console.screens import VIEWS
@@ -58,18 +59,24 @@ def test_an_event_reads_the_board_again(console, stream, tmp_path):
             lambda: client.status_error(401, "a token this server does not know"),
             "The server refused this machine's token (run/mcp-token).",
         ),
+        (
+            lambda: client.status_error(500, "database disk image is malformed"),
+            "The server could not show the board: 500: database disk image is malformed",
+        ),
     ],
-    ids=["no-server", "token-refused"],
+    ids=["no-server", "token-refused", "server-error"],
 )
 def test_a_server_the_console_cannot_use_is_said_on_every_view(console, monkeypatch, refusal, said):
     """No view is drawn over a server that is not there, and a refused token
     is never reported as no server: one sends a person to start a server that
-    is already running."""
+    is already running. A server that answers every board read with an error
+    is said in its own words, not "reconnecting" forever."""
 
     async def board_rows(**kwargs):
         raise refusal()
 
     monkeypatch.setattr(client, "board_rows", board_rows)
+    monkeypatch.setattr(live, "BACKOFF_S", (0.1,))
 
     async def scenario(app, pilot):
         seen = []

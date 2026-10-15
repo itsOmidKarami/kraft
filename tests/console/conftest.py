@@ -50,7 +50,14 @@ class Console:
             app = KraftConsole()
             async with app.run_test(size=size, notifications=notifications) as pilot:
                 await self.until(pilot, lambda: app.link is not live.Link.RECONNECTING)
-                return await scenario(app, pilot)
+                try:
+                    return await scenario(app, pilot)
+                finally:
+                    # `app.run()` cancels the workers before it takes the
+                    # screens down; `run_test()` does it after, so a live
+                    # callback could land on a frame with no widgets left.
+                    app.workers.cancel_all()
+                    await pilot.pause()
 
         return run_with_app(self.wired, inside)
 

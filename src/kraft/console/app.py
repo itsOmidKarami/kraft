@@ -78,6 +78,9 @@ def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
         return "The server refused this machine's token (run/mcp-token)."
+    if error is not None and error.kind != client.Failure.UNREACHABLE:
+        # A server that answers, but not with the board: its own words.
+        return f"The server could not show the board: {client.reason_of(str(error))}"
     return f"No server at {client.base_url().removeprefix('http://')}."
 
 
