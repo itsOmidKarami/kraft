@@ -1,5 +1,8 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import * as api from "../../api";
+import { useStore } from "../../store";
 import { App } from "../App";
 import { ROUTES } from "../shell/routes";
 import { stubFetch } from "../item/testkit";
@@ -52,6 +55,18 @@ describe("ng App at phone width (A.1)", () => {
     render(<App />);
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Skip to content" })).toBeNull();
+  });
+
+  it("says it is offline on every screen, in words, and Retry now reads again", async () => {
+    width(true);
+    window.history.pushState({}, "", "/analytics");
+    const list = vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
+    useStore.setState({ loadError: "down", connection: "open" } as never);
+    render(<App />);
+    expect(screen.getByText(/^Offline: down\. What is shown may be out of date/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    await waitFor(() => expect(screen.queryByText(/^Offline: /)).toBeNull());
+    expect(list).toHaveBeenCalled();
   });
 
   it("renders the desktop shell above 767px", () => {

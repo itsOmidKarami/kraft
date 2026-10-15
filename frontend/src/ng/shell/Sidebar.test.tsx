@@ -222,6 +222,14 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
   });
 
+  it("says offline, not live, while the list read has failed", () => {
+    useStore.setState({ connection: "open", loadError: "down" } as never);
+    mount();
+    expect(screen.getByText("offline")).toBeInTheDocument();
+    expect(screen.queryByText("live")).toBeNull();
+    useStore.setState({ loadError: null } as never);
+  });
+
   it("shows the version alone in the footer, linking About", async () => {
     mount("/templates/chains");
     const foot = await screen.findByRole("link", { name: "Kraft v0.9.4" });

@@ -95,7 +95,6 @@ export function Board() {
   return (
     <>
       <RootHeader title="Board">
-        {offline && <span className="ph-offline">offline</span>}
         <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>
           {repo ? repoName(repo) : "All repos"}
           <ChevronDown size={14} aria-hidden="true" />
@@ -115,7 +114,7 @@ export function Board() {
         {/* An update or a rollback installed under this server, in a tab opened before it: the sidebar's line, which the phone has no sidebar for (R11b-08). */}
         {!olderServer(health) && restartWords(health) && <p className="ph-restart" role="status">Kraft {restartWords(health)}.</p>}
         {load.state === "loading" && empty && <div className="ph-skeleton" aria-hidden="true"><span /><span /><span /></div>}
-        {empty && load.state !== "loading" && (
+        {empty && load.state !== "loading" && !offline && (
           <p className="ph-empty">
             {noRepos ? <>No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</> : "Nothing here. Tap + to file one."}
           </p>

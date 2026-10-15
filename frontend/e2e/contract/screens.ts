@@ -135,6 +135,7 @@ export const STATES: State[] = [
 
   // Settings
   { area: "settings", state: "policy", ...appSettings("/settings/policy") },
+  { area: "settings", state: "policy-offline", app: (p) => app(p, "/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "settings", state: "auto-intake", ...appSettings("/settings/auto-intake") },
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
@@ -200,6 +201,7 @@ export const STATES: State[] = [
 
   // Phone, 390px (PH-): the app at 390 against the mobile prototype
   { area: "phone", state: "board", viewport: "phone", app: appPhone("/") },
+  { area: "phone", state: "board-offline", viewport: "phone", app: appPhone("/", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "phone", state: "item-running", viewport: "phone", app: appPhone(item("running")) },
   { area: "phone", state: "item-gate", viewport: "phone", app: appPhone(item("needs-gate")) },
   { area: "phone", state: "item-capped", viewport: "phone", app: appPhone(item("capped")) },
@@ -215,6 +217,7 @@ export const STATES: State[] = [
   { area: "phone", state: "more", viewport: "phone", app: appPhone("/more") },
   { area: "phone", state: "chains", viewport: "phone", app: appPhone("/templates/chains") },
   { area: "phone", state: "policy", viewport: "phone", app: appPhone("/settings/policy") },
+  { area: "phone", state: "policy-offline", viewport: "phone", app: appPhone("/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
   { area: "phone", state: "sign-in", viewport: "phone", app: (p) => app(p, "/", { mock: { locked: true }, noShell: true, ready: (pg) => pg.getByLabel(/^Password/).waitFor() }) },
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone

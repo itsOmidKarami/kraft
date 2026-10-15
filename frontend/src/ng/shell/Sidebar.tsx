@@ -11,15 +11,14 @@ import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
 import { request } from "../http";
 import type { UpdateState } from "../settings/AboutPage";
+import { connectionWord } from "../offline";
 import { restartPending, useHealth } from "./health";
 import { tip } from "../ui/Tooltip";
-
-const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
-  c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
 
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const [mode, setMode] = useState<SidebarMode>(currentSidebar);
   const connection = useStore((s) => s.connection);
+  const word = connectionWord(connection, useStore((s) => s.loadError));
   // The board's own Needs you count: failed and paused mid-chain included.
   const needsYou = useGroupCount("needs");
   const health = useHealth();
@@ -99,9 +98,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       <div className="ng-side-edge" aria-hidden />
       <aside className="ng-sidebar" aria-label="Sidebar" onKeyDown={onSideKey}>
         <div className="ng-side-head">
-          <span className={`ng-side-live-dot ${connection === "open" ? "ok" : "warn"}`} role="img" aria-label={connectionWord(connection)} />
+          <span className={`ng-side-live-dot ${word === "live" ? "ok" : "warn"}`} role="img" aria-label={word} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
-          <span className={`ng-side-live ng-side-label ${connection === "open" ? "ok" : "warn"}`}>{connectionWord(connection)}</span>
+          <span className={`ng-side-live ng-side-label ${word === "live" ? "ok" : "warn"}`}>{word}</span>
           <button
             type="button"
             className="ng-side-pin"

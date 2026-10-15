@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { detailOf, type Answer } from "../../http";
+import { useOnRecovered } from "../../offline";
 import * as api from "./itemDraftApi";
 import type { DraftView, Op, Refusal } from "./types";
 import { stripPassed } from "./view";
@@ -46,9 +47,11 @@ export function useItemDraft(item: ItemLike) {
     const a = await api.getDraft(id);
     if (!live.current) return a;
     if (a.status === 200 && shaped(a.body)) take(a.body);
-    else if (a.status >= 300) setStatus((s) => (s === "ready" ? s : "error"));
+    else if (a.status === 0 || a.status >= 300) setStatus((s) => (s === "ready" ? s : "error"));
     return a;
   }), [id, enqueue, take]);
+
+  useOnRecovered(() => { if (status === "error") void read(); });
 
   useEffect(() => {
     live.current = true;

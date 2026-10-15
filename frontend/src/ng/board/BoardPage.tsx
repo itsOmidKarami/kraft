@@ -7,6 +7,7 @@ import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
+import { reload, useOffline } from "../offline";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Kbd } from "../ui/Kbd";
@@ -38,29 +39,20 @@ const isTextField = (t: EventTarget | null) =>
 type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
 
 /** The list, read again on mount (C.2): the store's own load ran at boot and
- *  may have failed. Offline (C.3) while that read failed or the event socket
- *  is reconnecting; it clears once the socket is open and a read succeeds. */
+ *  may have failed. Offline (C.3) is the app's (`useOffline`): the shell reads again
+ *  once the socket is open. */
 function useListLoad() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const connection = useStore((s) => s.connection);
   const refresh = useCallback(() => {
     setLoad((l) => (l.state === "error" ? l : { state: "loading" }));
-    useStore.getState().bootstrap().then(
+    reload().then(
       () => setLoad({ state: "ok" }),
       (e: Error) => setLoad({ state: "error", error: e.message }),
     );
   }, []);
   useEffect(refresh, [refresh]);
-  const was = useRef(connection);
-  useEffect(() => {
-    if (connection === "open" && was.current === "reconnecting") refresh();
-    was.current = connection;
-  }, [connection, refresh]);
-  return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
+  return { load, refresh, offline: useOffline().offline };
 }
-
-/** The read's error without its request line ("(GET /work-items?…)"): the banner says what broke, not which call. */
-const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [^)]*\)/, "").replace(/\.$/, "");
 
 /** A minute's clock for the rows' ages and "retry in". */
 function useNow() {
@@ -96,7 +88,7 @@ export function BoardPage() {
   const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
-  const { load, refresh, offline } = useListLoad();
+  const { load, offline } = useListLoad();
   // R10c-01: an older server still running after an update gets a banner, not only the footer line.
   const health = useHealth();
   // A bulk answer with failures: those items stay checked (D.6).
@@ -228,9 +220,9 @@ export function BoardPage() {
 
   // Over first-run as over the board: a server older than its interface says so either way (R11a-11).
   const restart = olderServer(health) && (
-    <div className="board-offline board-restart" role="alert">
-      <span className="board-offline-mark" aria-hidden>!</span>
-      <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
+    <div className="ng-offline ng-offline-warn" role="alert">
+      <span className="ng-offline-mark" aria-hidden>!</span>
+      <span className="ng-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
     </div>
   );
   // FirstRun's last step opens the composer, which lives on the board.
@@ -269,15 +261,6 @@ export function BoardPage() {
         <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
       </HeaderActions>
 
-      {offline && (
-        <div className="board-offline" role="alert">
-          <span className="board-offline-mark" aria-hidden>!</span>
-          <span className="board-offline-text">
-            Could not load the board{load.state === "error" ? `: ${bannerError(load.error)}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
-          </span>
-          <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
-        </div>
-      )}
       {restart}
       <div className="board-filters">
         <label className="board-filter">
