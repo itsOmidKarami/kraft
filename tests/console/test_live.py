@@ -232,6 +232,22 @@ async def test_a_server_that_answers_again_is_followed_at_once(monkeypatch):
     assert seen["links"][:2] == [Link.DOWN, Link.LIVE]
 
 
+async def test_a_retry_asked_for_before_the_first_read_does_not_skip_a_backoff(monkeypatch):
+    """The health poll can hear the server while the first board read is still
+    in flight; that retry is spent by the read, not kept for the first drop."""
+    _script(monkeypatch, [([], 7), ([], 8)], [[]])
+    monkeypatch.setattr(live, "BACKOFF_S", (60.0,))
+
+    async def health():
+        raise GONE
+
+    monkeypatch.setattr(client, "health", health)
+    watched, seen = _recording()
+    watched.retry()
+    await _run_until(watched, lambda: len(seen["links"]) >= 2)
+    assert seen["links"] == [Link.LIVE, Link.RECONNECTING]
+
+
 async def test_a_view_that_fails_ends_the_run_not_just_a_task(monkeypatch):
     """Only a ClientError is expected: anything else a callback raises must
     reach whoever runs `run()`, not die unseen in a background task."""

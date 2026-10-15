@@ -91,22 +91,33 @@ WAITS_FOR_SIGINT = """
 import signal, sys, time
 {on_sigint}
 print("up", flush=True)
-time.sleep(30)
+{then}
 """
 
 
 @pytest.mark.parametrize(
-    ("on_sigint", "code"),
+    ("on_sigint", "then", "code"),
     [
-        ("signal.signal(signal.SIGINT, lambda *a: sys.exit(130))", 130),
-        ("signal.signal(signal.SIGINT, signal.SIG_IGN)", -signal.SIGKILL),
+        ("signal.signal(signal.SIGINT, lambda *a: sys.exit(130))", "time.sleep(30)", 130),
+        ("signal.signal(signal.SIGINT, signal.SIG_IGN)", "time.sleep(30)", -signal.SIGKILL),
+        # The leader is gone at once; what it started ignores SIGINT and holds the output.
+        (
+            "import subprocess\n"
+            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+            "subprocess.Popen([sys.executable, '-c', 'import signal, time; "
+            "signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(30)'])\n"
+            # Long enough for it to have started ignoring SIGINT.
+            "time.sleep(1)",
+            "sys.exit(0)",
+            0,
+        ),
     ],
-    ids=["stops-on-sigint", "ignores-sigint"],
+    ids=["stops-on-sigint", "ignores-sigint", "leader-gone-child-holds-the-output"],
 )
-async def test_ending_a_command_interrupts_then_kills(kraft_is, monkeypatch, on_sigint, code):
+async def test_ending_a_command_interrupts_then_kills(kraft_is, monkeypatch, on_sigint, then, code):
     """Quitting the console: SIGINT first, so the CLI cleans up; a command
     still there after the grace is killed rather than left running."""
-    kraft_is(WAITS_FOR_SIGINT.format(on_sigint=on_sigint))
+    kraft_is(WAITS_FOR_SIGINT.format(on_sigint=on_sigint, then=then))
     monkeypatch.setattr(runner, "QUIT_GRACE_S", 0.3)
     lines: list[str] = []
     run = runner.Run([], lines.append)
@@ -114,3 +125,17 @@ async def test_ending_a_command_interrupts_then_kills(kraft_is, monkeypatch, on_
     await run.end()
     async with asyncio.timeout(10):
         assert await task == code
+    # Nothing it started is left running.
+    with pytest.raises(ProcessLookupError):
+        for _ in range(100):
+            os.killpg(run.process.pid, 0)
+            await asyncio.sleep(0.05)
+
+
+async def test_a_stop_before_the_child_exists_still_stops_it(kraft_is):
+    """Esc or quit while the command is still being started."""
+    kraft_is("import time; time.sleep(30)")
+    run = runner.Run([], lambda line: None)
+    run.stop()
+    async with asyncio.timeout(10):
+        assert await run.finish() != 0

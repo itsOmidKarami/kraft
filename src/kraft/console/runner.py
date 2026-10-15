@@ -33,6 +33,7 @@ class Run:
         self.process: asyncio.subprocess.Process | None = None
         #: The exit code once it has ended; negative when a signal ended it.
         self.code: int | None = None
+        self._stopped = False
 
     async def finish(self) -> int:
         """Start it, pass on its output as it comes, and return its exit code."""
@@ -48,6 +49,8 @@ class Run:
             env={**os.environ, "PYTHONUNBUFFERED": "1", "GIT_TERMINAL_PROMPT": "0"},
         )
         assert self.process.stdout is not None
+        if self._stopped:  # asked to stop while it was starting
+            self.stop()
         # Chunks, not readline(): one `--json` line can outgrow its 64 KiB limit.
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
@@ -63,20 +66,37 @@ class Run:
 
     def stop(self) -> None:
         """SIGINT to its process group: the CLI's own clean-up runs (`repo
-        connect --verify` removes its worktree only on an interrupt)."""
-        if self.process is not None and self.process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(self.process.pid, signal.SIGINT)
+        connect --verify` removes its worktree only on an interrupt). Until
+        the run has finished, not until the leader has exited: what it started
+        can outlive it and still hold the output open."""
+        self._stopped = True
+        self._signal(signal.SIGINT)
+
+    def _signal(self, sig: int) -> None:
+        if self.process is not None and self.code is None:
+            # PermissionError: macOS, for a group whose only member is a zombie.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(self.process.pid, sig)
+
+    def _alive(self) -> bool:
+        """Whether any member of its group is still there."""
+        if self.process is None or self.code is not None:
+            return False
+        try:
+            os.killpg(self.process.pid, 0)
+        except (ProcessLookupError, PermissionError):
+            return False
+        return True
 
     async def end(self) -> None:
-        """Stop it, and kill its group if it has not stopped in `QUIT_GRACE_S`.
-        It watches the exit code rather than awaiting `wait()`: on Python 3.12
-        (before gh-119710) that also waits for the output pipe to close, which
-        a quitting console no longer reads."""
+        """Stop it, and kill its group if it has not stopped in `QUIT_GRACE_S`,
+        even when the leader is gone and a child of it is not. It polls the
+        group rather than awaiting `wait()`: on Python 3.12 (before gh-119710)
+        that also waits for the output pipe to close, which a quitting console
+        no longer reads."""
         self.stop()
         for _ in range(round(QUIT_GRACE_S / 0.05)):
-            if self.process is None or self.process.returncode is not None:
+            if not self._alive():
                 return
             await asyncio.sleep(0.05)
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.process.pid, signal.SIGKILL)
+        self._signal(signal.SIGKILL)

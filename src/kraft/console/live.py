@@ -86,6 +86,8 @@ class Live:
             try:
                 rows, cursor = await client.board_rows()
                 stuck = 0
+                # A retry asked for before this read answered is spent.
+                self._retry.clear()
                 # From the cursor, not 0, so the stream does not replay history.
                 self.seq = cursor if self.seq is None else self.seq
                 self._connected, self._dropped_at = True, None
