@@ -19,6 +19,7 @@
 .ph-area-title h1 { margin: 0; font-size: var(--fs-ph-title); font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-status { padding: 3px 8px; border-radius: 5px; font: 600 var(--fs-label) system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; background: var(--line); color: var(--text-sub); }
 .ph-status.ph-tone-warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
+.ph-status.ph-tone-change { color: var(--mark-change); background: color-mix(in oklab, var(--mark-change) 16%, transparent); }
 .ph-status.ph-tone-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 16%, transparent); }
 .ph-area-sub { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-yaml { display: flex; flex-direction: column; gap: 6px; }

@@ -80,6 +80,7 @@ const ALLOWED = [
   "templates/repos/path", // a repo path with the home directory as ~, one source with the desktop
   "templates/repos/RepoConfig", // setRepo and setEnabled: the preview-checked set_repo
   "templates/fields", // fieldMeta labels and routeOf: a task field goes by one name on both layouts
+  "templates/fieldChoices", // the sets a typed or enum field takes, one source with the desktop's Config tab
   "templates/choices", // the steering profiles and harnesses a typed list takes, as data
   "templates/useLibrary", // the published library's components, read once
   "templates/panes/useHarnessOptions", // the harness profiles, read once
