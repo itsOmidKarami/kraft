@@ -6,7 +6,7 @@
 .nt-h2 { margin: 6px 2px 0; }
 .nt-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
 .nt-card:hover { background: var(--surface); }
-.nt-card.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.nt-card.is-sel { border-color: var(--text-sub); background: var(--surface-2); }
 .nt-card-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .nt-card-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
 .nt-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--line); color: var(--text-sub); }
@@ -15,7 +15,7 @@
 .nt-sub { font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .nt-chips { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 3px; }
 .nt-card:not(.is-on) .nt-chip { border-style: dashed; }
-.nt-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: var(--fs-label)/16px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.nt-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font-size: var(--fs-label); line-height: 16px; color: var(--text-sub); }
 .nt-state { flex: none; margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
 .nt-status { display: flex; align-items: center; gap: 6px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .nt-card.is-on .nt-status { color: var(--ok); }

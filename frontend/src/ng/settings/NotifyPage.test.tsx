@@ -68,8 +68,8 @@ describe("ng NotifyPage", () => {
     await screen.findByRole("heading", { name: "Notifications" });
     const webhook = within(card("Webhook"));
     expect(webhook.getByText("active")).toBeInTheDocument();
-    expect(webhook.getByText("gate_requested")).toBeInTheDocument();
-    expect(webhook.getByText("work_item_needs_human")).toBeInTheDocument();
+    expect(webhook.getByText("Decision waiting")).toBeInTheDocument();
+    expect(webhook.getByText("Stopped for you")).toBeInTheDocument();
     expect(webhook.getByText(/last sent 2m ago · 200 OK/)).toBeInTheDocument();
     expect(webhook.getByRole("button", { name: /Send a test/ })).toBeEnabled();
     const browser = within(card("This browser"));
@@ -229,8 +229,28 @@ describe("ng NotifyPage", () => {
     expect(N.requestPermission).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Allow notifications" })).toBeNull());
     expect(screen.getByText("Notifications are allowed")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("switch", { name: "Alerts on this device" }));
+    expect(screen.getByRole("switch", { name: "Alerts on this device" })).toBeChecked();
     expect(within(card("This browser")).getByText("active")).toBeInTheDocument();
+  });
+
+  it("leaves the channel off when the browser does not grant permission after Allow", async () => {
+    const { N } = stubNotification("default") as { N: { permission: string; requestPermission: ReturnType<typeof vi.fn> } };
+    N.requestPermission.mockImplementation(async () => { N.permission = "denied"; return "denied"; });
+    setup();
+    await open("This browser");
+    await userEvent.click(screen.getByRole("button", { name: "Allow notifications" }));
+    await screen.findByText("Notifications are blocked");
+    expect(browserNotify.isEnabled()).toBe(false);
+    expect(within(card("This browser")).queryByText("active")).toBeNull();
+  });
+
+  it("offers Try again when the settings fail to load, and loads them on the retry", async () => {
+    const get = vi.spyOn(api, "getNotify").mockRejectedValueOnce(new Error("offline")).mockResolvedValue(BASE);
+    render(<NotifyPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "This browser" })).toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it("gives a blocked browser its steps and a Check again, with the switch disabled and no retry prompt", async () => {
@@ -266,8 +286,8 @@ describe("ng NotifyPage", () => {
     await open("This browser");
     await userEvent.click(screen.getByRole("switch", { name: "A decision is waiting (this browser)" }));
     expect(browserNotify.enabledEvents()).toEqual(["work_item_needs_human", "work_item_storage_held"]);
-    expect(within(card("This browser")).queryByText("gate_requested")).toBeNull();
-    expect(within(card("Webhook")).getByText("gate_requested")).toBeInTheDocument();
+    expect(within(card("This browser")).queryByText("Decision waiting")).toBeNull();
+    expect(within(card("Webhook")).getByText("Decision waiting")).toBeInTheDocument();
     expect(put).not.toHaveBeenCalled();
   });
 

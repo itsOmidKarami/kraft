@@ -5,7 +5,8 @@ import { enabledEvents, isEnabled, NOTIFY_EVENTS, notificationText, requestPermi
 import { ago } from "../../../format";
 import type { Notify } from "../../../types";
 import { WEBHOOK_OFF } from "../../ui/reasons";
-import { ALLOW, browserActive as browserOn, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, evLine, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive, type Channel, type Permission } from "../../settings/notifyWords";
+import { ALLOW, browserActive as browserOn, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, eventWords, evLine, previewAddress, RETRY, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive, type Channel, type Permission } from "../../settings/notifyWords";
+import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { TabStrip } from "../ui/Rows";
@@ -20,26 +21,28 @@ const AREA = "/settings/notifications";
 function useNotify() {
   const [notify, setNotify] = useState<Notify | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const load = () => {
+    setError(null);
     api.getNotify().then(setNotify, (e) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
-  return { notify, setNotify, error };
+  };
+  useEffect(load, []);
+  return { notify, setNotify, error, load };
 }
 
 /** `/settings/notifications`: the two channels and whether each is active (W17 brief O.2). */
 export function NotificationsList() {
-  const { notify, error } = useNotify();
+  const { notify, error, load } = useNotify();
   const permission = permissionNow();
   const browserIsActive = browserOn(isEnabled(), permission);
   return (
     <AreaScreen title="Notifications" sub="Where Kraft tells you it has stopped for you." status={{ label: SAVED.change }} yaml={false}>
-      {error && <p className="ph-error" role="alert">{error}</p>}
+      {error && <><p className="ph-error" role="alert">{error}</p><Button className="ph-btn" onClick={load}>{RETRY}</Button></>}
       {notify && (
         <Group
           title="Channels"
           foot={PROGRESS_NOTE}
           rows={[
-            { key: "webhook", label: CHANNELS.webhook, to: `${AREA}/webhook`, sub: `${notify.events.length ? notify.events.join(", ") : "no events"} · URL ${notify.url_set ? "set" : "not set"}`, chips: [{ label: channelState(webhookActive(notify)), tone: webhookActive(notify) ? "ok" : undefined }] },
+            { key: "webhook", label: CHANNELS.webhook, to: `${AREA}/webhook`, sub: `${notify.events.length ? evLine(notify.events) : "no events"} · URL ${notify.url_set ? "set" : "not set"}`, chips: [{ label: channelState(webhookActive(notify)), tone: webhookActive(notify) ? "ok" : undefined }] },
             { key: "browser", label: CHANNELS.browser, to: `${AREA}/browser`, sub: permission === "granted" ? "This device only" : `This device only · ${PERMISSION_SHORT[permission]}`, chips: [{ label: channelState(browserIsActive), tone: browserIsActive ? "ok" : undefined }] },
           ]}
         />
@@ -54,7 +57,7 @@ export function NotificationChannel() {
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") === "config" ? "config" : "overview";
   const known = channel === "webhook" || channel === "browser";
-  const { notify, setNotify, error } = useNotify();
+  const { notify, setNotify, error, load } = useNotify();
   const view = (t: "overview" | "config") => setParams(t === "config" ? { tab: "config" } : {}, { replace: true });
   if (!known) return <AreaScreen title="Notifications" status={{ label: SAVED.change }} yaml={false}><p className="ph-empty">There is no channel {channel}.</p></AreaScreen>;
   const name = CHANNELS[channel as Channel];
@@ -66,7 +69,7 @@ export function NotificationChannel() {
       yaml={notify && channel === "webhook" ? yamlOf({ enabled: notify.enabled, url: notify.url_set ? "(set, never shown)" : null, base_url: notify.base_url, events: notify.events }) : false}
     >
       <TabStrip label={name} value={tab} onChange={view} tabs={[{ id: "overview", label: "Overview" }, { id: "config", label: "Config" }]} />
-      {error && <p className="ph-error" role="alert">{error}</p>}
+      {error && <><p className="ph-error" role="alert">{error}</p><Button className="ph-btn" onClick={load}>{RETRY}</Button></>}
       {notify && channel === "webhook" && <Webhook notify={notify} setNotify={setNotify} tab={tab} />}
       {notify && channel === "browser" && <BrowserAlerts tab={tab} />}
     </AreaScreen>
@@ -82,13 +85,13 @@ function Preview({ link }: { link: string }) {
   const sample = notificationText(event, "Add retry budget to the intake poller");
   return (
     <>
-      <Group title="What it looks like" rows={[{ label: "event", value: id, mono: true, onEdit: () => edit({ kind: "choice", title: "Event", value: id, options: NOTIFY_EVENTS.map((e) => ({ value: e.id, label: e.id, hint: e.label })), set: async (v) => { setId(v); return null; } }) }]} />
+      <Group title="What it looks like" rows={[{ label: "event", value: eventWords(id), onEdit: () => edit({ kind: "choice", title: "Event", value: id, options: NOTIFY_EVENTS.map((e) => ({ value: e.id, label: eventWords(e.id), hint: e.label })), set: async (v) => { setId(v); return null; } }) }]} />
       <div className="ph-notice" role="img" aria-label={`Preview: ${sample.title}. ${sample.body}`}>
         <span className="ph-notice-icon" aria-hidden="true">K</span>
         <span className="ph-notice-text">
           <span className="ph-notice-title">{sample.title}</span>
           <span className="ph-notice-body">{sample.body}</span>
-          <span className="ph-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/k7m2x9qa</span>
+          <span className="ph-notice-link">{previewAddress(link)}/work-items/k7m2x9qa</span>
         </span>
       </div>
       {node}
@@ -125,7 +128,7 @@ function Webhook({ notify, setNotify, tab }: { notify: Notify; setNotify: (n: No
   return (
     <>
       <Group rows={[{ label: "enabled", sw: notify.enabled, onSwitch: (on) => void put("enabled", { enabled: on }), ...mark("enabled") }]} />
-          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: e.id, sw: notify.events.includes(e.id), onSwitch: () => void put("events", { events: notify.events.includes(e.id) ? notify.events.filter((x) => x !== e.id) : [...notify.events, e.id] }), ...mark("events") }))} />
+          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: eventWords(e.id), sw: notify.events.includes(e.id), onSwitch: () => void put("events", { events: notify.events.includes(e.id) ? notify.events.filter((x) => x !== e.id) : [...notify.events, e.id] }), ...mark("events") }))} />
       <Group
         title="Delivery"
         rows={[
@@ -187,7 +190,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
         title="Permission"
         rows={[
           permission === "default"
-            ? { label: ALLOW, sub: lead.text, onClick: () => void requestPermission().then(setPermission) }
+            ? { label: ALLOW, sub: lead.text, onClick: () => void requestPermission().then((p) => { setPermission(p); if (p === "granted") toggle(true); }) }
             : permission === "denied"
               ? { label: lead.title, sub: lead.text }
               : { label: lead.title, sub: lead.text },
@@ -204,7 +207,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
               { label: "Send a test", onClick: testBrowser, disabled: !!off, sub: off ? undefined : "Shows an alert on this device now." },
             ]}
           />
-          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: e.id, sw: events.includes(e.id), onSwitch: () => toggleEvent(e.id) }))} foot={PROGRESS_NOTE} />
+          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: eventWords(e.id), sw: events.includes(e.id), onSwitch: () => toggleEvent(e.id) }))} foot={PROGRESS_NOTE} />
         </>
       )}
     </>
