@@ -8,6 +8,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
+import { nameOf } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -73,7 +74,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
         {card.actions.map((a) => (
           <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} aria-describedby={a.primary && card.note ? `${item.id}-card-note` : undefined} onClick={() => void a.run()}>{a.label}</Button>
         ))}
-        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {card.node} →</button>}
+        {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {nameOf(item.chain_definition.nodes, card.node)} →</button>}
       </div>
       {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
     </section>
@@ -88,7 +89,7 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
   const task = item.stop?.task;
   const path = node ? actionPath(node, task) : null;
   const label = task ? `Retry from ${taskName(path ?? task)}` : "Retry";
-  const target = task ? taskName(path ?? task) : item.stop?.node ?? "the node";
+  const target = task ? taskName(path ?? task) : (item.stop?.node ? nameOf(item.chain_definition.nodes, item.stop.node) : "the node");
   return { label, target, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
 }
 
@@ -105,7 +106,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
   const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", spentLine(item)] : null;
-  const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
+  const where = stop ? [pathOf(stop.task) || (stop.node && nameOf(item.chain_definition.nodes, stop.node)), stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   const status = item.display_status;
 
   if (status === "failed" && stop) {
@@ -172,7 +173,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const by = str(closed?.payload.by);
     return {
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: `MR !${ref} was closed on the forge`,
-      where: [stop.node, closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
+      where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
       node: stop.node,
       text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.",
       facts: [],
@@ -227,7 +228,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;
     return {
-      tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${at}` : undefined, node: at,
+      tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
       text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
         ["work kept", "the branch, the worktree until it is archived, findings and threads"],
@@ -313,7 +314,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const steerable = item.steerable !== false;
   // One primary: Resume until a steer is typed, then Resume with steer.
   const steered = steerable && !!steer.trim();
-  const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
+  const what = item.current_node_id ? ` at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : "";
   const resume = async (withSteer: boolean) => {
     setBusy(true);
     setError(null);

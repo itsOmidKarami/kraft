@@ -62,6 +62,13 @@ describe("the gate review (F)", () => {
     expect(!!screen.queryByText("Approve the plan. It marks the MR ready.")).toBe(shown);
   });
 
+  it("names the gate as the desktop does and marks that it needs you, not the raw id", async () => {
+    mount(gateItem(), "/work-items/w1/review?gate=plan_approval");
+    const head = (await screen.findByText("Approve plan")).closest("header")!;
+    expect(head).toHaveTextContent("Approve plan NEEDS YOU");
+    expect(head).not.toHaveTextContent("plan_approval");
+  });
+
   it("shows a gate's document and the files that changed, and opens one file at a time", async () => {
     mount(gateItem());
     // The file's first mount pays for its imports, and the document and the diff come in two reads: under load, past 1s.

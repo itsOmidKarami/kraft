@@ -17,6 +17,14 @@ export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 /** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
 export const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
 
+/** What a reader calls a node: a gate by what it decides ("approve spec"), any other node in words. The id stays
+ *  for places where the id is the point (config, the chain editor, CLI hints). */
+export const gateAction = (id: string) => `approve ${gateWords(id)}`;
+export const displayName = (n: { id: string; kind?: string }) => (n.kind === "gate" ? gateAction(n.id) : nodeWords(n.id));
+
+/** `displayName` for a node known by id: found in the chain for its kind, else its id in words. */
+export const nameOf = (nodes: { id: string; kind?: string }[] | undefined, id: string) => displayName(nodes?.find((n) => n.id === id) ?? { id });
+
 /** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
 export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
 

@@ -12,6 +12,7 @@ import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { DocViewer } from "../DocViewer";
+import { gateAction, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
@@ -22,10 +23,10 @@ const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
   // As the header's badge says it: filed and never started, not paused.
   if (neverStarted(item)) return "not started";
-  if (st === "needs_you" && item.stop?.kind === "gate") return `waiting for you at ${item.pending_gate ?? item.stop.node}`;
+  if (st === "needs_you" && item.stop?.kind === "gate") return `waiting for you to ${gateAction(item.pending_gate ?? item.stop.node ?? "")}`;
   const step = item.summary?.step;
   const live = !["done", "archived", "cancelled"].includes(st);
-  return [st.replace("_", " "), live && step ? `step ${step.index} of ${step.count}` : "", live ? item.current_node_id ?? "" : ""].filter(Boolean).join(" · ");
+  return [st.replace("_", " "), live && step ? `step ${step.index} of ${step.count}` : "", live && item.current_node_id ? nameOf(item.chain_definition.nodes, item.current_node_id) : ""].filter(Boolean).join(" · ");
 };
 
 const RECENT = 5;
@@ -48,7 +49,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
       <dl className="item-facts ip-facts">
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
-        {live && item.current_node_id && <div><dt>current</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onSelect(item.current_node_id!)}>{item.current_node_id}</button></dd></div>}
+        {live && item.current_node_id && <div><dt>current</dt><dd><button type="button" className="item-link is-strong" onClick={() => onSelect(item.current_node_id!)}>{nameOf(item.chain_definition.nodes, item.current_node_id)}</button></dd></div>}
         {!!item.attachments?.length && (
           <div>
             <dt title="attached at intake">attached</dt>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail } from "../item/testkit";
-import { admittedRowAction, glyphOf, reasonTail, rowAction, ticksOf } from "./rowText";
+import { admittedRowAction, displayName, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -119,5 +119,20 @@ describe("glyphOf and ticksOf", () => {
     expect(ticksOf(row("done")).map((t) => t.gate)).toEqual([false, true, false, false]);
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
+  });
+});
+
+describe("displayName", () => {
+  it.each([
+    ["a gate, by what it decides", { id: "spec_approval", kind: "gate" }, "approve spec"],
+    ["any other node, in words", { id: "merge_request", kind: "exec" }, "merge request"],
+  ])("names %s", (_, node, name) => {
+    expect(displayName(node)).toBe(name);
+  });
+
+  it("finds the kind in the chain, and falls back to the id in words", () => {
+    const nodes = [{ id: "plan_approval", kind: "gate" }];
+    expect(nameOf(nodes, "plan_approval")).toBe("approve plan");
+    expect(nameOf(nodes, "open_draft")).toBe("open draft");
   });
 });

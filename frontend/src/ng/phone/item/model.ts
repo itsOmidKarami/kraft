@@ -10,6 +10,7 @@ import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
+import { nodeWords } from "../../board/rowText";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -97,9 +98,9 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
     case "needs_you": {
       if (!stop) return null;
       switch (stop.kind) {
-        case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${item.pending_gate ?? stop.node ?? ""}`, text: gateMessage(materialized(item), item.pending_gate ?? stop.node ?? ""), facts: spent(item) };
+        case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${nodeWords(item.pending_gate ?? stop.node ?? "")}`, text: gateMessage(materialized(item), item.pending_gate ?? stop.node ?? ""), facts: spent(item) };
         case "budget": return {
-          tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined,
+          tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${nodeWords(stop.node)}` : undefined,
           text: offersRaise(item) ? "Raising the budget resumes the item at once." : budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE,
           facts: budgetSpent(item),
         };

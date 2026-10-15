@@ -24,7 +24,7 @@ import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { Popover } from "../ui/Popover";
 import { groupOf } from "./model";
-import { reasonTail } from "./rowText";
+import { gateAction, reasonTail } from "./rowText";
 import "../item/item.css";
 
 export type PeekTab = "overview" | "activity" | "config";
@@ -133,7 +133,8 @@ function GateNote({ item, version }: { item: ItemDetail; version: string }) {
   const gates = item.chain_definition.nodes.filter((n) => n.kind === "gate").map((n) => n.id);
   const gate = item.pending_gate ?? item.stop?.node ?? "";
   const k = gates.indexOf(gate);
-  const place = k < 0 ? "" : k === gates.length - 1 ? `${gate} is the last gate.` : `${gate} is gate ${k + 1} of ${gates.length}.`;
+  const name = gateAction(gate).replace(/^./, (c) => c.toUpperCase());
+  const place = k < 0 ? "" : k === gates.length - 1 ? `${name} is the last gate.` : `${name} is gate ${k + 1} of ${gates.length}.`;
   const { add, del } = totals(files ?? []);
   const change = files?.length ? ` ${files.length} ${files.length === 1 ? "file" : "files"}, +${add} −${del}` : "";
   const open = threads ? `${change ? "," : ""} ${threads} open ${threads === 1 ? "thread" : "threads"}` : "";

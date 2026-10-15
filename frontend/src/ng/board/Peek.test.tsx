@@ -49,7 +49,7 @@ afterEach(() => {
 describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
-    expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
+    expect(await screen.findByText(/Waiting for you to approve/)).toBeInTheDocument();
     fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
@@ -59,8 +59,8 @@ describe("Peek", () => {
       "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 412, deletions: 88 }] }],
       "GET /work-items/w1/threads": [200, [{ id: "t1", state: "open" }]],
     } });
-    const banner = await screen.findByText(/Waiting for your approval at/);
-    await waitFor(() => expect(banner).toHaveTextContent("Waiting for your approval at plan_approval.plan_approval is the last gate. 1 file, +412 −88, 1 open thread."));
+    const banner = await screen.findByText(/Waiting for you to approve/);
+    await waitFor(() => expect(banner).toHaveTextContent("Waiting for you to approve plan.Approve plan is the last gate. 1 file, +412 −88, 1 open thread."));
     expect(screen.getByText("chain").nextElementSibling).toHaveTextContent(/^default · frozen at intake$/);
     expect(screen.getByText("repo").nextElementSibling).toHaveTextContent(/^kraft-plugins$/);
   });

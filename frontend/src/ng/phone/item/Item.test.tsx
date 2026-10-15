@@ -49,10 +49,10 @@ describe("the item screen (C)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Design the cache" })).toBeInTheDocument();
     expect(screen.getByText("RUNNING")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "2 done" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("plan_approval")).toBeNull();
+    expect(screen.queryByText("approve plan")).toBeNull();
     expect(screen.getByRole("button", { name: /verification/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "2 done" }));
-    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    expect(screen.getByText("approve plan")).toBeInTheDocument();
     expect(await screen.findByText(/loaded review_package/)).toBeInTheDocument();
     expect(screen.getByText("verification › review › code_review")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
@@ -369,8 +369,8 @@ describe("a skipped gate in the chain (R15b-03)", () => {
     const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
     mount(item("running"), "/work-items/w1", { "GET /work-items/w1/events": [200, [skipped]] });
     await userEvent.click(await screen.findByRole("button", { name: "2 done" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /plan_approval/ })).toHaveTextContent("skipped"));
-    expect(screen.getByRole("button", { name: /plan_approval/ })).not.toHaveTextContent("approved");
+    await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/ })).toHaveTextContent("skipped"));
+    expect(screen.getByRole("button", { name: /approve plan/ })).not.toHaveTextContent("approved");
   });
 });
 
