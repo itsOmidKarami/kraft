@@ -26,8 +26,8 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
  *  and a world wider than the view starts `left` px from the left edge, or centred on `focus` when it has one. */
 /** `initial`: the floor is for the opening view only; the Fit button then shows the whole chain. */
 /** `reach`: world x's past the focus to bring in on the right, most wanted first; the first that fits beside the whole focus is shown. */
-/** `top`: a run under the gate rail. Its boxes sit this many px under the view's top edge and its row starts `left` px
- *  in, under the rail's first pill, instead of centred both ways. */
+/** `top`: a row under the chain overview. Its boxes sit this many px under the view's top edge and it starts `left` px
+ *  in, under the overview's start, instead of centred both ways. */
 export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number; reach?: number[]; top?: number };
 /** The editors' fit (Templates prototype `fit1`): opens no smaller than 80% (Fit shows it all), a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12, initial: true };

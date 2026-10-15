@@ -9,7 +9,7 @@ export type ChainNode = GraphItem & {
   subTone?: "amber" | "muted";
   /** What a node the run stands on waits for, in words ("waiting on CI"), for a pane or a row; the canvas does not draw it. */
   wait?: string;
-  /** The run stands here waiting on a person: the gate rail marks its run in amber. */
+  /** The run stands here waiting on a person: the chain overview and the node view's strip draw it amber. */
   needs?: boolean;
 };
 export type ChainArc =

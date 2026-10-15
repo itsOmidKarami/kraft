@@ -37,13 +37,13 @@ describe("camera maths", () => {
     ["letting the start mark go when the reach would not fit beside it", { floor: 0.45, left: 12, focus: 600, start: 27, reach: [1550] }, { W: 2600, H: 250 }, 678 - 1550 * 0.45],
     ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
     ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
-    ["under the gate rail: from the left even when it fits whole", { floor: 0.45, left: 12, top: 60 }, { W: 1000, H: 250 }, 12],
+    ["under the chain overview: from the left even when it fits whole", { floor: 0.45, left: 12, top: 60 }, { W: 1000, H: 250 }, 12],
   ])("fits to a floor %s", (_, rule, world, tx) => {
     const cam = fitCam(world, { w: 690, h: 700 }, "chain", rule);
     expect(cam.s).toBeGreaterThanOrEqual(0.45);
     expect(cam.tx).toBeCloseTo(tx);
   });
-  it("puts a run under the gate rail at the top, its boxes `top` px down, not centred in the view", () => {
+  it("puts the row under the chain overview at the top, its boxes `top` px down, not centred in the view", () => {
     // Boxes start 69px into the world (L.CY − L.BOX / 2).
     expect(fitCam({ W: 600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.95, left: 12, top: 60 }).ty).toBe(60 - 69);
   });
