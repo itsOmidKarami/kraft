@@ -24,6 +24,7 @@ import { AddonBadge, ReadOnly } from "../templates/addon";
 import { LIBRARY_FILE } from "../templates/draft/view";
 import { addonRepo, parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
+import { usePane } from "../shell/usePane";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
 function usePublished() {
@@ -65,6 +66,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const sel = parseRef(refId);
   const id = sel ? `${sel.section}.${sel.name}` : undefined;
   const row = rows.find((x) => x.id === id);
+  usePane(paneOpen && !!row);
   // An add-on's component is read through the same accessors, over the add-ons' library beside the draft's: nothing
   // in it is the draft's, so it has no change and no problem, and every write to it would answer 409.
   const shownDraft = useMemo(() => (row?.addon ? { ...draft, view: { ...draft.view!, result: { ...r, model: { ...r.model, [LIBRARY_FILE]: merged }, problems: [], changes: [] } } } : draft), [row?.addon, draft, r, merged]);

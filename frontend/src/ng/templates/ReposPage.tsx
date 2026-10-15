@@ -16,6 +16,7 @@ import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos
 import { useRepoFragment } from "./repos/useRepoFragment";
 import { NoMatch } from "../ui/NoMatch";
 import "./repos/repos.css";
+import { usePane } from "../shell/usePane";
 
 export const reposUrl = (repo?: string) => `/settings/repos${repo ? `/${encodeURIComponent(repo)}` : ""}`;
 
@@ -53,6 +54,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
 
   const repos = data?.repos ?? [];
   const sel = repos.find((x) => x.path === param || x.name === param) ?? (param ? undefined : repos[0]);
+  usePane(paneOpen && !!sel);
   const matches = useMemo(() => repos.filter((x) => !q.trim() || `${repoName(x)} ${x.path}`.toLowerCase().includes(q.trim().toLowerCase())), [repos, q]);
   const rove = useRoving(sel?.path, matches[0]?.path);
   const change = (path: string) => r.changes.find((c) => c.path === path);
