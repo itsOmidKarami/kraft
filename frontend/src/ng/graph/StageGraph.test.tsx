@@ -118,9 +118,9 @@ describe("StageGraph", () => {
       expect(overviewFor(nodes)).toBe(false);
       const { rerender } = render(<StageGraph name="c" nodes={long} overview names />);
       expect(overview().getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
-        "spec, done", "approve spec, done", "build, done", "test, done", "describe, done", "final review, needs you", "open mr, not started", "await ci, not started", "merge, not started",
+        "spec, done", "approve spec, done", "build, done", "test, done", "describe, done", "approve final review, needs you", "open mr, not started", "await ci, not started", "merge, not started",
       ]);
-      expect(overview().getByRole("button", { name: "final review, needs you" })).toHaveClass("is-gate", "is-amber");
+      expect(overview().getByRole("button", { name: "approve final review, needs you" })).toHaveClass("is-gate", "is-amber");
       expect(overview().getByRole("button", { name: "merge, not started" })).toHaveClass("is-todo");
       // No grouping below: every node, one ▶ and one ■, and the edges fade instead of counting what is off-screen.
       expect(document.querySelectorAll(".canvas .graph-node")).toHaveLength(9);
@@ -130,7 +130,7 @@ describe("StageGraph", () => {
       expect(screen.getByRole("group", { name: "c" })).toContainElement(screen.getByRole("group", { name: "Chain overview" }));
       rerender(<StageGraph name="c" nodes={nodes} overview names />);
       expect(screen.queryByRole("group", { name: "Chain overview" })).toBeNull();
-      expect(btn(/^approve spec,/)).toHaveAccessibleName("approve spec, gate, done");
+      expect(btn(/^approve merge,/)).toHaveAccessibleName("approve merge, gate, not started");
     });
 
     it("moves the canvas to a node clicked on the overview, and follows a drag along it", () => {

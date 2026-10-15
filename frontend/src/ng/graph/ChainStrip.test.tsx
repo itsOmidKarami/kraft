@@ -7,7 +7,7 @@ import type { ChainNode } from "./layout";
 
 const nodes: ChainNode[] = [
   { id: "spec", kind: "exec", state: "done" },
-  { id: "approve_spec", kind: "gate", state: "done" },
+  { id: "spec_approval", kind: "gate", state: "done" },
   { id: "implement", kind: "exec", state: "current" },
   { id: "merge", kind: "gate", state: "todo" },
 ];
@@ -49,7 +49,7 @@ describe("ChainStrip", () => {
     render(<ChainStrip nodes={nodes} viewing="implement" />);
     await user.click(screen.getByRole("button", { name: /^approve spec, / }));
     // An id wraps after its underscores, never cut to an ellipsis.
-    expect([...document.querySelectorAll(".strip-label")].map((l) => l.textContent)).toContain("approve_\u200bspec");
+    expect([...document.querySelectorAll(".strip-label")].map((l) => l.textContent)).toContain("spec_\u200bapproval");
     expect(screen.queryByRole("button", { name: /^approve spec, / })).toBeNull();
     expect(screen.getByRole("button", { name: /^spec, node/ })).toHaveFocus();
   });

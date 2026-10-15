@@ -124,7 +124,7 @@ describe("DraftItemPage", () => {
     expect(screen.queryByRole("button", { name: "Skip on this item" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
     expect(screen.getByRole("switch", { name: "Skip on this item" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /^final review,/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^approve final review,/ }));
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
     fireEvent.click(screen.getByRole("button", { name: "Skip on this item" }));
     await settle();
