@@ -30,7 +30,7 @@ import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { acceptHealth, every, onceEach, statusMenu, statusText, statusTooltip } from "./core/health";
+import { acceptHealth, every, onceEach, statusLabel, statusMenu, statusText, statusTooltip, statusWaiting } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -84,9 +84,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  status.name = "Kraft";
   // The text alone: a board or scope change re-renders it without refetching spend.
   const renderText = () => {
-    status.text = statusText(connected, refusal(state()) !== null, needsYouCount(store.items(), include));
+    const needs = needsYouCount(store.items(), include);
+    status.text = statusText(connected, refusal(state()) !== null, needs);
+    status.backgroundColor = statusWaiting(connected, needs) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+    status.accessibilityInformation = { label: statusLabel(connected, needs), role: "button" };
   };
   const setStatus = (now: boolean) => {
     connected = now;

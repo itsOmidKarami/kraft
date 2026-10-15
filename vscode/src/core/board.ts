@@ -1,5 +1,5 @@
 import { groupOf, STATUS_GROUPS, type GroupKey } from "../../../frontend/src/ng/board/model";
-import { reasonTail } from "../../../frontend/src/ng/board/rowText";
+import { nodeWords, reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem, WorkItemDetail } from "./api";
 import { linkTokens } from "./links";
 import { primaryAction, primaryToken } from "./primary";
@@ -15,16 +15,19 @@ export type ItemState =
   | "gate" | "question" | "budget" | "cap" | "needs_you" | "failed" | "paused" | "not_started"
   | "running" | "waiting" | "queued" | "blocked" | "escalated" | "done" | "cancelled" | "archived" | "unknown";
 
+/** Glyphs differ wherever colour differs (failed `error`, capped `stop-circle`),
+ *  so no state is told by colour alone. Running is static: a spinner on every
+ *  running row would compete with the rows that wait on you. */
 const ICONS: Record<ItemState, string> = {
   gate: "pass",
   question: "question",
   budget: "credit-card",
-  cap: "error",
+  cap: "stop-circle",
   needs_you: "warning",
   failed: "error",
   paused: "debug-pause",
   not_started: "debug-pause",
-  running: "sync~spin",
+  running: "play-circle",
   waiting: "watch",
   queued: "watch",
   blocked: "watch",
@@ -136,11 +139,41 @@ export const announceable = (items: WorkItem[], include: Include) => items.filte
 
 export const iconOf = (item: WorkItem) => ICONS[stateOf(item)];
 
-/** The row's description: the id, then why it is where it is. */
-export function describe(item: WorkItem): string {
-  const tail = reasonTail(item);
-  return tail ? `${item.id} · ${tail}` : item.id;
+/** The theme colour of a row's icon: a ThemeColor id. Waiting on you reads
+ *  yellow, a fault red; everything else keeps the default. */
+const COLORS: Partial<Record<ItemState, string>> = {
+  gate: "list.warningForeground",
+  question: "list.warningForeground",
+  budget: "list.warningForeground",
+  needs_you: "list.warningForeground",
+  cap: "list.errorForeground",
+  failed: "list.errorForeground",
+};
+
+export const colorOf = (item: WorkItem): string | undefined => COLORS[stateOf(item)];
+
+/** Whether a stop is a fault, not a request: failed, capped, over budget or
+ *  stuck on a conflict. A gate or a question is the item asking for you. */
+export function isFault(item: Pick<WorkItem, "display_status" | "stop">): boolean {
+  if (item.display_status === "failed") return true;
+  return item.display_status === "needs_you" && item.stop?.kind !== "gate" && item.stop?.kind !== "question";
 }
+
+/** The row's description: why it is where it is, or its status when it has no
+ *  reason. The id lives in the hover and in a quick pick's detail. */
+export function describe(item: WorkItem): string {
+  return reasonTail(item) || nodeWords(item.display_status ?? item.status);
+}
+
+/** What a screen reader says for a row: the title, its state, then the reason. */
+export function itemLabel(item: WorkItem): string {
+  const state = nodeWords(item.display_status ?? item.status);
+  const reason = reasonTail(item);
+  return [item.title, state, reason && reason !== state ? reason : ""].filter(Boolean).join(", ");
+}
+
+/** What a screen reader says for a group row: "Needs you, 3 items". */
+export const groupLabel = (label: string, count: number) => `${label}, ${count} ${count === 1 ? "item" : "items"}`;
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -172,9 +205,10 @@ export const questionText = (reason: string) => reason.replace(/^needs_context:\
  *  then, with the item's detail, what it has spent and how long it has run against their caps. */
 export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_cap" | "running_time">): string {
   const reason = item.stop?.reason;
-  const first = reason
-    ? item.stop?.kind === "question" ? questionText(reason) : reason
-    : `${item.id} — ${reasonTail(item) || item.display_status || item.status}`;
+  const first = `${item.id} — ${
+    reason
+      ? item.stop?.kind === "question" ? questionText(reason) : reason
+      : reasonTail(item) || item.display_status || item.status}`;
   if (!detail) return first;
   return [first, spendLine(detail.budget_cap), timeLine(detail.running_time)].filter((l) => l !== null).join("\n");
 }

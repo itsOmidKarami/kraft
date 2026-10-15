@@ -24,4 +24,4 @@ it("gatePicks lists the items at a gate, the longest-waiting first", () => {
 });
 
 it("itemPick shows the title, then the id and why", () =>
-  expect(itemPick(stopped("budget", { id: "K-7", title: "Fix it" }))).toEqual({ label: "Fix it", description: "K-7 · waiting for you at implementation", id: "K-7" }));
+  expect(itemPick(stopped("budget", { id: "K-7", title: "Fix it" }))).toEqual({ label: "Fix it", description: "waiting for you at implementation", detail: "K-7", id: "K-7" }));

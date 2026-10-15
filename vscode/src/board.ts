@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, describe, groupHolding, groupItems, iconOf, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -158,6 +158,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
       // Its key, not its label: the count in the label changes as items move.
       t.id = `group:${node.id}`;
       t.contextValue = "group";
+      t.accessibilityInformation = { label: groupLabel(node.label, node.items.length) };
       return t;
     }
     if (node.kind === "archived") {
@@ -178,7 +179,9 @@ export class Board implements vscode.TreeDataProvider<Node> {
     const t = new vscode.TreeItem(item.title, this.unlocated(item).length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     t.id = item.id;
     t.description = describe(item);
-    t.iconPath = new vscode.ThemeIcon(iconOf(item));
+    const color = colorOf(item);
+    t.iconPath = new vscode.ThemeIcon(iconOf(item), color ? new vscode.ThemeColor(color) : undefined);
+    t.accessibilityInformation = { label: itemLabel(item) };
     t.contextValue = contextValueOf(item, { drafts: this.drafts?.has(item.id) ?? false });
     // A gate row's click opens its document; any other row's only selects it.
     const click = rowCommand(item);

@@ -29,8 +29,12 @@ export class TabInputWebview {
   constructor(public viewType: string) {}
 }
 
-export class ThemeIcon {
+export class ThemeColor {
   constructor(public id: string) {}
+}
+
+export class ThemeIcon {
+  constructor(public id: string, public color?: ThemeColor) {}
 }
 
 export const commands = {

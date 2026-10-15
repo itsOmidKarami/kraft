@@ -20,8 +20,8 @@ export const PICK_TITLE: Record<PickVerb, string> = {
   openMergeRequest: "open a merge request", openSpec: "open a spec", openPlan: "open a plan",
 };
 
-/** One quick-pick entry: the row's title, and its id and why it is where it is. */
-export const itemPick = (item: WorkItem) => ({ label: item.title, description: describe(item), id: item.id });
+/** One quick-pick entry: the row's title, why it is where it is, and its id on the detail line. */
+export const itemPick = (item: WorkItem) => ({ label: item.title, description: describe(item), detail: item.id, id: item.id });
 
 const LINKS: Partial<Record<PickVerb, LinkToken>> = { openMergeRequest: "mr", openSpec: "attSpec", openPlan: "attPlan" };
 const DOOR: Partial<Record<PickVerb, ItemAction>> = { raiseBudget: "raise_budget" };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptHealth, downRow, every, onceEach, statusMenu, statusText, statusTooltip } from "../../src/core/health";
+import { acceptHealth, downRow, every, onceEach, statusMenu, statusLabel, statusText, statusTooltip, statusWaiting } from "../../src/core/health";
 
 describe("health", () => {
   it.each([
@@ -36,11 +36,20 @@ describe("health", () => {
   ])("statusTooltip: %s", (_, connected, readOnly, err, want, today?) => expect(statusTooltip(connected, readOnly, err, today)).toBe(want));
 
   it.each([
-    [true, false, 2, "$(check) Kraft 2"],
+    [true, false, 2, "$(bell-dot) Kraft 2"],
     [true, false, 0, "$(check) Kraft"],
-    [true, true, 1, "$(check) Kraft (read-only) 1"],
+    [true, true, 1, "$(bell-dot) Kraft (read-only) 1"],
     [false, false, 3, "$(debug-disconnect) Kraft"],
   ])("statusText(%s, %s, %s)", (connected, readOnly, needs, want) => expect(statusText(connected, readOnly, needs)).toBe(want));
+
+  it.each([
+    [true, 2, true, "Kraft: 2 items waiting on you"],
+    [true, 1, true, "Kraft: 1 item waiting on you"],
+    [true, 0, false, "Kraft: connected, nothing waiting"],
+    [false, 3, false, "Kraft: not running"],
+  ])("status bar, connected %s with %s waiting", (connected, needs, waiting, label) => {
+    expect([statusWaiting(connected, needs), statusLabel(connected, needs)]).toEqual([waiting, label]);
+  });
 
   it("every opens at most once per window, and always when forced", () => {
     let t = 0;
