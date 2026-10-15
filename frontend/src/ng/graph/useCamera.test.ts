@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { currentCam, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
+import { currentCam, EDITOR_FIT, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
 import { useCamera } from "./useCamera";
 
 describe("camera maths", () => {
@@ -120,10 +120,11 @@ describe("useCamera", () => {
     expect(h.result.current.cam.s).toBe(0.3); // the camera's own minimum: the whole chain, as far as it goes
   });
 
-  it("keeps an editor's floor on Fit", () => {
-    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit", fit: { floor: 0.8, left: 12 } });
-    act(() => h.result.current.fit());
+  it("keeps an editor's floor for the opening view only, and Fit shows the whole chain", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit", fit: EDITOR_FIT });
     expect(h.result.current.cam.s).toBe(0.8);
+    act(() => h.result.current.fit());
+    expect(h.result.current.cam.s).toBe(0.3);
   });
 
   it("opens on the current node, and the reserve narrows the view", () => {
