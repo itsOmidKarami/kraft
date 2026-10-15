@@ -3,7 +3,7 @@ import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
 import { authoredAt, chainCapGroups, settingRows, sourceWord } from "../draft/view";
-import { fieldMeta, parse, show, type FieldMeta } from "../fields";
+import { fieldMeta, parse, RECOVERY_NOTE, show, type FieldMeta } from "../fields";
 import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
@@ -118,7 +118,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
           </>
         )
       )}
-      {row.recovery && <p className="cfg-note">applies to its on-failure recovery</p>}
+      {row.recovery && <p className="cfg-note">{RECOVERY_NOTE}</p>}
       {err && <p className="cfg-err" role="alert">{err}</p>}
     </div>
   );

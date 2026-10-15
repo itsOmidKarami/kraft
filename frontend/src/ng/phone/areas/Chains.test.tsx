@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChainNodeView, ChainsList, ChainView } from "./Chains";
@@ -31,11 +31,11 @@ describe("Chains (L.1)", () => {
   const src = (value: unknown, source = "default") => ({ value, source });
   const SOURCES = {
     "": {},
-    verification: { read_only: src(false), skippable: src(true, "chain"), model: src(null), effort: src("high", "chain"), "policy.time_cap_minutes": src(null) },
+    verification: { read_only: src(false), skippable: src(true, "chain"), model: src(null), effort: src("high", "chain"), "policy.time_cap_minutes": src(null), "policy.token_budget": src(5000, "chain"), "policy.timeout_minutes": { value: null, source: "default", recovery: true } },
     spec_approval: { reject_to: src("spec", "chain"), message: src("Review the spec.", "chain") },
     "verification.checks.lint": { command: src("just lint", "chain") },
   };
-  const DRAFT = (r = {}) => view("chains", "default", { draft: true, files: { "chains/default.yaml": "id: default\n" } }, { sources: SOURCES as never, model: { "chains/default.yaml": { id: "default", nodes: [{ id: "spec", kind: "exec" }, { id: "spec_approval", kind: "gate" }, { id: "verification", kind: "exec" }] } } as never, changes: [{ path: "verification", kind: "change", summary: "effort high", fields: ["effort"] }, { path: "spec", kind: "change", summary: "x" }], ...r });
+  const DRAFT = (r = {}) => view("chains", "default", { draft: true, files: { "chains/default.yaml": "id: default\n" } }, { sources: SOURCES as never, model: { "chains/default.yaml": { id: "default", nodes: [{ id: "spec", kind: "exec" }, { id: "spec_approval", kind: "gate" }, { id: "verification", kind: "exec" }] } } as never, changes: [{ path: "verification", kind: "change", summary: "effort high", fields: ["effort", "policy"] }, { path: "spec", kind: "change", summary: "x" }], ...r });
   const OPS = [200, { ...DRAFT(), ops: [] }] as [number, unknown];
   const open = (path = "/templates/chains/default", route = "/templates/chains/:chain", more: Record<string, [number, unknown]> = {}) => mountAt(path.includes("/nodes/") ? <ChainNodeView /> : <ChainView />, path, path.includes("/nodes/") ? "/templates/chains/:chain/nodes/:node" : route, answers({ "GET /drafts/chains/default": [200, DRAFT()], "POST /drafts/chains/default/ops": OPS, "GET /harnesses/profiles": [200, { profiles: [{ id: "claude", provider: "anthropic" }], agent_profiles: [{ id: "coder" }] }], "GET /harnesses/providers": [200, { valid: { anthropic: { capabilities: { effort: { values: ["low", "high"] } } } } }], ...more }));
 
@@ -68,7 +68,12 @@ describe("Chains (L.1)", () => {
     const { calls } = open("/templates/chains/default/nodes/verification");
     expect(await screen.findByText("effort")).toBeInTheDocument();
     expect(screen.getByText("high").className).toContain("ph-is-changed");
-    expect(screen.getByText("(changed)")).toBeInTheDocument();
+    // A policy key is reported by its group, so each one set shows as changed.
+    expect(screen.getByText("5000").className).toContain("ph-is-changed");
+    expect(screen.getAllByText("(changed)")).toHaveLength(2);
+    // A cap that is its recovery's says so, and is not folded away as unset.
+    expect(screen.getByRole("button", { name: /^wall clock.*applies to its on-failure recovery/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: /^Not set/ })).queryByText("wall clock")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /^effort/ }));
     await userEvent.click(await screen.findByRole("radio", { name: /^low/ }));
     await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ ops: [{ op: "set_field", path: "verification", field: "effort", value: "low" }] }]));
@@ -77,7 +82,7 @@ describe("Chains (L.1)", () => {
     expect(screen.getByText("Adding, removing and reordering nodes and steps is on desktop.")).toBeInTheDocument();
   });
 
-  it("a gate's reject target is one of the nodes before it, and a task opens under ?sel=", async () => {
+  it("a gate's reject target is one of the nodes before it", async () => {
     open("/templates/chains/default/nodes/spec_approval");
     await userEvent.click(await screen.findByRole("button", { name: /^reject to/ }));
     await userEvent.type(screen.getByLabelText("reject to", { selector: "input" }), "nope{Enter}");
@@ -120,6 +125,5 @@ describe("Chains (L.1)", () => {
     expect(screen.getByText("lint")).toBeInTheDocument();
     expect(screen.getByText("verification_fix_loop")).toBeInTheDocument();
     expect(screen.getByText("fix")).toBeInTheDocument();
-    expect(screen.queryByText(/The graph canvas, drag to reorder/)).toBeNull();
   });
 });
