@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import { ApiError, type BulkResult } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
-import { announceable, archivedChildren, colorOf, contextValueOf, groupLabel, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
+import { announceable, boardDescription, archivedChildren, colorOf, contextValueOf, groupLabel, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
 import { log } from "../../src/log";
 import { item, stopped } from "./fixtures/item";
 
@@ -201,16 +201,24 @@ it.each([
   ["connected, scope not ready yet", true, false, false, 0, "none"],
   ["something visible", true, true, false, 2, "none"],
   ["connected, ready, nothing in this repo", true, true, false, 0, "here"],
-  ["showing every repo, nothing anywhere", true, true, true, 0, "none"],
+  ["showing every repo, nothing anywhere", true, true, true, 0, "all"],
+  ["showing every repo, something in one", true, true, true, 2, "none"],
 ])("welcome: %s", (_, connected, ready, showAll, visible, want) => {
   expect(welcomeState(connected, ready, showAll, visible)).toBe(want);
 });
 
 it.each([
+  ["this repo's board", true, false, 3, "This repo"],
+  ["every repo's board", true, true, 0, "All repos"],
+  ["disconnected with cached rows: stale, said so", false, false, 3, "Not connected · last known"],
+  ["disconnected with nothing cached: the Start row says it", false, true, 0, ""],
+])("boardDescription: %s", (_, connected, showAll, rows, want) => expect(boardDescription(connected, showAll, rows)).toBe(want));
+
+it.each([
   ["this repo is not connected", true, true, false, 0, true, "connect"],
   ["connected, nothing in it", true, true, false, 0, false, "here"],
   ["unconnected, but something visible", true, true, false, 3, true, "none"],
-  ["unconnected, showing every repo", true, true, true, 0, true, "none"],
+  ["unconnected, showing every repo", true, true, true, 0, true, "all"],
   ["unconnected, scope not ready", true, false, false, 0, true, "none"],
 ])("welcome with unconnected: %s", (_, connected, ready, showAll, visible, unconnected, want) => {
   expect(welcomeState(connected, ready, showAll, visible, unconnected)).toBe(want);
@@ -368,11 +376,11 @@ describe("Answer", () => {
 
 describe("A multi-selection", () => {
   const row = (i: ReturnType<typeof item>) => ({ kind: "item", item: i });
-  const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", actions: ["pause"] })];
-  const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", display_status: "paused", actions: ["resume"] })];
-  const q = stopped("question", { id: "Q-1", actions: ["resume", "retry"] });
+  const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", title: "Cache layer", actions: ["pause"] })];
+  const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", title: "Login page", display_status: "paused", actions: ["resume"] })];
+  const q = stopped("question", { id: "Q-1", title: "Rate limits", actions: ["resume", "retry"] });
   const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"] }), item({ id: "D-2", display_status: "done", actions: ["archive"] })];
-  const p3 = item({ id: "P-3", actions: ["pause"] });
+  const p3 = item({ id: "P-3", title: "Search box", actions: ["pause"] });
   /** The ids each bulk call sent, without the results array it fills. */
   const sent = (bulk: { mock: { calls: unknown[][] } }) => bulk.mock.calls.map((c) => c.slice(0, 2));
 
@@ -418,7 +426,7 @@ describe("A multi-selection", () => {
     expect(sent(api.bulk)).toEqual([["pause", ["P-1", "P-2"]]]);
     expect(logged).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
     expect(api.pause).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-2 (being started).");
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: Cache layer (being started).");
     expect(info).not.toHaveBeenCalled();
     expect(refreshed).toEqual(["P-1", "P-2"]);
   });
@@ -428,14 +436,14 @@ describe("A multi-selection", () => {
     await handlers.get("kraft.resume")!(row(r1), [row(r1), row(q), row(r2)]);
     expect(api.resume.mock.calls).toEqual([["R-1"], ["R-2"]]);
     expect(input).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: R-2 (boom), Q-1 (needs an answer).");
+    expect(warn).toHaveBeenCalledWith("Resumed 1. Not resumed: Login page (boom), Rate limits (needs an answer).");
   });
 
   it("still refreshes each id when a batch fails, and says what went through", async () => {
     const { handlers, warn, refreshed } = setup();
     await handlers.get("kraft.pause")!(row(p1), [row(p1), row(p3)]);
     expect(refreshed).toEqual(["P-1", "P-3"]);
-    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: P-3 (Kraft did not answer within 60s).");
+    expect(warn).toHaveBeenCalledWith("Paused 1. Not paused: Search box (Kraft did not answer within 60s).");
   });
 
   it.each([

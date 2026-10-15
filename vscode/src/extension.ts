@@ -6,7 +6,7 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
-import { needsYou, needsYouCount } from "./core/board";
+import { nameOf, needsYou, needsYouCount } from "./core/board";
 import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
@@ -186,9 +186,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const preview = registerArtifactPreview(context);
   const diff = registerDiff(context, store, api, () => runDir, (arg) => preview.target(arg)?.id);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include, (cb) => scope.onChange(cb));
-  migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
+  migrate = registerMigration(context, api, () => refusal(state()), cache, (id) => nameOf(store, id)).migrate;
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal, preview);
-  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, (arg) => preview.target(arg)?.id);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, gates.confirmApprove, (arg) => preview.target(arg)?.id);
   const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.

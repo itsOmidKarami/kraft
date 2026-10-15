@@ -93,3 +93,18 @@ export function gateConsequence(item: Pick<WorkItem, "chain_definition">, gate: 
 export function consequenceQuestion(title: string, what: "merge" | "push"): string {
   return what === "merge" ? `Approve and merge ${title} into the target branch?` : `Approve and push ${title}?`;
 }
+
+/**
+ * The one confirmation both approve routes (the gate's Approve and Submit Review)
+ * share: asks only for a gate that merges or pushes, and answers whether to go on.
+ * `ask` shows the modal with this button and answers whether it was clicked.
+ */
+export async function confirmConsequence(
+  item: Pick<WorkItem, "title" | "chain_definition"> | undefined,
+  gate: string,
+  ask: (question: string, button: string) => Promise<boolean>,
+): Promise<boolean> {
+  const what = item && gateConsequence(item, gate);
+  if (!what) return true;
+  return ask(consequenceQuestion(item.title, what), what === "merge" ? "Approve and Merge" : "Approve and Push");
+}

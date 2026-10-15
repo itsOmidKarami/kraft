@@ -30,7 +30,7 @@ it.each<[Outcome, number, string | undefined, boolean]>([
 ])("canSend(%s, %i, %j) is %s", (o, n, s, want) => expect(canSend(o, n, s)).toBe(want));
 
 describe("submitMessage", () => {
-  const ctx = { id: "K-1", title: "Cache embeddings", n: 2, gate: "spec" as string | null, fixNode: "implement" as string | null, paused: false };
+  const ctx = { title: "Cache embeddings", n: 2, gate: "spec" as string | null, fixNode: "implement" as string | null, paused: false };
   const gateless = (action: "retried" | "rerun" | "queued"): ReviewResult =>
     ({ review_id: "r", outcome: "request_changes", gate: null, target: "implement", target_reason: "requested", action });
   it.each<{ id: string; outcome: Outcome; r: ReviewResult; c?: Partial<typeof ctx>; want: string }>([
@@ -45,7 +45,7 @@ describe("submitMessage", () => {
     { id: "gateless retried", outcome: "request_changes", r: gateless("retried"), c: { gate: null }, want: "Requested changes · 2 threads sent to implement · retried" },
     {
       id: "queued on a paused item", outcome: "request_changes", r: gateless("queued"), c: { gate: null, paused: true },
-      want: "Requested changes · 2 threads sent to implement · queued. K-1 stays paused until you resume it.",
+      want: "Requested changes · 2 threads sent to implement · queued. Cache embeddings stays paused until you resume it.",
     },
   ])("$id", ({ outcome, r, c, want }) => expect(submitMessage(outcome, r, { ...ctx, ...c })).toBe(want));
 });

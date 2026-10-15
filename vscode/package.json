@@ -229,13 +229,13 @@
         "command": "kraft.toggleAllRepos",
         "title": "Show All Repos",
         "category": "Kraft",
-        "icon": "$(filter)"
+        "icon": "$(filter-filled)"
       },
       {
         "command": "kraft.showThisRepo",
         "title": "Show This Repo",
         "category": "Kraft",
-        "icon": "$(filter-filled)"
+        "icon": "$(filter)"
       },
       {
         "command": "kraft.startDaemon",
@@ -402,8 +402,13 @@
     "viewsWelcome": [
       {
         "view": "kraft.board",
-        "contents": "No Kraft work in this repo. [Show all repos](command:kraft.toggleAllRepos)",
+        "contents": "No Kraft work in this repo.\n[File Work Item…](command:kraft.fileWork)\n[Show all repos](command:kraft.toggleAllRepos)",
         "when": "kraft.welcome == here || kraft.welcome == connect && kraft.readOnly"
+      },
+      {
+        "view": "kraft.board",
+        "contents": "No Kraft work yet, in any repo.\n[File Work Item…](command:kraft.fileWork)",
+        "when": "kraft.welcome == all"
       },
       {
         "view": "kraft.board",

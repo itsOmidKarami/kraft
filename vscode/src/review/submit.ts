@@ -31,6 +31,7 @@ export function registerReviewSubmit(
   show: (id: string, gate: string, a: Artifact) => Promise<void>,
   openArtifact: (id: string, gate?: string) => Promise<boolean>,
   reveal: (id: string, tid: string) => Promise<boolean | undefined>,
+  confirmApprove: (id: string, gate: string) => Promise<boolean>,
   previewId: (arg: unknown) => string | undefined,
 ) {
   const info = (msg: string) => void vscode.window.showInformationMessage(msg);
@@ -103,7 +104,7 @@ export function registerReviewSubmit(
           // Again here: a thread may have been labelled must-fix while the pickers were open.
           threads: () => cache.load(id),
           refuse: (refusal) => showRefusal(id, refusal, reveal),
-          readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, async (digest) => {
+          readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), () => confirmApprove(id, g), undefined, async (digest) => {
             sent = await api.submitReview(id, g, { outcome: "approve", ...(summary && { summary }), digest });
             return true;
           }),
@@ -111,12 +112,12 @@ export function registerReviewSubmit(
         if (r === "refused") return not("must-fix");
         if (r === "read-first") return info(`Read the ${gateWords(g)} on ${nameOf(store, id)} first: the document is open.`), not("read-first");
         if (r === "cancelled" || !sent) return not("cancelled");
-        info(submitMessage("approve", sent, { id, title: detail!.title, n, gate: g, fixNode: null, paused: false }));
+        info(submitMessage("approve", sent, { title: detail!.title, n, gate: g, fixNode: null, paused: false }));
       } else {
         const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }), ...(outcome === "request_changes" && node && { node }) });
         // The gate's document will be revised: the render shown so far no longer binds an approve.
         if (gate && outcome === "request_changes") shown.forget(id);
-        info(submitMessage(outcome, r, { id, title: detail!.title, n, gate, fixNode, paused: detail!.status === "paused" }));
+        info(submitMessage(outcome, r, { title: detail!.title, n, gate, fixNode, paused: detail!.status === "paused" }));
       }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.

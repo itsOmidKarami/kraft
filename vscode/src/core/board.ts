@@ -89,13 +89,14 @@ export const archivedChildren = (cached: WorkItem[], store: { item(id: string): 
 
 /** The board's welcome text: `here` says this repo has no Kraft work and
  *  offers Show all repos; `connect` says this repo is not connected at all
- *  (`unconnected`) and offers to connect it. Never before the scope is ready
- *  (git is async), never while disconnected (the Start row says that), and
- *  not when every repo is already shown. */
-export type Welcome = "none" | "here" | "connect";
+ *  (`unconnected`) and offers to connect it; `all` says there is none anywhere
+ *  while every repo is shown. Never before the scope is ready (git is async),
+ *  never while disconnected (the Start row says that). */
+export type Welcome = "none" | "here" | "connect" | "all";
 
 export function welcomeState(connected: boolean, ready: boolean, showAll: boolean, visible: number, unconnected = false): Welcome {
-  if (!(connected && ready && !showAll && visible === 0)) return "none";
+  if (!(connected && ready && visible === 0)) return "none";
+  if (showAll) return "all";
   return unconnected ? "connect" : "here";
 }
 
@@ -220,4 +221,11 @@ export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_
 export function steerPrompt(item: WorkItem): string {
   const reason = item.stop?.kind === "question" ? item.stop.reason : null;
   return reason ? `${item.title} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.title} (optional)`;
+}
+
+/** The board view's description: which repos it shows, or, while disconnected
+ *  with rows still on it, that they are the last ones known. */
+export function boardDescription(connected: boolean, showAll: boolean, rows: number): string {
+  if (!connected) return rows ? "Not connected · last known" : "";
+  return showAll ? "All repos" : "This repo";
 }
