@@ -57,6 +57,8 @@ const ALLOWED = [
   "templates/problems", // problemText
   "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
   "settings/accessWords", // what Access says, on both layouts
+  "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
+  "settings/storageWords", // the categories and the state note
   "settings/policy/ctx", // the policy sections' shared context type and problemAt
   "settings/policy/keys", // the set_value keys the Policy page sends
   "settings/policy/sections", // which section a key or a problem belongs to

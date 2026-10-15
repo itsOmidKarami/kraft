@@ -7,6 +7,7 @@ import { rejectTarget } from "../../item/graph";
 import { listDrafts } from "../../templates/draft/draftApi";
 import { stepsOf, taskName } from "../../item/paths";
 import { addonLabel } from "../../library/types";
+import { coveredText } from "../../item/chainName";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
 
@@ -82,7 +83,7 @@ export function ChainNodeView() {
         { label: "kind", value: "gate", mono: true },
         { label: "reject to", value: rejectTarget(c!.nodes, n.id) ?? "the gate reopens", mono: true },
         { label: "auto review", value: n.auto_escalate ? "an agent reads it first" : "off" },
-        ...(n.covered_by ? [{ label: "covered by", value: n.covered_by, mono: true }] : []),
+        ...(n.covered_by ? [{ label: "document", value: coveredText(n.covered_by), mono: true }] : []),
       ]
     : [
         { label: "kind", value: "exec", mono: true },

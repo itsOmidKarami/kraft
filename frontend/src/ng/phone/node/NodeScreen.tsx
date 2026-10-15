@@ -1,3 +1,4 @@
+import { breakable } from "../ui/breakable";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -101,7 +102,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
       <div className="ph-content">
         <div className="ph-node-head">
-          <h1 className="ph-node-title">{nodeId}</h1>
+          <h1 className="ph-node-title">{breakable(nodeId)}</h1>
           <p className={`ph-node-sub ph-tone-${sub.tone}`}>{gate ? "gate" : "exec node"} · {sub.text}</p>
         </div>
         <TabStrip label="Node" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />

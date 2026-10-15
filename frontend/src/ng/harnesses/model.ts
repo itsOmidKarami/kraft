@@ -203,3 +203,10 @@ export const TOOLS_EVERY = "Every tool";
 export const TOOLS_NONE = "No tools";
 export const TOOLS_RESTRICT = "Restrict to a list";
 export const toolsWord = (tools: string[] | null): string => (tools == null ? TOOLS_EVERY : tools.length ? tools.join(", ") : TOOLS_NONE);
+
+/** The harness's own fields as both layouts label them; `defaults` keys map to the field that sets them. */
+export const HARNESS_FIELD = { enabled: "enabled", executable: "executable", provider: "provider", model: "default model", effort: "default effort", permission_mode: "permission mode" } as const;
+export const defaultLabel = (key: string): string => (HARNESS_FIELD as Record<string, string>)[key] ?? key;
+export const enabledHelp = (enabled: boolean): string => (enabled ? "enabled" : "disabled: a task selecting it stops for a human");
+export const enableLabel = (id: string, enabled: boolean): string => `${enabled ? "Disable" : "Enable"} ${id}`;
+export const executableWord = (found: boolean): string => (found ? "found" : "not on PATH");

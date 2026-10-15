@@ -74,18 +74,23 @@ describe("Composer", () => {
     expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^docs:ship/)]);
   });
 
-  it("creates and starts on ⌘↵ and creates paused from the button, sending the create body", async () => {
+  it("creates paused on ⌘↵ and from the button, and starts only from the menu, sending the create body", async () => {
     const { calls, onCreated } = mount();
     await settle();
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Cache the embeddings" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Brief" }), { target: { value: "Key by content hash." } });
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
     await settle();
-    expect(creates(calls).at(-1)?.body).toEqual({ title: "Cache the embeddings", description: "Key by content hash.", repo: "/code/kraft-plugins", chain_template: "default", attachments: [], autostart: true });
+    expect(creates(calls).at(-1)?.body).toEqual({ title: "Cache the embeddings", description: "Key by content hash.", repo: "/code/kraft-plugins", chain_template: "default", attachments: [], autostart: false });
+    expect(screen.getByText(/↵ create paused/)).toBeInTheDocument();
     expect(onCreated).toHaveBeenCalledWith("new1");
     fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
     await settle();
     expect((creates(calls).at(-1)?.body as { autostart: boolean }).autostart).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "More ways to create" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create and start" }));
+    await settle();
+    expect((creates(calls).at(-1)?.body as { autostart: boolean }).autostart).toBe(true);
   });
 
   it("says so when Create and start is queued because every slot is busy, and not when it starts or was meant paused", async () => {
@@ -100,6 +105,10 @@ describe("Composer", () => {
     await settle();
     expect(toasts).toEqual([]);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(toasts).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "More ways to create" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create and start" }));
     await settle();
     expect(toasts).toEqual(["Queued: 3 of 3 slots are busy. It starts when one frees."]);
     window.removeEventListener("kraft:toast", hear);

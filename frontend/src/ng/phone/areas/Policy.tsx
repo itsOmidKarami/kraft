@@ -5,7 +5,7 @@ import { problemAt, type Ctx } from "../../settings/policy/ctx";
 import { capKey, KEYS, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
 import { SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, policyOf } from "../../settings/policy/types";
-import { parse, parseAge, parseSize, raw, show } from "../../settings/policy/units";
+import { parse, parseAge, parseSize, raw, show, sourceWord, UNIT_WORD } from "../../settings/policy/units";
 import type { Change } from "../../templates/draft/types";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
@@ -15,7 +15,6 @@ import { Group, useEditor, type Edit, type RowSpec } from "./kit";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] : undefined);
-const UNIT_WORD = { usd: "dollars", tok: "tokens", min: "minutes", days: "days", s: "seconds", count: "a whole number", "s-as-min": "minutes", size: "a size: 1000M, 10G, 1T", age: "hours or days: 12h, 24h, 2d" } as const;
 
 /** `set_value` as the desktop's `PolicyCell` sends it: a scope, the dotted key, the value (null clears). */
 const sendValue = async (draft: ConfigDraft, k: Pick<KeySpec, "scope" | "key">, value: unknown) => {
@@ -162,8 +161,6 @@ function Limits(e: Edits) {
   );
 }
 
-const SOURCE: Record<string, string> = { loop: "the loop's own", node: "its node", chain: "its chain", defaults: "defaults:", maxima: "maxima:", loops: "loops:", default: "default:" };
-
 function Loops(e: Edits) {
   const { ctx, edit } = e;
   const { p, draft } = ctx;
@@ -200,7 +197,7 @@ function Loops(e: Edits) {
           label: `${l.node} · ${l.chain}`,
           mono: true,
           value: `${show("count", l.attempts.value)} · ${show("s-as-min", l.wall_clock_s.value)}`,
-          sub: `${SOURCE[l.attempts.source ?? ""] ?? l.attempts.source ?? "default"}`,
+          sub: sourceWord(l.attempts.source),
           onEdit: () => edit({
             kind: "menu", title: `${l.node} · ${l.chain}`,
             options: [

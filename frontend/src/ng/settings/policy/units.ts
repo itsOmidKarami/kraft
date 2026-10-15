@@ -50,3 +50,10 @@ export function parseSize(text: string): { value: string | null } | { error: str
   if (!typed) return { value: null };
   return /^[1-9]\d*[kmgt]b?$/i.test(typed) ? { value: typed.toUpperCase() } : { error: "Enter a whole number with a unit: 1000M, 10G, 1T." };
 }
+
+/** Where a loop's number comes from, as a phrase that stands alone on both layouts. */
+export const SOURCE: Record<string, string> = { loop: "the loop's own", node: "its node", chain: "its chain", defaults: "policy defaults", maxima: "policy maxima", loops: "the loops default", default: "policy default" };
+export const sourceWord = (source: string | null | undefined): string => SOURCE[source ?? ""] ?? source ?? SOURCE.default;
+
+/** What an input in a unit takes, for its help line. */
+export const UNIT_WORD = { usd: "dollars", tok: "tokens", min: "minutes", days: "days", s: "seconds", count: "a whole number", "s-as-min": "minutes", size: "a size: 1000M, 10G, 1T", age: "hours or days: 12h, 24h, 2d" } as const;

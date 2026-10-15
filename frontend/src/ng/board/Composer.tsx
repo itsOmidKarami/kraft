@@ -65,7 +65,7 @@ const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
  *  title, a line of brief, repo, chain, an optional spec or plan, and a tick
- *  preview of what will run from the server's dry run. ⌘↵ creates and starts. */
+ *  preview of what will run from the server's dry run. ⌘↵ creates paused. */
 export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: string; onClose: () => void; onCreated: (id: string) => void }) {
   const navigate = useNavigate();
   /** The enabled repos, null until read: an empty list is no repo to file to. */
@@ -155,11 +155,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   };
 
   return (
-    <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(true), ok, refuse)}>
+    <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(false), ok, refuse)}>
       <div className="composer-row">
         <NodeGlyph kind="slot" size="sm" mark="add" />
         <input ref={titleRef} className="composer-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />
-        <span className="composer-hint">{mod("↵")} create and start</span>
+        <span className="composer-hint">{mod("↵")} create paused</span>
       </div>
       <div className="composer-indent">
         <textarea className="composer-brief" aria-label="Brief" placeholder="A line of brief. Every node reads it." rows={1} value={d.brief} onChange={(e) => set({ brief: e.target.value })} />

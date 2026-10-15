@@ -6,22 +6,10 @@ import type { StorageUsage } from "../../types";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
 import { CleanupDialog } from "./CleanupDialog";
+import { CATEGORIES, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote } from "./storageWords";
 import { Block } from "./parts";
 import "./settings.css";
 import "./storage.css";
-
-const HOUSEKEEPING = "/settings/policy/housekeeping";
-/** The server's eight categories, in the order the page lists them. */
-const CATEGORIES: [key: string, label: string][] = [
-  ["worktrees", "Worktrees"],
-  ["sandboxes", "Sandbox stores and homes"],
-  ["documents", "Item documents and session output"],
-  ["logs", "Logs"],
-  ["results", "Results"],
-  ["databases", "Databases and backups"],
-  ["attachments", "Attachments"],
-  ["other", "Everything else"],
-];
 
 /** Settings › Storage: what the worktrees use against the quota and limit, and
  *  which of them a clean-up may take. The figure is the server's cached
@@ -78,8 +66,7 @@ export function StoragePage() {
   const toggle = (id: string) => setChecked((c) => { const n = new Set(c); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // One live region, always mounted: a screen reader hears a change in it, not a relabelled button.
-  const note =
-    measuring && data ? "Measuring…" : data?.state === "held" ? "Over the limit: starts are held until you make room." : data?.state === "over_quota" && limit != null && used > limit ? "Over the limit in items' documents, which archiving keeps: starts still go ahead. Abandoning an item removes its documents." : data?.state === "over_quota" ? "Over the quota: Kraft is warning; starts still go ahead." : "";
+  const note = storageNote(data, measuring);
 
   return (
     <div className="ng-settings">
@@ -143,7 +130,7 @@ export function StoragePage() {
                 </Button>
                 <span className="set-hint">{checked.size} selected</span>
               </div>
-              {!reclaimable.length && <p className="set-hint">Nothing to clean up: no finished item holds a worktree. A running item is paused or abandoned from its own page.</p>}
+              {!reclaimable.length && <p className="set-hint">{NOTHING_TO_CLEAN}</p>}
               <table className="set-st-table" aria-label="Worktrees by size">
                 <thead>
                   <tr>

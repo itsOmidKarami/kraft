@@ -79,6 +79,23 @@ describe("Search (I)", () => {
     expect(calls.filter((c) => c.method === "POST")).toEqual([]);
   });
 
+  it("lists failed and paused items under Needs you as the board groups them, in the board's words, and opens them as items", async () => {
+    const failed = item("f5", "failed", { current_node_id: "verification" });
+    const paused = item("p6", "paused", { current_node_id: "implementation" });
+    const fresh = item("n7", "paused", { current_node_id: null });
+    useStore.setState({ workItems: Object.fromEntries([gate("g2"), failed, paused, fresh].map((i) => [i.id, i])) } as never);
+    mount();
+    const needs = within(screen.getByRole("region", { name: "Needs you" }));
+    expect(needs.getByRole("button", { name: /Item f5/ })).toHaveTextContent("failed at verification");
+    expect(needs.getByRole("button", { name: /Item p6/ })).toHaveTextContent("paused at implementation");
+    expect(needs.getByRole("button", { name: /Item g2/ })).toHaveTextContent("approve plan");
+    expect(needs.getByRole("button", { name: /Item g2/ })).not.toHaveTextContent("plan_approval");
+    expect(needs.queryByText(/Item n7/)).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Recent" })).getByRole("button", { name: /Item n7/ })).toHaveTextContent("created paused");
+    await userEvent.click(needs.getByRole("button", { name: /Item f5/ }), { advanceTimers: vi.advanceTimersByTime });
+    expect(where()).toBe("/work-items/f5");
+  });
+
   it("a document opens over the search with ?doc= and Back-able", async () => {
     mount({ "GET /documents/d1": [200, { title: "Spec · cache", path: ".engineering/specs/cache.md", content: "## Goal\n\nBounded." }] });
     await type("cache");

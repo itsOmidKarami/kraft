@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
 import type { Notify } from "../../../types";
+import { CHANNELS, CLEAR_URL } from "../../settings/notifyWords";
 import { NotificationChannel, NotificationsList } from "./Notifications";
 import { mountAt, where } from "./testkit";
 
@@ -44,7 +45,7 @@ describe("Notifications list (O.2)", () => {
     expect(web).toHaveTextContent("active");
     expect(web).toHaveTextContent("gate_requested, work_item_needs_human");
     expect(web).toHaveAttribute("href", "/settings/notifications/webhook");
-    expect(screen.getByRole("link", { name: /^Browser alerts/ })).toHaveTextContent("active");
+    expect(screen.getByRole("link", { name: new RegExp(`^${CHANNELS.browser}`) })).toHaveTextContent("active");
     expect(screen.getByText(/Progress events are deliberately not offered/)).toBeInTheDocument();
   });
 
@@ -54,7 +55,7 @@ describe("Notifications list (O.2)", () => {
     serve({ url_set: false });
     mountAt(<NotificationsList />, "/settings/notifications", "/settings/notifications");
     expect(await screen.findByRole("link", { name: /^Webhook/ })).toHaveTextContent("inactive");
-    expect(screen.getByRole("link", { name: /^Browser alerts/ })).toHaveTextContent("inactive");
+    expect(screen.getByRole("link", { name: new RegExp(`^${CHANNELS.browser}`) })).toHaveTextContent("inactive");
   });
 });
 
@@ -103,9 +104,9 @@ describe("Webhook channel (O.2)", () => {
     stubNotification("default");
     const put = serve();
     channel("webhook", "?tab=config");
-    await userEvent.click(await screen.findByRole("button", { name: "Remove URL" }));
+    await userEvent.click(await screen.findByRole("button", { name: CLEAR_URL }));
     expect(put).not.toHaveBeenCalled();
-    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove URL" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: CLEAR_URL }));
     await waitFor(() => expect(put).toHaveBeenCalledWith({ url: "" }));
   });
 
@@ -201,6 +202,18 @@ describe("Browser alerts channel (O.2)", () => {
     channel("browser", "?tab=config");
     expect(await screen.findByRole("switch", { name: /Alerts on this device/ })).toBeDisabled();
     expect(screen.getByText(/This browser has no notifications/)).toBeInTheDocument();
+  });
+
+  it("has the same event switches as the webhook, kept in this browser only", async () => {
+    stubNotification("granted");
+    const put = serve();
+    channel("browser", "?tab=config");
+    const gate = await screen.findByRole("switch", { name: /^gate_requested/ });
+    expect(gate).toBeChecked();
+    await userEvent.click(gate);
+    expect(gate).not.toBeChecked();
+    expect(JSON.parse(localStorage.getItem("kraft.browserNotify.events") ?? "[]")).not.toContain("gate_requested");
+    expect(put).not.toHaveBeenCalled();
   });
 
   it("the switch is kept in this browser only, and a granted test shows an alert", async () => {
