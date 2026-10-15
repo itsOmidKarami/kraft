@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ReviewThread, ThreadLabel } from "../../types";
 import { Button } from "../ui/Button";
 import { useReason } from "../ui/Reason";
@@ -79,7 +80,11 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
   const submit = async () => {
     if (busy) return;
     if (!d.body.trim()) {
-      setTried(true);
+      // Back to Write, so the reason and focus land on the field.
+      flushSync(() => {
+        setPreview(false);
+        setTried(true);
+      });
       box.current?.focus();
       return;
     }

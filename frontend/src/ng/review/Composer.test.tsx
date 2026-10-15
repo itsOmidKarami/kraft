@@ -146,6 +146,16 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenLastCalledWith({ body: "Cap it lower", label: null, suggest: LINES.join("\n") });
   });
 
+  it("goes back to Write when Add to review finds no text in Preview, with the reason on the field", async () => {
+    const { onSubmit } = compose(NEW);
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to review" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    const box = screen.getByRole("textbox", { name: "Comment" });
+    expect(box).toHaveFocus();
+    expect(box).toHaveAccessibleDescription("A comment needs some text.");
+  });
+
   it("closes on Escape at once when empty, and shows a refusal in place", async () => {
     const { onCancel, unmount } = compose(NEW);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Escape" });

@@ -31,6 +31,8 @@ export function gateConsequence(item: Pick<WorkItem, "pending_gate" | "chain_def
 
 /** The words for sending a gate back, one source for the desktop bar, dialog and confirm, and the phone screens. */
 export const REQUEST_CHANGES = "Request changes";
+/** The first words of where a request goes, before the node: both trees say it this way. */
+export const sendsBack = (threads: boolean) => `Sends ${threads ? "these threads" : "your note"} back to `;
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -64,7 +66,7 @@ export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status">
   else {
     const path = shorten(fix.gate ? [...fix.then, fix.gate] : fix.then);
     request = [
-      { t: drafts(threads).length ? "Sends these threads back to " : "Sends your note back to " }, { t: fix.node, mono: true }, { t: ", the node this item runs a fix round on." },
+      { t: sendsBack(drafts(threads).length > 0) }, { t: fix.node, mono: true }, { t: ", the node this item runs a fix round on." },
       ...(path.length ? [{ t: " Chain resumes from there: " }, { t: path.join(" → "), mono: true }, { t: "." }] : []),
       ...(fix.round ? [{ t: noRounds ? " No fix rounds left." : ` Fix round ${fix.round.n} of ${fix.round.max}.` }] : []),
       ...(!fix.gate && fix.reason ? [{ t: ` Why this node: ${fix.reason}.` }] : []),

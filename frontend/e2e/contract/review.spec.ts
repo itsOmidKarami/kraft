@@ -98,7 +98,7 @@ const ROWS: Row[] = [
       await expect(p.getByRole("button", { name: /^Reject/ }), "no Reject button in the review header").toHaveCount(0);
       await p.getByRole("button", { name: "Request changes" }).first().click();
       const d = p.getByRole("dialog");
-      await expect(d.getByText(/back to/)).toContainText("implementation", { timeout: 2000 });
+      await expect(d.locator(".rv-finish-sends, .rv-outcome-sub").first()).toContainText(/back to\s+implementation/, { timeout: 2000 });
       await expect(d.getByRole("button", { name: "Request changes" })).toBeVisible();
     },
   },

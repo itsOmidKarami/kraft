@@ -8,7 +8,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence } from "../../review/finish";
+import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, sendsBack } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -262,7 +262,7 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
         <span className="ph-composer-pad" />
       </header>
       <div className="ph-content">
-        <p className="ph-help">{`The item goes back${target ? ` to ${target}` : ""} with your note as the first thing the agent reads.`}</p>
+        <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {target && <p className="ph-target">Goes back to: {target}</p>}
         {error && <p className="ph-error" role="alert">{error}</p>}

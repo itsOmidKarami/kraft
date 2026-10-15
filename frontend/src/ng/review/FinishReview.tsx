@@ -110,18 +110,19 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const [picked, setPicked] = useState<ReviewOutcome | null>(initial ?? null);
   // Opened on Request changes there is one action to take: the choice of outcomes would only offer it again, with Approve beside it.
   const request = rows[0];
-  const focused = initial === "request_changes" && (!request.disabled || !fix);
+  const focused = initial === "request_changes" && !request.disabled;
   const outcome = focused ? "request_changes" : picked && !rows.find((r) => r.key === picked)?.disabled ? picked : firstOpen;
   const [note, setNote] = useState("");
   const [tried, setTried] = useState(false);
   const noteBox = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The fix target can arrive after the dialog opens; the note takes focus when it does.
+  useEffect(() => { if (focused) noteBox.current?.focus(); }, [focused]);
   const toSend = drafts(threads);
   const canSend = outcome === "approve" || toSend.length > 0 || !!note.trim();
   // Said after a press that had nothing to send, and gone once there is something.
   const noSend = useReason(tried && !canSend ? (focused ? ADD_NOTE : ADD_TO_SUBMIT) : null);
-  const waiting = outcome === "request_changes" && !fix;
   const go = async () => {
     if (!canSend) {
       setTried(true);
@@ -143,12 +144,12 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
         <>
           <Button onClick={onClose}>Keep reviewing</Button>
           {noSend.note}
-          <Button variant="primary" disabled={busy || waiting} onClick={go}>{outcome === "request_changes" ? REQUEST_CHANGES : "Submit review"}</Button>
+          <Button variant="primary" disabled={busy} onClick={go}>{outcome === "request_changes" ? REQUEST_CHANGES : "Submit review"}</Button>
         </>
       }
     >
       <div className="rv-finish">
-        {focused && <p className="rv-muted">{request.parts.map((p, i) => <span key={i} className={p.mono ? "rv-mono" : undefined}>{p.t}</span>)}</p>}
+        {focused && <p className="rv-muted rv-finish-sends">{request.parts.map((p, i) => <span key={i} className={p.mono ? "rv-mono" : undefined}>{p.t}</span>)}</p>}
         {(toSend.length > 0 || !focused) && <ul className="rv-finish-list" aria-label="To send">
           {toSend.map(({ thread: t, comment: c }) => (
             <li key={c.id}>
@@ -160,7 +161,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
           ))}
           {!toSend.length && <li className="rv-muted">No threads yet. Add a comment on a line or a file first.</li>}
         </ul>}
-        <textarea ref={noteBox} autoFocus={focused} className="rv-textarea" aria-label="Overall note" {...noSend.attrs} placeholder={focused && !toSend.length ? "What needs to change? The agent reads this first, markdown supported" : "Overall note for the agent (optional), markdown supported"} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !waiting)} />
+        <textarea ref={noteBox} className="rv-textarea" aria-label="Overall note" {...noSend.attrs} placeholder={focused && !toSend.length ? "What needs to change? The agent reads this first, markdown supported" : "Overall note for the agent (optional), markdown supported"} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(go, !busy)} />
         {noSend.note}
         {!focused && <fieldset className="rv-outcomes">
           <legend className="review-visually-hidden">Outcome</legend>

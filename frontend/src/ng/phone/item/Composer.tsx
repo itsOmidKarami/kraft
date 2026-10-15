@@ -1,4 +1,4 @@
-import { REQUEST_CHANGES } from "../../review/finish";
+import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
 import { nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
@@ -65,7 +65,7 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
   reject: {
     title: REQUEST_CHANGES,
-    help: (i) => `The item goes back to ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"} with your note as the first thing the agent reads.`,
+    help: (i) => `${sendsBack(false)}${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}, with your note as the first thing the agent reads.`,
     placeholder: "What needs to change?",
     label: REQUEST_CHANGES,
     target: (i) => `Goes back to: ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}`,

@@ -138,6 +138,7 @@ describe("FinishDialog", () => {
     const request = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
     routed(<Finish threads={[]} initial="request_changes" />);
     expect(screen.getByRole("dialog", { name: "Request changes" })).toBeInTheDocument();
+    expect(document.querySelector(".rv-finish-sends")).toHaveTextContent("Sends your note back to implementation");
     expect(screen.queryByRole("radio")).toBeNull();
     expect(screen.queryByText(/No threads yet/)).toBeNull();
     const note = screen.getByRole("textbox", { name: "Overall note" });
@@ -152,6 +153,14 @@ describe("FinishDialog", () => {
     expect(send).not.toHaveAttribute("aria-describedby");
     fireEvent.change(note, { target: { value: "Bound it." } });
     expect(screen.queryByText("Write what needs to change first.")).toBeNull();
+  });
+
+  it("shows the full dialog, not a confirm with no reason, until the fix target resolves", () => {
+    vi.spyOn(http, "request").mockReturnValue(new Promise(() => {}));
+    routed(<Finish it={item({ pending_gate: null, fix_target: null })} gate={null} threads={[]} initial="request_changes" />);
+    expect(screen.getByRole("dialog", { name: "Finish your review" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Request changes/ })).toBeDisabled();
+    expect(screen.getByText("Finding the node this would send the threads to…")).toBeInTheDocument();
   });
 
   it("carries a chain revision's digest on Approve only", async () => {
