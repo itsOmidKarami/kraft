@@ -6,7 +6,7 @@ import { groupOf, groupsOf, type BoardView } from "./model";
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
   detail({ id, title: `t-${id}`, display_status, updated_at: `2026-09-13T0${id.length % 10}:00:00Z`, ...over });
-const view = (over: Partial<BoardView> = {}): BoardView => ({ filter: { q: "", repo: "", chain: "" }, group: "status", sort: "attention", doneCap: null, ...over });
+const view = (over: Partial<BoardView> = {}): BoardView => ({ filter: { q: "", repo: "", chain: "", gate: "", stop: "" }, group: "status", sort: "attention", doneCap: null, ...over });
 const labels = (items: WorkItem[], v = view()) => groupsOf(items, v).map((g) => `${g.label}:${g.rows.map((r) => r.id).join(",")}`);
 
 describe("groupOf", () => {
@@ -79,6 +79,22 @@ describe("groupsOf", () => {
     expect(ids({ q: "de" })).toEqual(["def"]);
     expect(ids({ repo: "/r/other" })).toEqual(["def"]);
     expect(ids({ chain: "default" })).toEqual(["abc"]);
+  });
+
+  it("narrows by the gate an item waits at and by its kind of stop, on items that need a person", () => {
+    const gate = (id: string, at: string) => item(id, "needs_you", { pending_gate: at, stop: { kind: "gate", node: at, resume_at: null, reason: null } });
+    const items = [
+      gate("g1", "plan_approval"),
+      gate("g2", "spec_approval"),
+      item("q1", "needs_you", { stop: { kind: "question", node: "implement", resume_at: null, reason: "x" } }),
+      // A run that merely sits at a gate node, or a done item with a stale stop, is neither.
+      item("r1", "running", { pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } }),
+    ];
+    const ids = (f: Partial<BoardView["filter"]>) => groupsOf(items, view({ filter: { q: "", repo: "", chain: "", ...f } })).flatMap((g) => g.rows).map((r) => r.id);
+    expect(ids({ gate: "plan_approval" })).toEqual(["g1"]);
+    expect(ids({ stop: "gate" }).sort()).toEqual(["g1", "g2"]);
+    expect(ids({ stop: "question" })).toEqual(["q1"]);
+    expect(ids({ gate: "plan_approval", stop: "question" })).toEqual([]);
   });
 
   it("caps Done at the newest show_done rows and keeps the total for show all", () => {

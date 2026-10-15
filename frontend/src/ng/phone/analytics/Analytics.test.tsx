@@ -17,7 +17,7 @@ const REPORT = {
   by_repo: [{ repo: "/code/kraft-plugins", items: 8, mrs: 6, tokens: 1, cost_usd: 20, cost_complete: false, done: 6, cycles: 3 }],
   rejected_gates_by_gate: [{ gate: "plan_approval", n: 1 }],
   gate_waits: [{ gate: "plan_approval", n: 4, median_ms: 1800_000, total_ms: 9e6 }],
-  stop_reasons: [{ label: "gate wait", n: 5 }],
+  stop_reasons: [{ label: "gate wait", n: 5 }, { label: "budget", n: 2 }],
 } as unknown as Report;
 
 function mount(answer: [number, unknown] = [200, REPORT]) {
@@ -48,7 +48,8 @@ describe("Analytics (J): each tile reads one field", () => {
     mount();
     await screen.findByText("$38.20");
     expect(screen.getByRole("link", { name: /kraft-plugins/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins");
-    expect(screen.getByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/?gate=plan_approval");
+    expect(screen.getByRole("link", { name: /budget/ })).toHaveAttribute("href", "/?stop=budget");
     expect(screen.getByRole("link", { name: /gate wait/ })).toHaveAttribute("href", "/");
   });
 

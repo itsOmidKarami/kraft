@@ -85,7 +85,7 @@ describe("the phone board (B)", () => {
     mount();
     await act(async () => {});
     const heads = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    const want = groupsOf(list, { filter: { q: "", repo: "", chain: "" }, group: "status", sort: "attention", doneCap: 2 }).filter((g) => g.total).map((g) => `${g.label}${g.total}`);
+    const want = groupsOf(list, { filter: { q: "", repo: "", chain: "", gate: "", stop: "" }, group: "status", sort: "attention", doneCap: 2 }).filter((g) => g.total).map((g) => `${g.label}${g.total}`);
     expect(heads).toEqual(want);
     // Paused mid-chain and failed are under Needs you, a paused item with no node is Not started (R54).
     const needs = screen.getByRole("region", { name: "Needs you" });
@@ -134,6 +134,49 @@ describe("the phone board (B)", () => {
     expect(screen.queryByRole("region")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(where()).not.toContain("f=");
+    expect(screen.getByText("Item r3")).toBeInTheDocument();
+  });
+
+  it("filters by chain, gate and stop reason from their sheets, in the URL", async () => {
+    put(
+      gate("g1"),
+      item("m1", "needs_you", { chain_template: "docs_only", stop: { kind: "mr_closed", node: "merge_request", resume_at: null, reason: null } }),
+      item("r3", "running"),
+    );
+    mount();
+    await act(async () => {});
+    await userEvent.click(screen.getByRole("button", { name: /^Chain/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /docs_only/ }));
+    expect(where()).toContain("chain=docs_only");
+    expect(screen.getByText("Item m1")).toBeInTheDocument();
+    expect(screen.queryByText("Item g1")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Needs you/ })).toHaveTextContent("1");
+
+    await userEvent.click(screen.getByRole("button", { name: /Chain · docs_only/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /All chains/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Gate/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /approve plan/ }));
+    expect(where()).toContain("gate=plan_approval");
+    expect(screen.getByText("Item g1")).toBeInTheDocument();
+    expect(screen.queryByText("Item r3")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /Gate · approve plan/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /All gates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Stop reason/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /MR closed/ }));
+    expect(where()).toContain("stop=mr_closed");
+    expect(screen.queryByText("Item g1")).toBeNull();
+  });
+
+  it("says so when a link's gate has nothing waiting, and Clear drops the gate and the stop", async () => {
+    put(item("r3", "running"));
+    mount("/?gate=spec_approval&stop=budget");
+    await act(async () => {});
+    expect(screen.getByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gate · spec approval/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).not.toContain("gate=");
+    expect(where()).not.toContain("stop=");
     expect(screen.getByText("Item r3")).toBeInTheDocument();
   });
 

@@ -6,8 +6,8 @@ import { readBoardQuery, useBoardQuery, writeBoardQuery } from "./url";
 
 describe("board query", () => {
   it("reads every field, with defaults for what is missing or unknown", () => {
-    const q = readBoardQuery(new URLSearchParams("repo=/r/a&chain=docs&q=cache&group=repo&sort=title&sel=w1&new=1"));
-    expect(q).toEqual({ repo: "/r/a", chain: "docs", q: "cache", group: "repo", sort: "title", sel: "w1", new: true });
+    const q = readBoardQuery(new URLSearchParams("repo=/r/a&chain=docs&gate=plan_approval&stop=budget&q=cache&group=repo&sort=title&sel=w1&new=1"));
+    expect(q).toEqual({ repo: "/r/a", chain: "docs", gate: "plan_approval", stop: "budget", q: "cache", group: "repo", sort: "title", sel: "w1", new: true });
     expect(readBoardQuery(new URLSearchParams("group=bogus&sort=bogus"))).toMatchObject({ group: "status", sort: "attention", new: false });
   });
 

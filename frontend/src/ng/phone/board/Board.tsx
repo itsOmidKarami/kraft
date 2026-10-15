@@ -8,7 +8,8 @@ import { tip } from "../../ui/Tooltip";
 import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
-import { groupOf, groupsOf, type GroupKey } from "../../board/model";
+import { chainOf, groupOf, groupsOf, matches, type GroupKey } from "../../board/model";
+import { nodeWords, stopFilterOptions, stopWords } from "../../board/rowText";
 import { useBoardPrefs } from "../../board/prefs";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -36,6 +37,9 @@ export function Board() {
   const [params, setParams] = useSearchParams();
   const f: Chip = isChip(params.get("f")) ? (params.get("f") as Chip) : "all";
   const repo = params.get("repo") ?? "";
+  const chain = params.get("chain") ?? "";
+  const gate = params.get("gate") ?? "";
+  const stop = params.get("stop") ?? "";
   const navigate = useNavigate();
   const sheet = useSheet();
   const now = useNow();
@@ -60,17 +64,21 @@ export function Board() {
     setParams(next, { replace: true });
   };
 
-  const inRepo = (i: WorkItem) => !repo || i.repo === repo;
-  const scoped = items.filter(inRepo);
+  const scoped = items.filter((i) => matches(i, { q: "", repo, chain, gate, stop }));
   const count = (g: GroupKey) => scoped.filter((i) => groupOf(i) === g).length;
   const counts: Record<Chip, number> = { all: scoped.length, needs: count("needs"), running: count("running"), not_started: count("not_started"), done: count("done") };
 
   const groups = useMemo(
-    () => groupsOf(items, { filter: { q: "", repo, chain: "" }, group: "status", sort: "attention", doneCap: showAll ? null : (prefs?.show_done ?? 5) }),
-    [items, repo, showAll, prefs?.show_done],
+    () => groupsOf(items, { filter: { q: "", repo, chain, gate, stop }, group: "status", sort: "attention", doneCap: showAll ? null : (prefs?.show_done ?? 5) }),
+    [items, repo, chain, gate, stop, showAll, prefs?.show_done],
   );
   const shown = groups.filter((g) => (f === "all" ? g.total > 0 : g.key === f));
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
+  const chains = [...new Set(items.map(chainOf))].sort();
+  const { gates, stops } = stopFilterOptions(items);
+  // A chosen gate or stop nothing waits at any more stays listed, so the sheet says what is filtering.
+  const gateLabel = gates.find((g) => g.value === gate)?.label ?? nodeWords(gate);
+  const stopLabel = stops.find((s) => s.value === stop)?.label ?? stopWords(stop);
 
   const fail = (id: string, message: string | null) =>
     setErrors((e) => {
@@ -109,6 +117,11 @@ export function Board() {
           </button>
         ))}
       </div>
+      <div className="ph-chips ph-filters" role="group" aria-label="Filter">
+        <button type="button" className={`ph-pill${chain ? " ph-is-set" : ""}`} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chain}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className={`ph-pill${gate ? " ph-is-set" : ""}`} onClick={() => sheet.open("gate")}>{gate ? `Gate · ${gateLabel}` : "Gate"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className={`ph-pill${stop ? " ph-is-set" : ""}`} onClick={() => sheet.open("stop")}>{stop ? `Stop · ${stopLabel}` : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></button>
+      </div>
       <div className="ph-content ph-board">
         {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
         {/* An update or a rollback installed under this server, in a tab opened before it: the sidebar's line, which the phone has no sidebar for (R11b-08). */}
@@ -119,7 +132,7 @@ export function Board() {
             {noRepos ? <>No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</> : "Nothing here. Tap + to file one."}
           </p>
         )}
-        {!empty && shown.length === 0 && <NoMatch className="ph-empty" onClear={() => set({ f: "", repo: "" })} />}
+        {!empty && shown.length === 0 && <NoMatch className="ph-empty" onClear={() => set({ f: "", repo: "", chain: "", gate: "", stop: "" })} />}
         {shown.map((g) => (
           <section key={g.key} className="ph-group" aria-label={g.label}>
             <h2 className={`ph-group-head${g.key === "needs" ? " ph-is-hot" : ""}`}>{g.label}<span>{g.total}</span></h2>
@@ -138,6 +151,33 @@ export function Board() {
           value={repo}
           options={[{ value: "", label: "All repos", hint: String(items.length) }, ...repos.map((r) => ({ value: r, label: repoName(r), hint: String(items.filter((i) => i.repo === r).length) }))]}
           onPick={(v) => sheet.closeThen(() => set({ repo: v }))}
+          onClose={sheet.close}
+        />
+      )}
+      {sheet.is("chain") && (
+        <ChoiceSheet
+          title="Chain"
+          value={chain}
+          options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: c, hint: String(items.filter((i) => chainOf(i) === c).length) }))]}
+          onPick={(v) => sheet.closeThen(() => set({ chain: v }))}
+          onClose={sheet.close}
+        />
+      )}
+      {sheet.is("gate") && (
+        <ChoiceSheet
+          title="Gate"
+          value={gate}
+          options={[{ value: "", label: "All gates" }, ...gates.map((g) => ({ value: g.value, label: g.label, hint: String(g.n) })), ...(gate && !gates.some((g) => g.value === gate) ? [{ value: gate, label: gateLabel, hint: "0" }] : [])]}
+          onPick={(v) => sheet.closeThen(() => set({ gate: v }))}
+          onClose={sheet.close}
+        />
+      )}
+      {sheet.is("stop") && (
+        <ChoiceSheet
+          title="Stop reason"
+          value={stop}
+          options={[{ value: "", label: "All stop reasons" }, ...stops.map((s) => ({ value: s.value, label: s.label, hint: String(s.n) })), ...(stop && !stops.some((s) => s.value === stop) ? [{ value: stop, label: stopLabel, hint: "0" }] : [])]}
+          onPick={(v) => sheet.closeThen(() => set({ stop: v }))}
           onClose={sheet.close}
         />
       )}

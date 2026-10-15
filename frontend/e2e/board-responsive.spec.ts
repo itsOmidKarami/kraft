@@ -3,7 +3,9 @@ import { createdId, expect, openComposer, test } from "./fixtures";
 // The peek lies over the list at every width, so opening it moves and reflows
 // nothing: a row's box is the same before and after. The shipped regression
 // this replaces was a title rewrapping to a word per line beside a docked pane.
-for (const width of [1440, 1100, 900]) {
+// At 1279 and below the Board takes the sidebar's rail on arrival, so the "before"
+// below is measured after the rail and opening the peek moves nothing.
+for (const width of [1440, 1100, 1024, 900]) {
   test(`the peek opens without reflowing a row at ${width}`, async ({ page }) => {
     // One server serves every run, so the title is this run's own.
     const title = `a row that must not reflow at ${width} ${Date.now()}`;
@@ -21,6 +23,7 @@ for (const width of [1440, 1100, 900]) {
     await expect(row).toBeVisible();
     // The reason tail wraps below 1280, so a row's height depends on the font being loaded.
     await page.evaluate(() => document.fonts.ready);
+    if (width <= 1279) await expect(page.locator("html")).toHaveAttribute("data-sidebar", "rail");
     const before = (await row.boundingBox())!;
 
     await row.click();

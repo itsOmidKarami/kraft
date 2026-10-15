@@ -4,6 +4,9 @@
 .ph-chips { flex: none; display: flex; gap: 8px; padding: 6px 16px 12px; overflow-x: auto; }
 .ph-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 .ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.ph-filters { padding-top: 0; }
+.ph-filters .ph-pill { flex: none; }
+.ph-pill.ph-is-set { border-color: var(--text-muted); color: var(--text); }
 .ph-chip-n { font-size: var(--fs-label); opacity: .7; }
 .ph-board { gap: 6px; padding-top: 0; }
 .ph-group { display: flex; flex-direction: column; gap: 6px; }

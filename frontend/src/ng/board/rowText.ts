@@ -2,7 +2,7 @@ import { until } from "../../format";
 import type { ChainNode, ItemAction, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { admits } from "../item/status";
-import { groupOf } from "./model";
+import { gateOf, groupOf, stopOf } from "./model";
 
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
  *  server's `display_status` and `stop` and the raw row, one table each. */
@@ -80,6 +80,31 @@ function fallbackName(to: unknown): string {
   if (!to || typeof to !== "object") return "";
   const { model, harness } = to as { model?: unknown; harness?: unknown };
   return typeof model === "string" && model ? model : typeof harness === "string" ? harness : "";
+}
+
+/** A stop kind as a filter and its Analytics row say it: the kind in words, `mr_closed` as "MR closed". */
+export const stopWords = (kind: string) => (kind === "mr_closed" ? "MR closed" : nodeWords(kind));
+
+export interface FilterOption { value: string; label: string; n: number }
+
+/** The gates items wait at and the kinds they are stopped on, as the Gate and Stop filters list them: named by what
+ *  a reader calls them (`gateName`, `stopWords`), most items first. Desktop and phone list the same. */
+export function stopFilterOptions(items: WorkItem[]): { gates: FilterOption[]; stops: FilterOption[] } {
+  const tally = (key: (i: WorkItem) => string, label: (id: string, i: WorkItem) => string) => {
+    const m = new Map<string, FilterOption>();
+    for (const i of items) {
+      const v = key(i);
+      if (!v) continue;
+      const o = m.get(v) ?? { value: v, label: label(v, i), n: 0 };
+      o.n += 1;
+      m.set(v, o);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  };
+  return {
+    gates: tally(gateOf, (id, i) => gateName(i.chain_definition?.nodes, id)),
+    stops: tally(stopOf, stopWords),
+  };
 }
 
 export type StopCue = "failed" | "paused" | "gate" | "question" | "limit" | "other";

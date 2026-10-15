@@ -36,14 +36,27 @@ export const minutes = (ms: number, runs: number) => (runs === 0 ? "—" : ms > 
 /** A span the report carries as 0 when nothing was measured (no completed item, no merge request): "—" then, not "0s". */
 export const measured = (ms: number, has = ms > 0) => (has ? elapsed(ms) : "—");
 
-/** The board, scoped the way the report is. The board filters by repo and chain only: no gate, status or stop reason, so a row for one of those lands on the board for the same scope. */
-export const boardHref = (scope: { repo?: string | null; chain?: string | null }) => {
+/** The board, scoped the way the report is, and narrowed to a gate or a stop kind when the row names one. */
+export const boardHref = (scope: { repo?: string | null; chain?: string | null; gate?: string | null; stop?: string | null }) => {
   const q = new URLSearchParams();
   if (scope.repo) q.set("repo", scope.repo);
   if (scope.chain) q.set("chain", scope.chain);
+  if (scope.gate) q.set("gate", scope.gate);
+  if (scope.stop) q.set("stop", scope.stop);
   const s = q.toString();
   return s ? `/?${s}` : "/";
 };
+
+/** What a stop-reason row filters the board to. The report's labels are its own buckets: a gate stop reads
+ *  "gate · <gate>", and only "budget" and "cap breach" are one stop kind each. The rest (a task failure, an
+ *  orchestrator defect, a preventable dispatch) are judged from the stop's text and span several kinds, so they
+ *  narrow nothing and land on the board for the same scope. */
+export function stopFilter(label: string): { gate?: string; stop?: string } {
+  if (label.startsWith("gate · ")) return { gate: label.slice("gate · ".length) };
+  if (label === "budget") return { stop: "budget" };
+  if (label === "cap breach") return { stop: "cap" };
+  return {};
+}
 
 /** The share of lead time spent waiting on a person, the report's main figure. */
 export const waitingKpi = (pct: number) => ({ label: "Waiting on you", value: `${pct}%`, sub: "of lead time" });

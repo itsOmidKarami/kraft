@@ -5,6 +5,7 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
+import { usePane } from "../shell/usePane";
 import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { reload, useOffline } from "../offline";
@@ -17,7 +18,7 @@ import { NoMatch } from "../ui/NoMatch";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
-import type { RowAction } from "./rowText";
+import { nodeWords, stopFilterOptions, stopWords, type RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
 import { Composer } from "./Composer";
@@ -76,6 +77,9 @@ function useNow() {
  *  the first work item exists: one filed from the CLI or anywhere else ends
  *  the setup, so the board shows it (R11a-02). */
 export function BoardPage() {
+  // The peek lies over the list, so the sidebar steps back to its rail on arrival at a narrow width, not when the peek
+  // opens: opening it then moves nothing. A pinned or railed choice of the reader's own still wins.
+  usePane(true);
   const prefs = useBoardPrefs();
   const [query, setQuery] = useBoardQuery(prefs?.group_by);
   const navigate = useNavigate();
@@ -134,15 +138,15 @@ export function BoardPage() {
   const groups = useMemo(
     () =>
       groupsOf(items, {
-        filter: { q: query.q, repo: query.repo, chain: query.chain },
+        filter: { q: query.q, repo: query.repo, chain: query.chain, gate: query.gate, stop: query.stop },
         group: query.group,
         sort: query.sort,
         doneCap: allDone ? null : (prefs?.show_done ?? 5),
       }),
-    [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
+    [items, query.q, query.repo, query.chain, query.gate, query.stop, query.group, query.sort, allDone, prefs?.show_done],
   );
   const needsN = countIn(items, "needs");
-  const filtered = !!(query.q.trim() || query.repo || query.chain);
+  const filtered = !!(query.q.trim() || query.repo || query.chain || query.gate || query.stop);
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
   const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {
@@ -243,6 +247,10 @@ export function BoardPage() {
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   const chains = [...new Set(items.map(chainOf))].sort();
+  const { gates, stops } = stopFilterOptions(items);
+  // A chosen gate or stop nothing waits at any more stays listed, so the menu says what is filtering.
+  const gateLabel = (id: string) => gates.find((g) => g.value === id)?.label ?? nodeWords(id);
+  const stopLabel = (kind: string) => stops.find((s) => s.value === kind)?.label ?? stopWords(kind);
 
   return (
     <div className="board-page">
@@ -281,6 +289,26 @@ export function BoardPage() {
             ...chains.map((c) => ({ label: c, checked: query.chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setQuery({ chain: c }) })),
           ]}
         />
+        <Menu
+          label="Gate"
+          triggerClass={`board-menu-btn${query.gate ? " is-set" : ""}`}
+          trigger={<>{query.gate ? `Gate · ${gateLabel(query.gate)}` : "Gate"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: "All gates", checked: !query.gate, onSelect: () => setQuery({ gate: "" }) },
+            ...gates.map((g) => ({ label: g.label, checked: query.gate === g.value, hint: String(g.n), onSelect: () => setQuery({ gate: g.value }) })),
+            ...(query.gate && !gates.some((g) => g.value === query.gate) ? [{ label: gateLabel(query.gate), checked: true, hint: "0", onSelect: () => {} }] : []),
+          ]}
+        />
+        <Menu
+          label="Stop reason"
+          triggerClass={`board-menu-btn${query.stop ? " is-set" : ""}`}
+          trigger={<>{query.stop ? `Stop · ${stopLabel(query.stop)}` : "Stop reason"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: "All stop reasons", checked: !query.stop, onSelect: () => setQuery({ stop: "" }) },
+            ...stops.map((s) => ({ label: s.label, checked: query.stop === s.value, hint: String(s.n), onSelect: () => setQuery({ stop: s.value }) })),
+            ...(query.stop && !stops.some((s) => s.value === query.stop) ? [{ label: stopLabel(query.stop), checked: true, hint: "0", onSelect: () => {} }] : []),
+          ]}
+        />
         <span className="board-filters-gap" />
         <Menu
           label="Group by"
@@ -305,7 +333,7 @@ export function BoardPage() {
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
             {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.length === 0 ? (
               filtered
-                ? <NoMatch className="board-empty board-empty-solo" query={query.q} onClear={() => setQuery({ q: "", repo: "", chain: "" })} />
+                ? <NoMatch className="board-empty board-empty-solo" query={query.q} onClear={() => setQuery({ q: "", repo: "", chain: "", gate: "", stop: "" })} />
                 : <p className="board-empty board-empty-solo">No work items yet.</p>
             ) : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
