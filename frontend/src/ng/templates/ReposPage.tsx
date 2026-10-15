@@ -12,6 +12,7 @@ import { Kv, Note } from "./panes/controls";
 import { ConnectForm } from "./repos/ConnectForm";
 import { readiness, testsCell, testsTitle } from "./repos/evidence";
 import { RepoConfig, setEnabled } from "./repos/RepoConfig";
+import { homePath } from "./repos/path";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos/types";
 import { useRepoFragment } from "./repos/useRepoFragment";
 import { NoMatch } from "../ui/NoMatch";
@@ -42,7 +43,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const running = runningOf(r);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("overview");
-  const [paneOpen, setPaneOpen] = useState(!!param);
+  const [paneOpen, setPaneOpen] = useState(!!param || (data?.repos.length ?? 0) === 1);
   const [connecting, setConnecting] = useState(false);
   const connectBtn = useRef<HTMLButtonElement>(null);
   const [chains, setChains] = useState<string[]>([]);
@@ -56,6 +57,11 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const sel = repos.find((x) => x.path === param || x.name === param) ?? (param ? undefined : repos[0]);
   usePane(paneOpen && !!sel);
   const matches = useMemo(() => repos.filter((x) => !q.trim() || `${repoName(x)} ${x.path}`.toLowerCase().includes(q.trim().toLowerCase())), [repos, q]);
+  // One repo and nothing chosen: open it, in place of the empty canvas beside a one-row list.
+  const only = !param && repos.length === 1 ? repos[0] : undefined;
+  useEffect(() => {
+    if (only) navigate(reposUrl(only.name || only.path), { replace: true });
+  }, [only, navigate]);
   const rove = useRoving(sel?.path, matches[0]?.path);
   const change = (path: string) => r.changes.find((c) => c.path === path);
   const select = (x: RepoView, to = tab) => {
@@ -241,7 +247,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
       crumbs={[{ label: "Repos" }]}
       icon="git-branch"
       title={name}
-      sub={`${repo.path}${forge ? ` · ${forge}` : ""} · ${running} open`}
+      sub={`${homePath(repo.path)}${forge ? ` · ${forge}` : ""} · ${running} open`}
       prob={own[0] ? { msg: own[0].message } : undefined}
       tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }]}
       tab={tab}
@@ -260,7 +266,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
       {own.filter((p) => !p.field).map((p, i) => <Note key={i} bad>{p.message}</Note>)}
       {tab === "overview" && (
         <>
-          <Kv k="path" v={repo.path} mono />
+          <Kv k="path" v={<span className="rp-path" data-allow-ellipsis title={repo.path}><span dir="ltr">{homePath(repo.path)}</span></span>} mono />
           <Kv k="default chain" v={String(repo.entry.default_chain ?? "default")} mono />
           <Kv k="open items" v={String(running)} />
           <Kv k="state" v={enabled ? "enabled" : "disabled"} />

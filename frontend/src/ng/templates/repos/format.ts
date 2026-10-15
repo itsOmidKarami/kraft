@@ -58,7 +58,7 @@ export const whole = (what: string, positive = true) => ({
   parse: (t: string): Parsed => {
     if (!t) return { value: null };
     const n = Number(t);
-    return Number.isInteger(n) && (!positive || n > 0) ? { value: n } : { error: `${what} is a whole number above 0.` };
+    return Number.isInteger(n) && (!positive || n > 0) ? { value: n } : { error: `${what} must be a whole number greater than 0.` };
   },
 });
 

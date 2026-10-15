@@ -1,4 +1,5 @@
 import type { Problem, Result } from "../templates/draft/types";
+import { nodeWords } from "../board/rowText";
 
 export type Access = "available" | "override" | "never";
 export const ACCESS: { value: Access; label: string }[] = [
@@ -210,6 +211,14 @@ export function profileLanes(r: Resolved, name: string): Lane[] {
 
 /** The tasks of a harness or profile, as `chain › path` for names and links. */
 export const taskName = (t: { chain: string; path: string }) => `${t.chain} › ${t.path}`;
+/** A task tile's words: the node it sits in, then what it does there ("spec · author"). */
+export const taskTile = (t: { path: string }) => {
+  const [node, ...rest] = t.path.split(".");
+  return rest.length ? `${nodeWords(node)} · ${nodeWords(rest[rest.length - 1])}` : nodeWords(node);
+};
+/** How many tasks reach a profile's entry for a provider (a task counts once, whichever harness it lands on). */
+export const entryUsers = (r: Resolved, profile: string, provider: string): number =>
+  new Set(r.harnesses.filter((h) => h.provider === provider).flatMap((h) => h.tasks.filter((t) => t.profile === profile).map((t) => `${t.chain}/${t.path}`))).size;
 export const taskLeaf = (t: { path: string }) => t.path.split(".").pop() ?? t.path;
 
 /** What the allowed-tools list says, on both trees: `null` is unset and allows every tool, `[]` allows none. */

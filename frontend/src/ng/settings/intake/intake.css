@@ -28,8 +28,10 @@
 .ink-note { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .ink-row { display: grid; grid-template-columns: minmax(70px, 110px) minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-label); }
 .ink-k { padding-top: 2px; color: var(--text-muted); }
+.ink-v > .segmented { align-self: flex-start; }
 .ink-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ink-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; font-size: var(--fs-label); color: var(--text-muted); }
 .ink-chip.is-changed { border-color: var(--mark-change-line); color: var(--mark-change); }
 .ink-rownote { grid-column: 2 / -1; font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .ink-select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: var(--fs-label); color: var(--text); }
+.ink-link { color: var(--text); text-decoration: underline; }

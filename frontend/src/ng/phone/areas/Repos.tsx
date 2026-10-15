@@ -15,6 +15,7 @@ import { NoMatch } from "../../ui/NoMatch";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
+import { homePath } from "../../templates/repos/path";
 
 const url = (r: RepoView) => `/settings/repos/${encodeURIComponent(r.name || r.path)}`;
 
@@ -47,13 +48,13 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: r.path, subCut: true, value: String(r.entry.default_chain ?? "default"),
+            sub: homePath(r.path), subCut: true, value: String(r.entry.default_chain ?? "default"),
             chips: [{ label: readiness(r.entry).word, tone: readiness(r.entry).ok ? "ok" as const : "warn" as const }, { label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
       )}
       {data && data.detected.length > 0 && (
-        <Group title="Detected" note="Workspace members Kraft found that are not connected." rows={data.detected.map((r): RowSpec => ({ key: r.path, label: repoName(r), mono: true, sub: r.path, chips: [{ label: "connect", tone: "ok" }], onClick: () => void connect(r) }))} />
+        <Group title="Detected" note="Workspace members Kraft found that are not connected." rows={data.detected.map((r): RowSpec => ({ key: r.path, label: repoName(r), mono: true, sub: homePath(r.path), chips: [{ label: "connect", tone: "ok" }], onClick: () => void connect(r) }))} />
       )}
     </AreaScreen>
   );

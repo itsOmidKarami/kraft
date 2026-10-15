@@ -45,6 +45,7 @@
 .pol-help { font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .pol-loops { display: grid; grid-template-columns: minmax(110px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; column-gap: 10px; }
 .pol-loop { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; column-gap: 10px; align-items: center; min-height: 30px; padding: 2px 8px; font-size: var(--fs-label); }
+.pol-loop.is-head { min-height: 0; padding-bottom: 0; }
 .pol-loop.is-default { border-bottom: 1px solid var(--line); }
 .pol-chain { margin-left: 4px; font-size: var(--fs-label); color: var(--text-muted); }
 .pol-link { padding: 0; border: 0; background: transparent; font-size: var(--fs-meta); color: var(--text-muted); text-decoration: underline; cursor: pointer; }

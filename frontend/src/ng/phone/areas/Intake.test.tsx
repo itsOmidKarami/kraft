@@ -29,9 +29,9 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Auto-intake (N.2)", () => {
   it("says what the rule does in one status line, On and Off", async () => {
     main();
-    expect(await screen.findByText(/^On ·/)).toHaveTextContent("On · Every 5 minutes, starts ready beads at P2 and below from every enabled repo. Each runs to its first gate and waits for you there.");
+    expect(await screen.findByText(/^On ·/)).toHaveTextContent("On · Every 5 minutes, starts the open issues in your bd tracker that nothing blocks, at P2 and below, from every enabled repo. Each runs to its first gate and waits for you there.");
     expect(statusLine({ ...INTAKE, enabled: false })).toMatch(/^Off · Nothing is picked up automatically/);
-    expect(statusLine({ ...INTAKE, repos: ["/a", "/b"], interval_s: 90 })).toContain("Every 1.5 minutes, starts ready beads at P2 and below from /a, /b");
+    expect(statusLine({ ...INTAKE, repos: ["/a", "/b"], interval_s: 90 })).toContain("Every 1.5 minutes, starts the open issues in your bd tracker that nothing blocks, at P2 and below, from /a, /b");
   });
 
   it("an Off rule shows Off and no checks", async () => {
