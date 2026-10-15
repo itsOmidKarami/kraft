@@ -47,7 +47,7 @@ TEXT_ON = ("bg", "side", "surface")
 FLOORS = {
     "text": (4.5, TEXT_ON),
     "text-sub": (4.5, TEXT_ON),
-    "text-muted": (4.5, TEXT_ON),
+    "text-muted": (4.5, (*TEXT_ON, "surface-2")),
     "text-faint": (3.0, TEXT_ON),
     "focus": (3.0, ("bg",)),
     # Graph edges, dots and outlines (WCAG 1.4.11): `border` and `line` are

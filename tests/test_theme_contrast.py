@@ -36,6 +36,7 @@ def test_every_combination_clears_its_floors(surface, mode, amount):
     for role in ("text", "text-sub", "text-muted"):
         for ground in ("bg", "side", "surface"):
             assert contrast(t[role], t[ground]) >= 4.5, (role, ground)
+    assert contrast(t["text-muted"], t["surface-2"]) >= 4.5, "surface-2"
     for ground in ("bg", "side", "surface"):
         assert contrast(t["text-faint"], t[ground]) >= 3.0, ground
     for role in ("ok", "warn", "bad", "info"):

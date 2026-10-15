@@ -246,6 +246,17 @@ describe("ng Sidebar", () => {
     expect(foot).toHaveAttribute("href", "/settings/about");
     expect(foot).toHaveTextContent(`v0.9.4${word}`);
   });
+
+  // A long dev version is what gets cut, never the badge (Kraft-ehe4a.18).
+  it("keeps the badge whole beside a long dev version, the full version in a title", async () => {
+    const version = "0.1.dev50+ge1f847a47.d20260101";
+    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, version, installed: version } as never);
+    vi.mocked(http.request).mockResolvedValue({ status: 200, body: { installed: version, latest: "v0.9.9", channel: "stable", behind: true, checked_at: null } });
+    mount("/templates/chains");
+    const foot = await screen.findByRole("link", { name: `Kraft v${version}, update available` });
+    expect(foot.querySelector(".ng-side-update")).toHaveTextContent("update");
+    expect(foot.querySelector(".ng-side-ver")).toHaveAttribute("title", `v${version}`);
+  });
 });
 
 describe("ng Sidebar draft dots", () => {  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
