@@ -56,8 +56,11 @@ const ALLOWED = [
   "templates/draft/types",
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
-  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
+  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Board & code saves
   "settings/savedWords", // what a save-on-change page says about whether it sticks, on both layouts
+  "settings/MovedAnchors", // a bookmark to a section that moved off Appearance
+  "settings/useTheme", // the theme a page edits and saves on change, and theme.yaml as it reads
+  "settings/boardCodeWords", // the code and board choices, on both layouts
   "settings/accessWords", // what Access says, on both layouts
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note

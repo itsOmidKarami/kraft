@@ -217,7 +217,7 @@ describe("BoardPage", () => {
     expect(where()).toContain("sort=title");
   });
 
-  it("starts Group from Appearance › Board", async () => {
+  it("starts Group from Board & code › Board", async () => {
     theme({ group_by: "chain" });
     put(item("a1", "running"));
     board();

@@ -140,6 +140,7 @@ export const STATES: State[] = [
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
   { area: "settings", state: "appearance", ...appSettings("/settings/appearance") },
+  { area: "settings", state: "board-and-code", ...appSettings("/settings/board-and-code") },
   { area: "settings", state: "about", ...appSettings("/settings/about") },
   // Item header (H1–H6): the main button's menu, ⋮, the four anchored cards, the diff line
   { area: "work-item", state: "header-menu", app: appHeader("running", async (p) => { await appMain(p).hover(); }) },

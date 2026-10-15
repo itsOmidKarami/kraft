@@ -60,6 +60,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "channel", route: "/settings/notifications/:channel", taps: [...more("Notifications"), { role: "link", name: "^Webhook" }], heading: "Webhook" },
   { id: "access", route: "/settings/access", taps: more("Access"), heading: "Access" },
   { id: "appearance", route: "/settings/appearance", taps: more("Appearance"), heading: "Appearance" },
+  { id: "board-and-code", route: "/settings/board-and-code", taps: more("Board & code"), heading: "Board & code" },
   { id: "storage", route: "/settings/storage", taps: more("Storage"), heading: "Storage" },
   { id: "about", route: "/settings/about", taps: more("About"), heading: "About" },
   { id: "archived", route: "/archived", taps: more("Archived"), heading: "Archived" },

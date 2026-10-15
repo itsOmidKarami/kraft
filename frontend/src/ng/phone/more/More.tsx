@@ -1,4 +1,4 @@
-import { Archive, Bell, Bot, ChartColumn, Download, GitBranch, HardDrive, Info, LibraryBig, Lock, Palette, SlidersHorizontal, Workflow, type LucideIcon } from "lucide-react";
+import { Archive, Bell, Bot, ChartColumn, Download, GitBranch, HardDrive, Info, LibraryBig, Lock, GitCompare, Palette, SlidersHorizontal, Workflow, type LucideIcon } from "lucide-react";
 import { useEffect } from "react";
 import { useDraftCounts } from "../../shell/useDraftCounts";
 import { restartNote, SELF_RESTART, useApply } from "../../apply/store";
@@ -20,6 +20,7 @@ const SETTINGS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/settings/notifications", label: "Notifications", icon: Bell },
   { to: "/settings/access", label: "Access", icon: Lock },
   { to: "/settings/appearance", label: "Appearance", icon: Palette },
+  { to: "/settings/board-and-code", label: "Board & code", icon: GitCompare },
   { to: "/settings/storage", label: "Storage", icon: HardDrive },
   { to: "/settings/about", label: "About", icon: Info },
 ];

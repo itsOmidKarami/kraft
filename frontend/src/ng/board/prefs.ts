@@ -9,7 +9,7 @@ export const DEFAULT_PREFS: BoardPrefs = { group_by: "status", show_done: 5, ope
 
 let cached: Promise<BoardPrefs> | null = null;
 
-/** Appearance › Board (`theme.board`): Group, the Done cap and Open in. Read
+/** Board & code › Board (`theme.board`): Group, the Done cap and Open in. Read
  *  once per page load; W16 writes it. */
 export function useBoardPrefs(): BoardPrefs | null {
   const [prefs, setPrefs] = useState<BoardPrefs | null>(null);

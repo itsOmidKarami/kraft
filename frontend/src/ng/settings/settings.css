@@ -5,7 +5,6 @@
 .set-title h1, .nt-title h1, .pol-title { margin: 0; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
 .set-h2, .set-block h2, .nt-h2, .pol-h2, .ink-h2 { font-size: var(--fs-label); font-weight: 400; color: var(--text-muted); }
 .appearance-controls h2, .appearance-preview h2 { margin: 0 0 8px; }
-.set-more > h2 { margin: 0; }
 .lede { margin: 4px 0 0; font-size: var(--fs-label); color: var(--text-muted); }
 .note { margin: 8px 2px 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .error { font-size: var(--fs-label); color: var(--bad); }
@@ -27,18 +26,9 @@
 .choice-note { padding: 0 2px; font-size: var(--fs-label); color: var(--text-muted); }
 .accent-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.set-more { margin-top: 12px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 0; }
-.set-more > h2 { margin-bottom: 8px; }
-.set-fold { border-top: 1px solid var(--line); }
-.set-fold > summary { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; cursor: pointer; list-style: none; }
-.set-fold > summary::-webkit-details-marker { display: none; }
-.set-fold > summary::before { content: "▸"; flex: none; width: 12px; font-size: var(--fs-label); color: var(--text-muted); }
-.set-fold[open] > summary::before { content: "▾"; }
-.set-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
-.set-fold .set-h3 { margin: 0; }
-.set-fold-now { font-size: var(--fs-label); color: var(--text-muted); }
-.set-fold-body { padding: 4px 0 18px 24px; }
-.set-h3 { margin: 0 0 8px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
+.set-section { padding: 14px 0 18px; border-top: 1px solid var(--line); }
+.set-section:first-of-type { margin-top: 16px; }
+.set-section > h2 { margin: 0 0 8px; }
 .set-sub { margin: 12px 0 6px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-hint { display: block; margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .set-cards { display: flex; flex-wrap: wrap; gap: 8px; }
