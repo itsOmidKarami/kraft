@@ -214,6 +214,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
             label="route"
             value={route}
             options={(["profile", "model"] as const).map((x) => ({ value: x, label: ROUTE_LABEL[x] }))}
+            sub="How the model is chosen: a named profile, or a model and effort set here."
             // Profile or model + effort, never both (Decisions §9 Task kinds): setting one clears the other server-side.
             onPick={(x) => {
               setRouteChoice(x);
@@ -221,7 +222,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
             }}
           />
           {route === "profile" ? (
-            <SelectRow label="profile" value={profile} options={profiles} onPick={set("profile")} />
+            <SelectRow label="profile" value={profile} options={profiles} sub="A named model and effort from Harnesses. Harness default leaves it to the harness." onPick={set("profile")} />
           ) : (
             <>
               <PauseText label="model" mono value={str(v("model"))} choices={models.map((m) => ({ value: m }))} listLabel="Models" onText={(t) => set("model", true)(t.trim())} onBlur={draft.flush} />

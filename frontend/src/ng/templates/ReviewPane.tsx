@@ -77,7 +77,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
   const r = view.result;
   const n = counts(r);
   const blocked = n.problems > 0;
-  const why = useReason(blocked ? fixProblems(n.problems) : null, { below: true });
+  const why = useReason(blocked ? fixProblems(n.problems) : null);
   const stale: StaleBody | null = draft.stale;
   const live = scopeFile(view.files, scope);
   const text = view.files[live] ?? "";
@@ -139,7 +139,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
     <>
       <Button variant="danger" onClick={() => setAsking(true)}>Discard draft</Button>
       <span className="bp-gap" />
-      {why.note}
+      {why.text && <p className="tpl-rv-why" id={why.id}>{why.text}</p>}
       <Button variant="primary" disabled={blocked} {...why.attrs} onClick={publish}>Publish</Button>
     </>
   );
@@ -184,7 +184,10 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
         </div>
       )}
       {r.warnings.map((w) => <Note key={w.file}>{w.file}: {w.message}.</Note>)}
-      {(problems.length > 0 || r.yaml_error) && (
+      {tab === "yaml" && (problems.length > 0 || r.yaml_error) && (
+        <p className="pane-note is-bad">{plural(problems.length + (r.yaml_error ? 1 : 0), "problem")} block publishing. <button type="button" className="tpl-rv-fix" onClick={() => setTab("changes")}>See them →</button></p>
+      )}
+      {tab === "changes" && (problems.length > 0 || r.yaml_error) && (
         <>
           <Head>Problems</Head>
           {r.yaml_error && <div className="tpl-rv-prob"><span className="tpl-rv-path">{r.yaml_error.file}, line {r.yaml_error.line}</span><span>{r.yaml_error.message}</span></div>}

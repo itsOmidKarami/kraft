@@ -61,6 +61,7 @@
 .tpl-rv-prob { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; padding: 6px 8px; border-left: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-size: var(--fs-label); color: var(--text); }
 .tpl-rv-prob > span:nth-child(2) { flex-basis: 100%; }
 .tpl-rv-fix { margin-left: auto; padding: 0 6px; border: 0; border-radius: 4px; background: none; font-size: var(--fs-meta); color: var(--text); text-decoration: underline; cursor: pointer; }
+.tpl-rv-why { flex: 1 0 100%; order: -1; margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--text); }
 .tpl-rv-diff { margin: 4px 0 8px; padding: 6px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: var(--fs-label)/17px ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .tpl-rv-line { display: block; padding: 0 8px; white-space: pre; }
 .tpl-rv-line.is-add { color: var(--text); background: color-mix(in srgb, var(--ok) 14%, transparent); }

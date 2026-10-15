@@ -134,15 +134,23 @@ describe("Config tab", () => {
   });
 });
 
+/** A select row edits in place: its value is a button until clicked. */
+const editing = async (name: string) => {
+  await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}, .*\\. Edit$`) }));
+  return screen.getByRole("combobox", { name });
+};
+
 describe("Overview tab", () => {
   it("picks a gate's document from what earlier nodes produce; required shows only with a document", async () => {
     const { draft } = mount("local_review");
-    const doc = screen.getByRole("combobox", { name: "document" });
-    expect([...doc.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["none", ...DEFAULT_VIEW.result.resolved!.documents.local_review]);
     await userEvent.click(screen.getByRole("checkbox", { name: "required" }));
     expect(draft.field).toHaveBeenCalledWith("local_review", "artifact_required", true);
+    const doc = await editing("document");
+    expect([...doc.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["none", ...DEFAULT_VIEW.result.resolved!.documents.local_review]);
     await userEvent.selectOptions(doc, "none");
     expect(draft.field).toHaveBeenCalledWith("local_review", "artifact", null);
+    // The pick closes the select back to its value.
+    expect(screen.queryByRole("combobox", { name: "document" })).toBeNull();
   });
 
   it("has no required box on a gate that needs no document", () => {
@@ -153,9 +161,9 @@ describe("Overview tab", () => {
     expect(screen.getByText("Nothing is needed to approve.")).toBeInTheDocument();
   });
 
-  it("offers only earlier exec nodes to reject to; gates are disabled", () => {
+  it("offers only earlier exec nodes to reject to; gates are disabled", async () => {
     mount("local_review");
-    const opts = [...screen.getByRole("combobox", { name: "reject to" }).querySelectorAll("option")];
+    const opts = [...(await editing("reject to")).querySelectorAll("option")];
     expect(opts.map((o) => o.textContent)).toEqual(["not set", "spec", "spec_approval (gate)", "implementation", "verification"]);
     expect(opts.find((o) => o.value === "spec_approval")).toBeDisabled();
   });
@@ -171,13 +179,15 @@ describe("Overview tab", () => {
 
   it("routes an agent task by profile or by model + effort, never both", async () => {
     const { draft } = mount("implementation.main.implement");
-    expect(await screen.findByRole("combobox", { name: "profile" })).toHaveValue("strong");
+    expect(await screen.findByRole("button", { name: "profile, strong. Edit" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "model" })).toBeNull();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "route" }), "model");
+    // Each route says what it is, where it is edited.
+    expect(screen.getByText(/How the model is chosen/)).toBeInTheDocument();
+    await userEvent.selectOptions(await editing("route"), "model");
     expect(draft.field).toHaveBeenCalledWith("implementation.main.implement", "profile", null);
     expect(screen.getByRole("textbox", { name: "model" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "profile" })).toBeNull();
-    expect([...screen.getByRole("combobox", { name: "effort" }).querySelectorAll("option")].map((o) => o.textContent)).toEqual(["default", "low", "medium", "high"]);
+    expect(screen.queryByRole("button", { name: /^profile, / })).toBeNull();
+    expect([...(await editing("effort")).querySelectorAll("option")].map((o) => o.textContent)).toEqual(["default", "low", "medium", "high"]);
   });
 
   it("sends a typed field on a pause, and flushes on blur", async () => {

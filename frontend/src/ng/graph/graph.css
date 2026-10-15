@@ -170,7 +170,11 @@
 .strip-node { position: absolute; width: 90px; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; z-index: 1; }
 .strip-btn { display: flex; margin: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; pointer-events: auto; }
 .strip-btn:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
-.strip-label { font: 600 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); white-space: nowrap; }
+.strip-label { overflow: hidden; text-overflow: ellipsis; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
+.strip-label.is-viewing { font-weight: 600; color: var(--text); }
+.strip-fold { position: absolute; z-index: 1; display: flex; align-items: center; gap: 4px; box-sizing: border-box; margin: 0; padding: 0 10px 0 2px; border: 1px solid var(--stroke); border-radius: 13px; background: var(--bg); font: 400 var(--fs-label) ui-monospace, Menlo, monospace; white-space: nowrap; color: var(--text-sub); cursor: pointer; }
+.strip-fold:is(:hover, :focus-visible) { border-color: var(--text-muted); }
+.strip-fold-n { margin-left: 4px; color: var(--text-muted); }
 
 /* GateView */
 .gateview { position: absolute; top: 0; left: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; }

@@ -1,40 +1,68 @@
-import { useMemo, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ChainNode } from "./layout";
 import { NodeGlyph } from "./NodeGlyph";
+import { stripRow, type Fold, type RowEntry } from "./stages";
 import { accessibleName } from "./types";
 import { useRoving } from "./useRoving";
 import "./graph.css";
 import { tip } from "../ui/Tooltip";
 
-/** Strip geometry, from ChainStrip.dc.html `static G`. */
-export const S = { B: 30, CE: 50, CG: 34, CY: 22, PAD: 22, H: 64 } as const;
+/** Strip geometry: a node's column holds its glyph and its id under it; a folded stage is one pill. */
+export const S = { B: 30, CE: 92, CG: 92, CY: 22, PAD: 22, H: 64, PILL: 26, GAP: 16 } as const;
 
-export function stripLayout(nodes: ChainNode[]) {
+const foldW = (f: Fold) => 58 + f.words.length * 7.4 + (f.passed ? 14 : 0) + S.GAP;
+const foldKey = (key: string) => `f:${key}`;
+
+export function stripLayout(row: RowEntry[]) {
   let x = S.PAD;
-  const items = nodes.map((node) => {
-    const w = node.kind === "gate" ? S.CG : S.CE, cx = x + w / 2;
+  const cols = row.map((entry) => {
+    const w = entry.kind === "fold" ? foldW(entry) : entry.kind === "gate" ? S.CG : S.CE, cx = x + w / 2;
     x += w;
-    return { node, cx };
+    return { entry, w, cx };
   });
-  const half = (n: ChainNode) => (n.kind === "gate" ? 12 : S.B / 2);
-  const edges = items.slice(1).map((b, i) => {
-    const a = items[i];
-    return { d: `M${a.cx + half(a.node) + 3} ${S.CY} L${b.cx - half(b.node) - 3} ${S.CY}`, todo: b.node.state === "todo" };
+  const half = (c: (typeof cols)[number]) => (c.entry.kind === "fold" ? (c.w - S.GAP) / 2 : c.entry.kind === "gate" ? 12 : S.B / 2);
+  const edges = cols.slice(1).map((b, i) => {
+    const a = cols[i];
+    const todo = b.entry.kind === "fold" ? !b.entry.passed : b.entry.state === "todo";
+    return { d: `M${a.cx + half(a) + 3} ${S.CY} L${b.cx - half(b) - 3} ${S.CY}`, todo };
   });
-  return { items, edges, W: x + S.PAD, H: S.H };
+  return {
+    items: cols.flatMap((c) => (c.entry.kind === "fold" ? [] : [{ node: c.entry, cx: c.cx, w: c.w }])),
+    folds: cols.flatMap((c) => (c.entry.kind === "fold" ? [{ fold: c.entry, cx: c.cx, w: c.w }] : [])),
+    edges,
+    W: x + S.PAD,
+    H: S.H,
+  };
 }
 
 type Props = { nodes: ChainNode[]; viewing: string; onOpen?: (id: string) => void; onBack?: () => void };
 
-/** The chain bar above a node view: one row, only the viewed node labelled. */
+/** A pill's accessible name: the stage by its gate in words, how many nodes it holds. */
+const pillName = (f: Fold) => `${f.words} stage, ${f.nodes.length} ${f.nodes.length === 1 ? "node" : "nodes"}${f.passed ? ", passed" : ""}: expand`;
+
+/** The chain bar above a node view: the viewed node's stage node by node, every id under its glyph, the other stages
+ *  folded to a pill named by their gate (a click opens one in place). */
 export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
-  const lay = useMemo(() => stripLayout(nodes), [nodes]);
-  const roving = useRoving(viewing, nodes[0]?.id);
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const row = useMemo(() => stripRow(nodes, opened, viewing), [nodes, opened, viewing]);
+  const lay = useMemo(() => stripLayout(row), [row]);
+  const stops = row.map((e) => (e.kind === "fold" ? foldKey(e.key) : e.id));
+  const roving = useRoving(viewing, stops[0]);
+  // A stage opened in place hands focus to its first node, its pill having gone.
+  const landing = useRef<string | null>(null);
+  useEffect(() => {
+    if (landing.current && stops.includes(landing.current)) roving.go(landing.current);
+    landing.current = null;
+  }, [row]); // eslint-disable-line react-hooks/exhaustive-deps
+  const expand = (f: Fold) => {
+    landing.current = f.nodes[0].id;
+    setOpened((o) => new Set(o).add(f.key));
+  };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const i = nodes.findIndex((n) => n.id === roving.active);
+    const i = stops.indexOf(roving.active ?? "");
     e.preventDefault();
-    roving.go(nodes[Math.max(0, Math.min(nodes.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))]?.id);
+    roving.go(stops[Math.max(0, Math.min(stops.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))]);
   };
   return (
     <div className="strip">
@@ -44,10 +72,10 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
           <svg width={lay.W} height={lay.H} aria-hidden="true">
             {lay.edges.map((e, i) => <path key={i} d={e.d} className={e.todo ? "strip-edge is-todo" : "strip-edge"} />)}
           </svg>
-          {lay.items.map(({ node: n, cx }) => {
+          {lay.items.map(({ node: n, cx, w }) => {
             const v = n.id === viewing;
             return (
-              <div key={n.id} className="strip-node" style={{ left: cx - 45, top: S.CY - S.B / 2 }}>
+              <div key={n.id} className="strip-node" style={{ left: cx - w / 2, width: w, top: S.CY - S.B / 2 }}>
                 <button
                   ref={roving.ref(n.id)}
                   type="button"
@@ -60,8 +88,30 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
                 >
                   <NodeGlyph {...n} size="sm" sel={v} prob={n.prob && !v} />
                 </button>
-                {v && <span className="strip-label">{n.id}</span>}
+                <span className={v ? "strip-label is-viewing" : "strip-label"} style={{ maxWidth: w - 6 }}>{n.id}</span>
               </div>
+            );
+          })}
+          {lay.folds.map(({ fold: f, cx, w }) => {
+            const key = foldKey(f.key);
+            const gate = f.nodes.at(-1)!;
+            return (
+              <button
+                key={key}
+                ref={roving.ref(key)}
+                type="button"
+                tabIndex={roving.tabIndex(key)}
+                {...tip(pillName(f), f.nodes.map((n) => n.id).join(" → "))}
+                className="strip-fold"
+                style={{ left: cx - (w - S.GAP) / 2, top: S.CY - S.PILL / 2, width: w - S.GAP, height: S.PILL }}
+                onFocus={() => roving.go(key)}
+                onClick={() => expand(f)}
+              >
+                {gate.kind === "gate" && <NodeGlyph kind="gate" state={f.passed ? "done" : undefined} size="sm" />}
+                <span>{f.words}</span>
+                {f.passed && <span className="fold-done" aria-hidden="true">✓</span>}
+                <span className="strip-fold-n">{f.nodes.length}</span>
+              </button>
             );
           })}
         </div>

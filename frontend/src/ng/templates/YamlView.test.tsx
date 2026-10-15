@@ -30,6 +30,10 @@ describe("YAML view", () => {
     rerender(<YamlView draft={fake(viewWith("id: default\nnodes: []\n"))} scope={{ area: "chains", key: "default" }} published={null} />);
     expect(area()).toHaveValue("id: default\nnodes: []\n");
     expect([...document.querySelectorAll(".yv-mark")].map((m) => m.textContent)).toEqual(["+", "+", ""]);
+    // The status agrees with the header: a draft is a draft, and a chain with none is the published one.
+    expect(screen.getByRole("status")).toHaveTextContent("parsed · draft");
+    rerender(<YamlView draft={fake({ ...viewWith("id: default\nnodes: []\n"), draft: false })} scope={{ area: "chains", key: "default" }} published={null} />);
+    expect(screen.getByRole("status")).toHaveTextContent("parsed · matches published");
   });
 
   it("marks a problem on its line, and its row puts the caret there", async () => {

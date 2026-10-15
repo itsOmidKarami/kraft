@@ -52,6 +52,16 @@ const where = () => screen.getByLabelText("where").textContent;
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the gate review (F)", () => {
+  it.each([
+    ["shows the gate's message under its title", "Approve the plan. It marks the MR ready.", true],
+    ["has no message line when the gate says nothing", undefined, false],
+  ])("%s", async (_, message, shown) => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", ...(message && { message }) }] } });
+    mount(gateItem({ materialized_chain: frozen }), "/work-items/w1/review?gate=plan_approval");
+    await screen.findByRole("heading", { level: 1 }, { timeout: 5000 });
+    expect(!!screen.queryByText("Approve the plan. It marks the MR ready.")).toBe(shown);
+  });
+
   it("shows a gate's document and the files that changed, and opens one file at a time", async () => {
     mount(gateItem());
     // The file's first mount pays for its imports, and the document and the diff come in two reads: under load, past 1s.

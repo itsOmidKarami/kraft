@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChainStrip, S, stripLayout } from "./ChainStrip";
+import { stripRow } from "./stages";
 import type { ChainNode } from "./layout";
 
 const nodes: ChainNode[] = [
@@ -12,33 +13,44 @@ const nodes: ChainNode[] = [
 ];
 
 describe("ChainStrip", () => {
-  it("keeps the prototype's geometry", () => {
-    expect(S).toEqual({ B: 30, CE: 50, CG: 34, CY: 22, PAD: 22, H: 64 });
-    const lay = stripLayout(nodes);
-    expect(lay.items.map((i) => i.cx)).toEqual([47, 89, 131, 173]);
-    expect(lay.W).toBe(22 + 50 + 34 + 50 + 34 + 22);
-    expect(lay.edges[0].d).toBe("M65 22 L74 22");
-    expect(lay.edges.map((e) => e.todo)).toEqual([false, false, true]);
+  it("lays out a column for each node and a pill for each folded stage", () => {
+    const lay = stripLayout(stripRow(nodes, new Set(), "implement"));
+    expect(lay.items.map((i) => i.node.id)).toEqual(["implement", "merge"]);
+    expect(lay.folds.map((f) => [f.fold.words, f.fold.passed])).toEqual([["approve spec", true]]);
+    expect(lay.items.map((i) => i.w)).toEqual([S.CE, S.CG]);
+    expect(lay.edges).toHaveLength(2);
+    expect(lay.edges.map((e) => e.todo)).toEqual([false, true]);
   });
 
-  it("labels only the viewed node, and names every glyph", () => {
+  it("labels every node of the viewed stage and folds the others to a pill named by their gate", () => {
     render(<ChainStrip nodes={nodes} viewing="implement" />);
     expect(screen.getByText("implement")).toBeInTheDocument();
+    expect(screen.getByText("merge")).toBeInTheDocument();
     expect(screen.queryByText("spec")).toBeNull();
-    expect(screen.getByRole("button", { name: "approve_spec, gate, done" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "approve spec stage, 2 nodes, passed: expand" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "merge, gate, not started" })).toBeInTheDocument();
   });
 
-  it("enters on the viewed node, moves with ←/→, opens on Enter, goes back", async () => {
+  it("opens a folded stage in place and lands on its first node", async () => {
+    const user = userEvent.setup();
+    render(<ChainStrip nodes={nodes} viewing="implement" />);
+    await user.click(screen.getByRole("button", { name: /^approve spec stage/ }));
+    expect(screen.getByText("approve_spec")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^approve spec stage/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^spec, node/ })).toHaveFocus();
+  });
+
+  it("enters on the viewed node, moves with ←/→ over nodes and pills, opens on Enter, goes back", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn(), onBack = vi.fn();
     render(<ChainStrip nodes={nodes} viewing="implement" onOpen={onOpen} onBack={onBack} />);
     await user.tab();
     await user.tab();
     expect(screen.getByRole("button", { name: /^implement/ })).toHaveFocus();
-    await user.keyboard("{ArrowLeft}{Enter}");
-    expect(onOpen).toHaveBeenCalledWith("approve_spec");
-    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
-    expect(screen.getByRole("button", { name: /^merge/ })).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("button", { name: /^approve spec stage/ })).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}{Enter}");
+    expect(onOpen).toHaveBeenCalledWith("merge");
     await user.click(screen.getByRole("button", { name: "Back to the chain" }));
     expect(onBack).toHaveBeenCalled();
   });

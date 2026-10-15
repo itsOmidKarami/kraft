@@ -257,7 +257,9 @@ describe("a node the chain ran again", () => {
     expect(where()).toBe(`${AT}?sel=verification.checks.lint`);
     // Another node's view starts on its own newest.
     await pickPass(1);
-    await userEvent.click(within(screen.getByRole("group", { name: "Chain" })).getAllByRole("button")[0]);
+    const strip = within(screen.getByRole("group", { name: "Chain" }));
+    await userEvent.click(strip.getAllByRole("button", { name: /stage, .*expand$/ })[0]);
+    await userEvent.click(strip.getByRole("button", { name: /^plan, node/ }));
     expect(where()).toBe("/work-items/w1/nodes/plan");
   });
 
