@@ -27,6 +27,17 @@
 .board-filters { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
 .board-filter input { box-sizing: border-box; width: 230px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); }
 .board-filter input::placeholder { color: var(--text-muted); }
+.board-filter { position: relative; }
+.board-filter input { padding-right: 30px; }
+.board-filter-kbd { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; pointer-events: none; }
+.board-filter:focus-within .board-filter-kbd { display: none; }
+.board-keys-btn { padding: 2px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.board-keys-btn:is(:hover, :focus-visible) { background: var(--surface-2); }
+.board-keys-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-shortcuts-list { margin: 0; display: grid; gap: 8px; }
+.board-shortcut { display: flex; align-items: center; gap: 12px; }
+.board-shortcut dt { display: flex; gap: 4px; min-width: 96px; }
+.board-shortcut dd { margin: 0; color: var(--text-sub); }
 .board-filter input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .board-filters-gap { flex: 1; }
 .board-menu-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }

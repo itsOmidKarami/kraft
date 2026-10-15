@@ -9,7 +9,9 @@ import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
+import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
+import { tip } from "../ui/Tooltip";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
@@ -23,6 +25,7 @@ import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { countIn } from "./counts";
+import { Shortcuts } from "./Shortcuts";
 import { Skeleton } from "./Skeleton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
@@ -85,6 +88,7 @@ export function BoardPage() {
   const filterRef = useRef<HTMLInputElement>(null);
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
   const [budgetEdit, setBudgetEdit] = useState(false);
+  const [keys, setKeys] = useState(false);
   const [body, bodyW] = useWidth();
   const bodyEl = useRef<HTMLDivElement | null>(null);
   const bodyRef = useCallback((el: HTMLDivElement | null) => { body(el); bodyEl.current = el; }, [body]);
@@ -174,13 +178,16 @@ export function BoardPage() {
     if (lost) requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
   }, [query.sel, setQuery]);
 
-  // "/" focuses the filter; Escape clears the selection once menus have had it.
+  // "/" focuses the filter, "?" lists the shortcuts; Escape clears the selection once menus have had it.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
+      } else if (e.key === "?" && !isTextField(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setKeys(true);
       } else if (e.key === "Escape" && query.sel) closePeek();
     };
     window.addEventListener("keydown", onKey);
@@ -273,7 +280,8 @@ export function BoardPage() {
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>
-          <input ref={filterRef} type="search" value={query.q} placeholder="Filter by title or id" onChange={(e) => setQuery({ q: e.target.value })} />
+          <input ref={filterRef} type="search" value={query.q} placeholder="Filter by title or id" aria-keyshortcuts="/" onChange={(e) => setQuery({ q: e.target.value })} />
+          {!query.q && <span className="board-filter-kbd" aria-hidden><Kbd>/</Kbd></span>}
         </label>
         <Menu
           label="Chain"
@@ -298,6 +306,7 @@ export function BoardPage() {
           trigger={<><span className="board-menu-key">Sort</span> {SORT_LABEL[query.sort]} <span aria-hidden className="board-caret">▾</span></>}
           items={(Object.keys(SORT_LABEL) as SortBy[]).map((s) => ({ label: SORT_LABEL[s], checked: query.sort === s, onSelect: () => setQuery({ sort: s }) }))}
         />
+        <button type="button" className="board-keys-btn" {...tip("Keyboard shortcuts")} aria-keyshortcuts="?" onClick={() => setKeys(true)}><Kbd>?</Kbd></button>
       </div>
 
       <div className="board-body" ref={bodyRef}>
@@ -317,7 +326,7 @@ export function BoardPage() {
                     </span>
                   )}
                   <span className="board-head-gap" />
-                  {g.done && g.total > 0 && (
+                  {g.total > 0 && (
                     <button type="button" className="board-select-all" onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</button>
                   )}
                 </h2>
@@ -360,6 +369,7 @@ export function BoardPage() {
         )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
+      {keys && <Shortcuts onClose={() => setKeys(false)} />}
     </div>
   );
 }

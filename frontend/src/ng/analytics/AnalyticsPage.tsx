@@ -6,7 +6,7 @@ import type { Analytics } from "../../types";
 import { chainOf } from "../board/model";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
-import { DEFAULT_RANGE, gateRows, HOW_COUNTED, RANGES } from "./shared";
+import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES } from "./shared";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 
@@ -109,7 +109,7 @@ export function AnalyticsPage() {
           <Section id="an-overview" bare title="Overview">
             <div className="an-kpis">
               <Kpi label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
-              <Kpi label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
+              <Kpi label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
               <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
               <Kpi label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
             </div>
@@ -158,8 +158,8 @@ export function AnalyticsPage() {
                   {report.by_node.map((n) => (
                     <tr key={n.node} data-node={n.node}>
                       <td className="an-name" data-allow-ellipsis title={n.node}>{n.node}</td>
-                      <td><span className="an-share"><span style={{ width: `${(n.cost_usd / topCost) * 100}%` }} /></span></td>
-                      <td className="an-num">{Math.round(n.avg_ms / 60_000)}</td>
+                      <td>{(n.cost_usd > 0 || n.cost_complete) && <span className="an-share"><span style={{ width: `${(n.cost_usd / topCost) * 100}%` }} /></span>}</td>
+                      <td className="an-num">{minutes(n.avg_ms, n.runs)}</td>
                       <td className="an-num">{tokens(n.tokens)}</td>
                       <td className="an-num an-strong">{usd(n.cost_usd, n.cost_complete)}</td>
                       <td className="an-num">{totalCost ? Math.round((n.cost_usd / totalCost) * 100) : 0}%</td>
@@ -186,7 +186,7 @@ export function AnalyticsPage() {
               </table>
             </Section>
 
-            <Section id="an-stops" title="Why items stopped for a person" foot={<p className="an-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {elapsed(t.open_mr_to_green_ci_ms)} median</p>} empty={report.stop_reasons.length === 0 ? "Nothing stopped for a person in this range." : undefined}>
+            <Section id="an-stops" title="Why items stopped for a person" foot={<p className="an-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {measured(t.open_mr_to_green_ci_ms)} median</p>} empty={report.stop_reasons.length === 0 ? "Nothing stopped for a person in this range." : undefined}>
               <ul className="an-stops">
                 {report.stop_reasons.map((s) => (
                   <li key={s.label} className="an-stop" data-label={s.label}>
