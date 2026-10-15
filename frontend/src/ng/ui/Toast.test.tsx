@@ -35,6 +35,16 @@ describe("Toast", () => {
     expect(screen.queryByText("Cancelling 2 items…")).toBeNull();
   });
 
+  it("never pushes an unread error out for normal toasts", () => {
+    render(<Toaster />);
+    act(() => showToast("Failed to save", { tone: "error" }));
+    for (const m of ["b1", "b2", "b3", "b4"]) act(() => showToast(m));
+    expect(screen.getByText("Failed to save")).toBeInTheDocument();
+    expect(screen.queryByText("b1")).toBeNull();
+    expect(screen.queryByText("b2")).toBeNull();
+    expect(screen.getByText("b4")).toBeInTheDocument();
+  });
+
   it("stacks three at most and says an error as an alert that stays until dismissed", () => {
     vi.useFakeTimers();
     render(<Toaster />);

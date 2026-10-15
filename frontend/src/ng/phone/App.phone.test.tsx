@@ -182,6 +182,14 @@ describe("the phone's unknown address", () => {
     expect(document.title).toBe("Not found · Kraft");
   });
 
+  it("offers the area's own list for a deep unknown address, not More", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/repos/x/y");
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "Up to Repos" })).toHaveAttribute("href", "/settings/repos");
+  });
+
   it("titles each screen and moves focus to its heading on a tab change", async () => {
     width(true);
     stubFetch();

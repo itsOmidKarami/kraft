@@ -21,7 +21,7 @@ export function useDocumentTitle() {
  *  pressed went away with its page), the page itself, or the navigation. An
  *  open dialog, a field or the composer holds focus on purpose. */
 const mayTake = (at: Element | null, main: HTMLElement) =>
-  !at || at === document.body || at === main || !!at.closest("nav, header, .ng-skip");
+  !at || at === document.body || at === main || !at.closest('[role="dialog"]') && !!at.closest(".ng-side, .ng-header, .ng-skip, .ph-tabs, .ph-header");
 
 /** On a route change (not a tab or a query change within a page), moves focus
  *  to the page's heading so a keyboard or screen-reader user lands on the new

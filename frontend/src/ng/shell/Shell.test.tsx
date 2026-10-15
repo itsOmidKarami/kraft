@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
@@ -9,6 +9,8 @@ import { HeaderActions } from "./HeaderActions";
 import { Shell } from "./Shell";
 
 afterEach(() => window.history.pushState({}, "", "/"));
+
+const Where = () => <output data-testid="where">{useLocation().pathname + useLocation().search}</output>;
 
 const inShell = (page: JSX.Element) =>
   render(
@@ -65,7 +67,9 @@ describe("ng Shell", () => {
   it("opens the board's composer from N on another page", async () => {
     window.history.pushState({}, "", "/settings/about");
     render(<App />);
-    await userEvent.keyboard("N");
+    fireEvent.keyDown(document.body, { key: "N" });
+    expect(window.location.pathname).toBe("/settings/about");
+    await userEvent.keyboard("{Shift>}N{/Shift}");
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/?new=1"));
   });
 
@@ -100,8 +104,16 @@ describe("ng Shell chrome", () => {
     expect(screen.getByRole("heading", { name: "Page" })).not.toHaveFocus();
   });
 
+  it("leaves focus where it is inside a dialog, even when the dialog is hosted inside the app header", async () => {
+    inShell(<><h1>Page</h1><div className="ng-header"><div role="dialog" aria-label="Doc"><button>Close doc</button></div></div></>);
+    screen.getByRole("button", { name: "Close doc" }).focus();
+    fireEvent.click(screen.getByRole("link", { name: "Chains" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("button", { name: "Close doc" })).toHaveFocus();
+  });
+
   it("opens the one shortcut help from ? on any page, but not from a field or over a dialog", async () => {
-    inShell(<><h1>Anything</h1><input aria-label="Box" /></>);
+    inShell(<><h1>Anything</h1><input aria-label="Box" /><Where /></>);
     await userEvent.type(screen.getByRole("textbox", { name: "Box" }), "?");
     expect(screen.queryByRole("dialog")).toBeNull();
     await userEvent.keyboard("{Escape}");
@@ -110,7 +122,7 @@ describe("ng Shell chrome", () => {
     const help = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
     expect(help).toHaveTextContent("Search");
     expect(help).toHaveTextContent("New work item");
-    await userEvent.keyboard("N");
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await userEvent.keyboard("{Shift>}N{/Shift}");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 });

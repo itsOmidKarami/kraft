@@ -32,7 +32,7 @@ export function Shell() {
     const onKey = (e: KeyboardEvent) => {
       if (!isBareKey(e) || dialogOpen()) return;
       if (e.key === "?") setHelp(true);
-      else if (e.key === "N" && !offline) {
+      else if (e.key === "N" && e.shiftKey && !offline) {
         const q = new URLSearchParams(pathname === "/" ? search : "");
         q.delete("sel");
         q.set("new", "1");

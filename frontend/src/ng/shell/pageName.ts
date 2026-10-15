@@ -53,14 +53,14 @@ export function pageTitle(href: string, item: ItemLookup, needs = 0): string {
 /** The nearest page above an address that exists, for a not-found page to offer:
  *  the longest known prefix, else the section's landing page (the address
  *  `/templates` and `/settings` themselves redirect to). */
-export function nearestPage(pathname: string): { to: string; label: string } {
+export function nearestPage(pathname: string): { to: string; label: string; section?: boolean } {
   const segs = pathname.split("/").filter(Boolean);
   for (let n = segs.length - 1; n > 0; n--) {
     const to = `/${segs.slice(0, n).join("/")}`;
     const r = ROUTES.find((x) => x.path === to);
     if (r) return { to, label: r.label };
   }
-  if (segs[0] === "templates") return { to: "/templates/chains", label: "Chains" };
-  if (segs[0] === "settings") return { to: "/settings/policy", label: "Policy" };
+  if (segs[0] === "templates") return { to: "/templates/chains", label: "Chains", section: true };
+  if (segs[0] === "settings") return { to: "/settings/policy", label: "Policy", section: true };
   return { to: "/", label: "Board" };
 }

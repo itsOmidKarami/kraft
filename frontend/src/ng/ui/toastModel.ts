@@ -20,6 +20,13 @@ export const MAX_TOASTS = 3;
 
 let seq = 0;
 
+/** Keeps the newest MAX_TOASTS, dropping the oldest normal toast first: an error stays until it is read, so only errors crowding errors push one out. */
+function capped(rows: ToastRow[]): ToastRow[] {
+  const out = [...rows];
+  while (out.length > MAX_TOASTS) out.splice(Math.max(0, out.findIndex((t) => t.tone !== "error")), 1);
+  return out;
+}
+
 /** The toasts both trees show, from the `kraft:toast` event `showToast` sends. A
  *  toast holding focus stays until focus leaves it, so its action is never pulled
  *  from under a keyboard. `bind` gives each toast's element to that check. */
@@ -31,7 +38,7 @@ export function useToasts() {
     const on = (e: Event) => {
       const d = (e as CustomEvent<ToastDetail>).detail;
       const id = ++seq;
-      setToasts((cur) => [...cur, { ...d, id }].slice(-MAX_TOASTS));
+      setToasts((cur) => capped([...cur, { ...d, id }]));
       const ms = d.ms ?? (d.tone === "error" ? undefined : TOAST_MS);
       if (ms === undefined) return;
       const drop = () => {

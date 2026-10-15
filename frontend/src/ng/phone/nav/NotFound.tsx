@@ -2,11 +2,11 @@ import { Link, useLocation } from "react-router-dom";
 import { nearestPage } from "../../shell/pageName";
 import { ScreenHeader } from "./ScreenHeader";
 
-/** An address no phone screen answers. The tab bar stays, and the way up is the area's list, or More for a section. */
+/** An address no phone screen answers. The tab bar stays, and the way up is the area's list, or More when only the section is known. */
 export function NotFound() {
   const { pathname } = useLocation();
   const near = nearestPage(pathname);
-  const up = near.to === "/" ? null : /^\/(?:templates|settings)\//.test(near.to) ? { to: "/more", label: "More" } : near;
+  const up = near.to === "/" ? null : near.section ? { to: "/more", label: "More" } : near;
   return (
     <>
       <ScreenHeader />
