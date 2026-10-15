@@ -77,6 +77,11 @@
             "off"
           ],
           "default": "all",
+          "enumDescriptions": [
+            "Notify when an item needs you or fails.",
+            "Notify only when a gate opens.",
+            "Never notify."
+          ],
           "description": "Which Kraft states raise a notification."
         },
         "kraft.path": {
@@ -130,12 +135,12 @@
       },
       {
         "command": "kraft.cancel",
-        "title": "Cancel",
+        "title": "Cancel\u2026",
         "category": "Kraft"
       },
       {
         "command": "kraft.skip",
-        "title": "Skip",
+        "title": "Skip\u2026",
         "category": "Kraft"
       },
       {
@@ -145,7 +150,7 @@
       },
       {
         "command": "kraft.archive",
-        "title": "Archive",
+        "title": "Archive\u2026",
         "category": "Kraft"
       },
       {
@@ -192,7 +197,7 @@
       },
       {
         "command": "kraft.approveNextGate",
-        "title": "Approve Next Gate\u2026",
+        "title": "Next Gate",
         "category": "Kraft"
       },
       {
@@ -281,7 +286,7 @@
       },
       {
         "command": "kraft.review.discard",
-        "title": "Discard Review Comments",
+        "title": "Discard Review Comments\u2026",
         "category": "Kraft"
       },
       {
@@ -302,7 +307,7 @@
       },
       {
         "command": "kraft.review.deleteComment",
-        "title": "Delete",
+        "title": "Delete\u2026",
         "category": "Kraft",
         "icon": "$(trash)"
       },
@@ -326,7 +331,7 @@
       },
       {
         "command": "kraft.review.otherThreads",
-        "title": "Show Threads Not on a File in This Review",
+        "title": "Show Other Threads",
         "category": "Kraft",
         "icon": "$(comment-discussion)"
       },
@@ -360,6 +365,38 @@
         "command": "kraft.fileSelection",
         "title": "File Selection as Kraft Work\u2026",
         "category": "Kraft"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "kraft.approveNextGate",
+        "key": "ctrl+alt+k n",
+        "mac": "cmd+alt+k n",
+        "when": "kraft.connected"
+      },
+      {
+        "command": "kraft.approve",
+        "key": "ctrl+alt+k a",
+        "mac": "cmd+alt+k a",
+        "when": "resourceScheme == kraft-artifact || kraft.artifactPreview"
+      },
+      {
+        "command": "kraft.reject",
+        "key": "ctrl+alt+k r",
+        "mac": "cmd+alt+k r",
+        "when": "resourceScheme == kraft-artifact || kraft.artifactPreview"
+      },
+      {
+        "command": "kraft.review.submit",
+        "key": "ctrl+alt+k s",
+        "mac": "cmd+alt+k s",
+        "when": "kraft.artifactPreview || resourceScheme =~ /^kraft-(wt|git|artifact|threads)$/ && kraft.review.activeHasDrafts"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "kraft.openMenu",
+        "label": "Open"
       }
     ],
     "viewsWelcome": [
@@ -494,37 +531,7 @@
           "group": "2_end"
         },
         {
-          "command": "kraft.openWorktree",
-          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.openInWebUi",
-          "when": "view == kraft.board && viewItem =~ /^item:/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.showWorkerLog",
-          "when": "view == kraft.board && viewItem =~ /^item:/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.openMergeRequest",
-          "when": "view == kraft.board && viewItem =~ /\\bmr\\b/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.openSpec",
-          "when": "view == kraft.board && viewItem =~ /\\battSpec\\b/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.openPlan",
-          "when": "view == kraft.board && viewItem =~ /\\battPlan\\b/",
-          "group": "3_open"
-        },
-        {
-          "command": "kraft.reviewChanges",
+          "submenu": "kraft.openMenu",
           "when": "view == kraft.board && viewItem =~ /^item:/",
           "group": "3_open"
         },
@@ -537,6 +544,43 @@
           "command": "kraft.review.discard",
           "when": "view == kraft.board && viewItem =~ /\\bdrafts\\b/ && !kraft.readOnly",
           "group": "4_review"
+        }
+      ],
+      "kraft.openMenu": [
+        {
+          "command": "kraft.openWorktree",
+          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/",
+          "group": "open@1"
+        },
+        {
+          "command": "kraft.openInWebUi",
+          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "group": "open@2"
+        },
+        {
+          "command": "kraft.showWorkerLog",
+          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "group": "open@3"
+        },
+        {
+          "command": "kraft.openMergeRequest",
+          "when": "view == kraft.board && viewItem =~ /\\bmr\\b/",
+          "group": "open@4"
+        },
+        {
+          "command": "kraft.openSpec",
+          "when": "view == kraft.board && viewItem =~ /\\battSpec\\b/",
+          "group": "open@5"
+        },
+        {
+          "command": "kraft.openPlan",
+          "when": "view == kraft.board && viewItem =~ /\\battPlan\\b/",
+          "group": "open@6"
+        },
+        {
+          "command": "kraft.reviewChanges",
+          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "group": "open@7"
         }
       ],
       "explorer/context": [

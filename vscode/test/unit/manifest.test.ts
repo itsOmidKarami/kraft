@@ -51,6 +51,30 @@ it("offers Show Log in the palette and keeps the status menu out of it", () => {
   expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.statusMenu", when: "false" });
 });
 
+it.each([
+  ["kraft.cancel", "Cancel…"], ["kraft.skip", "Skip…"], ["kraft.archive", "Archive…"],
+  ["kraft.review.discard", "Discard Review Comments…"], ["kraft.review.deleteComment", "Delete…"],
+  ["kraft.review.otherThreads", "Show Other Threads"], ["kraft.approveNextGate", "Next Gate"],
+])("%s is titled %s", (command, title) =>
+  expect(pkg.contributes.commands.find((c: { command: string }) => c.command === command)?.title).toBe(title));
+
+it("explains each value of kraft.notifications", () => {
+  const { enum: values, enumDescriptions } = pkg.contributes.configuration.properties["kraft.notifications"];
+  expect(enumDescriptions).toHaveLength(values.length);
+});
+
+describe("default keybindings", () => {
+  const keybindings = pkg.contributes.keybindings as { command: string; key: string; mac: string; when: string }[];
+  const gateDoc = "resourceScheme == kraft-artifact || kraft.artifactPreview";
+  it.each([
+    ["kraft.approveNextGate", "ctrl+alt+k n", "kraft.connected"],
+    ["kraft.approve", "ctrl+alt+k a", gateDoc],
+    ["kraft.reject", "ctrl+alt+k r", gateDoc],
+    ["kraft.review.submit", "ctrl+alt+k s", "kraft.artifactPreview || resourceScheme =~ /^kraft-(wt|git|artifact|threads)$/ && kraft.review.activeHasDrafts"],
+  ])("%s is %s, only when %s", (command, key, when) =>
+    expect(keybindings.filter((k) => k.command === command)).toEqual([{ command, key, mac: key.replace("ctrl", "cmd"), when }]));
+});
+
 describe("a row's primary action", () => {
   const commands = pkg.contributes.commands as { command: string; icon?: string }[];
   const board = pkg.contributes.menus["view/item/context"] as { command: string; when?: string; group?: string }[];
