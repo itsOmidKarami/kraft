@@ -125,7 +125,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
             {surface === "yaml" ? "⇄ Page" : "YAML"}
           </Button>
         )}
-        <Button variant="primary" aria-pressed={review} disabled={!review && n.changes === 0 && n.problems === 0} onClick={toggleReview}>Review &amp; publish</Button>
+        <Button variant={review ? undefined : "primary"} disabled={!review && n.changes === 0 && n.problems === 0} onClick={toggleReview}>{review ? "Back to editing" : "Review & publish"}</Button>
       </HeaderActions>
       <div className="tpl-area">
         {surface === "yaml" ? (

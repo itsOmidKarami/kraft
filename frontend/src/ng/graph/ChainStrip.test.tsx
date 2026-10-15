@@ -18,6 +18,9 @@ describe("ChainStrip", () => {
     expect(lay.items.map((i) => i.node.id)).toEqual(["implement", "merge"]);
     expect(lay.folds.map((f) => [f.fold.words, f.fold.passed])).toEqual([["approve spec", true]]);
     expect(lay.items.map((i) => i.w)).toEqual([S.CE, S.CG]);
+    // A column takes its id's width, up to a cap past which the id wraps.
+    const wide = stripLayout([{ id: "implementation", kind: "exec" }, { id: "a_very_long_node_name_indeed", kind: "exec" }]);
+    expect(wide.items.map((i) => i.w)).toEqual([124, S.MAX]);
     expect(lay.edges).toHaveLength(2);
     expect(lay.edges.map((e) => e.todo)).toEqual([false, true]);
   });
@@ -35,7 +38,8 @@ describe("ChainStrip", () => {
     const user = userEvent.setup();
     render(<ChainStrip nodes={nodes} viewing="implement" />);
     await user.click(screen.getByRole("button", { name: /^approve spec stage/ }));
-    expect(screen.getByText("approve_spec")).toBeInTheDocument();
+    // An id wraps after its underscores, never cut to an ellipsis.
+    expect([...document.querySelectorAll(".strip-label")].map((l) => l.textContent)).toContain("approve_\u200bspec");
     expect(screen.queryByRole("button", { name: /^approve spec stage/ })).toBeNull();
     expect(screen.getByRole("button", { name: /^spec, node/ })).toHaveFocus();
   });

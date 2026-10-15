@@ -2,21 +2,23 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { ChainNode } from "./layout";
 import { NodeGlyph } from "./NodeGlyph";
 import { stripRow, type Fold, type RowEntry } from "./stages";
-import { accessibleName } from "./types";
+import { accessibleName, breakable } from "./types";
 import { useRoving } from "./useRoving";
 import "./graph.css";
 import { tip } from "../ui/Tooltip";
 
 /** Strip geometry: a node's column holds its glyph and its id under it; a folded stage is one pill. */
-export const S = { B: 30, CE: 92, CG: 92, CY: 22, PAD: 22, H: 64, PILL: 26, GAP: 16 } as const;
+export const S = { B: 30, CE: 92, CG: 92, CY: 22, PAD: 28, H: 80, PILL: 26, GAP: 16, MAX: 140 } as const;
 
 const foldW = (f: Fold) => 58 + f.words.length * 7.4 + (f.passed ? 14 : 0) + S.GAP;
+/** A node's column: its id's width (bold, monospace) when that is more than the minimum, up to a cap past which it wraps. */
+const nodeW = (n: { id: string; kind: string }) => Math.min(S.MAX, Math.max(n.kind === "gate" ? S.CG : S.CE, Math.ceil(n.id.length * 8) + 12));
 const foldKey = (key: string) => `f:${key}`;
 
 export function stripLayout(row: RowEntry[]) {
   let x = S.PAD;
   const cols = row.map((entry) => {
-    const w = entry.kind === "fold" ? foldW(entry) : entry.kind === "gate" ? S.CG : S.CE, cx = x + w / 2;
+    const w = entry.kind === "fold" ? foldW(entry) : nodeW(entry), cx = x + w / 2;
     x += w;
     return { entry, w, cx };
   });
@@ -30,7 +32,7 @@ export function stripLayout(row: RowEntry[]) {
     items: cols.flatMap((c) => (c.entry.kind === "fold" ? [] : [{ node: c.entry, cx: c.cx, w: c.w }])),
     folds: cols.flatMap((c) => (c.entry.kind === "fold" ? [{ fold: c.entry, cx: c.cx, w: c.w }] : [])),
     edges,
-    W: x + S.PAD,
+    W: x + 2 * S.PAD,
     H: S.H,
   };
 }
@@ -48,6 +50,11 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
   const lay = useMemo(() => stripLayout(row), [row]);
   const stops = row.map((e) => (e.kind === "fold" ? foldKey(e.key) : e.id));
   const roving = useRoving(viewing, stops[0]);
+  // A strip wider than its bar scrolls to the node in view.
+  const world = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    world.current?.querySelector("[aria-current]")?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [viewing]);
   // A stage opened in place hands focus to its first node, its pill having gone.
   const landing = useRef<string | null>(null);
   useEffect(() => {
@@ -68,7 +75,7 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
     <div className="strip">
       <button type="button" className="strip-back" aria-label="Back to the chain" title="Back to the chain (Esc)" onClick={onBack}>← chain</button>
       <div className="strip-scroll">
-        <div role="group" aria-label="Chain" className="strip-world" style={{ width: lay.W, height: lay.H }} onKeyDown={onKeyDown}>
+        <div ref={world} role="group" aria-label="Chain" className="strip-world" style={{ width: lay.W, height: lay.H }} onKeyDown={onKeyDown}>
           <svg width={lay.W} height={lay.H} aria-hidden="true">
             {lay.edges.map((e, i) => <path key={i} d={e.d} className={e.todo ? "strip-edge is-todo" : "strip-edge"} />)}
           </svg>
@@ -88,7 +95,7 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
                 >
                   <NodeGlyph {...n} size="sm" sel={v} prob={n.prob && !v} />
                 </button>
-                <span className={v ? "strip-label is-viewing" : "strip-label"} style={{ maxWidth: w - 6 }}>{n.id}</span>
+                <span className={v ? "strip-label is-viewing" : "strip-label"} style={{ maxWidth: w - 6 }}>{breakable(n.id)}</span>
               </div>
             );
           })}
