@@ -12,6 +12,7 @@ import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { ComesAfterCard, PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 import { ESCALATION } from "./nodeGraph";
+import { reviewedBelow } from "./status";
 import { placeUrl } from "./url";
 import { openBudgetEditor, Workspace } from "./Workspace";
 import { openLimitEditor } from "./RaiseLimit";
@@ -68,11 +69,11 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   };
   return (
     <div className="item-page">
-      <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
+      <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} bodyActs />
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
-        <DiffLine id={item.id} version={runVersion(item)} files={files} />
+        <DiffLine id={item.id} version={runVersion(item)} files={files} review={!reviewedBelow(item)} />
       </div>
       <Banner item={item} onRaise={raise} reload={reload} />
       <StateCard item={item} files={files} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />

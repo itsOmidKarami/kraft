@@ -78,17 +78,29 @@ describe("ItemPage", () => {
     expect(calls.filter((c) => c.path.endsWith("/diff"))).toHaveLength(1);
   });
 
-  // R12b-06: on a time cap the header's Raise cap only opened Config, which has no row for that cap.
-  it("opens the cap's own editor from the header's Raise cap on a stop that names its limit", async () => {
+  // R12b-06: on a time cap Raise cap only opened Config, which has no row for that cap. It is one button now, the banner's.
+  it("opens the cap's own editor from the one Raise cap on a stop that names its limit", async () => {
     const limit = { path: "", key: "time_cap_minutes", value: 1, maximum: null };
     const capped = detail({ status: "needs_human", display_status: "needs_you", stop: { kind: "cap", node: "verification", task: null, resume_at: null, reason: "running time hit its 1m cap", limit } as never });
     stubFetch({ "GET /work-items/w1": [200, capped], "GET /policy": [200, {}] });
     mount("/work-items/w1", true);
-    // The header's, not the banner's, which always opened it.
-    const raises = await screen.findAllByRole("button", { name: "Raise cap" });
-    await userEvent.click(raises.find((b) => b.classList.contains("item-main-action"))!);
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     expect(await screen.findByRole("dialog", { name: "Raise running-time cap" })).toBeInTheDocument();
     expect(screen.getByTestId("where")).not.toHaveTextContent("tab=config");
+  });
+
+  // One primary per state: the banner or card carries it; the header shows state and the ⋮, the diff line the fact.
+  it.each([
+    ["a gate", { status: "needs_human", display_status: "needs_you", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } }, "Review changes", 0],
+    ["a failed item", { status: "needs_human", display_status: "failed", stop: { kind: "failed", node: "verification", task: null, attempt: 1, resume_at: null, reason: "Tests failed.", facts: {} } }, "Retry", 1],
+  ])("%s has one primary action, in the banner or card", async (_name, over, primary, diffLink) => {
+    stubFetch({ "GET /work-items/w1": [200, detail({ ...over, worktree_exists: true } as never)], "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }] });
+    mount("/work-items/w1", true);
+    await screen.findAllByText(/1 file/);
+    expect(screen.getAllByRole("button", { name: new RegExp(`^${primary}`) })).toHaveLength(1);
+    expect(screen.queryAllByRole("link", { name: "Review changes" })).toHaveLength(diffLink);
+    expect(screen.queryByRole("button", { name: "Open gate" })).toBeNull();
+    expect(document.querySelector(".item-main")).toBeNull();
   });
 });
 

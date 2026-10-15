@@ -193,6 +193,26 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
   return { badge: status.replace("_", " ").toUpperCase(), tone: TONE[status], main, panel };
 }
 
+/** Whether the item page's banner or state card already carries `main` as its own primary button,
+ *  so the page's header leaves it out (one primary per state, next to the words that explain it).
+ *  Retry counts only where a card has it: a failed or stuck stop, not a budget the item cannot
+ *  raise (its banner has no button) or a closed MR's fallback. Start, Pause, Restore, an
+ *  escalated item's Retry and a done item's Archive have no card, so the header keeps them. */
+export function bodyOffers(item: Pick<WorkItem, "display_status" | "stop" | "needs_context_question">, main: Main | null): boolean {
+  const status = item.display_status;
+  switch (main) {
+    case "gate": case "conflicts": case "raise": case "reopen": case "resume": return true;
+    case "answer": return !!item.needs_context_question;
+    case "archive": return status === "cancelled";
+    case "retry": return !!item.stop && (status === "failed" || (status === "needs_you" && !["gate", "budget", "cap", "mr_closed", "conflict", "question"].includes(item.stop.kind)));
+    default: return false;
+  }
+}
+
+/** Whether a banner or card on the item page already offers the review (a gate's, a rebase's conflicts). */
+export const reviewedBelow = (item: Pick<WorkItem, "display_status" | "stop">) =>
+  item.display_status === "needs_you" && (item.stop?.kind === "gate" || item.stop?.kind === "conflict");
+
 export const MAIN_LABEL: Record<Main, string> = {
   pause: "Pause",
   resume: "Resume",

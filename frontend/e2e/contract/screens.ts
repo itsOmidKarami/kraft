@@ -144,7 +144,7 @@ export const STATES: State[] = [
   { area: "work-item", state: "header-menu", app: appHeader("running", async (p) => { await appMain(p).hover(); }) },
   { area: "work-item", state: "header-kebab", app: appHeader("running", (p) => p.getByRole("button", { name: "Item menu" }).click()) },
   { area: "work-item", state: "header-pause", app: appHeader("running", appMenuRow(/^Pause/)) },
-  { area: "work-item", state: "header-escalate", app: appHeader("failed", appMenuRow(/^Escalate/)) },
+  { area: "work-item", state: "header-escalate", app: appHeader("failed", async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); await p.getByRole("menuitem", { name: /^Escalate/ }).click(); }) },
   { area: "work-item", state: "header-complete", app: appHeader("running", appMenuRow(/^Mark complete/)) },
   { area: "work-item", state: "header-cancel", app: appHeader("running", appMenuRow(/^Cancel/)) },
   { area: "work-item", state: "header-title-edit", app: appHeader("running", (p) => p.locator(".item-title-btn").click()) },

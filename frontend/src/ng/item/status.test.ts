@@ -9,7 +9,7 @@ import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
 import { ITEM_ACTIONS, type ItemAction } from "../../types/vocab.generated";
-import { admits, archivable, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
+import { admits, archivable, bodyOffers, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
@@ -124,6 +124,32 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     ["a policy limit, raise_budget alone", policyBudget, ["raise_budget"], false],
     ["the daily cap, everything listed", { ...ownBudget, scope: "daily" }, [...ITEM_ACTIONS], false],
   ])("offersRaise: %s", (_name, stop, actions, want) => expect(offersRaise({ stop, actions })).toBe(want));
+
+  // The item page's header drops the main button these name, because its banner or card carries it (ItemHeader's bodyActs).
+  const stopOf = (kind: StopKind, more: object = {}) => ({ kind, node: "n", resume_at: null, reason: null, ...more }) as WorkItemStop;
+  it.each<[string, Partial<ItemDetail>, boolean]>([
+    ["a gate: the banner's Review changes", { display_status: "needs_you", stop: stopOf("gate") }, true],
+    ["conflicts: the card's Review the conflicts", { display_status: "needs_you", stop: stopOf("conflict") }, true],
+    ["a question with its text: the question card", { display_status: "needs_you", stop: stopOf("question"), needs_context_question: "Which?" }, true],
+    ["a question with no text: the other-stop card has Retry, not Answer", { display_status: "needs_you", stop: stopOf("question") }, false],
+    ["a cap: the banner's Raise cap", { display_status: "needs_you", stop: stopOf("cap") }, true],
+    ["a budget the item raises: the banner's Raise cap", { display_status: "needs_you", stop: stopOf("budget", { scope: "work_item" }) }, true],
+    ["a budget it cannot raise: the banner has no button, Retry stays", { display_status: "needs_you", stop: stopOf("budget", { scope: "daily" }) }, false],
+    ["a closed MR with a ref: the card's Reopen", { display_status: "needs_you", stop: stopOf("mr_closed") }, true],
+    ["a closed MR the server will not reopen: no card Retry", { display_status: "needs_you", stop: stopOf("mr_closed"), actions: ["retry"] }, false],
+    ["a stuck loop: the card's Retry", { display_status: "needs_you", stop: stopOf("stuck") }, true],
+    ["a failed item: the card's Retry", { display_status: "failed", stop: stopOf("failed") }, true],
+    ["a failed item with no stop has no card", { display_status: "failed", stop: null }, false],
+    ["an escalated item has no card", { display_status: "escalated", stop: null }, false],
+    ["a paused item: the paused card's Resume", { display_status: "paused", current_node_id: "n" }, true],
+    ["a never-started item: Start has no card", { display_status: "paused", current_node_id: null }, false],
+    ["a cancelled item: the card's Archive", { display_status: "cancelled" }, true],
+    ["a done item has no card", { display_status: "done" }, false],
+    ["a running item has no card", { display_status: "running" }, false],
+  ])("bodyOffers the header's main button: %s", (_name, over, want) => {
+    const it_ = detail(over);
+    expect(bodyOffers(it_, headerState(it_).main)).toBe(want);
+  });
 
   it("archivable: an ended item the server will not archive is not", () => {
     expect(archivable({ display_status: "done", actions: ["restore"] })).toBe(false);

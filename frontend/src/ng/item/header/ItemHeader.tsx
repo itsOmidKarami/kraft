@@ -11,7 +11,7 @@ import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { actionPath } from "../paths";
-import { archivable, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
+import { archivable, bodyOffers, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
@@ -46,16 +46,20 @@ type Props = {
   onCancelOpen?: (open: boolean) => void;
   escalateOpen?: boolean;
   onEscalateOpen?: (open: boolean) => void;
+  /** The item page, whose banner or state card carries the primary action: the header then shows state and the ⋮ only. */
+  bodyActs?: boolean;
 };
 
 /** The right side of the item page's header row (Decisions §1, §14): others
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
-export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
+export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen, bodyActs }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   // The board's Needs you count, this item left out.
   const others = useGroupCount("needs", item.id);
-  const hs = headerState(item);
+  const state = headerState(item);
+  // Its main button gone, the panel's doors (Escalate…, Mark complete…, Cancel…) move to the ⋮.
+  const hs = bodyActs && bodyOffers(item, state.main) ? { ...state, main: null } : state;
   const [pausing, setPausing] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [localCancel, setLocalCancel] = useState(false);
@@ -120,7 +124,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   };
   // Once a card's action is done the card is gone, and the button in it that had the
   // focus with it: the focus goes to the main button, which is the next way on (R12b-08).
-  const toMain = () => requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".item-main-action")?.focus());
+  const toMain = () => requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".item-main-action, .icon-btn")?.focus());
   const itemUrl = `/work-items/${encodeURIComponent(item.id)}`;
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);

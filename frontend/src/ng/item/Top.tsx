@@ -151,8 +151,9 @@ export function useOpenThreads(id: string, version: string): number {
 }
 
 /** `N files +A −D · K open threads · Review changes` (the prototype's diff
- *  line), the threads only when there are some; hidden with no diff. */
-export function DiffLine({ id, version, files }: { id: string; version: string; files: DiffFile[] | null }) {
+ *  line), the threads only when there are some; hidden with no diff.
+ *  `review` is false where a banner or card already offers the review. */
+export function DiffLine({ id, version, files, review = true }: { id: string; version: string; files: DiffFile[] | null; review?: boolean }) {
   const threads = useOpenThreads(id, version);
   if (!files?.length) return null;
   const { add, del } = totals(files);
@@ -160,8 +161,7 @@ export function DiffLine({ id, version, files }: { id: string; version: string; 
     <p className="item-diffline">
       {files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{add}</span> <span className="item-del">−{del}</span>
       {threads > 0 && <><span aria-hidden> · </span>{threads} open {threads === 1 ? "thread" : "threads"}</>}
-      <span aria-hidden> · </span>
-      <Link className="item-link is-strong" to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link>
+      {review && <><span aria-hidden> · </span><Link className="item-link is-strong" to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link></>}
     </p>
   );
 }
