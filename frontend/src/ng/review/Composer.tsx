@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ReviewThread, ThreadLabel } from "../../types";
 import { Button } from "../ui/Button";
 import { useReason } from "../ui/Reason";
@@ -56,6 +57,7 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
   const set = (patch: Partial<Draft>) => {
     const next = { ...d, ...patch };
     setD(next);
+    if (patch.body !== undefined) setTried(false);
     drafts.set(key, next);
   };
   const r = target.range;
@@ -69,13 +71,23 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
     onCancel();
   };
   const dirty = !!(d.body.trim() || d.suggest !== null);
-  const ready = !!d.body.trim() && !busy;
-  const noText = useReason(d.body.trim() ? null : COMMENT_NEEDS_TEXT);
+  // Said after an Add to review with nothing written, and gone once there is text.
+  const [tried, setTried] = useState(false);
+  const noText = useReason(tried && !d.body.trim() ? COMMENT_NEEDS_TEXT : null);
   // One ⌘↵ handler, on the wrapper, for both boxes: a second one on a box
-  // would send twice before React re-renders `ready`.
-  const send = sendOnModEnter(() => submit(), ready);
+  // would send twice before React re-renders `busy`.
+  const send = sendOnModEnter(() => submit(), !busy);
   const submit = async () => {
-    if (!ready) return;
+    if (busy) return;
+    if (!d.body.trim()) {
+      // Back to Write, so the reason and focus land on the field.
+      flushSync(() => {
+        setPreview(false);
+        setTried(true);
+      });
+      box.current?.focus();
+      return;
+    }
     setBusy(true);
     const e = await onSubmit(d);
     setBusy(false);
@@ -129,7 +141,7 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
       {preview ? (
         <div className="rv-preview"><Markdown text={d.body || "Nothing to preview"} code={codeBlock} /></div>
       ) : (
-        <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
+        <textarea ref={box} className="rv-textarea" aria-label="Comment" {...noText.attrs} placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
       )}
       {d.suggest !== null && d.wrote && (
         // The range moved under it: the typed suggestion is kept, never dropped unsaid (R10b-09).
@@ -168,7 +180,7 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
           {noText.note}
-          <Button variant="primary" disabled={!ready} {...noText.attrs} onClick={submit}>
+          <Button variant="primary" disabled={busy} onClick={submit}>
             {editing ? "Save" : "Add to review"}
           </Button>
         </div>

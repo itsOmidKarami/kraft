@@ -22,13 +22,16 @@ const options = (name: RegExp) => {
 };
 
 describe("compare pickers", () => {
-  // GR-12: they wrap as one group, so Diff settings is never alone on a second row.
-  it("keeps collapse, expand and Diff settings in one group", () => {
+  // GR-12: they wrap as one group, so Display is never alone on a second row.
+  it("keeps collapse, expand and Display in one group, each with a tooltip, the menu headed Display", () => {
     bar();
-    const group = screen.getByRole("button", { name: "Diff settings" }).parentElement!;
+    const group = screen.getByRole("button", { name: "Display" }).parentElement!;
     expect(group).toHaveClass("rv-tools");
     expect(group).toContainElement(screen.getByRole("button", { name: "Collapse all files" }));
     expect(group).toContainElement(screen.getByRole("button", { name: "Expand all files" }));
+    expect([...group.querySelectorAll("button")].map((b) => b.getAttribute("data-tip"))).toEqual(["Collapse all files", "Expand all files", "Display"]);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    expect(screen.getByRole("menu", { name: "Display" })).toHaveTextContent(/^Display/);
   });
 
   it("offers base, each superseded attempt and the last review; latest, then earlier attempts", () => {
@@ -111,7 +114,7 @@ describe("diff settings", () => {
   it("sends each switch as a patch of the diff preferences", () => {
     const set = vi.fn();
     render(<DiffSettings prefs={DEFAULT_PREFS} set={set} />);
-    fireEvent.click(screen.getByRole("button", { name: "Diff settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Side-by-side/ }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Show whitespace changes/ }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Wrap long lines/ }));
@@ -121,11 +124,11 @@ describe("diff settings", () => {
 
   it("is a menu the keyboard reaches: Enter opens it on its first item, ↓ moves, Escape comes back", async () => {
     render(<DiffSettings prefs={DEFAULT_PREFS} set={() => {}} />);
-    const button = screen.getByRole("button", { name: "Diff settings" });
+    const button = screen.getByRole("button", { name: "Display" });
     expect(button).toHaveAttribute("aria-haspopup", "menu");
     button.focus();
     fireEvent.click(button);
-    expect(screen.getByRole("menu", { name: "Diff settings" })).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "Display" })).toBeInTheDocument();
     const first = screen.getByRole("menuitemradio", { name: /Side-by-side/ });
     await waitFor(() => expect(first).toHaveFocus());
     fireEvent.keyDown(first, { key: "ArrowDown" });

@@ -8,7 +8,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, rejectTo } from "../../review/finish";
+import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, sendsBack } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -18,7 +18,7 @@ import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
-import { capitalise, gateName } from "../../board/rowText";
+import { capitalise, gateName, nameOf } from "../../board/rowText";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -99,7 +99,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const [openFile, setOpenFile] = useState<string | null>(place.file);
   useEffect(() => setOpenFile(place.file), [place.file]);
 
-  if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
+  if (params.get("compose") === "reject") return <ReviewComposer target={target && nameOf(item.chain_definition.nodes, target)} submit={submit} />;
   // Comments are written on the desktop; this screen reads the change and decides the gate.
   const readOnly = "Read-only here: add comments on the desktop.";
 
@@ -262,14 +262,14 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
         <span className="ph-composer-pad" />
       </header>
       <div className="ph-content">
-        <p className="ph-help">{`The item goes back${target ? ` to ${target}` : ""} with your note as the first thing the agent reads.`}</p>
+        <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {target && <p className="ph-target">Goes back to: {target}</p>}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{target ? rejectTo(target) : REQUEST_CHANGES}</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{REQUEST_CHANGES}</Button>
       </div>
     </>
   );

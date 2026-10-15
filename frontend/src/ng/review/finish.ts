@@ -1,6 +1,6 @@
 /** What Finish your review and the bottom bar say and allow, from data only (W8 G). Pure. */
 import type { FixTarget, ReviewComment, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
-import { displayName } from "../board/rowText";
+import { displayName, gateName, nameOf } from "../board/rowText";
 import { spentLine } from "../item/status";
 
 /** The server's `open_must_fix`: a must-fix thread not resolved, drafts included. */
@@ -29,9 +29,10 @@ export function gateConsequence(item: Pick<WorkItem, "pending_gate" | "chain_def
   ].filter(Boolean).join(" · ");
 }
 
-/** The two words for sending a gate back, one source for the desktop dialog and both phone screens. */
+/** The words for sending a gate back, one source for the desktop bar, dialog and confirm, and the phone screens. */
 export const REQUEST_CHANGES = "Request changes";
-export const rejectTo = (node: string) => `Reject to ${node}`;
+/** The first words of where a request goes, before the node: both trees say it this way. */
+export const sendsBack = (threads: boolean) => `Sends ${threads ? "these threads" : "your note"} back to `;
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -55,7 +56,7 @@ export interface OutcomeRow {
 }
 
 /** The three outcomes with their sentences (prototype `reviewVals`, Review Flow §4). */
-export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status">, gate: string | null, threads: ReviewThread[], fix: FixTarget | null): OutcomeRow[] {
+export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status" | "chain_definition">, gate: string | null, threads: ReviewThread[], fix: FixTarget | null): OutcomeRow[] {
   const atGate = !!gate && item.pending_gate === gate;
   const ended = ENDED.has(item.display_status ?? "");
   const noRounds = !!fix?.round && fix.round.n > fix.round.max;
@@ -63,10 +64,11 @@ export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status">
   if (ended) request = [{ t: "Unavailable once the item is done, cancelled or archived." }];
   else if (!fix) request = [{ t: "Finding the node this would send the threads to…" }];
   else {
-    const path = shorten(fix.gate ? [...fix.then, fix.gate] : fix.then);
+    const nodes = item.chain_definition?.nodes;
+    const path = shorten(fix.then.map((id) => nameOf(nodes, id)).concat(fix.gate ? [gateName(nodes, fix.gate)] : []));
     request = [
-      { t: "Sends these threads back to " }, { t: fix.node, mono: true }, { t: ", the node this item runs a fix round on." },
-      ...(path.length ? [{ t: " Chain resumes from there: " }, { t: path.join(" → "), mono: true }, { t: "." }] : []),
+      { t: sendsBack(drafts(threads).length > 0) }, { t: nameOf(nodes, fix.node) }, { t: ", the node this item runs a fix round on." },
+      ...(path.length ? [{ t: " Chain resumes from there: " }, { t: path.join(" → ") }, { t: "." }] : []),
       ...(fix.round ? [{ t: noRounds ? " No fix rounds left." : ` Fix round ${fix.round.n} of ${fix.round.max}.` }] : []),
       ...(!fix.gate && fix.reason ? [{ t: ` Why this node: ${fix.reason}.` }] : []),
     ];

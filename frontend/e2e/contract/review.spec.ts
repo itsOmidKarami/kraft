@@ -92,14 +92,14 @@ const ROWS: Row[] = [
   },
 
   {
-    name: "review: at a gate Request changes is a rejection, and the Finish review dialog says where it goes [decided]",
+    name: "review: at a gate Request changes is a rejection, and its dialog says where it goes [decided]",
     run: async (p) => {
       await app(p, item("needs-gate", "/review?gate=final_review&doc=1"), { ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) });
       await expect(p.getByRole("button", { name: /^Reject/ }), "no Reject button in the review header").toHaveCount(0);
       await p.getByRole("button", { name: "Request changes" }).first().click();
       const d = p.getByRole("dialog");
-      await expect(d.getByText("Reject final_review · goes back to implementation")).toBeVisible({ timeout: 2000 });
-      await expect(d.getByRole("button", { name: "Reject to implementation" })).toBeVisible();
+      await expect(d.locator(".rv-finish-sends, .rv-outcome-sub").first()).toContainText(/back to\s+implementation/, { timeout: 2000 });
+      await expect(d.getByRole("button", { name: "Request changes" })).toBeVisible();
     },
   },
   {
