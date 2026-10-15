@@ -3,6 +3,8 @@
   --font-sans: "Inter Variable", Inter, system-ui, sans-serif;
   --fs-meta: 13px; --fs-label: 12px; --fs-body: 14px;
   --fs-h1: 20px; --fs-h2: 16px; --fs-h3: 15px;
+  /* The phone's page and tile titles, a step above the desktop headings. */
+  --fs-ph-title: 26px; --fs-ph-h1: 22px;
   /* The item graph's labels and captions, sized for its zoom floors (graph/camera.ts). */
   --fs-graph-label: 11.5px; --fs-graph-caption: 11px;
 }

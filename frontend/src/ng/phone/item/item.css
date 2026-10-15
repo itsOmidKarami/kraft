@@ -7,7 +7,7 @@
 .ph-tag-bad { color: var(--bad); }
 .ph-tag-ok { color: var(--ok); }
 .ph-item-meta { font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
-.ph-item-title { margin: 0; font-size: var(--fs-h1); font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.ph-item-title { margin: 0; font-size: var(--fs-ph-h1); font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-brief { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ph-brief.ph-is-open { -webkit-line-clamp: 20; }
 .ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; min-width: 44px; padding: 0; border: 0; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
