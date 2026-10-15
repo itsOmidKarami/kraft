@@ -7,7 +7,7 @@ for (const width of [1440, 1100, 900]) {
   test(`the peek opens without reflowing a row at ${width}`, async ({ page }) => {
     // One server serves every run, so the title is this run's own.
     const title = `a row that must not reflow at ${width} ${Date.now()}`;
-    // A row click opens the peek only while Appearance says so; another spec
+    // A row click opens the peek only while Board & code says so; another spec
     // on this server may have set Full page, and the board grouped by repo.
     await page.request.put("/api/theme", { data: { board: { group_by: "status", open_in: "peek" } } });
     // Paused, not started: a started item finishes in about two seconds and its

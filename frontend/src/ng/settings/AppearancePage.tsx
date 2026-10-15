@@ -1,12 +1,8 @@
-import { useEffect, useState } from "react";
-import * as api from "../../api";
 import type { Accent, ColourAmount, Surface, Theme, ThemeMode } from "../../types";
-import { applyTheme, lookOf } from "../theme/applyTheme";
 import { accentOf, ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
 import { ThemeCard } from "../theme/ThemeCard";
-import { DEFAULT_PREFS } from "../review/prefs";
 import { Segmented } from "../ui/Segmented";
-import { AppearanceMore } from "./AppearanceMore";
+import { themeYaml, useTheme } from "./useTheme";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 
@@ -20,46 +16,9 @@ const MODES: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "System" },
 ];
 
-/** What theme.yaml holds, from the page's own state: the effective value of every control. */
-function themeYaml(theme: Theme): string {
-  const scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
-  const diff = theme.diff ?? DEFAULT_PREFS;
-  const amount = theme.colour_amount ?? "subtle";
-  return [
-    `mode: ${theme.mode}`,
-    `surface: ${theme.surface ?? "graphite"}`,
-    `accent: ${amount === "mono" ? "none" : accentOf(theme.accent)}`,
-    `colour_amount: ${amount}`,
-    "code_scheme:",
-    `  light: ${scheme.light}`,
-    `  dark: ${scheme.dark}`,
-    "diff:",
-    `  layout: ${diff.layout}`,
-    `  colours: ${diff.colours}`,
-    `  show_whitespace: ${diff.show_whitespace}`,
-    `  word_highlight: ${diff.word_highlight}`,
-    `  wrap_lines: ${diff.wrap_lines}`,
-    `  one_file_at_a_time: ${diff.one_file_at_a_time}`,
-    `density: ${theme.density}`,
-    "board:",
-    `  open_in: ${theme.board.open_in}`,
-    ...(theme.editor ? [`editor: ${theme.editor}`] : []),
-  ].join("\n");
-}
-
-/** Settings › Appearance (UX V2 W1): the look first, then the code and board view in folded sections. Saved on change: each
- *  control sends only its own key, and the server merges it into theme.yaml. */
+/** Settings › Appearance (UX V2 W1): how Kraft looks. The code and board preferences are on Board & code. */
 export function AppearancePage() {
-  const [theme, setTheme] = useState<Theme | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.getTheme().then(setTheme, (e) => setError(String(e instanceof Error ? e.message : e)));
-  }, []);
-  // The page paints whatever it shows: a change at once, a failed save undone.
-  useEffect(() => {
-    if (theme) applyTheme(lookOf(theme));
-  }, [theme]);
+  const { theme, error, save } = useTheme();
 
   if (!theme) return <div className="ng-settings">{error && <p role="alert">{error}</p>}</div>;
 
@@ -68,22 +27,6 @@ export function AppearancePage() {
   const accent = amount === "mono" ? "none" : accentOf(theme.accent);
   const mode = resolveMode(theme.mode);
 
-  const save = async (patch: Partial<Theme>) => {
-    // A derived look is written out whole on its first change, so the other
-    // two keys stop following the default at the same moment (brief E.3).
-    const body = theme.derived ? { surface, accent, colour_amount: amount, ...patch } : patch;
-    const before = theme;
-    const next = { ...theme, ...body, derived: false };
-    setTheme(next);
-    setError(null);
-    try {
-      const saved = await api.putTheme(body);
-      setTheme(saved);
-    } catch (e) {
-      setTheme(before);
-      setError(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
   const setAmount = (v: ColourAmount) => save(v === "mono" ? { colour_amount: v, accent: "none" } : { colour_amount: v });
 
   return (
@@ -139,7 +82,6 @@ export function AppearancePage() {
             <p className="caption">{`${title(surface)} · ${accent} accent · ${mode} · ${amount}`}</p>
           </section>
         </div>
-        <AppearanceMore theme={theme} save={save} />
       </div>
     </YamlFrame>
   );
