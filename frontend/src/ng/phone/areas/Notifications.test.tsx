@@ -43,7 +43,7 @@ describe("Notifications list (O.2)", () => {
     mountAt(<NotificationsList />, "/settings/notifications", "/settings/notifications");
     const web = await screen.findByRole("link", { name: /^Webhook/ });
     expect(web).toHaveTextContent("active");
-    expect(web).toHaveTextContent("gate_requested, work_item_needs_human");
+    expect(web).toHaveTextContent("Decision waiting, Stopped for you");
     expect(web).toHaveAttribute("href", "/settings/notifications/webhook");
     expect(screen.getByRole("link", { name: new RegExp(`^${CHANNELS.browser}`) })).toHaveTextContent("active");
     expect(screen.getByText(/Progress events are deliberately not offered/)).toBeInTheDocument();
@@ -175,6 +175,15 @@ describe("Browser alerts channel (O.2)", () => {
     await userEvent.click(ask);
     await waitFor(() => expect(N.requestPermission).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Allow notifications/ })).toBeNull());
+    expect(screen.getByRole("switch", { name: /Alerts on this device/ })).toBeChecked();
+  });
+
+  it("offers Try again when the channel fails to load", async () => {
+    vi.spyOn(api, "getNotify").mockRejectedValueOnce(new Error("offline")).mockResolvedValue(BASE);
+    channel("webhook");
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText(/delivered .* 200/)).toBeInTheDocument();
   });
 
   it.each([
@@ -217,7 +226,7 @@ describe("Browser alerts channel (O.2)", () => {
     channel("browser", "?tab=config");
     const gate = await screen.findByRole("switch", { name: /^A decision is waiting/ });
     expect(gate).toBeChecked();
-    expect(screen.getByText("gate_requested")).toBeInTheDocument();
+    expect(screen.getByText("Decision waiting")).toBeInTheDocument();
     await userEvent.click(gate);
     expect(gate).not.toBeChecked();
     expect(JSON.parse(localStorage.getItem("kraft.browserNotify.events") ?? "[]")).not.toContain("gate_requested");

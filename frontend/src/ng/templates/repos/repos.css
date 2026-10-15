@@ -9,7 +9,7 @@
 .rp-rows { display: flex; flex-direction: column; gap: 2px; }
 .rp-row { border-radius: 8px; font-size: var(--fs-label); cursor: pointer; }
 .rp-row:hover { background: var(--surface); }
-.rp-row.is-sel { background: var(--surface-2); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.rp-row.is-sel { background: var(--surface-2); }
 .rp-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rp-row.is-off .rp-name-text, .rp-row.is-off .rp-cell { color: var(--text-muted); }
 .rp-name { display: flex; align-items: center; gap: 6px; min-width: 0; }

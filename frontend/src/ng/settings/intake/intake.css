@@ -3,7 +3,7 @@
 .ink-page { gap: 18px; }
 .ink-card { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); }
 .ink-card.is-on { background: var(--surface); }
-.ink-sch.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.ink-sch.is-sel { border-color: var(--text-sub); background: var(--surface-2); }
 .ink-status { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); font-weight: 500; }
 .ink-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
 .ink-card.is-on .ink-dot { background: var(--ok); }

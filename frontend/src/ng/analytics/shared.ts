@@ -32,3 +32,15 @@ export const minutes = (ms: number, runs: number) => (runs === 0 ? "—" : ms > 
 
 /** A span the report carries as 0 when nothing was measured (no completed item, no merge request): "—" then, not "0s". */
 export const measured = (ms: number, has = ms > 0) => (has ? elapsed(ms) : "—");
+
+/** The board, scoped the way the report is. The board filters by repo and chain only: no gate, status or stop reason, so a row for one of those lands on the board for the same scope. */
+export const boardHref = (scope: { repo?: string | null; chain?: string | null }) => {
+  const q = new URLSearchParams();
+  if (scope.repo) q.set("repo", scope.repo);
+  if (scope.chain) q.set("chain", scope.chain);
+  const s = q.toString();
+  return s ? `/?${s}` : "/";
+};
+
+/** The share of lead time spent waiting on a person, the report's main figure. */
+export const waitingKpi = (pct: number) => ({ label: "Waiting on you", value: `${pct}%`, sub: "of lead time" });

@@ -4,9 +4,10 @@ import { elapsed, repoName, tokens, usd } from "../../format";
 import { useStore } from "../../store";
 import type { Analytics } from "../../types";
 import { chainOf } from "../board/model";
+import { Link } from "react-router-dom";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
-import { DEFAULT_RANGE, EMPTY_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES } from "./shared";
+import { boardHref, DEFAULT_RANGE, EMPTY_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES, waitingKpi } from "./shared";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 
@@ -93,6 +94,7 @@ export function AnalyticsPage() {
   const topCost = Math.max(0.000001, ...(report?.by_node.map((n) => n.cost_usd) ?? [0]));
   const totalCost = report?.by_node.reduce((s, n) => s + n.cost_usd, 0) ?? 0;
   const topStop = report?.stop_reasons[0]?.n || 1;
+  const scopeHref = boardHref({ repo, chain });
   const gates = report ? gateRows(report) : [];
   const emptyRange = !!report && t!.completed === 0 && report.by_node.length === 0;
   const topWait = Math.max(1, ...gates.map((g) => g.total_ms));
@@ -111,7 +113,8 @@ export function AnalyticsPage() {
           <Section id="an-overview" bare title="Overview">
             <div className="an-kpis">
               <Kpi label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
-              <Kpi label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
+              <Kpi label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub="median" />
+              <Kpi {...waitingKpi(t.human_wait_pct)} />
               <Kpi label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
               <Kpi label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
             </div>
@@ -141,7 +144,7 @@ export function AnalyticsPage() {
                 <tbody>
                   {gates.map((g) => (
                     <tr key={g.gate} data-gate={g.gate}>
-                      <td className="an-name" data-allow-ellipsis title={g.gate}>{g.gate}</td>
+                      <td className="an-name" data-allow-ellipsis title={g.gate}><Link className="an-link" to={scopeHref}>{g.gate}</Link></td>
                       <td><span className="an-share"><span style={{ width: `${(g.total_ms / topWait) * 100}%` }} /></span></td>
                       <td className="an-num">{g.n}</td>
                       <td className="an-num">{elapsed(g.median_ms)}</td>
@@ -177,7 +180,7 @@ export function AnalyticsPage() {
                 <tbody>
                   {report.by_repo.map((r) => (
                     <tr key={r.repo} data-repo={r.repo}>
-                      <td className="an-name" data-allow-ellipsis title={r.repo}>{repoName(r.repo)}</td>
+                      <td className="an-name" data-allow-ellipsis title={r.repo}><Link className="an-link" to={boardHref({ repo: r.repo, chain })}>{repoName(r.repo)}</Link></td>
                       <td className="an-num">{r.items}</td>
                       <td className="an-num">{r.done}</td>
                       <td className="an-num an-strong">{usd(r.cost_usd, r.cost_complete)}</td>
@@ -192,7 +195,7 @@ export function AnalyticsPage() {
               <ul className="an-stops">
                 {report.stop_reasons.map((s) => (
                   <li key={s.label} className="an-stop" data-label={s.label}>
-                    <span className="an-stop-label" data-allow-ellipsis title={s.label}>{s.label}</span>
+                    <Link className="an-stop-label an-link" data-allow-ellipsis title={s.label} to={scopeHref}>{s.label}</Link>
                     <span className="an-stop-bar"><span style={{ width: `${(s.n / topStop) * 100}%` }} /></span>
                     <span className="an-num">{s.n}</span>
                   </li>

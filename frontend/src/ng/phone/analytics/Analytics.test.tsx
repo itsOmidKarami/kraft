@@ -36,10 +36,20 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(tile("Completed")).getByText("12")).toBeInTheDocument();
     expect(within(tile("Completed")).getByText("+3 vs previous")).toBeInTheDocument();
     expect(within(tile("Lead time")).getByText("1h")).toBeInTheDocument();
-    expect(within(tile("Lead time")).getByText("median · 8% waiting on you")).toBeInTheDocument();
+    expect(within(tile("Lead time")).getByText("median")).toBeInTheDocument();
+    expect(within(tile("Waiting on you")).getByText("8%")).toBeInTheDocument();
+    expect(within(tile("Waiting on you")).getByText("of lead time")).toBeInTheDocument();
     expect(within(tile("Cost")).getByText("$3.18 per completed item")).toBeInTheDocument();
     expect(within(tile("Repairs per item")).getByText("1.5")).toBeInTheDocument();
     expect(within(tile("Repairs per item")).getByText("2 hit their cap")).toBeInTheDocument();
+  });
+
+  it("links a repo row to the board for that repo and the gate and stop rows to the board", async () => {
+    mount();
+    await screen.findByText("$38.20");
+    expect(screen.getByRole("link", { name: /kraft-plugins/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins");
+    expect(screen.getByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /gate wait/ })).toHaveAttribute("href", "/");
   });
 
   it("reads a lead time and a checks span nothing measured as a dash, not 0s", async () => {

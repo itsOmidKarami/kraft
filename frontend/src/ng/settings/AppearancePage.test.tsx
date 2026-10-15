@@ -189,14 +189,20 @@ describe("ng AppearancePage", () => {
     await waitFor(() => expect(screen.getByLabelText("theme.yaml").textContent).toContain("surface: moss"));
   });
 
-  it("starts with the pane collapsed, and its Overview lists the values in force", async () => {
-    setup({ colour_amount: "mono" });
+  it("keeps no side rail until YAML is opened", async () => {
+    setup();
     await screen.findByRole("radiogroup", { name: "Mode" });
-    expect(screen.getByRole("complementary", { name: "appearance pane, collapsed" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Expand appearance" }));
-    const pane = screen.getByRole("complementary", { name: "appearance pane" });
-    expect(within(pane).getByText("colour amount").nextSibling).toHaveTextContent("mono");
-    expect(within(pane).getByText("accent").nextSibling).toHaveTextContent("none");
+    expect(screen.queryByRole("complementary")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByRole("complementary", { name: "appearance pane" })).toBeInTheDocument();
+  });
+
+  it("folds each code and board section shut, saying what it is set to", async () => {
+    setup({ editor: "zed", board: { group_by: "status", show_done: 5, open_in: "full" } });
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    const folds = [...document.querySelectorAll<HTMLDetailsElement>("details.set-fold")];
+    expect(folds.map((d) => d.open)).toEqual([false, false, false, false]);
+    expect(folds.map((d) => d.querySelector(".set-fold-now")!.textContent)).toEqual(["light auto, dark auto", "inline, theme colours", "opens items in a full page", "Zed"]);
   });
 
   it("writes the chosen code schemes and diff preferences into the YAML, not the defaults", async () => {

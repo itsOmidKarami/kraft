@@ -114,10 +114,12 @@ test("notifications: send a test reports a result", async ({ page }) => {
 test("appearance: density and open-in persist after a reload", async ({ page }) => {
   await page.goto("/settings/appearance");
   await page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" }).check();
+  await page.locator("summary", { hasText: "Board" }).click(); // opens the fold
   await page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" }).check();
   await expect.poll(async () => (await (await page.request.get("/api/theme")).json()).board.open_in).toBe("full");
   await page.reload();
   await expect(page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" })).toBeChecked();
+  await page.locator("summary", { hasText: "Board" }).click();
   await expect(page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" })).toBeChecked();
   // The other specs click rows expecting the peek.
   await page.request.put("/api/theme", { data: { density: "compact", board: { open_in: "peek" } } });

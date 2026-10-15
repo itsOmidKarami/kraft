@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -21,7 +22,7 @@ const REPORT: Analytics = {
 
 const show = async (r: Analytics, heading = "Overview") => {
   vi.spyOn(api, "getAnalytics").mockResolvedValue(r);
-  render(<AnalyticsPage />);
+  render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
   await screen.findByText(heading);
 };
 
@@ -36,7 +37,7 @@ const FOOTNOTES = [
   /Bars count merges, not completions/,
   /A wait at a gate runs from the gate being requested until it is approved or rejected/,
 ];
-const TILES = ["Completed", "Lead time", "Cost", "Repairs per item"];
+const TILES = ["Completed", "Lead time", "Waiting on you", "Cost", "Repairs per item"];
 
 describe("ng AnalyticsPage", () => {
   it("has every section and tile, one short line under each tile, and the footnotes in one disclosure", async () => {
@@ -44,7 +45,8 @@ describe("ng AnalyticsPage", () => {
     for (const name of SECTIONS) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     for (const label of TILES) expect(screen.getByText(label, { selector: ".an-kpi-label" })).toBeInTheDocument();
     expect(screen.getByText("+8 vs previous")).toBeInTheDocument();
-    expect(screen.getByText("median · 25% waiting on you")).toBeInTheDocument();
+    expect(screen.getByText("Lead time", { selector: ".an-kpi-label" }).parentElement).toHaveTextContent("median");
+    expect(screen.getByText("Waiting on you", { selector: ".an-kpi-label" }).parentElement).toHaveTextContent("25%of lead time");
     expect(screen.getByText("$7.08 per completed item")).toBeInTheDocument();
     expect(screen.getByText("6 hit their cap")).toBeInTheDocument();
     expect(screen.getByText(/1\.25 unplanned touches per item · open MR → checks done/)).toBeVisible();
@@ -53,6 +55,13 @@ describe("ng AnalyticsPage", () => {
     for (const note of FOOTNOTES) expect(screen.getByText(note)).toBeVisible();
     expect(screen.getByRole("columnheader", { name: "avg repairs" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "2.0" })).toBeInTheDocument();
+  });
+
+  it("links a repo row to the board for that repo and the gate and stop rows to the board for the page's scope", async () => {
+    await show(REPORT);
+    expect(screen.getByRole("link", { name: "kraft" })).toHaveAttribute("href", "/?repo=%2FUsers%2Fdev%2Fcode%2Fkraft");
+    expect(screen.getByRole("link", { name: "spec_approval" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "agent needs context" })).toHaveAttribute("href", "/");
   });
 
   it("names the gate items waited at, with its median, total and rejections", async () => {
@@ -65,7 +74,7 @@ describe("ng AnalyticsPage", () => {
     vi.spyOn(api, "getAnalytics").mockResolvedValue(REPORT);
     const tail = document.createElement("div");
     document.body.append(tail);
-    const { container } = render(<HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider>);
+    const { container } = render(<HeaderTailHost.Provider value={tail}><MemoryRouter><AnalyticsPage /></MemoryRouter></HeaderTailHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
     expect(tail).toHaveTextContent("· Items created in the last 8 weeks");
     // One heading for a screen reader (R14b-03), which sighted readers do not see twice: the crumb says it.
@@ -92,7 +101,7 @@ describe("ng AnalyticsPage", () => {
     document.body.append(actions);
     const tail = document.createElement("div");
     document.body.append(tail);
-    render(<HeaderActionsHost.Provider value={actions}><HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider></HeaderActionsHost.Provider>);
+    render(<HeaderActionsHost.Provider value={actions}><HeaderTailHost.Provider value={tail}><MemoryRouter><AnalyticsPage /></MemoryRouter></HeaderTailHost.Provider></HeaderActionsHost.Provider>);
     await screen.findByRole("heading", { name: "Overview" });
     expect(api.getAnalytics).toHaveBeenLastCalledWith({ range: "8w", repo: undefined, template: undefined });
     await userEvent.click(within(actions).getByRole("button", { name: /Range/ }));
@@ -158,7 +167,7 @@ describe("ng AnalyticsPage", () => {
 
   it("shows the error and no report when the request fails", async () => {
     vi.spyOn(api, "getAnalytics").mockRejectedValue(new Error("boom"));
-    render(<AnalyticsPage />);
+    render(<MemoryRouter><AnalyticsPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("boom"));
     expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
   });

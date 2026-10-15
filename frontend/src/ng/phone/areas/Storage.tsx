@@ -73,14 +73,14 @@ export function StorageScreen() {
             rows={[
               { label: cleanAll(reclaimable.length, data.reclaimable_bytes), onClick: () => void ask(), disabled: !reclaimable.length, danger: true },
             ]}
-            foot={reclaimable.length ? "Archives the finished items and deletes their worktrees. Choosing items one by one is on desktop." : NOTHING_TO_CLEAN}
+            foot={reclaimable.length ? "Cleans up the finished items: they move to Archived and their worktrees are deleted. Choosing items one by one is on desktop." : NOTHING_TO_CLEAN}
           />
         </>
       )}
       {sheet.is("clean") && (
         <ConfirmSheet
           title="Clean up finished worktrees?"
-          text={preview ? `${plural(take.length, "item")} archived, their worktrees deleted. ${lost ? `${plural(lost, "uncommitted file")} will be lost.` : "No uncommitted files."} ${humanSize(preview.used_after_bytes)} used afterwards.` : "Asking the server what this would do…"}
+          text={preview ? `${plural(take.length, "item")} cleaned up: moved to Archived, their worktrees deleted. ${lost ? `${plural(lost, "uncommitted file")} will be lost.` : "No uncommitted files."} ${humanSize(preview.used_after_bytes)} used afterwards.` : "Asking the server what this would do…"}
           confirm={{ label: "Clean up", danger: true, disabled: !take.length, run: () => void confirm() }}
           busy={busy || !preview}
           error={cleanError}

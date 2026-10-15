@@ -5,7 +5,6 @@ import { applyTheme, lookOf } from "../theme/applyTheme";
 import { accentOf, ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
 import { ThemeCard } from "../theme/ThemeCard";
 import { DEFAULT_PREFS } from "../review/prefs";
-import { Head, Kv, Note } from "../templates/panes/controls";
 import { Segmented } from "../ui/Segmented";
 import { AppearanceMore } from "./AppearanceMore";
 import { YamlFrame } from "./YamlFrame";
@@ -48,33 +47,7 @@ function themeYaml(theme: Theme): string {
   ].join("\n");
 }
 
-function Overview({ theme }: { theme: Theme }) {
-  const scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
-  const diff = theme.diff ?? DEFAULT_PREFS;
-  const amount = theme.colour_amount ?? "subtle";
-  const mode = resolveMode(theme.mode);
-  return (
-    <>
-      <Head>Theme</Head>
-      <Kv k="mode" v={theme.mode} mono />
-      <Kv k="surface" v={theme.surface ?? "graphite"} mono />
-      <Kv k="accent" v={amount === "mono" ? "none" : accentOf(theme.accent)} mono />
-      <Kv k="colour amount" v={amount} mono />
-      <Kv k="code scheme" v={`${scheme[mode]} (${mode})`} mono />
-      <Kv k="density" v={theme.density} mono />
-      <Head>Review diff</Head>
-      <Kv k="layout" v={diff.layout} mono />
-      <Kv k="colours" v={diff.colours} mono />
-      <Kv k="whitespace" v={diff.show_whitespace ? "shown" : "hidden"} mono />
-      <Kv k="changed words" v={diff.word_highlight ? "highlighted" : "off"} mono />
-      <Kv k="long lines" v={diff.wrap_lines ? "wrapped" : "scroll"} mono />
-      <Kv k="files" v={diff.one_file_at_a_time ? "one at a time" : "all"} mono />
-      <Note>The theme is also kept in this browser, so the page paints in the right colours before the server answers. System follows the operating system and changes with it.</Note>
-    </>
-  );
-}
-
-/** Settings › Appearance (UX V2 W1): the look first, then the code and board view. Saved on change: each
+/** Settings › Appearance (UX V2 W1): the look first, then the code and board view in folded sections. Saved on change: each
  *  control sends only its own key, and the server merges it into theme.yaml. */
 export function AppearancePage() {
   const [theme, setTheme] = useState<Theme | null>(null);
@@ -114,7 +87,7 @@ export function AppearancePage() {
   const setAmount = (v: ColourAmount) => save(v === "mono" ? { colour_amount: v, accent: "none" } : { colour_amount: v });
 
   return (
-    <YamlFrame pageKey="appearance" file="theme.yaml" title="appearance" icon="palette" yaml={themeYaml(theme)} overview={<Overview theme={theme} />}>
+    <YamlFrame pageKey="appearance" file="theme.yaml" title="appearance" icon="palette" yaml={themeYaml(theme)}>
       <div className="set-page">
         <div className="set-title"><h1>Appearance</h1><p className="lede">Each choice applies at once.</p></div>
         {theme.derived && <p className="note">These are Kraft's default colours until you change one.</p>}
