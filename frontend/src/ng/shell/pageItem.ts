@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { WorkItem } from "../../types";
 
-export type CrumbItem = Pick<WorkItem, "id" | "repo" | "title" | "bead_id" | "mr_ref" | "display_status" | "pending_gate">;
+export type CrumbItem = Pick<WorkItem, "id" | "repo" | "title" | "bead_id" | "mr_ref" | "display_status" | "pending_gate"> & Partial<Pick<WorkItem, "chain_definition">>;
 
 /** The item the page in view has loaded, for the header's crumbs: the board
  *  list leaves archived items out, and the item page always has its own. */

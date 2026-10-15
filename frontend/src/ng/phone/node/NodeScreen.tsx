@@ -28,6 +28,7 @@ import { chainName } from "../../item/chainName";
 import { appliedRows } from "../../item/draft/applied";
 import { useApplied } from "../../item/draft/useApplied";
 import { gateMessage, loopPaths, materialized, nodeAt } from "../../item/chainValues";
+import { nameOf } from "../../board/rowText";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
@@ -54,6 +55,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const navigate = useNavigate();
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
+  const name = nameOf(item.chain_definition.nodes, nodeId);
   const api = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
   const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
   const graph = nodes.find((n) => n.id === nodeId)!;
@@ -90,7 +92,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       case "resume": return void run(act.resume(item.id), "Resumed.");
       case "skip": return sheet.open("skip");
       case "retry-from": return sheet.open("rewind");
-      case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${nodeId} from its first step.`);
+      case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${name} from its first step.`);
       case "review": return navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(nodeId)}`);
     }
   };
@@ -99,7 +101,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   return (
     <>
       <ScreenHeader id={item.bead_id ?? item.id.slice(0, 8)} />
-      <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
+      <Strip nodes={nodes} current={nodeId} name={(id) => nameOf(item.chain_definition.nodes, id)} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
       <div className="ph-content">
         <div className="ph-node-head">
           <h1 className="ph-node-title">{breakable(nodeId)}</h1>
@@ -223,19 +225,19 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
       {sheet.is("skip") && (
         <ConfirmSheet
-          title={`Skip ${nodeId}?`}
+          title={`Skip ${name}?`}
           text="The node is marked skipped without running. The chain carries on at the next node."
           busy={busy}
-          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${name}.`); if (r.ok) sheet.close(); } }}
           onClose={sheet.close}
         />
       )}
       {sheet.is("rewind") && (
         <ConfirmSheet
-          title={`Retry from ${nodeId}?`}
-          text={`The item rewinds to ${nodeId} and runs it again from its first step. Every node after it runs again afterwards.`}
+          title={`Retry from ${name}?`}
+          text={`The item rewinds to ${name} and runs it again from its first step. Every node after it runs again afterwards.`}
           busy={busy}
-          confirm={{ label: "Rewind and retry", danger: true, run: async () => { const r = await run(act.retry(item.id, { path: nodeId }), `Rewound to ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          confirm={{ label: "Rewind and retry", danger: true, run: async () => { const r = await run(act.retry(item.id, { path: nodeId }), `Rewound to ${name}.`); if (r.ok) sheet.close(); } }}
           onClose={sheet.close}
         />
       )}

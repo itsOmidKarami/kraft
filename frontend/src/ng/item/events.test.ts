@@ -10,8 +10,8 @@ describe("eventLine", () => {
     [ev("node_completed", {}, "plan"), "plan finished"],
     [ev("worker_session_started", { hook_point: "verification.review.code_review" }, "verification"), "code_review started on verification"],
     [ev("worker_session_started", {}, "verification"), "a session started on verification"],
-    [ev("gate_approved", { gate: "plan_approval", by: "human" }, "plan_approval"), "plan_approval · approved by you"],
-    [ev("gate_approved", { gate: "chain_revision_approval", by: "agent" }), "chain_revision_approval · passed on its own"],
+    [ev("gate_approved", { gate: "plan_approval", by: "human" }, "plan_approval"), "approve plan · approved by you"],
+    [ev("gate_approved", { gate: "chain_revision_approval", by: "agent" }), "approve chain revision · passed on its own"],
     [ev("fix_cycle_started", { cycle: 1 }, "verification"), "verification · fix loop round 2"],
     [ev("fix_cycle_finished", { cycle: 1, committed: true }, "verification"), "verification · fix loop round 2 · the fix committed a change"],
     [ev("fix_cycle_finished", { cycle: 1, committed: false }, "verification"), "verification · fix loop round 2 · the fix changed nothing"],
@@ -23,6 +23,12 @@ describe("eventLine", () => {
     [ev("work_item_archived", { by: "auto" }), "archived"],
     [ev("work_item_archived", { by: "auto", kept_branch: "kraft/x", unpushed_commits: 3 }), "archived · kept kraft/x: 3 unpushed commits"],
   ])("%o → %s", (e, line) => expect(eventLine(e)).toBe(line));
+
+  it("names the nodes and gates it is given as the chain does", () => {
+    const nodes = [{ id: "spec_approval", kind: "gate", artifact: "spec" }, { id: "merge_request", kind: "exec" }];
+    expect(eventLine(ev("gate_requested", { gate: "spec_approval" }, "spec_approval"), nodes)).toBe("approve spec is waiting for you");
+    expect(eventLine(ev("node_started", {}, "merge_request"), nodes)).toBe("merge request started");
+  });
 
   it("leaves bookkeeping out and names a type it does not know", () => {
     expect(eventLine(ev("worker_session_exited"))).toBeNull();
@@ -61,15 +67,15 @@ describe("recent", () => {
       ["verification · fix loop round 2 · the fix changed nothing", "verification · fix loop round 2 · the fix committed a change"]],
     ["a gate's decision takes the place of its request, a pending one stays",
       [at("gate_requested", { gate: "plan_approval" }, "plan_approval"), at("gate_approved", { gate: "plan_approval", by: "human" }, "plan_approval"), at("gate_requested", { gate: "final_review" }, "final_review")],
-      ["final_review is waiting for you", "plan_approval · approved by you"]],
+      ["approve final review is waiting for you", "approve plan · approved by you"]],
     // R14b-05: skipping a gate answers its request as a decision does.
     ["a skipped gate takes the place of its request",
       [at("gate_requested", { gate: "review_gate" }, "review_gate"), at("node_skipped", { node_id: "review_gate", gate: "review_gate" }, "review_gate"), at("work_item_completed")],
-      ["finished", "review_gate skipped"]],
+      ["finished", "review gate skipped"]],
     // CG-4: a decided gate reads once, and a finished node says how long it ran.
     ["a decided gate's own finish does not repeat its decision",
       [at("gate_requested", { gate: "final_review" }, "final_review"), at("gate_approved", { gate: "final_review", by: "human" }, "final_review"), at("node_completed", {}, "final_review")],
-      ["final_review · approved by you"]],
+      ["approve final review · approved by you"]],
     ["a finished node says how long it ran",
       [stamped("2026-10-03T10:00:00Z", at("node_started", {}, "verification")), stamped("2026-10-03T11:04:00Z", at("node_completed", {}, "verification"))],
       ["verification finished · 1h 4m"]],

@@ -1,4 +1,5 @@
 import { loopRounds, passWords, roundShown } from "../../item/nodeGraph";
+import { nameOf } from "../../board/rowText";
 import { otherRounds, scopeAt, scopesView, stateWords, statusWords } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -37,7 +38,7 @@ export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceP
       <ScreenHeader />
       <div className="ph-content">
         <div className="ph-node-head">
-          <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId} › {place.sel.step} › {place.sel.task}{several && repo ? ` › ${repo.name}` : ""}</p>
+          <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nameOf(item.chain_definition.nodes, nodeId)} › {place.sel.step} › {place.sel.task}{several && repo ? ` › ${repo.name}` : ""}</p>
           <h1 className="ph-node-title">{hit ? (hit.chip.setup ? hit.chip.name : hit.chip.command) : at.command}</h1>
           <p className={`ph-node-sub${hit?.chip.state === "failed" ? " ph-tone-bad" : hit?.chip.state === "running" ? " ph-tone-info" : ""}`}>
             {hit?.chip.setup ? "area setup" : "test scope"} · {pass && `${pass} · `}round {round}{total ? ` of ${total}` : ""} · {hit ? stateWords(hit.chip) : at.miss}

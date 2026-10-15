@@ -18,7 +18,7 @@ const stop = (kind: string, over = {}) => ({ kind, node: "verification", task: n
 describe("Banner", () => {
   it("shows a gate stop with Review and decide, which opens that gate's review with its brief (GR-5)", async () => {
     render(<><Banner item={detail({ display_status: "needs_you", stop: stop("gate", { node: "final_review" }), pending_gate: "final_review" })} onRaise={() => {}} reload={() => {}} /><Where /></>);
-    expect(screen.getByRole("status")).toHaveTextContent("Waiting for your approval at final_review.");
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to approve final review.");
     await userEvent.click(screen.getByRole("button", { name: "Review and decide" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=final_review&doc=1");
   });

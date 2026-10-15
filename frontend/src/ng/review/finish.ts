@@ -1,6 +1,6 @@
 /** What Finish your review and the bottom bar say and allow, from data only (W8 G). Pure. */
 import type { FixTarget, ReviewComment, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
-import { nodeWords } from "../board/rowText";
+import { displayName } from "../board/rowText";
 import { spentLine } from "../item/status";
 
 /** The server's `open_must_fix`: a must-fix thread not resolved, drafts included. */
@@ -23,7 +23,7 @@ export function gateConsequence(item: Pick<WorkItem, "pending_gate" | "chain_def
   const left = nodes.slice(at + 1).filter((n) => n.kind === "gate" || n.gate_after).length;
   const spent = spentLine(item);
   return [
-    next ? `Approving starts ${nodeWords(next.id)}` : "Approving finishes the chain",
+    next ? `Approving starts ${displayName(next)}` : "Approving finishes the chain",
     at < 0 ? null : left ? `${left} ${left === 1 ? "gate" : "gates"} left` : "no gate after this",
     spent ? `${spent} spent` : null,
   ].filter(Boolean).join(" · ");

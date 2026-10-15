@@ -288,7 +288,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         </Inspector>
       </div>
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
-      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
+      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc), item.chain_definition.nodes) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
       {produced && <DocViewer source={{ kind: "produced", workItemId: item.id, produces: produced.kind, by: produced.path }} onClose={() => setProduced(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id, by: producerOf(materialized(item), item.pending_gate ?? "") ?? undefined }} onClose={() => setArtifact(false)} />}
     </div>

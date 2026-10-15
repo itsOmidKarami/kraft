@@ -45,7 +45,7 @@ describe("ItemPage", () => {
     const gated = detail({ status: "needs_human", display_status: "needs_you", current_node_id: "plan_approval", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } as never });
     stubFetch({ "GET /work-items/w1": [200, gated] });
     mount();
-    await screen.findByText(/Waiting for your approval at/);
+    await screen.findByText(/Waiting for you to approve/);
     await userEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });

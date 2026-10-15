@@ -108,7 +108,7 @@ describe("the node screen (D)", () => {
     mount(item("running"), "/work-items/w1/nodes/verification");
     expect(await screen.findByRole("heading", { level: 1, name: "verification" })).toBeInTheDocument();
     const strip = screen.getByRole("group", { name: "Chain" });
-    expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual(["plan", "plan_approval", "verification", "merge_request"]);
+    expect(within(strip).getAllByRole("button").map((b) => b.textContent)).toEqual(["plan", "approve plan", "verification", "merge request"]);
     expect(within(strip).getByRole("button", { name: "verification" })).toHaveAttribute("aria-current", "true");
     expect(screen.getAllByText("exec node · running", { exact: false })).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: /code_review/ }));
@@ -118,7 +118,7 @@ describe("the node screen (D)", () => {
   it("changes node from the strip with replace, not a new history entry", async () => {
     mount(item("running"), "/work-items/w1/nodes/verification");
     const before = window.history.length;
-    await userEvent.click(within(await screen.findByRole("group", { name: "Chain" })).getByRole("button", { name: "merge_request" }));
+    await userEvent.click(within(await screen.findByRole("group", { name: "Chain" })).getByRole("button", { name: "merge request" }));
     await waitFor(() => expect(where()).toBe("/work-items/w1/nodes/merge_request"));
     expect(window.history.length).toBe(before);
   });

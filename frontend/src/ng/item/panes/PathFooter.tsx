@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { nameOf } from "../../board/rowText";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
@@ -62,6 +63,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
     setSteer("");
     reload();
   };
+  // A node reads as its name; a step or task keeps the path that is its identity.
+  const named = what === "node" ? nameOf(item.chain_definition.nodes, path) : null;
   const retry = () => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }));
   // The confirm's own Escape: it closes the confirm, never the pane, and keeps a steer that has text.
   const onKey = (e: KeyboardEvent) => {
@@ -73,8 +76,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
   if (!extra && !acts.length) return null;
   if (confirm === "skip")
     return (
-      <div className="ip-confirm" role="group" aria-label={`Skip ${path}?`} onKeyDown={onKey}>
-        <p className="ip-confirm-q">Skip <code>{path}</code>?</p>
+      <div className="ip-confirm" role="group" aria-label={`Skip ${named ?? path}?`} onKeyDown={onKey}>
+        <p className="ip-confirm-q">Skip {named ?? <code>{path}</code>}?</p>
         <p className="item-muted">{what === "task" ? "The task stops and does not run again this round." : what === "step" ? "Every task in the step stops; the node goes on with the next step." : "The node stops here; the chain goes on with the next node."}</p>
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
@@ -89,8 +92,8 @@ export function PathFooter({ item, path, what, state, reload, extra, only }: { i
     // select another node's path under that node's view: the pass is not that path's.
     const earlier = item.earlier_pass?.node === path.split(".")[0] ? item.earlier_pass.pass : null;
     return (
-      <div className="ip-confirm" role="group" aria-label={`Retry ${path}`} onKeyDown={onKey}>
-        <p className="ip-confirm-q">Retry <code>{path}</code></p>
+      <div className="ip-confirm" role="group" aria-label={`Retry ${named ?? path}`} onKeyDown={onKey}>
+        <p className="ip-confirm-q">Retry {named ?? <code>{path}</code>}</p>
         {earlier && <p className="item-muted">You are reading pass {earlier}. The retry runs on the node as it stands now, and pass {earlier} stays as it is.</p>}
         {steerable && <textarea autoFocus aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(retry, !busy)} />}
         {error && <p className="item-error" role="alert">{error}</p>}

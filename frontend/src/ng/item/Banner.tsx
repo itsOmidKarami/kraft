@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
+import { gateName, nameOf } from "../board/rowText";
 import { admits, budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
@@ -26,7 +27,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
-        <span className="item-banner-text">Waiting for your approval at <code>{gate}</code>.{note && <span className="item-banner-note">{note}</span>}</span>
+        <span className="item-banner-text">Waiting for you to {gateName(item.chain_definition.nodes, gate)}.{note && <span className="item-banner-note">{note}</span>}</span>
         <Button variant="primary" onClick={() => navigate(gateReviewUrl(item.id, gate))}>Review and decide</Button>
       </div>
     );
@@ -37,7 +38,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
         <span aria-hidden className="item-banner-glyph">✦</span>
         <span className="item-banner-text">
           {/* Where first: the reason can be two sentences, and a node tacked on after them read as part of the last. */}
-          {stop.node && <>Stopped at <code>{stop.node}</code>. </>}
+          {stop.node && <>Stopped at {nameOf(item.chain_definition.nodes, stop.node)}. </>}
           {sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"))}
           {stop.kind === "budget" && !offersRaise(item) && <> {budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE}</>}
         </span>
@@ -78,7 +79,7 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
       <div className="item-banner is-question" role="status">
         {/* Decisions §4: in a node view the question is one line; the whole of it is in the title (README allowlist #10). */}
         <span className="item-banner-text item-one-line" data-allow-ellipsis="" title={q}>
-          {item.stop.task ? `${taskName(item.stop.task)} is` : "The agent is"} asking you{where && <> on <code>{where}</code></>}: “{q}”
+          {item.stop.task ? `${taskName(item.stop.task)} is` : "The agent is"} asking you{where && <> on {nameOf(item.chain_definition.nodes, where)}</>}: “{q}”
         </span>
         <Button variant="primary" onClick={onOpenThread}>Open thread</Button>
       </div>
@@ -87,7 +88,7 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
     <section className="item-card is-warn" aria-label="Needs you">
       <h2 className="item-card-head">
         <CircleHelp size={14} aria-hidden /> <span className="item-card-title">Needs you</span>
-        <span className="item-card-where">asked by {item.stop.task ? taskName(item.stop.task) : "the agent"}{where && ` · on ${where}`}</span>
+        <span className="item-card-where">asked by {item.stop.task ? taskName(item.stop.task) : "the agent"}{where && ` · on ${nameOf(item.chain_definition.nodes, where)}`}</span>
       </h2>
       <blockquote className="item-quote">“{q}”</blockquote>
       {/* An answer resumes the item: with no resume the server takes, nothing could send it, so there is no box. */}

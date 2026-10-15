@@ -155,6 +155,14 @@ def test_resolved_names_the_attachment_kind_each_node_is_covered_by(client):
     assert covered["final_review"] is None
 
 
+def test_resolved_names_the_artifact_each_gate_decides(client):
+    nodes = client.get("/api/templates/chains/default/resolved").json()["nodes"]
+    artifact = {n["id"]: n["artifact"] for n in nodes}
+    assert artifact["spec_approval"] == "spec"
+    assert artifact["chain_revision_approval"] == "chain_revision"
+    assert artifact["spec"] is None
+
+
 def test_resolved_lists_per_gate_the_documents_earlier_nodes_produce(client):
     documents = client.get("/api/templates/chains/default/resolved").json()["documents"]
     assert documents["spec_approval"] == ["spec"]

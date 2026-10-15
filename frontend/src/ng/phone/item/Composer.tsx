@@ -1,4 +1,5 @@
 import { REQUEST_CHANGES, rejectTo } from "../../review/finish";
+import { nameOf } from "../../board/rowText";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -19,6 +20,8 @@ export const isComposeKind = (v: string | null): v is ComposeKind => COMPOSE_KIN
 
 const gateOf = (item: ItemDetail) => item.pending_gate ?? item.stop?.node ?? "";
 const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
+/** The node as a reader names it. */
+const nodeName = (item: ItemDetail) => { const id = nodeOf(item); return id ? nameOf(item.chain_definition.nodes, id) : null; };
 
 /** Sends the note through the door `steerDoor` names. A stopped item's retry
  *  carries it, at the node it stopped on. A running item is paused, then
@@ -53,12 +56,12 @@ interface Spec {
 const SPEC: Record<ComposeKind, Spec> = {
   steer: {
     title: "Steer",
-    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeOf(i)}` : ""} stops now and restarts with your note.`
-      : stopped(i) ? `Steering retries${nodeOf(i) ? ` ${nodeOf(i)}` : " the item"} with your note as the first thing its next agent reads.`
+    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeName(i)}` : ""} stops now and restarts with your note.`
+      : stopped(i) ? `Steering retries${nodeOf(i) ? ` ${nodeName(i)}` : " the item"} with your note as the first thing its next agent reads.`
       : "Your note goes to the next agent launch, and the item resumes with it."),
     placeholder: "What should the next attempt do differently?",
     label: "Send steer",
-    target: (i) => (nodeOf(i) ? `goes to ${nodeOf(i)} · added to that agent's next launch` : null),
+    target: (i) => (nodeOf(i) ? `goes to ${nodeName(i)} · added to that agent's next launch` : null),
   },
   reject: {
     title: REQUEST_CHANGES,
@@ -69,7 +72,7 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
   answer: {
     title: "Answer",
-    help: (i) => (i.needs_context_question ? `Asked${nodeOf(i) ? ` on ${nodeOf(i)}` : ""}: “${i.needs_context_question}”` : "The agent is waiting for your answer."),
+    help: (i) => (i.needs_context_question ? `Asked${nodeOf(i) ? ` on ${nodeName(i)}` : ""}: “${i.needs_context_question}”` : "The agent is waiting for your answer."),
     placeholder: "Write your answer…",
     label: "Send and resume",
   },
@@ -125,7 +128,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     let r: Done & { paused?: boolean };
     let ok = "";
     switch (kind) {
-      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeOf(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
+      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeName(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
       case "reject": r = await act.reject(item.id, gateOf(item), t); ok = "Changes requested."; break;
       case "answer": r = await act.resume(item.id, t); ok = "Sent. The item is running again."; break;
       case "escalate": r = await act.escalate(item.id, t, flag); ok = "Escalated. A new thread started."; break;
