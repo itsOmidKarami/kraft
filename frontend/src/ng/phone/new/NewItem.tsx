@@ -41,7 +41,8 @@ export function NewItem() {
     api.getRepos().then((r) => {
       const live = r.repos.filter((x) => x.enabled !== false);
       setRepos(live);
-      setD((x) => (x.repo || !live[0] ? x : { ...x, repo: live[0].path, chain: live[0].default_chain }));
+      // A restored draft keeps its repo only while that repo is still connected and enabled.
+      setD((x) => (live.some((r) => r.path === x.repo) || !x.repo && !live[0] ? x : { ...x, repo: live[0]?.path ?? "", chain: live[0]?.default_chain ?? "", spec: "", plan: "" }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, []);

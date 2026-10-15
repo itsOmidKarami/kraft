@@ -220,6 +220,16 @@ describe("Composer", () => {
     expect(sessionStorage.getItem(COMPOSER_KEY)).toBeNull();
   });
 
+  it("drops a restored draft's repo that is no longer connected, for the default repo, and files nothing to the old one", async () => {
+    sessionStorage.setItem(COMPOSER_KEY, JSON.stringify({ title: "half an idea", repo: "/code/gone", chain: "gone_chain", spec: "docs/a.md", plan: "", brief: "" }));
+    const { calls } = mount();
+    await settle();
+    expect(screen.getByRole("button", { name: /kraft-plugins/ })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(creates(calls).at(-1)?.body).toMatchObject({ repo: "/code/kraft-plugins", chain_template: "default", attachments: [] });
+  });
+
   it("starts on the board's repo filter and resets the chain to a picked repo's default", async () => {
     mount(undefined, { repoFilter: "/code/kraft-docs" });
     await settle();

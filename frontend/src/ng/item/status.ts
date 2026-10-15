@@ -102,6 +102,11 @@ const reviewingGate = (item: Omit<EscalateFields, "display_status" | "current_no
 export const retryable = (item: Pick<WorkItem, "display_status"> & Omit<EscalateFields, "display_status" | "current_node_id">) =>
   admits(item, "retry", (item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated") && !reviewingGate(item));
 
+/** Whether `/resume` would take this item as a Resume: a paused item that has begun. A never-started one has Start,
+ *  which asks about its draft first (`neverStarted`), so a bulk Resume leaves it out. */
+export const resumable = (item: Pick<WorkItem, "display_status" | "current_node_id"> & Doors) =>
+  admits(item, "resume", item.display_status === "paused") && !neverStarted(item);
+
 /** Whether `/pause` would take this item: it claims only a running or waiting
  *  one (`active`, `waiting`, `rate_limited`) and answers every stopped item 409
  *  "work item is needs_human, not running" (R11b-01): a gate, a question, a stuck

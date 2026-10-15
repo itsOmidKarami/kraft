@@ -168,7 +168,9 @@ describe("BoardPage", () => {
     put(item("n1", "needs_you"), item("f2", "failed"), item("d3", "done"));
     board();
     expect(await screen.findByText("2 NEED YOU")).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("link", { name: "completed and cancelled · auto-archive after 30 days" }));
+    const link = await screen.findByRole("link", { name: "Archived" });
+    expect(link.parentElement).toHaveTextContent("Archived · auto-archive after 30 days");
+    await userEvent.click(link);
     expect(where()).toBe("/archived");
   });
 

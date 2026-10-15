@@ -117,7 +117,8 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
       const byId = (id: string) => r.repos.find((x) => x.id === id);
       setRoots(new Set(Object.values(r.workspaces ?? {}).filter((w) => Object.keys(w.members).length).map((w) => byId(w.root)?.path ?? "")));
       const first = live.find((x) => x.path === repoFilter) ?? live[0];
-      if (first) setD((x) => (x.repo ? x : { ...x, repo: first.path, chain: first.default_chain }));
+      // A restored draft keeps its repo only while that repo is still connected and enabled; else the default one stands in.
+      setD((x) => (live.some((r) => r.path === x.repo) || !x.repo && !first ? x : { ...x, repo: first?.path ?? "", chain: first?.default_chain ?? "", spec: "", plan: "" }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, [repoFilter]);

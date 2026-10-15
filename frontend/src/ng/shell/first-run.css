@@ -36,6 +36,11 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .fr-main { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 18px 20px; min-width: 0; }
 .fr-main .field { align-self: stretch; }
 .fr-main .field input { font-family: ui-monospace, Menlo, monospace; }
+.fr-wide { grid-template-columns: minmax(0, 1fr); }
+.fr-results { align-self: stretch; display: flex; flex-direction: column; gap: 6px; }
+.fr-also { align-self: stretch; }
+.fr-also summary { width: fit-content; margin-bottom: 6px; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; }
+.fr-also summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .fr-aside { padding: 18px 16px; border-left: 1px solid var(--line); background: var(--surface-2); border-radius: 0 10px 10px 0; }
 .fr-aside p { font-size: var(--fs-label); color: var(--text-muted); }
 .fr-try { display: flex; align-items: center; gap: 6px; }
@@ -44,7 +49,7 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .fr-probes { align-self: stretch; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 6px; }
 .fr-probes li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; font-size: var(--fs-label); }
 .fr-probes li + li { border-top: 1px solid var(--line); }
-.fr-probes li > span:first-child { color: var(--text-sub); font-family: ui-monospace, Menlo, monospace; }
+.fr-probes li > span:first-child { flex: none; color: var(--text-sub); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
 .fr-probes li > span:last-child { font-family: ui-monospace, Menlo, monospace; text-align: right; overflow-wrap: anywhere; }
 .fr-pending { color: var(--text-muted); font-style: italic; }
 .fr-cmd { align-self: stretch; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }

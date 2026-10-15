@@ -151,6 +151,13 @@ describe("discarding (G.2)", () => {
     expect(sessionStorage.getItem("kraft.ng.phone.new")).toBeNull();
   });
 
+  it("drops a restored draft's repo that is no longer connected, for the first connected one", async () => {
+    sessionStorage.setItem("kraft.ng.phone.new", JSON.stringify({ title: "back again", brief: "", repo: "/code/gone", chain: "gone_chain", spec: "", plan: "" }));
+    const calls = mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Create paused" }));
+    await waitFor(() => expect(posts(calls)[0].body).toMatchObject({ repo: "/code/kraft-plugins", chain_template: "default" }));
+  });
+
   it("keeps the unsent draft across a reload", async () => {
     const first = mount();
     await userEvent.type(title(), "half a thought");

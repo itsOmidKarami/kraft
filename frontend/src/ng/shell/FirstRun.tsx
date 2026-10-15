@@ -18,6 +18,7 @@ const STEPS = ["Connect a repo", "Chain and policy", "First work item"] as const
 const STEP_ICON = [GitBranch, Workflow, FilePlus] as const;
 const STEP_SUB = ["a git checkout", "default", "created paused"] as const;
 /** What Kraft reads from a checkout, listed before it has one to read. */
+const ALSO = /^Also found/;
 const PROBES = [".gitmodules", ".beads/", "test command", "forge remote"] as const;
 /** What `docsite/content/1.get-started/1.install.md` gives for Claude Code: the
  *  plugin, which registers the MCP server every Claude worker needs. */
@@ -174,7 +175,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   };
 
   useEffect(() => {
-    if (!probe || shown >= probeRows(probe).length) return;
+    if (!probe || shown >= probeRows(probe).filter(([k]) => !ALSO.test(k)).length) return;
     const t = setTimeout(() => setShown((s) => s + 1), PROBE_STEP_MS);
     return () => clearTimeout(t);
   }, [probe, shown]);
@@ -248,8 +249,11 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     }
   };
 
+  // The other commands it found sit behind a disclosure: they are alternatives to the ones in use, not results.
   const rows = probe ? probeRows(probe) : [];
-  const probed = probe != null && shown >= rows.length;
+  const main = rows.filter(([k]) => !ALSO.test(k));
+  const extra = rows.filter(([k]) => ALSO.test(k));
+  const probed = probe != null && shown >= main.length;
   // A repo with no commit cannot be added yet: the reason sits by the button it turns off,
   // and Check again (or Enter) reads it again without editing the path (R10a-01).
   const noCommit = probe?.read_from === null;
@@ -276,7 +280,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
         </ol>
       </div>
 
-      <section className="fr-card" aria-label={STEPS[step - 1]}>
+      <section className={`fr-card${step === 1 && probe ? " fr-wide" : ""}`} aria-label={STEPS[step - 1]}>
         <div className="fr-main">
           <p className="fr-crumb">Set up <span aria-hidden>›</span> Step {step} of {STEPS.length}</p>
           <div className="fr-head">
@@ -312,6 +316,24 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
               {added && noSetup && (nested.length
                 ? <p>No setup command: {nested.join(", ")} {nested.length > 1 ? "have" : "has"} tests and nothing found prepares {nested.length > 1 ? "them" : "it"}. Its first work item stops before it starts until you set a setup command that does, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>
                 : <p>No setup command found: its first work item stops before it starts until you set one, or turn on No setup needed, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>)}
+              {probe && (
+                <div className="fr-results">
+                  <h3>Kraft probes</h3>
+                  <ul className="fr-probes" aria-label="Probe results">
+                    {main.map(([k, v], i) => (
+                      <li key={k}><span>{k}</span><span className={i < shown ? undefined : "fr-pending"}>{i < shown ? v : "checking…"}</span></li>
+                    ))}
+                  </ul>
+                  {extra.length > 0 && probed && (
+                    <details className="fr-also">
+                      <summary>Also found ({extra.length})</summary>
+                      <ul className="fr-probes" aria-label="Also found">
+                        {extra.map(([k, v]) => <li key={k}><span>{k}</span><span>{v}</span></li>)}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
             </>
           )}
           {step === 2 && (
@@ -349,26 +371,18 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             </ol>
           )}
         </div>
-        <aside className="fr-aside">
+        {!(step === 1 && probe) && <aside className="fr-aside">
           {step === 1 && (
             <>
               <h3>Kraft probes</h3>
-              {probe ? (
-                <ul className="fr-probes" aria-label="Probe results">
-                  {rows.map(([k, v], i) => (
-                    <li key={k}><span>{k}</span><span className={i < shown ? undefined : "fr-pending"}>{i < shown ? v : "checking…"}</span></li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="fr-probes is-todo" aria-label="What Kraft probes">
-                  {PROBES.map((k) => <li key={k}><span><span className="fr-probe-dot" aria-hidden />{k}</span><span className="fr-pending">after you add</span></li>)}
-                </ul>
-              )}
+              <ul className="fr-probes is-todo" aria-label="What Kraft probes">
+                {PROBES.map((k) => <li key={k}><span><span className="fr-probe-dot" aria-hidden />{k}</span><span className="fr-pending">after you add</span></li>)}
+              </ul>
             </>
           )}
           {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Templates and Settings write is YAML in $KRAFT_HOME/config (~/.kraft/config by default).</p></>}
           {step === 3 && <><h3>On create</h3><p>Filed from a title, or from an existing spec or plan. It waits for you to start it.</p></>}
-        </aside>
+        </aside>}
       </section>
       <div className="fr-route">
         <p className="fr-agent">
