@@ -1,6 +1,6 @@
 /* The Auto-intake page (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .ink-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
-.ink-page { max-width: 760px; box-sizing: border-box; margin: 0 auto; padding: 20px 20px 60px; display: flex; flex-direction: column; gap: 18px; }
+.ink-page { gap: 18px; }
 .ink-card { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); }
 .ink-card.is-on { background: var(--surface); }
 .ink-sch.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
@@ -10,7 +10,7 @@
 .ink-gap { flex: 1; }
 .ink-says { font-size: var(--fs-meta); color: var(--text-sub); }
 .ink-sentence { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); }
-.ink-h2 { margin: 0 0 8px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.ink-h2 { margin: 0 0 8px; }
 .ink-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .ink-head .ink-h2 { margin: 0; }
 .ink-checks { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }

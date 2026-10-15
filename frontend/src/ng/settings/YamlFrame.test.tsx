@@ -21,7 +21,7 @@ describe("YamlFrame", () => {
     const pane = screen.getByRole("complementary", { name: "thing pane" });
     expect(within(pane).getByLabelText("t.yaml").textContent).toBe("a: 1\nb: 2");
     expect(within(pane).getByText("never shown")).toBeInTheDocument();
-    expect(within(pane).getByText("t.yaml · saved on change")).toBeInTheDocument();
+    expect(within(pane).getByText("t.yaml · Saved on change")).toBeInTheDocument();
     expect(yamlButton()).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(yamlButton());
     expect(screen.queryByRole("complementary", { name: "thing pane" })).toBeNull();

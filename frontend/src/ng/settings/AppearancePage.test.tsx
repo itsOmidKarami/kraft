@@ -45,6 +45,14 @@ describe("ng AppearancePage", () => {
     expect(document.documentElement.dataset).toMatchObject({ surface: "moss", accent: "rose", amount: "full", mode: "light" });
   });
 
+  it("puts the look first, then Density, then the code and board view under its own heading", async () => {
+    setup();
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    expect(screen.getByText("Saved on change")).toHaveClass("saved-note");
+    const order = [...screen.getAllByRole("heading", { level: 2 }), ...screen.getAllByRole("heading", { level: 3 })].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).map((h) => h.textContent);
+    expect(order.slice(order.indexOf("Mode"), order.indexOf("Default editor") + 1)).toEqual(["Mode", "Colour amount", "Surface", "Accent", "Density", "Preview", "Code and board view", "Syntax highlighting", "Review diff", "Board", "Default editor"]);
+  });
+
   it.each([
     // r12 review: unset is KRAFT_EDITOR first, so it is "Not set", not "System default".
     ["a choice this machine has", "zed", ["VS Code", "Zed", "Not set"], "Zed"],
@@ -92,14 +100,25 @@ describe("ng AppearancePage", () => {
   });
 
   it("shows derived values selected, and writes all three on the first change", async () => {
-    const put = setup({ palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true });
+    const put = setup({ palette: "forest", surface: "moss", accent: "violet", colour_amount: "full", derived: true });
     await screen.findByText(/Kraft's default colours until you change one/);
     expect(pressed("Moss")).toBe("true");
-    expect(pressed("Green")).toBe("true");
+    expect(pressed("Violet")).toBe("true");
     expect(screen.getByRole("radio", { name: "Full" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: /^Sand/ }));
-    await waitFor(() => expect(put).toHaveBeenCalledWith({ surface: "sand", accent: "green", colour_amount: "full" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ surface: "sand", accent: "violet", colour_amount: "full" }));
     expect(screen.queryByText(/Kraft's default colours/)).toBeNull();
+  });
+
+  it.each(["green", "amber"] as const)("a stored %s accent is not offered: the page, the paint and the first save fall back to none", async (accent) => {
+    const put = setup({ surface: "moss", accent, colour_amount: "full" });
+    await screen.findByRole("button", { name: "Blue" });
+    for (const gone of ["Green", "Amber"]) expect(screen.queryByRole("button", { name: gone })).toBeNull();
+    expect(pressed("None")).toBe("true");
+    expect(document.documentElement.dataset.accent).toBe("none");
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Sand/ }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ surface: "sand" }));
   });
 
   it("puts the page back and says so when a save fails", async () => {

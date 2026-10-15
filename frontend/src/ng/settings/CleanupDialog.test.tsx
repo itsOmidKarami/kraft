@@ -31,11 +31,11 @@ describe("CleanupDialog", () => {
   it("says what is freed, what is lost and what stays before anything is removed", async () => {
     const { calls, sent } = mount({ "POST /storage/preview": [200, storagePreview()] });
     const dialog = await screen.findByRole("dialog", { name: "Clean up worktrees" });
-    expect(await within(dialog).findByText(/Frees 3G/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/9G used afterwards: still over the quota of 8G, under the limit of 10G/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/Frees 3 GB/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/9 GB used afterwards: still over the quota of 8 GB, under the limit of 10 GB/)).toBeInTheDocument();
     const [cache, spike] = within(dialog).getAllByRole("listitem");
     expect(cache).toHaveTextContent("Cache embeddings");
-    expect(cache).toHaveTextContent("2G");
+    expect(cache).toHaveTextContent("2 GB");
     expect(cache).toHaveTextContent("3 uncommitted files will be lost");
     expect(cache).toHaveTextContent("branch is deleted");
     expect(spike).toHaveTextContent("no uncommitted files");
@@ -46,10 +46,10 @@ describe("CleanupDialog", () => {
   });
 
   it.each([
-    ["ok", "under the quota of 8G", 9 * GB],
-    ["held", "still over the limit of 10G, so starts stay held", 9 * GB],
-    ["over_quota", "11G used afterwards: over the limit of 10G in documents archiving keeps, so starts still go ahead", 11 * GB],
-    [null, "9G used afterwards.", 9 * GB],
+    ["ok", "under the quota of 8 GB", 9 * GB],
+    ["held", "still over the limit of 10 GB, so starts stay held", 9 * GB],
+    ["over_quota", "11 GB used afterwards: over the limit of 10 GB in documents archiving keeps, so starts still go ahead", 11 * GB],
+    [null, "9 GB used afterwards.", 9 * GB],
   ] as const)("says where usage lands when the state after is %s", async (state_after, text, used_after_bytes) => {
     mount({ "POST /storage/preview": [200, storagePreview({ state_after, used_after_bytes })] });
     expect(await screen.findByText((content) => content.includes(text))).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe("CleanupDialog", () => {
 
   it("archives the previewed ids on confirm, then reports back", async () => {
     const { sent, onClose, onDone } = mount({ "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": bulkOk("w1", "w4") });
-    await userEvent.click(await screen.findByRole("button", { name: "Archive 2 items and free 3G" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(sent().map((c) => c.body)).toEqual([{ action: "archive", ids: ["w1", "w4"] }]);
     expect(onDone).toHaveBeenCalledTimes(1);
@@ -67,7 +67,7 @@ describe("CleanupDialog", () => {
     const { sent } = mount({ "POST /storage/preview": [500, { detail: "git status failed in w1" }] });
     expect(await screen.findByRole("alert")).toHaveTextContent("nothing was removed: git status failed in w1");
     expect(screen.queryByRole("listitem")).toBeNull();
-    expect(screen.getByRole("button", { name: /^Archive/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Clean up \d+ items?/ })).toBeDisabled();
     expect(sent()).toEqual([]);
   });
 
@@ -83,7 +83,7 @@ describe("CleanupDialog", () => {
     });
     const { sent } = mount({ "POST /storage/preview": [200, preview], "POST /work-items/bulk": bulkOk("w4") });
     expect(await screen.findByText("Skipped: work item is already archived")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Archive 1 item and free 1G" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clean up 1 item and free 1 GB" }));
     await waitFor(() => expect(sent()).toHaveLength(1));
     expect(sent()[0].body).toEqual({ action: "archive", ids: ["w4"] });
   });
@@ -110,13 +110,13 @@ describe("CleanupDialog", () => {
   ];
   it.each(failures)("keeps the dialog open and names what was not archived: %s", async (_name, answer, summary, lines) => {
     const { onClose, onDone } = mount({ "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": answer });
-    await userEvent.click(await screen.findByRole("button", { name: "Archive 2 items and free 3G" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(summary);
     for (const line of lines) expect(screen.getByText(line)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /^Archive/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Clean up \d+ items?/ })).toBeNull();
     expect(useBulk.getState().last).toBeNull();
     // Cancel unmounted: focus moves to Close, not to the page behind.
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
@@ -132,7 +132,7 @@ describe("CleanupDialog", () => {
       return out;
     });
     mount({ "POST /storage/preview": [200, storagePreview()] });
-    await userEvent.click(await screen.findByRole("button", { name: "Archive 2 items and free 3G" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
     await screen.findByRole("alert");
     expect(useBulk.getState().last).toBe(other);
   });

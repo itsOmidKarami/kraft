@@ -1,3 +1,4 @@
+import { humanSize } from "../../sizes";
 import type { StorageUsage } from "../../types";
 
 /** The server's eight categories, in the order Storage lists them, on both layouts. */
@@ -26,3 +27,11 @@ export function storageNote(data: StorageUsage | null, measuring: boolean): stri
 }
 
 export const NOTHING_TO_CLEAN = "Nothing to clean up: no finished item holds a worktree. A running item is paused or abandoned from its own page.";
+
+/** The clean-up action has one name, here and on the phone; an item it can take is "can be cleaned up". */
+export const CLEAN_SELECTED = "Clean up selected";
+export const CLEANABLE = "can be cleaned up";
+export const cleanAll = (count: number, bytes: number) => `Clean up all (${count}, ${humanSize(bytes)})`;
+
+/** The key figure, said once above the bar: what the worktrees use, against the limit when there is one. */
+export const usageFigure = (used: number, limit: number | null) => (limit != null ? `${humanSize(used)} used of the ${humanSize(limit)} limit` : `${humanSize(used)} used by worktrees`);

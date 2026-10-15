@@ -4,6 +4,7 @@ import { ago } from "../../../format";
 import type { Health } from "../../../types";
 import { detailOf, jsonBody, request } from "../../http";
 import { showToast } from "../../ui/Toast";
+import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 
@@ -73,7 +74,7 @@ export function AboutScreen() {
   ].filter(Boolean).join("\n");
 
   return (
-    <AreaScreen title="About" sub="This build and this instance." status={{ label: "read only" }} yaml={false}>
+    <AreaScreen title="About" sub="This build and this instance." status={{ label: SAVED.readOnly }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       <Group
         title="Version"

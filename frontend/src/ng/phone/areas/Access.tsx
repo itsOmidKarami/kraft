@@ -7,6 +7,7 @@ import { SELF_RESTART, afterRestart, bindHost, restartNote, useApply } from "../
 import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "../../settings/accessWords";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
+import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
 
@@ -52,7 +53,7 @@ export function AccessScreen() {
       if ("password" in body || "session_expiry_days" in body) void loadSessions();
     });
 
-  if (!access) return <AreaScreen title="Access" status={{ label: "saved on change" }} yaml={false}>{loadError ? <p className="ph-error" role="alert">{loadError}</p> : <p className="ph-empty">Loading…</p>}</AreaScreen>;
+  if (!access) return <AreaScreen title="Access" status={{ label: SAVED.change }} yaml={false}>{loadError ? <p className="ph-error" role="alert">{loadError}</p> : <p className="ph-empty">Loading…</p>}</AreaScreen>;
 
   const lan = access.bind !== LOOPBACK;
   const items = restart.filter((i) => i.id.startsWith("access."));
@@ -107,7 +108,7 @@ export function AccessScreen() {
   };
 
   return (
-    <AreaScreen title="Access" sub={ACCESS_LEDE} status={items.length ? { label: "restart to apply", tone: "warn" } : { label: "saved on change" }} yaml={false}>
+    <AreaScreen title="Access" sub={ACCESS_LEDE} status={items.length ? { label: SAVED.restart, tone: "warn" } : { label: SAVED.change }} yaml={false}>
       {items.length > 0 && (
         <Group
           title="Restart needed"

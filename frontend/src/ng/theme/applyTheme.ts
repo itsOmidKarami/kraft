@@ -1,3 +1,4 @@
+import { accentOf } from "./looks";
 import type { Accent, ColourAmount, Surface, Theme, ThemeMode } from "../../types";
 
 /** The part of `theme.yaml` the new UI paints from. */
@@ -21,7 +22,7 @@ const KEY = "kraft.theme.v2";
 export function cachedLook(): Look | null {
   try {
     const t = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    return t && typeof t.surface === "string" && typeof t.mode === "string" ? { ...DEFAULT_LOOK, ...t } : null;
+    return t && typeof t.surface === "string" && typeof t.mode === "string" ? { ...DEFAULT_LOOK, ...t, accent: accentOf(t.accent) } : null;
   } catch {
     return null;
   }
@@ -31,7 +32,7 @@ export function cachedLook(): Look | null {
 export function lookOf(t: Theme): Look {
   return {
     surface: t.surface ?? DEFAULT_LOOK.surface,
-    accent: t.accent ?? DEFAULT_LOOK.accent,
+    accent: accentOf(t.accent),
     colour_amount: t.colour_amount ?? DEFAULT_LOOK.colour_amount,
     mode: t.mode,
     density: t.density,

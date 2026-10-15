@@ -6,8 +6,10 @@ import type { StorageUsage } from "../../types";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
 import { CleanupDialog } from "./CleanupDialog";
-import { CATEGORIES, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote } from "./storageWords";
-import { Block } from "./parts";
+import { CATEGORIES, CLEAN_SELECTED, CLEANABLE, cleanAll, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote, usageFigure } from "./storageWords";
+import { HeaderActions } from "../shell/HeaderActions";
+import { Block, SavedCue } from "./parts";
+import { SAVED } from "./savedWords";
 import "./settings.css";
 import "./storage.css";
 
@@ -70,6 +72,7 @@ export function StoragePage() {
 
   return (
     <div className="ng-settings">
+      <HeaderActions><SavedCue word={SAVED.readOnly} /></HeaderActions>
       <div className="set-page is-cards">
         <div className="set-title">
           <h1>Storage</h1>
@@ -80,23 +83,24 @@ export function StoragePage() {
           <div className="set-st-body">
             {error && <p className="set-error" role="alert">{error}</p>}
             {!data && measuring && <p className="set-hint">Measuring the run folder. This can take half a minute on a large instance.</p>}
+            {data && <p className="set-st-figure">{usageFigure(used, limit != null && data.state ? limit : null)}</p>}
             {data && limit != null && data.state ? (
               <>
-                <div className={`set-st-bar is-${data.state}`} role="img" aria-label={`Worktrees use ${humanSize(used)} of the ${humanSize(limit)} limit`}>
+                <div className={`set-st-bar is-${data.state}`} role="img" aria-label={usageFigure(used, limit)}>
                   <div className="set-st-fill" style={{ width: pct(used) }} />
                   <span className="set-st-mark" style={{ left: pct(data.quota_bytes ?? 0) }} />
                   <span className="set-st-mark" style={{ left: pct(limit) }} />
                 </div>
                 <p className="set-hint">
-                  {humanSize(used)} used · quota {humanSize(data.quota_bytes ?? 0)} · limit {humanSize(limit)}{" "}
-                  <Link className="set-link" to={HOUSEKEEPING} aria-label="Edit the quota and limit in Policy › Housekeeping">Edit</Link>
+                  Quota {humanSize(data.quota_bytes ?? 0)} · limit {humanSize(limit)}.{" "}
+                  <Link className="set-textlink" to={HOUSEKEEPING}>Edit in Policy › Housekeeping</Link>
                 </p>
               </>
             ) : (
               data && (
                 <p className="set-hint">
-                  {humanSize(used)} used by worktrees · no limit set.{" "}
-                  <Link className="set-link" to={HOUSEKEEPING}>Set one in Policy › Housekeeping</Link>
+                  No limit set.{" "}
+                  <Link className="set-textlink" to={HOUSEKEEPING}>Set one in Policy › Housekeeping</Link>
                 </p>
               )
             )}
@@ -124,9 +128,9 @@ export function StoragePage() {
           <Block id="set-st-worktrees" title="Worktrees" card aside={plural(data.items.length, "item")}>
             <div className="set-st-body">
               <div className="set-st-actions">
-                <Button disabled={!checked.size} onClick={() => setCleaning([...checked])}>Clean up selected</Button>
+                <Button disabled={!checked.size} onClick={() => setCleaning([...checked])}>{CLEAN_SELECTED}</Button>
                 <Button disabled={!reclaimable.length} onClick={() => setCleaning(reclaimable.map((i) => i.id))}>
-                  Clean up all reclaimable ({reclaimable.length}, {humanSize(data.reclaimable_bytes)})
+                  {cleanAll(reclaimable.length, data.reclaimable_bytes)}
                 </Button>
                 <span className="set-hint">{checked.size} selected</span>
               </div>
@@ -147,7 +151,7 @@ export function StoragePage() {
                     <tr key={i.id}>
                       <td>{i.reclaimable && <input type="checkbox" className="board-check" checked={checked.has(i.id)} onChange={() => toggle(i.id)} aria-label={`Select ${i.title}`} />}</td>
                       <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
-                      <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> reclaimable</span>}</td>
+                      <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> {CLEANABLE}</span>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>
                       <td className="is-num">{i.documents_bytes ? humanSize(i.documents_bytes) : ""}</td>
                       <td>{ago(i.updated_at)}</td>

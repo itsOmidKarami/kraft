@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "../../api";
 import type { Accent, ColourAmount, Surface, Theme, ThemeMode } from "../../types";
 import { applyTheme, lookOf } from "../theme/applyTheme";
-import { ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
+import { accentOf, ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
 import { ThemeCard } from "../theme/ThemeCard";
 import { DEFAULT_PREFS } from "../review/prefs";
 import { Head, Kv, Note } from "../templates/panes/controls";
@@ -11,6 +11,10 @@ import { AppearanceMore } from "./AppearanceMore";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 
+const DENSITIES: { value: Theme["density"]; label: string }[] = [
+  { value: "compact", label: "Compact" },
+  { value: "comfortable", label: "Comfortable" },
+];
 const MODES: { value: ThemeMode; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
@@ -25,7 +29,7 @@ function themeYaml(theme: Theme): string {
   return [
     `mode: ${theme.mode}`,
     `surface: ${theme.surface ?? "graphite"}`,
-    `accent: ${amount === "mono" ? "none" : (theme.accent ?? "none")}`,
+    `accent: ${amount === "mono" ? "none" : accentOf(theme.accent)}`,
     `colour_amount: ${amount}`,
     "code_scheme:",
     `  light: ${scheme.light}`,
@@ -54,7 +58,7 @@ function Overview({ theme }: { theme: Theme }) {
       <Head>Theme</Head>
       <Kv k="mode" v={theme.mode} mono />
       <Kv k="surface" v={theme.surface ?? "graphite"} mono />
-      <Kv k="accent" v={amount === "mono" ? "none" : (theme.accent ?? "none")} mono />
+      <Kv k="accent" v={amount === "mono" ? "none" : accentOf(theme.accent)} mono />
       <Kv k="colour amount" v={amount} mono />
       <Kv k="code scheme" v={`${scheme[mode]} (${mode})`} mono />
       <Kv k="density" v={theme.density} mono />
@@ -70,7 +74,7 @@ function Overview({ theme }: { theme: Theme }) {
   );
 }
 
-/** Settings › Appearance, colour section (UX V2 W1). Saved on change: each
+/** Settings › Appearance (UX V2 W1): the look first, then the code and board view. Saved on change: each
  *  control sends only its own key, and the server merges it into theme.yaml. */
 export function AppearancePage() {
   const [theme, setTheme] = useState<Theme | null>(null);
@@ -88,7 +92,7 @@ export function AppearancePage() {
 
   const surface = theme.surface ?? "graphite";
   const amount = theme.colour_amount ?? "subtle";
-  const accent = amount === "mono" ? "none" : (theme.accent ?? "none");
+  const accent = amount === "mono" ? "none" : accentOf(theme.accent);
   const mode = resolveMode(theme.mode);
 
   const save = async (patch: Partial<Theme>) => {
@@ -111,24 +115,23 @@ export function AppearancePage() {
 
   return (
     <YamlFrame pageKey="appearance" file="theme.yaml" title="appearance" icon="palette" yaml={themeYaml(theme)} overview={<Overview theme={theme} />}>
-      <div className="appearance">
-        <h1>Appearance</h1>
-        <p className="lede">The choice applies at once and is kept in theme.yaml.</p>
+      <div className="set-page">
+        <div className="set-title"><h1>Appearance</h1><p className="lede">Each choice applies at once.</p></div>
         {theme.derived && <p className="note">These are Kraft's default colours until you change one.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="appearance-cols">
           <div className="appearance-controls">
             <section>
-              <h2>Mode</h2>
+              <h2 className="set-h2">Mode</h2>
               <Segmented label="Mode" options={MODES} value={theme.mode} onChange={(v) => save({ mode: v })} />
             </section>
             <section>
-              <h2>Colour amount</h2>
+              <h2 className="set-h2">Colour amount</h2>
               <Segmented label="Colour amount" options={AMOUNTS} value={amount} onChange={setAmount} />
               <p className="note">Scales the tint of the surfaces, the accent and the status colours together. Mono leaves only grey.</p>
             </section>
             <section>
-              <h2>Surface</h2>
+              <h2 className="set-h2">Surface</h2>
               <div className="surface-grid">
                 {SURFACES.map((s) => (
                   <button key={s.id} type="button" className="surface-choice" aria-pressed={surface === s.id} onClick={() => save({ surface: s.id as Surface })}>
@@ -140,7 +143,7 @@ export function AppearancePage() {
               </div>
             </section>
             <section>
-              <h2>Accent</h2>
+              <h2 className="set-h2">Accent</h2>
               <div className="accent-row">
                 {ACCENTS.map((a) => (
                   <button key={a} type="button" className="accent-choice" aria-pressed={accent === a} disabled={amount === "mono"} onClick={() => save({ accent: a as Accent })}>
@@ -151,9 +154,14 @@ export function AppearancePage() {
               </div>
               <p className="note">{amount === "mono" ? "Mono has no accent. Pick Subtle or Full to choose one." : "The accent colours links only. Selection, buttons and focus stay neutral."}</p>
             </section>
+            <section>
+              <h2 className="set-h2">Density</h2>
+              <Segmented label="Density" options={DENSITIES} value={theme.density} onChange={(v) => save({ density: v })} />
+              <p className="note">Compact is the default. This interface is dense on purpose. Comfortable adds 2px to row padding and 1px to body type.</p>
+            </section>
           </div>
           <section className="appearance-preview">
-            <h2>Preview</h2>
+            <h2 className="set-h2">Preview</h2>
             <ThemeCard surface={surface} accent={accent} amount={amount} mode={mode} />
             <p className="caption">{`${title(surface)} · ${accent} accent · ${mode} · ${amount}`}</p>
           </section>

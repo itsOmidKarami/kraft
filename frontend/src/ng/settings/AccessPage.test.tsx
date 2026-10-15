@@ -234,22 +234,21 @@ describe("ng AccessPage", () => {
     expect(screen.getByLabelText("access.yaml").textContent).toContain("# password: not set");
   });
 
-  it("draws Port, Allowed hosts, Password and Sessions as cards, each with its aside at the top right", async () => {
+  it("draws Port, Allowed hosts, Password and Sessions as cards, saying nothing about saving: the header's cue does", async () => {
     setup();
     await screen.findByRole("heading", { name: "Access" });
     const card = (name: string) => screen.getByRole("region", { name }) as HTMLElement;
-    for (const [name, aside] of [["Port", "saved on change"], ["Allowed hosts", "saved on change"], ["Password", "writes access.yaml"], ["Sessions", "live"]]) {
+    for (const name of ["Port", "Allowed hosts", "Password", "Sessions"]) {
       expect(card(name)).toHaveClass("is-card");
-      expect(within(card(name)).getByText(aside)).toBeInTheDocument();
+      expect(card(name).querySelector(".set-block-aside")).toBeNull();
     }
-    expect(within(card("Sessions")).getByText("live")).toHaveClass("set-block-pill");
     expect(within(card("Port")).getByText("Used by both binds. Takes effect on restart. 1024–65535.")).toBeInTheDocument();
   });
 
-  it("says in the Port card's aside when the port waits for a restart", async () => {
+  it("says in the Port card's aside, in the cue's words, when the port waits for a restart", async () => {
     useApply.setState({ restart: [PORT_ITEM] });
     setup({ port: 9000 }, { port: 8765 });
-    expect(await within(await screen.findByRole("region", { name: "Port" })).findByText("waits for a restart")).toBeInTheDocument();
+    expect(await within(await screen.findByRole("region", { name: "Port" })).findByText("Restart to apply")).toBeInTheDocument();
   });
 
   it("offers the two reaches as radio cards with their address and what each means, and Sign out here for the current session", async () => {

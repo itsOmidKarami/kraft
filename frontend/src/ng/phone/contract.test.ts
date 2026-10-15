@@ -56,6 +56,7 @@ const ALLOWED = [
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
   "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
+  "settings/savedWords", // what a save-on-change page says about whether it sticks, on both layouts
   "settings/accessWords", // what Access says, on both layouts
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note

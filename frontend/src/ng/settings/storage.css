@@ -5,6 +5,7 @@
 .set-st-bar.is-over_quota .set-st-fill { background: var(--warn); }
 .set-st-bar.is-held .set-st-fill { background: var(--bad); }
 .set-st-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.set-st-figure { margin: 0; font-size: var(--fs-body); font-weight: 500; font-variant-numeric: tabular-nums; }
 .set-st-note { margin: 0; font-size: var(--fs-label); }
 .set-st-note:empty { display: none; }
 .set-st-note.is-warn { color: var(--warn); }
@@ -18,7 +19,7 @@
 .set-st-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
 .set-st-table th { padding: 4px 8px; text-align: left; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
-.set-st-table .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.set-st-table .is-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 .set-st-table tr.is-orphan td { color: var(--text-muted); }
 .set-st-title { color: var(--text); text-decoration: none; }
 .set-st-title:hover { text-decoration: underline; }

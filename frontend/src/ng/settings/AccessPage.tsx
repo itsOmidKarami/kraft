@@ -9,6 +9,7 @@ import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "./accessWords";
+import { SAVED } from "./savedWords";
 import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
@@ -180,7 +181,7 @@ export function AccessPage() {
 
   return (
     <>
-    <YamlFrame pageKey="access" file="access.yaml" title="access" icon="shield" status={items.length ? "restart to apply" : "saved on change"} yaml={yaml} yamlNote="The password is stored hashed and never shown. Bind and port are read at startup, so an edit here waits for a restart.">
+    <YamlFrame pageKey="access" file="access.yaml" title="access" icon="shield" status={items.length ? SAVED.restart : SAVED.change} yaml={yaml} yamlNote="The password is stored hashed and never shown. Bind and port are read at startup, so an edit here waits for a restart.">
       <div className="set-page is-cards">
         <div className="set-title"><h1>Access</h1><p className="lede">{ACCESS_LEDE}</p></div>
 
@@ -239,7 +240,7 @@ export function AccessPage() {
           <span className="set-hint">Takes effect on restart. 0.0.0.0 listens on every network this machine is on. To reach Kraft from your phone, prefer a Tailscale address (see <a href={REMOTE_ACCESS} target="_blank" rel="noopener noreferrer">Remote access</a>).</span>
         </section>
 
-        <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? "waits for a restart" : "saved on change"}>
+        <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? SAVED.restart : undefined}>
           <SetRow label="port" error={errors.port} hint="Used by both binds. Takes effect on restart. 1024–65535.">
             {editing === "port" ? (
               <input ref={field} className="set-input" aria-label="Port" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePort())} onBlur={() => void savePort()} />
@@ -252,7 +253,7 @@ export function AccessPage() {
 
         {lan ? (
           <>
-            <Block id="set-hosts" title="Allowed hosts" aside="saved on change" card>
+            <Block id="set-hosts" title="Allowed hosts" card>
               <SetRow label="hosts" error={errors.host} hint="Off loopback, another device's browser is refused (403) unless the Host it sends is on this list: the DNS-rebinding guard. A browser on this machine is let in at 127.0.0.1, localhost or [::1]. On 127.0.0.1 the list is ignored.">
                 <ul className="set-chips">
                   {access.allowed_hosts.map((h) => (
@@ -276,7 +277,7 @@ export function AccessPage() {
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
             </Block>
 
-            <Block id="set-password" title="Password" aside="writes access.yaml" card>
+            <Block id="set-password" title="Password" card>
               <SetRow label="password" error={errors.password} hint="A new password signs every session out.">
                 {editing === "password" ? (
                   <span className="set-inline">
@@ -298,7 +299,7 @@ export function AccessPage() {
               </SetRow>
             </Block>
 
-            <Block id="set-sessions" title="Sessions" aside="live" pill card>
+            <Block id="set-sessions" title="Sessions" card>
               {errors.sessions && <span className="set-error" role="alert">{errors.sessions}</span>}
               {sessions.length === 0 && <p className="set-hint">No sessions: auth is off.</p>}
               <ul className="set-sessions">

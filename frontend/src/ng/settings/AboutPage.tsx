@@ -4,6 +4,9 @@ import * as api from "../../api";
 import { ago, elapsed } from "../../format";
 import type { Access, Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
+import { HeaderActions } from "../shell/HeaderActions";
+import { SavedCue } from "./parts";
+import { SAVED } from "./savedWords";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
@@ -91,6 +94,7 @@ export function AboutPage() {
 
   return (
     <div className="ng-settings">
+      <HeaderActions><SavedCue word={SAVED.readOnly} /></HeaderActions>
       <div className="set-page is-cards">
         <div className="set-title"><h1>About</h1><p className="lede">This build and this instance.</p></div>
 

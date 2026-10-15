@@ -80,7 +80,7 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
           <>
             <Button onClick={onClose} disabled={busy}>Cancel</Button>
             <Button variant="danger" disabled={!take.length || busy} onClick={() => void confirm()}>
-              Archive {plural(take.length, "item")} and free {humanSize(preview?.freed_bytes ?? 0)}
+              Clean up {plural(take.length, "item")} and free {humanSize(preview?.freed_bytes ?? 0)}
             </Button>
           </>
         )

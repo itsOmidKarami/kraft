@@ -7,6 +7,8 @@ import type { Notify } from "../../types";
 import { Inspector } from "../graph/Inspector";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { HeaderActions } from "../shell/HeaderActions";
+import { SavedCue } from "./parts";
+import { SAVED } from "./savedWords";
 import { ALLOW, browserActive as browserIsActive, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, evLine, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive as webhookOn, type Channel, type Permission } from "./notifyWords";
 import { Head, Kv, Note } from "../templates/panes/controls";
 import { Button } from "../ui/Button";
@@ -325,12 +327,12 @@ export function NotifyPage() {
   ) : tab === "config" ? (sel === "webhook" ? webhookConfig : browserConfig) : overview;
   const tabs = [{ value: "overview", label: "Overview" }, ...(sel ? [{ value: "config", label: "Config" }] : []), ...(sel !== "browser" ? [{ value: "yaml", label: "YAML" }] : [])];
   const title = sel ? CHANNELS[sel] : "notifications";
-  const sub = sel === "webhook" ? "notify.yaml" : sel === "browser" ? "this device only" : "notify.yaml · saved on change";
+  const sub = sel === "webhook" ? "notify.yaml" : sel === "browser" ? "this device only" : `notify.yaml · ${SAVED.change}`;
 
   return (
     <div className="tpl-page" ref={frame}>
       <HeaderActions>
-        <span className="saved-note">saved on change</span>
+        <SavedCue word={SAVED.change} />
         <Button aria-pressed={!sel && tab === "yaml" && paneOpen} onClick={openYaml}>YAML</Button>
       </HeaderActions>
       <div className="tpl-area">

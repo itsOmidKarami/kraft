@@ -24,23 +24,24 @@ describe("Storage (phone)", () => {
     expect(screen.getByText("Over the limit: starts are held until you make room.")).toBeInTheDocument();
     const where = screen.getByRole("region", { name: "Where it goes" });
     for (const [, label] of CATEGORIES) expect(within(where).getByText(label)).toBeInTheDocument();
-    expect(within(where).getByText("12G")).toBeInTheDocument();
+    expect(within(where).getByText("12 GB")).toBeInTheDocument();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
   });
 
   it("previews a clean-up, says what is lost, and archives only on confirm", async () => {
     const { calls } = open();
-    await userEvent.click(await screen.findByText(/^Clean up all reclaimable \(1, 3G\)/));
+    await userEvent.click(await screen.findByText(/^Clean up all \(1, 3 GB\)/));
     expect(calls.at(-1)).toMatchObject({ path: "/storage/preview", body: { ids: ["w1"] } });
     const sheet = await screen.findByRole("dialog", { name: "Clean up finished worktrees?" });
     expect(await within(sheet).findByText(/2 uncommitted files will be lost/)).toBeInTheDocument();
     expect(calls.some((c) => c.path.startsWith("/work-items/bulk"))).toBe(false);
-    await userEvent.click(within(sheet).getByRole("button", { name: "Archive them" }));
+    await userEvent.click(within(sheet).getByRole("button", { name: "Clean up" }));
     await waitFor(() => expect(calls.find((c) => c.path.startsWith("/work-items/bulk"))?.body).toEqual({ action: "archive", ids: ["w1"] }));
   });
 
   it("offers no clean-up when no finished item holds a worktree", async () => {
     open(usage({ items: [], reclaimable_bytes: 0 }));
     expect(await screen.findByText(NOTHING_TO_CLEAN)).toBeInTheDocument();
-    expect(screen.getByText(/^Clean up all reclaimable/).closest("button")).toBeDisabled();
+    expect(screen.getByText(/^Clean up all \(/).closest("button")).toBeDisabled();
   });
 });
