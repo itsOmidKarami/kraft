@@ -117,7 +117,7 @@ describe("BulkBar", () => {
   const FAILED = detail({ id: "f8", title: "Item f8", display_status: "failed", status: "needs_human", bead_id: null });
 
   it("counts Resume on the paused ones that have begun (a never-started one has Start) and Retry on the stopped ones", () => {
-    const GATE = detail({ id: "g9", title: "Item g9", display_status: "needs_you", status: "needs_human", stop: { kind: "gate", reason: "approve spec" }, pending_gate: "spec_approval", bead_id: null });
+    const GATE = detail({ id: "g9", title: "Item g9", display_status: "needs_you", status: "needs_human", stop: { kind: "gate", reason: "approve spec", node: "spec_approval", resume_at: null }, pending_gate: "spec_approval", bead_id: null });
     mount([PAUSED, NEW, FAILED, RUN, GATE]);
     expect(screen.getByRole("button", { name: "Resume 1" })).toBeInTheDocument(); // the gate has its own Review, so Retry is 1, not 2
     expect(screen.getByRole("button", { name: "Retry 1" })).toBeInTheDocument();
