@@ -106,7 +106,7 @@ export function registerComments(
     }
     // Forgotten or reloaded while documents opened: the newer state draws itself.
     if (cache.get(id) !== threads) return;
-    const other = otherThreadsText(id, threads, places);
+    const other = otherThreadsText(nameOf(store, id), threads, places);
     others.set(id, other.text);
     othersChanged.fire(otherUri(id));
     for (const [tid, line] of other.lineOf) ranges.set(tid, { uri: otherUri(id), range: new vscode.Range(line, 0, line, 0) });

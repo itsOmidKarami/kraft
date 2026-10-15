@@ -94,8 +94,10 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
  *  the server has no bulk resume. */
 export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: WorkItem[]): Promise<void> {
   const { ids, skipped } = bulkPlan(verb, items);
-  if (verb === "archive" && ids.length > 1) {
-    const ok = await vscode.window.showWarningMessage(`Archive ${ids.length} items? Their worktrees are deleted.`, { modal: true }, "Archive");
+  const doomed = verb === "archive" ? items.filter((i) => ids.includes(i.id) && i.worktree_exists) : [];
+  if (doomed.length) {
+    const what = ids.length > 1 ? `${ids.length} items? Their worktrees are` : `${nameOf(store, ids[0])}? Its worktree is`;
+    const ok = await vscode.window.showWarningMessage(`Archive ${what} deleted.`, { modal: true }, "Archive");
     if (ok !== "Archive") return;
   }
   const results: BulkResult[] = [];

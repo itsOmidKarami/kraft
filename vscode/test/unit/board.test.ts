@@ -379,13 +379,14 @@ describe("A multi-selection", () => {
   const [p1, p2] = [item({ id: "P-1", actions: ["pause"] }), item({ id: "P-2", title: "Cache layer", actions: ["pause"] })];
   const [r1, r2] = [item({ id: "R-1", display_status: "paused", actions: ["resume"] }), item({ id: "R-2", title: "Login page", display_status: "paused", actions: ["resume"] })];
   const q = stopped("question", { id: "Q-1", title: "Rate limits", actions: ["resume", "retry"] });
-  const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"] }), item({ id: "D-2", display_status: "done", actions: ["archive"] })];
+  const d3 = item({ id: "D-3", display_status: "done", actions: ["archive"], worktree_exists: false });
+  const [d1, d2] = [item({ id: "D-1", display_status: "done", actions: ["archive"], worktree_exists: true }), item({ id: "D-2", display_status: "done", actions: ["archive"], worktree_exists: true })];
   const p3 = item({ id: "P-3", title: "Search box", actions: ["pause"] });
   /** The ids each bulk call sent, without the results array it fills. */
   const sent = (bulk: { mock: { calls: unknown[][] } }) => bulk.mock.calls.map((c) => c.slice(0, 2));
 
   function setup(refusal: () => string | null = () => null, answer: string | null = "Archive") {
-    const all = [p1, p2, p3, r1, r2, q, d1, d2];
+    const all = [p1, p2, p3, r1, r2, q, d1, d2, d3];
     const refreshed: string[] = [];
     const store = { items: () => all, item: (id: string) => all.find((i) => i.id === id), detail: () => undefined,
       refresh: async (id: string) => { refreshed.push(id); if (id === "P-2") throw new Error("gone"); return true; },
@@ -449,7 +450,9 @@ describe("A multi-selection", () => {
   it.each([
     ["archives after asking once", "Archive", [d1, d2], [["archive", ["D-1", "D-2"]]], "Archive 2 items? Their worktrees are deleted.", "Archived 2."],
     ["archives nothing when the question is dismissed", null, [d1, d2], [], "Archive 2 items? Their worktrees are deleted.", undefined],
-    ["asks nothing when only one of the selection can be archived", "Archive", [d1, p1], [["archive", ["D-1"]]], undefined, undefined],
+    ["asks once, by name, when only one of the selection can be archived", "Archive", [d1, p1], [["archive", ["D-1"]]], "Archive t? Its worktree is deleted.", undefined],
+    ["archives nothing when that one question is dismissed", null, [d1, p1], [], "Archive t? Its worktree is deleted.", undefined],
+    ["asks nothing when the one archivable has no worktree", "Archive", [d3, p1], [["archive", ["D-3"]]], undefined, undefined],
   ])("%s", async (_, answer, selection, calls, asked, said) => {
     const { handlers, api, warn, info } = setup(() => null, answer);
     await handlers.get("kraft.archive")!(row(selection[0]), selection.map(row));

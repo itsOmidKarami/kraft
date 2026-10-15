@@ -36,13 +36,13 @@ export const toastLevel = (item: Pick<WorkItem, "display_status" | "stop">): "wa
 
 /** What to show for what just became news: each announcement on its own, or,
  *  with two or more at once (a startup, reconnect or rescope finding a queue),
- *  one summary that offers Next Gate when a gate is among them. */
-export function toastPlan(found: [WorkItem, Announcement][]): { each: [WorkItem, Announcement][] } | { summary: string; level: "warning" | "information"; nextGate: boolean } {
+ *  one summary that offers Next Gate when a gate is among them, and always Show Board. */
+export function toastPlan(found: [WorkItem, Announcement][]): { each: [WorkItem, Announcement][] } | { summary: string; level: "warning" | "information"; buttons: string[] } {
   if (found.length < 2) return { each: found };
   return {
     summary: `${found.length} items need you`,
     level: found.some(([i]) => toastLevel(i) === "warning") ? "warning" : "information",
-    nextGate: found.some(([, a]) => a.kind === "gate"),
+    buttons: found.some(([, a]) => a.kind === "gate") ? ["Next Gate", "Show Board"] : ["Show Board"],
   };
 }
 

@@ -66,8 +66,9 @@ or from Submit Review. Several notifications at once become one ("3 items need
 you") with a Next Gate button. A reject asks for
 a reason, which goes to the agent.
 
-**Kraft: Next Gate** in the Command Palette opens the gate document of the item
-that has waited longest, so a queue of gates goes by without the mouse.
+**Kraft: Next Gate** in the Command Palette opens the gate document directly when
+one gate waits, and with several lists them, longest-waiting first, so a queue of
+gates goes by without the mouse.
 
 Default keys (`Cmd+Alt+K` on macOS), each chord starting `Ctrl+Alt+K`:
 
