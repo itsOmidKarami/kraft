@@ -103,6 +103,13 @@ describe("HarnessesPage: the pane's first state", () => {
     const { unmount } = renderPage();
     expect(await screen.findByRole("complementary", { name: "harnesses pane" })).toBeInTheDocument();
     unmount();
+    const { unmount: second } = renderPage("?harness=claude");
+    expect(await screen.findByRole("complementary", { name: "claude pane" })).toBeInTheDocument();
+    second();
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(max-width: 1279px)", media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+    const { unmount: third } = renderPage();
+    expect(await screen.findByRole("button", { name: "Expand Tools & escalation" })).toBeInTheDocument();
+    third();
     renderPage("?harness=claude");
     expect(await screen.findByRole("complementary", { name: "claude pane" })).toBeInTheDocument();
   });

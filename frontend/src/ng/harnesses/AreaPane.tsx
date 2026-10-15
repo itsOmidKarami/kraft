@@ -54,6 +54,7 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
       title="harnesses"
       sub="harnesses.yaml · access, tools and escalation from policy.yaml"
       prob={first ? { msg: problemText(first), fix: problems.length > 1 ? `and ${problems.length - 1} more` : first.fix } : undefined}
+      rail="Tools & escalation"
       tabs={tabs}
       tab={tab}
       onTab={onTab}

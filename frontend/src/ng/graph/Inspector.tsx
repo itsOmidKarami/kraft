@@ -28,6 +28,8 @@ type Props = {
   onTab?: (t: string) => void;
   onCollapse: () => void;
   onExpand: () => void;
+  /** What the collapsed rail reads, when the title alone does not say what is in the pane. */
+  rail?: string;
   /** Focus ⤢: opens the node view. */
   onFocus?: () => void;
   /** What the Focus button says and does when it is not the node view: a verb phrase and the longer tip. */
@@ -44,7 +46,7 @@ type Props = {
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, tabs, tab, onTab, onCollapse, onExpand, onFocus, focusAs, onTitle, titleEdit, onIcon, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, tabs, tab, onTab, onCollapse, onExpand, rail, onFocus, focusAs, onTitle, titleEdit, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -68,9 +70,9 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     return (
       <aside className="pane-rail" aria-label={`${title} pane, collapsed`}>
         <button ref={railBtn} type="button" className="rail-btn" {...tip("Expand pane")} onClick={onExpand}><PanelRightOpen size={14} /></button>
-        <button type="button" className="rail-name" aria-label={`Expand ${title}`} onClick={onExpand}>
+        <button type="button" className="rail-name" aria-label={`Expand ${rail ?? title}`} onClick={onExpand}>
           <span className="rail-icon">{glyph}{prob && <span className="rail-prob" aria-label="has a problem" />}</span>
-          <span className="rail-title">{title}</span>
+          <span className="rail-title">{rail ?? title}</span>
         </button>
       </aside>
     );
