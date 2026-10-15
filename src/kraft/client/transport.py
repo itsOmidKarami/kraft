@@ -10,6 +10,7 @@ regardless of which submodule it lives in.
 
 from __future__ import annotations
 
+import enum
 import os
 import re
 from pathlib import Path
@@ -19,6 +20,52 @@ import httpx
 
 from kraft import auth, config
 from kraft.paths import config_dir, default_run_dir
+
+
+class Failure(enum.StrEnum):
+    """What kind of failure a `ClientError` is, so a caller that must tell
+    them apart (the console) never parses the sentence."""
+
+    UNREACHABLE = "unreachable"  # no server answered
+    # No answer in time, or the connection dropped mid-request: the server may
+    # still finish what it was asked.
+    INTERRUPTED = "interrupted"
+    OTHER_INSTANCE = "other_instance"  # a server, but not this KRAFT_HOME's
+    UNAUTHORIZED = "unauthorized"  # 401
+    NOT_FOUND = "not_found"  # 404
+    REFUSED = "refused"  # any other 4xx, and the client's own checks
+    SERVER_ERROR = "server_error"  # 5xx
+    BAD_RESPONSE = "bad_response"  # an answer that is not JSON
+
+
+class ClientError(ValueError):
+    """A call Kraft refused or could not make. `str()` is the one sentence both
+    front doors show; `kind` and `status` say what it was. A `ValueError`, so
+    every `except ValueError` in the CLI and MCP keeps working."""
+
+    def __init__(self, message: str, *, kind: Failure, status: int | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+
+
+def status_error(status: int, detail: str) -> ClientError:
+    """`kraft <status>: <detail>`, the sentence every refused call reads as."""
+    if status == 401:
+        kind = Failure.UNAUTHORIZED
+    elif status == 404:
+        kind = Failure.NOT_FOUND
+    elif status >= 500:
+        kind = Failure.SERVER_ERROR
+    else:
+        kind = Failure.REFUSED
+    return ClientError(f"kraft {status}: {detail}", kind=kind, status=status)
+
+
+def _unreachable() -> ClientError:
+    return ClientError(
+        f"no Kraft server at {base_url()} — start one with `kraft`", kind=Failure.UNREACHABLE
+    )
 
 
 def base_url() -> str:
@@ -140,12 +187,20 @@ async def _send(method: str, path: str, **kwargs) -> httpx.Response:
         async with http() as session:
             return await session.request(method, _api(path), **kwargs)
     except httpx.ConnectError as exc:
-        raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
+        raise _unreachable() from exc
     except httpx.TimeoutException as exc:
         # The server may still finish what it was asked: say so, rather than
         # hand an agent a traceback, or a person a reason to ask twice.
-        raise ValueError(
-            f"Kraft did not answer {method} {path} in time; it may still finish it"
+        raise ClientError(
+            f"Kraft did not answer {method} {path} in time; it may still finish it",
+            kind=Failure.INTERRUPTED,
+        ) from exc
+    except httpx.TransportError as exc:
+        # The request may have reached the server before the connection went:
+        # the same reading a timeout gets, for the same reason.
+        raise ClientError(
+            f"lost the connection to Kraft during {method} {path}; it may still finish it",
+            kind=Failure.INTERRUPTED,
         ) from exc
 
 
@@ -154,8 +209,21 @@ async def _get(path: str, **params) -> dict | list:
     if response.status_code >= 400:
         # An agent reads this string. "404: work item not found" is actionable;
         # an httpx traceback is not.
-        raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
-    return response.json()
+        raise status_error(response.status_code, _detail(response))
+    return _json(response)
+
+
+def _json(response: httpx.Response) -> dict | list:
+    """The answer's body. A proxy's HTML page or a cut-off body is a sentence,
+    not a JSONDecodeError out of the client."""
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise ClientError(
+            f"kraft {response.status_code}: the answer was not JSON",
+            kind=Failure.BAD_RESPONSE,
+            status=response.status_code,
+        ) from exc
 
 
 async def _delete(url: str, **params) -> None:
@@ -163,7 +231,7 @@ async def _delete(url: str, **params) -> None:
     `_get`'s, because a 404 an agent reads must be one sentence either way."""
     response = await _send("DELETE", url, params=params)
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {_detail(response)}")
+        raise status_error(response.status_code, _detail(response))
 
 
 async def _patch(path: str, payload: dict) -> dict:
@@ -177,7 +245,7 @@ async def _patch(path: str, payload: dict) -> dict:
     except ValueError:
         body = {"detail": response.text}
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {detail_of(body)}")
+        raise status_error(response.status_code, detail_of(body))
     return body
 
 
@@ -196,5 +264,5 @@ async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, 
 async def _act(path: str, payload: dict | None = None) -> dict:
     status, body = await _post(path, payload)
     if status >= 400:
-        raise ValueError(f"kraft {status}: {detail_of(body)}")
+        raise status_error(status, detail_of(body))
     return body
