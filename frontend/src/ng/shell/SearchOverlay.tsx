@@ -67,9 +67,9 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
     ? {
         id: `${section}:${i.id}`,
         section,
-        // The item first, then the gate as the board words it: "approve spec", not "spec_approval" (#502 review).
+        // The item first, then the action: "Review" and the gate as the board words it ("approve spec", not "spec_approval", #502 review).
         label: i.title,
-        sub: [gateName(i.chain_definition?.nodes, i.pending_gate), shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
+        sub: ["Review", gateName(i.chain_definition?.nodes, i.pending_gate), shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,
         tag: headerState(i).badge,
         note: `reviews ${i.title}`,

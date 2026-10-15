@@ -7,7 +7,7 @@ import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { Menu } from "../ui/Menu";
 import { NoMatch } from "../ui/NoMatch";
-import { archivedLede, ARCHIVED_READ_ERROR } from "./archivedWords";
+import { archivedLede, ARCHIVED_READ_ERROR } from "../ui/archivedWords";
 import { BulkBar } from "./BulkBar";
 import { sendBulk } from "./bulk";
 import { Row } from "./Row";

@@ -128,8 +128,7 @@ describe("SearchOverlay", () => {
     // Waiting at a gate, it is an action: review that gate.
     // The item's name leads; the gate it waits at is the sub, as the board words it.
     const gate = within(section("Needs you")).getByTitle("Gated work").closest("[role=option]")!;
-    expect(gate.querySelector(".ng-search-sub")).toHaveTextContent("approve human review · wi_gate · alpha");
-    expect(gate).not.toHaveTextContent(/Review /);
+    expect(gate.querySelector(".ng-search-sub")).toHaveTextContent("Review · approve human review · wi_gate · alpha");
     expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
     const says = (row: string) => {
       const o = screen.getByTitle(row).closest("[role=option]")!;

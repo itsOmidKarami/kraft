@@ -26,7 +26,7 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
-import { autoArchiveNote } from "./archivedWords";
+import { autoArchiveNote } from "../ui/archivedWords";
 import { countIn } from "./counts";
 import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";

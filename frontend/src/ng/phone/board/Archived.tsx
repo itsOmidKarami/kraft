@@ -4,7 +4,7 @@ import { ago, repoName } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { AreaScreen } from "../areas/AreaScreen";
 import { Group, type RowSpec } from "../areas/kit";
-import { archivedLede, ARCHIVED_READ_ERROR } from "../../board/archivedWords";
+import { archivedLede, ARCHIVED_READ_ERROR } from "../../ui/archivedWords";
 import { itemPath } from "./actions";
 
 /** `/archived`: the desktop's archived list as rows, newest first, so its
