@@ -66,9 +66,11 @@
 .ng-side-count { min-width: 14px; font-size: var(--fs-label); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--bad); }
 .ng-side-group { flex: none; margin-top: 6px; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .ng-side-foot { flex: none; display: flex; padding: 6px 0 8px; border-top: 1px solid var(--line); }
-.ng-side-meta { display: flex; align-items: center; gap: 10px; flex: 1; padding: 3px 12px; font-size: var(--fs-meta); color: var(--text-muted); text-decoration: none; }
+.ng-side-meta { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1; padding: 3px 12px; font-size: var(--fs-meta); color: var(--text-muted); text-decoration: none; }
 .ng-side-meta:hover { color: var(--text); }
-.ng-side-update { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); }
+/* The version gives way first: the badge's word never clips, a long dev version ends in an ellipsis. */
+.ng-side-ver { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ng-side-update { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; color: var(--warn); }
 .ng-side-update .ng-side-dot { margin-left: 0; }
 .ng-side-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-left: auto; margin-right: -9px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; }
 .ng-side-pin:hover { color: var(--text); background: var(--surface-2); }

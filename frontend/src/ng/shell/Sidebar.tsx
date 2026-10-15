@@ -128,7 +128,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         <div className="ng-side-foot">
           {health?.version && (
             <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${restart ? ", restart to finish the update" : behind ? ", update available" : ""}`}>
-              v{health.version}
+              <span className="ng-side-ver" title={`v${health.version}`}>v{health.version}</span>
               {update && <span className="ng-side-update"><span className="ng-side-dot" />{restart ? "restart" : "update"}</span>}
             </NavLink>
           )}

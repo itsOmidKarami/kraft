@@ -80,6 +80,8 @@ describe("theme.css", () => {
       for (const r of ["--text", "--text-sub", "--text-muted"]) at(r, g, 4.5);
       at("--text-faint", g, 3);
     }
+    // Placeholders and chips sit on the raised --surface-2 (search kind chip, .item-input).
+    at("--text-muted", "--surface-2", 4.5);
     for (const g of ["--bg", "--surface"]) {
       at("--accent", g, 4.5);
       at("--stroke", g, 3);
