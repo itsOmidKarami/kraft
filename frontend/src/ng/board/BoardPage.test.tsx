@@ -1,3 +1,4 @@
+import { ShortcutHelp } from "../shell/ShortcutHelp";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -236,21 +237,14 @@ describe("BoardPage", () => {
     expect(screen.getByRole("searchbox", { name: "Filter" })).toHaveFocus();
   });
 
-  it("lists its keyboard shortcuts from ? and from the button, and hints / in the empty filter", async () => {
+  it("hints / in the empty filter, and adds its rows to the shortcut help", async () => {
     put(item("r1", "running"));
     board();
     await screen.findByRole("button", { name: /Item r1/ });
     const filter = screen.getByRole("searchbox", { name: "Filter" });
     expect(filter.parentElement).toHaveTextContent("/");
-    fireEvent.keyDown(filter, { key: "?" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.keyDown(document.body, { key: "?" });
+    render(<ShortcutHelp onClose={() => {}} />);
     expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent("Focus the filter");
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
-    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
     await userEvent.type(filter, "x");
     expect(filter.parentElement).not.toHaveTextContent("/");
   });

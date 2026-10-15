@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Archived } from "./board/Archived";
 import { Board } from "./board/Board";
 import { Analytics } from "./analytics/Analytics";
@@ -26,14 +26,19 @@ import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
 import { Tooltip } from "../ui/Tooltip";
 import { useTrail } from "./nav/trail";
+import { screenKey } from "./nav/route";
+import { useDocumentTitle, useFocusHeading } from "../shell/usePageChrome";
 import "./nav/nav.css";
 
 function Frame() {
   useTrail();
+  useDocumentTitle();
+  const { pathname, search } = useLocation();
+  useFocusHeading("ph-main", screenKey(pathname + search));
   return (
     <div className="ph-app">
       <OfflineBanner />
-      <main id="ph-main" className="ph-screen">
+      <main id="ph-main" tabIndex={-1} className="ph-screen">
         <Outlet />
       </main>
       <TabBar />

@@ -114,7 +114,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, [node]);
 
   useEffect(() => {
-    if (draft.error) showToast(draft.error);
+    if (draft.error) showToast(draft.error, { tone: "error" });
   }, [draft.error]);
 
   // The bottom pane opens collapsed on each node entry, unless the person came
@@ -258,7 +258,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const move = async (path: string, to: number) => {
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`);
+    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`, { tone: "error" });
     await draft.ops([op]);
   };
   moveSel.current = (dir) => {

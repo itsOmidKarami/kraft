@@ -108,7 +108,7 @@ function note(f: CompareFile, pf: PatchFile) {
 const copy = (text: string, what: string) =>
   navigator.clipboard?.writeText(text).then(
     () => showToast(`Copied ${what}`),
-    () => showToast(`Could not copy the ${what}`),
+    () => showToast(`Could not copy the ${what}`, { tone: "error" }),
   );
 
 function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: PatchFile }) {

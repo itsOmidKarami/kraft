@@ -60,7 +60,7 @@ export function useExpanded(id: string, from: CompareTarget, to: CompareTarget, 
     const got = status === 200 && !body.truncated ? parsePatch(body.diff).find((f) => f.path === path) : undefined;
     const whole = pf && got ? spansOf(pf, got) : null;
     // Cut at the server's size cap, the file would seem to end where the cut fell.
-    if (!whole && !quiet) showToast(status !== 200 ? detailOf(body) : body.truncated ? `${path} is too large to show in full` : `Could not read the rest of ${path}`);
+    if (!whole && !quiet) showToast(status !== 200 ? detailOf(body) : body.truncated ? `${path} is too large to show in full` : `Could not read the rest of ${path}`, { tone: "error" });
     return whole;
   };
   /** `path` drawn as `next` makes of its spans as they are now: a second press before the first drew adds to it. */

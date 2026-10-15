@@ -10,7 +10,7 @@ export function ScreenHeader({ id, trailing, children }: { id?: ReactNode; trail
     <header className="ph-header">
       <button type="button" className="ph-back" onClick={back.go}>
         <ChevronLeft size={20} aria-hidden="true" />
-        {back.label}
+        <span className="ph-back-label">{back.label}</span>
       </button>
       {id && <span className="ph-header-id">{id}</span>}
       <span className="ph-spacer" />

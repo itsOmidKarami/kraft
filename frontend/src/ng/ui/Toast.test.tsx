@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { showToast, Toaster } from "./Toast";
 
@@ -33,5 +33,18 @@ describe("Toast", () => {
     act(() => screen.getByRole("button", { name: "Undo" }).blur());
     act(() => vi.advanceTimersByTime(600));
     expect(screen.queryByText("Cancelling 2 items…")).toBeNull();
+  });
+
+  it("stacks three at most and says an error as an alert that stays until dismissed", () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    for (const m of ["a1", "a2", "a3", "a4"]) act(() => showToast(m));
+    expect(screen.queryByText("a1")).toBeNull();
+    expect(within(screen.getByRole("status")).getAllByText(/a\d/)).toHaveLength(3);
+    act(() => showToast("Failed to save", { tone: "error" }));
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(within(screen.getByRole("alert")).getByText("Failed to save")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("Failed to save")).toBeNull();
   });
 });

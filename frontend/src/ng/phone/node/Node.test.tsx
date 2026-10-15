@@ -464,10 +464,10 @@ describe("the task screen (E)", () => {
       const row = (k: string) => within(facts).getByText(k).nextElementSibling!.textContent;
       expect([row("status"), row("command"), row("paths"), row("execution")]).toEqual(["passed · 24s", "just test-api", "api/**", "sequential"]);
       expect(within(facts).queryByText("repo")).toBeNull();
-      expect(screen.getByRole("button", { name: "Task" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: SCOPE_PATH.split(".").at(-1)!.replace(/[_-]+/g, " ") })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("tab", { name: "Log" }));
       await waitFor(() => expect(calls.some((c) => c.path === `/work-items/w1/sessions/${api[1].id}/log`)).toBe(true));
-      await userEvent.click(screen.getByRole("button", { name: "Task" }));
+      await userEvent.click(screen.getByRole("button", { name: SCOPE_PATH.split(".").at(-1)!.replace(/[_-]+/g, " ") }));
       await waitFor(() => expect(where()).toBe(TESTS));
       // The task fact is the same way back.
       await userEvent.click(await screen.findByRole("button", { name: /just test-api/ }));
@@ -543,7 +543,7 @@ describe("the task screen (E)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
     expect(screen.getByText(/agent task · running now/)).toBeInTheDocument();
     expect(where()).toBe(TASK);
-    expect(screen.getByRole("button", { name: "Node" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "verification" })).toBeInTheDocument();
   });
 
   it.each([

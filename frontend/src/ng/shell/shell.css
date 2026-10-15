@@ -23,6 +23,7 @@
 .ng-crumb + .ng-crumb-ext::before { content: "·" / ""; margin: 0 6px; }
 .ng-main { flex: 1 1 auto; min-width: 0; }
 .ng-main:focus { outline: none; }
+.ng-main h1:focus { outline: none; }
 .ng-placeholder { max-width: 560px; padding: 28px 24px; }
 .ng-placeholder h1 { margin: 0 0 6px; font-size: var(--fs-h2); font-weight: 500; }
 .ng-placeholder p { margin: 0 0 12px; font-size: var(--fs-meta); color: var(--text-sub); }
@@ -80,3 +81,8 @@
 .ng-offline-text { flex: 1; color: var(--text); }
 .ng-offline-warn { border-bottom-color: color-mix(in oklab, var(--warn) 40%, transparent); background: color-mix(in oklab, var(--warn) 10%, var(--bg)); }
 .ng-offline-warn .ng-offline-mark { background: var(--warn); }
+.ng-shortcuts-list { margin: 0; display: grid; gap: 8px; }
+.ng-shortcuts-page { margin: 12px 0 0; font-size: var(--fs-label); font-weight: 600; color: var(--text-sub); }
+.ng-shortcut { display: flex; align-items: center; gap: 12px; }
+.ng-shortcut dt { display: flex; gap: 4px; min-width: 96px; }
+.ng-shortcut dd { margin: 0; color: var(--text-sub); }

@@ -143,7 +143,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     }
     if (r.paused) {
       // The item is paused now; the composer has nothing left to send.
-      showToast(`Paused, but the steer was not sent: ${r.error}`);
+      showToast(`Paused, but the steer was not sent: ${r.error}`, { tone: "error" });
       reload();
       return back.go();
     }
