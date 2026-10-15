@@ -64,6 +64,16 @@ THEMES = (
 )
 
 
+def home_relative(path: str) -> str:
+    """`path` with the home directory written `~`, only at a path boundary."""
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home) :]
+    return path
+
+
 def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
@@ -180,8 +190,9 @@ class KraftConsole(App):
 
     def on_resize(self, event: events.Resize) -> None:
         width, height = event.size
-        self.screen.set_class(width < MIN_SIZE[0] or height < MIN_SIZE[1], "-tiny")
-        self.screen.set_class(width < NARROW, "-narrow")
+        # The frame, not whatever is on top: Ctrl+P's palette is a pushed screen.
+        self.default_screen.set_class(width < MIN_SIZE[0] or height < MIN_SIZE[1], "-tiny")
+        self.default_screen.set_class(width < NARROW, "-narrow")
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
         self.rows = rows
@@ -198,7 +209,7 @@ class KraftConsole(App):
 
     def _live_link(self, link: Link, error: client.ClientError | None) -> None:
         self.link = link
-        self.screen.set_class(link is Link.DOWN, "-down")
+        self.default_screen.set_class(link is Link.DOWN, "-down")
         if link is Link.DOWN:
             self.query_one("#down", Static).update(Content(down_sentence(error)))
         if link is Link.LIVE and not self._scoped:
@@ -237,7 +248,7 @@ class KraftConsole(App):
                 *tabs[:-1],
             )
         )
-        where = self.scope.replace(os.path.expanduser("~"), "~", 1) if self.scope else "all repos"
+        where = home_relative(self.scope) if self.scope else "all repos"
         update_note = " · update available" if self.update_waiting else ""
         self.query_one("#where", Static).update(Content(f"{where} · v{self.version}{update_note}"))
 
@@ -276,4 +287,6 @@ def main() -> None:
         # server at all still opens, and says so.
         if exc.kind == client.Failure.OTHER_INSTANCE:
             raise
-    KraftConsole().run()
+    app = KraftConsole()
+    app.run()
+    raise SystemExit(app.return_code or 0)

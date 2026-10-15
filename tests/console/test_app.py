@@ -23,6 +23,7 @@ from kraft.console.screens import VIEWS
 OTHER_INSTANCE = client.ClientError(
     "kraft: the server at x is a different instance", kind=client.Failure.OTHER_INSTANCE
 )
+UNREACHABLE = client.transport._unreachable()
 
 
 def _text(app, selector: str) -> str:
@@ -281,7 +282,7 @@ def test_no_key_does_two_things_on_one_view(name):
         ({}, (False, True), None, "console needs a terminal"),
         ({}, (True, False), None, "console needs a terminal"),
         ({}, (True, True), OTHER_INSTANCE, "is a different instance"),
-        ({}, (True, True), None, None),
+        ({}, (True, True), UNREACHABLE, None),
     ],
     ids=["worker", "stdin-piped", "stdout-piped", "other-instance", "no-server-opens"],
 )
@@ -303,8 +304,9 @@ def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, tt
 
     monkeypatch.setattr(client, "health", refuse)
     if said is None:
-        cli.main(["console"])
-        assert len(opened) == 1
+        with pytest.raises(SystemExit) as left:
+            cli.main(["console"])
+        assert (left.value.code, len(opened)) == (0, 1)
         return
     with pytest.raises(SystemExit) as caught:
         cli.main(["console"])
@@ -313,3 +315,87 @@ def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, tt
     assert opened == []
     # A worker or a pipe is refused before any call to the server.
     assert bool(asked) == (health is not None)
+
+
+def test_kraft_console_exits_with_the_codes_textual_ended_with(monkeypatch):
+    """A crash inside the app must not read as success to the shell."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+    monkeypatch.setattr(client, "health", lambda: asyncio.sleep(0, {}))
+    monkeypatch.setattr(KraftConsole, "run", lambda self: setattr(self, "_return_code", 1))
+    with pytest.raises(SystemExit) as left:
+        cli.main(["console"])
+    assert left.value.code == 1
+
+
+@pytest.mark.parametrize(
+    ("home", "path", "shown"),
+    [
+        ("/Users/omid", "/Users/omid", "~"),
+        ("/Users/omid", "/Users/omid/work/x", "~/work/x"),
+        ("/Users/omid", "/Users/omidkarami/x", "/Users/omidkarami/x"),
+        ("/Users/omid", "/srv/Users/omid/x", "/srv/Users/omid/x"),
+    ],
+    ids=["home", "under-home", "sibling-prefix", "elsewhere"],
+)
+def test_the_scope_writes_home_as_a_tilde_only_at_a_path_boundary(monkeypatch, home, path, shown):
+    monkeypatch.setenv("HOME", home)
+    assert console_app.home_relative(path) == shown
+
+
+@pytest.mark.parametrize(
+    ("size", "palette_open"),
+    [((59, 24), True), ((59, 24), False)],
+    ids=["resized-under-the-palette", "resized-plain"],
+)
+def test_a_resize_under_the_palette_still_marks_the_frame(console, size, palette_open):
+    """Ctrl+P pushes a screen; the frame's size classes belong to the frame,
+    not to whatever is on top."""
+
+    async def scenario(app, pilot):
+        if palette_open:
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+        await pilot.resize_terminal(*size)
+        await pilot.pause()
+        if palette_open:
+            await pilot.press("escape")
+            await pilot.pause()
+        return app.query_one("#tiny").display and app.query_one("#tiny").region.area > 0
+
+    assert console.run(scenario) is True
+
+
+def test_the_tabs_win_the_top_line_at_80_columns(console, monkeypatch):
+    """A long repo path, version and update note must not wrap the tabs."""
+
+    async def health():
+        return {"status": "degraded"}
+
+    async def resolve_repo(cwd=None):
+        return "/Users/someone/projects/a/very/long/repository/path/that/goes/on"
+
+    monkeypatch.setattr(client, "health", health)
+    monkeypatch.setattr(client, "resolve_repo", resolve_repo)
+
+    async def scenario(app, pilot):
+        app.update_waiting = True
+        await console.until(pilot, lambda: app.scope and "degraded" in _text(app, "#tabs"))
+        app._draw_top()
+        await pilot.pause()
+        tabs = app.query_one("#tabs")
+        return tabs.region.width >= len(_text(app, "#tabs")), "Repos" in _text(app, "#tabs")
+
+    assert console.run(scenario) == (True, True)
+
+
+def test_a_link_change_under_the_palette_still_marks_the_frame(console):
+    async def scenario(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        app._live_link(Link.DOWN, None)
+        await pilot.press("escape")
+        await pilot.pause()
+        return app.query_one("#down").display, app.query_one(ContentSwitcher).display
+
+    assert console.run(scenario) == (True, False)
