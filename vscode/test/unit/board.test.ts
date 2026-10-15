@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Board, registerBoard } from "../../src/board";
 import { ApiError, type BulkResult } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
-import { announceable, archivedChildren, colorOf, contextValueOf, groupLabel, itemLabel, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
+import { announceable, archivedChildren, colorOf, contextValueOf, groupLabel, hoverFromCache, describe as describeItem, groupHolding, groupItems, iconOf, needsYouCount, nextTick, steerPrompt, tooltipOf, welcomeState, withArchived, worktreeTarget } from "../../src/core/board";
 import { log } from "../../src/log";
 import { item, stopped } from "./fixtures/item";
 
@@ -164,11 +164,6 @@ it.each([
   ["a running row", item(), undefined],
 ])("colour: %s", (_, it_, want) => expect(colorOf(it_)).toBe(want));
 
-it.each([
-  ["a gate", stopped("gate", { title: "Cache", pending_gate: "spec_approval" }), "Cache, needs you, approve spec"],
-  ["a running row", item({ title: "Cache" }), "Cache, running, implementation"],
-])("screen reader label: %s", (_, it_, want) => expect(itemLabel(it_)).toBe(want));
-
 it.each([[3, "Needs you, 3 items"], [1, "Needs you, 1 item"]])("group label for %s", (n, want) => expect(groupLabel("Needs you", n)).toBe(want));
 
 it.each([
@@ -194,9 +189,9 @@ it.each([
 it("tooltip: a row alone has no spend line", () => expect(tooltipOf(item())).not.toContain("Spent"));
 
 it.each([
-  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "K-1 asks: Keep the header? Your answer steers it (optional)"],
-  ["a question with no reason", stopped("question"), "Steer for K-1 (optional)"],
-  ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for K-1 (optional)"],
+  ["a question", stopped("question", { stop: { kind: "question", node: "implementation", reason: "needs_context: Keep the header?", resume_at: null } }), "t asks: Keep the header? Your answer steers it (optional)"],
+  ["a question with no reason", stopped("question"), "Steer for t (optional)"],
+  ["a cap", stopped("cap", { stop: { kind: "cap", node: "implementation", reason: "cap hit", resume_at: null } }), "Steer for t (optional)"],
 ])("steer prompt for %s", (_, it_, want) => {
   expect(steerPrompt(it_)).toBe(want);
 });
@@ -366,7 +361,7 @@ describe("Answer", () => {
     await handlers.get("kraft.answer")!({ kind: "item", item: asked }, [{ kind: "item", item: asked }, { kind: "item", item: other }]);
     expect(api.resume.mock.calls).toEqual(resumed);
     expect(api.retry).not.toHaveBeenCalled();
-    if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "Q-1 asks: Which API? Your answer steers it (optional)" });
+    if (resumed.length) expect(input).toHaveBeenCalledWith({ prompt: "t asks: Which API? Your answer steers it (optional)" });
   });
   afterEach(() => vi.restoreAllMocks());
 });

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { ApiError, type Api, type BulkResult, type ItemAction, type WorkItem } from "./core/api";
 import { steerPrompt } from "./core/board";
+import { budgetPrompt, cancelPrompt, completePrompt, escalatePrompt, skipQuestion } from "./core/wording";
 import { parseUsd } from "./core/budget";
 import { bulkPlan, bulkSummary, type BulkVerb } from "./core/bulk";
 import type { Store } from "./core/store";
@@ -44,8 +45,8 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
       case "cancel":
       case "complete": {
         const ask = action === "cancel"
-          ? { prompt: `Why cancel ${item.id}? (recorded on the item)`, empty: "Cancelling needs a reason." }
-          : { prompt: `Why mark ${item.id} complete? (recorded on the item)`, empty: "Completing needs a reason." };
+          ? { prompt: cancelPrompt(item.title), empty: "Cancelling needs a reason." }
+          : { prompt: completePrompt(item.title), empty: "Completing needs a reason." };
         const reason = await vscode.window.showInputBox({
           prompt: ask.prompt,
           validateInput: (v) => (v.trim() ? undefined : ask.empty),
@@ -57,7 +58,7 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
       case "raise_budget": {
         const why = item.stop?.reason ? `${item.stop.reason}. ` : "";
         const raw = await vscode.window.showInputBox({
-          prompt: `${why}New spend cap for ${item.id} in dollars, or none`,
+          prompt: budgetPrompt(item.title, why),
           validateInput: (v) => {
             const parsed = parseUsd(v);
             return "error" in parsed ? parsed.error : undefined;
@@ -70,13 +71,13 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
         break;
       }
       case "skip": {
-        const ok = await vscode.window.showWarningMessage(`Skip ${item.id}'s current step?`, { modal: true }, "Skip");
+        const ok = await vscode.window.showWarningMessage(skipQuestion(item.title), { modal: true }, "Skip");
         if (ok !== "Skip") return;
         await api.skip(item.id);
         break;
       }
       case "escalate": {
-        const message = await vscode.window.showInputBox({ prompt: `What should Kraft-Agent help with on ${item.id}?` });
+        const message = await vscode.window.showInputBox({ prompt: escalatePrompt(item.title) });
         if (!message) return;
         await api.escalate(item.id, message);
         break;

@@ -216,5 +216,5 @@ export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_
 /** The Resume/Retry input box's prompt: a question stop shows the question, so the steer answers it. */
 export function steerPrompt(item: WorkItem): string {
   const reason = item.stop?.kind === "question" ? item.stop.reason : null;
-  return reason ? `${item.id} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.id} (optional)`;
+  return reason ? `${item.title} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.title} (optional)`;
 }

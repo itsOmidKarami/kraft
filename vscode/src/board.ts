@@ -13,6 +13,7 @@ import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
 import { ALREADY_STARTING, alreadyRunning, INSTALL_URL, oneAtATime, startButtons, startFailure, startInvocation, type StartError } from "./core/start";
 import type { WorkspaceScope } from "./core/repoScope";
+import { noWorktree } from "./core/wording";
 import type { Store } from "./core/store";
 import { log } from "./log";
 import { pickItem } from "./palette";
@@ -293,7 +294,7 @@ export function registerBoard(
         return reportError(e, store, id);
       }
       const target = worktreeTarget(store.detail(id));
-      if (!target) return void vscode.window.showInformationMessage(`${id} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
+      if (!target) return void vscode.window.showInformationMessage(noWorktree(store.item(id)?.title ?? id));
       await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true });
     }),
     vscode.commands.registerCommand("kraft.openInWebUi", async (node?: { item?: WorkItem }) => {
