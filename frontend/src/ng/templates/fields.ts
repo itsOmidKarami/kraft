@@ -53,6 +53,10 @@ const META: Record<string, FieldMeta> = {
 };
 
 /** An unlisted field edits as text under its own name (`policy.sandbox` → "sandbox"). */
+/** How an agent task picks its model: a named profile, or a model and effort of its own. The profile wins, and neither set reads as the profile's default. */
+export const routeOf = (v: { profile?: unknown; model?: unknown; effort?: unknown }): "profile" | "model" => (v.profile || !(v.model || v.effort) ? "profile" : "model");
+export const ROUTE_LABEL = { profile: "profile", model: "model + effort" } as const;
+
 export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: field.replace(/^policy\./, "").replace(/_/g, " "), kind: "text" };
 
 /** A value as a row shows it. */

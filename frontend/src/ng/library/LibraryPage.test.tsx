@@ -23,11 +23,41 @@ describe("Library page: the list", () => {
     expect(within(box).getByRole("option", { name: /approval/ })).toHaveTextContent("unpublished");
   });
 
-  it("puts the whole name in the row's title and lets a long id cut", async () => {
+  it("shows a long id whole, wrapping instead of cutting", async () => {
     mount();
     const box = await list();
-    const long = within(box).getByTitle("never-signal-processes-you-didnt-start");
-    expect(long).toHaveAttribute("data-allow-ellipsis");
+    const long = within(box).getByText("never-signal-processes-you-didnt-start");
+    expect(long).not.toHaveAttribute("data-allow-ellipsis");
+    expect(long).not.toHaveAttribute("title");
+  });
+
+  it("folds a group on its heading, and a search opens it again", async () => {
+    const u = userEvent.setup();
+    mount();
+    const box = await list();
+    await u.click(within(box).getByRole("button", { name: /Tasks/ }));
+    expect(within(box).queryByRole("option", { name: /implementer/ })).toBeNull();
+    expect(within(box).getByRole("button", { name: /Tasks/ })).toHaveAttribute("aria-expanded", "false");
+    await u.type(screen.getByRole("textbox", { name: "Search the library" }), "impl");
+    expect(await within(box).findByRole("option", { name: /implementer/ })).toBeInTheDocument();
+  });
+
+  it("lists + New under headings by kind", async () => {
+    const u = userEvent.setup();
+    mount();
+    await list();
+    await u.click(screen.getByRole("button", { name: "New component" }));
+    const menu = await screen.findByRole("menu", { name: "New component" });
+    expect([...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent)).toEqual(["Node", "Step", "Task", "Steering"]);
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(8);
+  });
+
+  it("opens on an overview: counts per section, then what is unused, broken or changed, each a link", async () => {
+    mount();
+    const counts = await screen.findByRole("list", { name: "Components per section" });
+    expect(within(counts).getAllByRole("listitem").map((x) => x.textContent)).toEqual(["2nodes", "1steps", "4tasks", "2steering"]);
+    const unused = (await screen.findByRole("heading", { name: "Used by no chain" })).parentElement!;
+    await waitFor(() => expect(within(unused).getByRole("link", { name: "tasks.verify" })).toHaveAttribute("href", "/templates/library/tasks.verify"));
   });
 
   it("opens a component by its ref in the URL, and says so for one that isn't there", async () => {

@@ -8,6 +8,7 @@ import type { PaneKind } from "./describe";
 import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 import { autoEscalates } from "../escalateWords";
+import { ROUTE_LABEL, routeOf } from "../fields";
 
 export type PaneCtx = {
   r: Result;
@@ -187,7 +188,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const profile = str(v("profile"));
   // Picking "model + effort" shows its fields before a model is typed.
   const [routeChoice, setRouteChoice] = useState<string | null>(null);
-  const route = routeChoice ?? (profile || !(v("model") || v("effort")) ? "profile" : "model");
+  const route = routeChoice ?? routeOf({ profile, model: v("model"), effort: v("effort") });
   const scope = str(v("scope")) || "once";
   const loading = typeof opts === "string";
   const harnesses: Option[] = loading ? [{ value: harness, label: harness }] : opts.harnesses.profiles.map((p) => ({ value: p.id, label: p.id }));
@@ -212,7 +213,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
           <SelectRow
             label="route"
             value={route}
-            options={[{ value: "profile", label: "profile" }, { value: "model", label: "model + effort" }]}
+            options={(["profile", "model"] as const).map((x) => ({ value: x, label: ROUTE_LABEL[x] }))}
             // Profile or model + effort, never both (Decisions §9 Task kinds): setting one clears the other server-side.
             onPick={(x) => {
               setRouteChoice(x);
