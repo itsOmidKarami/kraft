@@ -108,6 +108,7 @@ describe("ng AnalyticsPage", () => {
     await show(REPORT);
     const bars = within(screen.getByRole("group", { name: "Merged items per week" })).getAllByLabelText(/^Week of /);
     expect(bars).toHaveLength(8);
+    expect(screen.getByText(/always the last eight weeks/)).toBeInTheDocument();
     bars.forEach((b) => expect(b).toHaveAttribute("tabindex", "0"));
     expect(screen.getByRole("table", { name: "Merged items per week" })).toBeInTheDocument();
   });

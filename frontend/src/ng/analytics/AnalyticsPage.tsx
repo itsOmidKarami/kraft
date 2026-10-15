@@ -116,7 +116,7 @@ export function AnalyticsPage() {
           </Section>
 
           <div className="an-grid">
-            <Section id="an-throughput" title="Throughput by week" note="Merged items per week. This week is partial." empty={t.mrs_merged === 0 ? "Nothing merged in this range." : undefined}>
+            <Section id="an-throughput" title="Throughput by week" note={`Merged items per week, always the last eight weeks, from the items created in the range. This week is partial.`} empty={t.mrs_merged === 0 ? "Nothing merged in this range." : undefined}>
               <div className="an-bars" role="group" aria-label="Merged items per week">
                 {weeks.map((w) => (
                   <div key={w.start} className="an-bar-col" data-partial={w.partial || undefined} tabIndex={0} aria-label={`Week of ${w.label}${w.partial ? " (partial)" : ""}: ${w.n} merged`}>
