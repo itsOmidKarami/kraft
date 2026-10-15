@@ -196,14 +196,14 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
 /** Whether the item page's banner or state card already carries `main` as its own primary button,
  *  so the page's header leaves it out (one primary per state, next to the words that explain it).
  *  Retry counts only where a card has it: a failed or stuck stop, not a budget the item cannot
- *  raise (its banner has no button) or a closed MR's fallback. Start, Pause, Restore, an
- *  escalated item's Retry and a done item's Archive have no card, so the header keeps them. */
+ *  raise (its banner has no button) or a closed MR's fallback. Start, Pause, Restore and an
+ *  escalated item's Retry have no card, so the header keeps them. */
 export function bodyOffers(item: Pick<WorkItem, "display_status" | "stop" | "needs_context_question">, main: Main | null): boolean {
   const status = item.display_status;
   switch (main) {
     case "gate": case "conflicts": case "raise": case "reopen": case "resume": return true;
     case "answer": return !!item.needs_context_question;
-    case "archive": return status === "cancelled";
+    case "archive": return status === "cancelled" || status === "done";
     case "retry": return !!item.stop && (status === "failed" || (status === "needs_you" && !["gate", "budget", "cap", "mr_closed", "conflict", "question"].includes(item.stop.kind)));
     default: return false;
   }

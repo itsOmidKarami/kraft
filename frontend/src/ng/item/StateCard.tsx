@@ -1,15 +1,18 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
-import { ago, plural, until, usd } from "../../format";
+import { ago, elapsed, logLineText, plural, until, usd } from "../../format";
 import { humanSize } from "../../sizes";
-import type { ChainNode, DiffFile, KraftEvent } from "../../types";
-import { CircleHelp, Clock, Pause, X } from "../icons";
+import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types";
+import { CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
-import { FORGE_LOGIN_HINT, failedFix, keptLine, withCode } from "./cause";
+import { pathSel, placeUrl } from "./url";
+import { useLogLines } from "./useLogLines";
+import { totals } from "./Top";
+import { FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -22,7 +25,7 @@ type Handlers = {
   onOpenNode: (node: string) => void;
 };
 type Action = { label: string; run: () => unknown; primary?: boolean };
-type Card = { tone: "bad" | "info" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: Action[]; node?: string | null; body?: ReactNode };
+type Card = { tone: "bad" | "info" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: Action[]; node?: string | null; body?: ReactNode; note?: string };
 
 /** `action` where `ok`, the server admitting its door (`admits`), else nothing. */
 const when = (ok: boolean, action: Action): Action[] => (ok ? [action] : []);
@@ -40,7 +43,7 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, files, onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -67,10 +70,11 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
         {card.actions.map((a) => (
-          <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} onClick={() => void a.run()}>{a.label}</Button>
+          <Button key={a.label} variant={a.primary ? "primary" : "secondary"} disabled={busy} aria-describedby={a.primary && card.note ? `${item.id}-card-note` : undefined} onClick={() => void a.run()}>{a.label}</Button>
         ))}
         {card.node && <button type="button" className="item-link item-card-open" onClick={() => h.onOpenNode(card.node!)}>Open {card.node} →</button>}
       </div>
+      {card.note && <p id={`${item.id}-card-note`} className="item-muted item-card-note">{card.note}</p>}
     </section>
   );
 }
@@ -83,7 +87,8 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
   const task = item.stop?.task;
   const path = node ? actionPath(node, task) : null;
   const label = task ? `Retry from ${taskName(path ?? task)}` : "Retry";
-  return { label, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
+  const target = task ? taskName(path ?? task) : item.stop?.node ?? "the node";
+  return { label, target, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
 }
 
 /** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
@@ -94,7 +99,7 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
   return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
@@ -103,15 +108,21 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   const status = item.display_status;
 
   if (status === "failed" && stop) {
-    const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
+    const { rows, structured } = failureFacts(item);
     // "Do I lose anything?": the branch and what is on it stay.
     const kept = keptLine(item, h.files?.length);
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
+    // A stop that names no cause says why it failed in the agent's own words: the end of its log.
+    const unexplained = !rows.length && !/ — /.test(stop.reason ?? "");
+    const retry = retryFrom(item, node, run);
+    const retries = admits(item, "retry", true);
     return {
-      tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
-      body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : undefined,
-      facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
-      actions: [...failedActions(item, retryFrom(item, node, run), h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
+      tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: (structured ? headline(stop.reason) : stop.reason) ?? undefined, node: stop.node,
+      body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : undefined,
+      facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
+      actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
+      // What Retry does, in the card's words: the task it restarts, the branch it keeps and what it has cost so far.
+      note: retries ? `Restarts ${retry.target}${item.branch ? ` on the kept branch ${item.branch}` : ""}${item.budget_cap ? ` · ${spentLine(item)} spent` : ""}` : undefined,
     };
   }
   if (status === "waiting" && stop?.kind === "rate_limit") {
@@ -191,6 +202,26 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       facts: [], actions: [],
     };
   }
+  if (status === "done") {
+    const mr = item.mr_ref;
+    const closed = [...events].reverse().find((e) => e.type === "mr_closed");
+    const reopened = [...events].reverse().find((e) => e.type === "mr_reopened");
+    const mrClosed = !!closed && (!reopened || reopened.seq < closed.seq);
+    const total = h.files?.length ? totals(h.files) : null;
+    const took = item.running_time ? elapsed(item.running_time.running_s * 1000) : null;
+    const facts: [string, ReactNode][] = [
+      ...(mr ? [["merge request", <><a className="item-link" href={mr.url} target="_blank" rel="noreferrer">!{mr.number}</a>{mrClosed ? " · closed on the forge" : ""}</>] as [string, ReactNode]] : []),
+      ...(h.files?.length ? [["changes", <>{plural(h.files.length, "file")} <span className="item-add">+{total!.add}</span> <span className="item-del">−{total!.del}</span></>] as [string, ReactNode]] : []),
+      ...(spent ? [spent] : []),
+      ...(took ? [["took", took] as [string, ReactNode]] : []),
+    ];
+    return {
+      tone: "neutral", glyph: <CircleCheck size={14} aria-hidden />, title: "Done",
+      text: mr ? undefined : "The chain finished. No merge request was opened.",
+      facts,
+      actions: when(admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
+    };
+  }
   if (status === "cancelled") {
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;
@@ -214,7 +245,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
 /** The events a card needs that the detail does not carry (who closed the MR,
  *  which node opened it, the cancel's reason): read once, for those cards only. */
 function useEndEvents(item: ItemDetail): KraftEvent[] {
-  const wants = item.display_status === "cancelled" || item.stop?.kind === "mr_closed";
+  const wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed";
   const [events, setEvents] = useState<KraftEvent[]>([]);
   useEffect(() => {
     if (!wants) return setEvents([]);
@@ -279,6 +310,8 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const resumes = admits(item, "resume", true);
   // No agent task paused at this node: the server refuses a steer, so offer plain Resume only.
   const steerable = item.steerable !== false;
+  // One primary: Resume until a steer is typed, then Resume with steer.
+  const steered = steerable && !!steer.trim();
   const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
   const resume = async (withSteer: boolean) => {
     setBusy(true);
@@ -304,8 +337,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       )}
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
-        {steerable && resumes && <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>}
-        {resumes && <Button variant={steerable ? "secondary" : "primary"} disabled={busy} onClick={() => resume(false)}>Resume</Button>}
+        {resumes && <Button variant="primary" disabled={busy} onClick={() => resume(steered)}>{steered ? "Resume with steer" : "Resume"}</Button>}
       </div>
     </section>
   );
@@ -319,5 +351,45 @@ function NotStartedCard({ item }: { item: ItemDetail }) {
       <h2 className="item-card-head"><Clock size={14} aria-hidden /> <span className="item-card-title">Not started</span></h2>
       <p className="item-muted">Nothing has run, and nothing spends tokens until you start it.{first ? ` Start runs it from ${first}.` : ""}</p>
     </section>
+  );
+}
+
+/** Where "Open the full log" goes: the failed task's pane on its Log tab, or the node's when the task is not in the chain. */
+function logLink(item: ItemDetail): string {
+  const stop = item.stop;
+  const sel = stop?.task ? pathSel(stop.task, item.chain_definition.nodes) : null;
+  if (sel) return placeUrl(item.id, { sel, tab: "log" });
+  return placeUrl(item.id, { sel: stop?.node ? { kind: "node", node: stop.node } : { kind: "chain" } });
+}
+
+/** The session the failed stop is about: the stop's task, else the node's newest, an escalation turn apart. */
+function failedSession(item: ItemDetail): WorkerSession | null {
+  const stop = item.stop;
+  if (!stop?.node) return null;
+  const onNode = item.worker_sessions.filter((s) => s.node_id === stop.node && !/(^|\.)escalation$/.test(s.hook_point));
+  const ofTask = stop.task ? onNode.filter((s) => s.hook_point === stop.task) : [];
+  return [...(ofTask.length ? ofTask : onNode)].sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1) ?? null;
+}
+
+const TAIL = 5;
+
+/** The end of the failed task's log, for a stop that names no cause: what the agent last said, and the way to the rest. */
+function FailedTail({ item, to }: { item: ItemDetail; to: string }) {
+  const session = failedSession(item);
+  if (!session) return <p className="item-muted">No session log to show for this stop.</p>;
+  return <Tail itemId={item.id} session={session} to={to} />;
+}
+
+function Tail({ itemId, session, to }: { itemId: string; session: WorkerSession; to: string }) {
+  const { lines, error } = useLogLines(itemId, session.id, session.status === "running");
+  const last = (lines ?? []).filter((l) => !l.truncated).map(logLineText).filter((t) => t.trim()).slice(-TAIL);
+  return (
+    <div className="item-tail">
+      {error ? <p className="item-muted">{error}</p>
+        : !lines ? <p className="item-muted">Reading the log…</p>
+        : !last.length ? <p className="item-muted">The log is empty.</p>
+        : <ul className="item-tail-lines" aria-label="Last lines of the log">{last.map((t, i) => <li key={i}>{t}</li>)}</ul>}
+      <Link className="item-link" to={to}>Open the full log →</Link>
+    </div>
   );
 }

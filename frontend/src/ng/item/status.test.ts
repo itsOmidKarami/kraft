@@ -144,7 +144,7 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     ["a paused item: the paused card's Resume", { display_status: "paused", current_node_id: "n" }, true],
     ["a never-started item: Start has no card", { display_status: "paused", current_node_id: null }, false],
     ["a cancelled item: the card's Archive", { display_status: "cancelled" }, true],
-    ["a done item has no card", { display_status: "done" }, false],
+    ["a done item: the card's Archive", { display_status: "done" }, true],
     ["a running item has no card", { display_status: "running" }, false],
   ])("bodyOffers the header's main button: %s", (_name, over, want) => {
     const it_ = detail(over);

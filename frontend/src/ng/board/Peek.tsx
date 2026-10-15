@@ -18,7 +18,7 @@ import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
-import { budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";
+import { bodyOffers, budgetRaise, headerState, MAIN_LABEL, neverStarted, offersRaise } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
@@ -90,7 +90,7 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
       onFocus={open}
-      footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
+      footer={<Footer cards={tab === "overview"} item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
       {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
@@ -179,7 +179,8 @@ function Config({ item, reload, budget, onBudget }: { item: ItemDetail; reload: 
 }
 
 /** The item's main action (W5's headerState; Start for a never-started item), then Open item. */
-function Footer({ item, reload, offline, onOpen, onRaise, onAnswer }: { item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void; onAnswer: () => void }) {
+/** `cards`: the Overview's banner and cards are on screen, so a main action one of them carries is not repeated here (as on the item page). */
+function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { cards: boolean; item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void; onAnswer: () => void }) {
   const hs = headerState(item);
   const btn = useRef<HTMLButtonElement>(null);
   const [pausing, setPausing] = useState(false);
@@ -227,7 +228,7 @@ function Footer({ item, reload, offline, onOpen, onRaise, onAnswer }: { item: It
   return (
     <>
       {/* No main when the server admits none of the item's ways on: Open item alone. */}
-      {hs.main && (
+      {hs.main && !(cards && bodyOffers(item, hs.main)) && (
         <button ref={btn} type="button" className={`btn ${hs.main === "pause" ? "btn-secondary" : "btn-primary"}`} disabled={offline || busy} onClick={main}>
           {hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
         </button>

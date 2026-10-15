@@ -28,8 +28,8 @@ export function eventLine(e: KraftEvent): string | null {
     case "fix_cycle_started": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
     // What the round did, said once it ended; recent() folds it into the round's start line. null: git could not say.
     case "fix_cycle_finished": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;
-    case "work_item_needs_human": return `stopped${node ? ` at ${node}` : ""}: ${cut(s(p.reason).replace(/^needs_context:\s*/, ""))}`;
-    case "escalation_message": return `escalation${node ? ` on ${node}` : ""}: ${cut(s(p.message), 60)}`;
+    case "work_item_needs_human": return `stopped${node ? ` at ${node}` : ""}: ${cut(s(p.reason).replace(/^needs_context:\s*/, ""), 240)}`;
+    case "escalation_message": return `escalation${node ? ` on ${node}` : ""}: ${cut(s(p.message), 240)}`;
     case "pause_requested": return "paused";
     case "work_item_resumed": return "resumed";
     case "work_item_retried": return `retried${node ? ` ${node}` : ""}`;

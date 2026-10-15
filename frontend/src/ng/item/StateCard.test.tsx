@@ -127,17 +127,20 @@ describe("StateCard", () => {
 
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
   it.each([
-    ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge_request →"]],
-    ["stranded", ["Retry from open_draft", "Escalate…", "Open merge_request →"]],
-    ["git", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"]],
-    [undefined, ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"]],
-    ["forge_unreachable", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"]],
-  ])("an infra failure with cause %s offers %j", async (cause, labels) => {
+    ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge_request →"], null],
+    ["stranded", ["Retry from open_draft", "Escalate…", "Open merge_request →"], "the run was left behind by a restart"],
+    ["git", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], null],
+    [undefined, ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], null],
+    ["forge_unreachable", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"], "the forge could not be reached"],
+  ])("an infra failure with cause %s offers %j", async (cause, labels, why) => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra", { facts: cause ? { cause } : {} }) });
     const card = screen.getByRole("region", { name: "Failed" });
     expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
+    // A cause with words says them as a fact; the others are not a fact of their own.
     expect(card).not.toHaveTextContent("cause");
+    if (why) expect(within(card).getByText("why").nextSibling).toHaveTextContent(why);
+    else expect(within(card).queryByText("why")).toBeNull();
     // A refused credential is fixed on the server's machine, so its words are on the card and no button leads to settings.
     if (cause === "forge_auth") expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. If git itself can't authenticate, check its credentials there too (gh auth setup-git, your SSH key or credential helper). Then Retry.");
     else expect(card).not.toHaveTextContent("gh auth login");
@@ -158,6 +161,60 @@ describe("StateCard", () => {
     unmount();
     show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_unreachable" } }) });
     expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
+  });
+
+  it("failed with failing test scopes: each as a row, the paragraph stops at the node, no log tail", () => {
+    const calls = stubFetch();
+    const scopes = [{ command: "npm test", scope: "web/**", exit_code: 1 }, { command: "just test-c", setup: true, area: "c", exit_code: 2 }];
+    show({ display_status: "failed", stop: stop("failed", { reason: "task failed in node verification: tests [builtin] — tests failed: `npm test` (scope `web/**`, exit 1); `just test-c` (setup of area `c`, exit 2)", facts: { ...scopes[0], failed_scopes: scopes } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-text")?.textContent).toBe("task failed in node verification: tests [builtin]");
+    expect([...card.querySelectorAll(".item-card-list li")].map((li) => li.textContent)).toEqual(["npm test (scope web/**, exit 1)", "just test-c (setup of area c, exit 2)"]);
+    expect(card).not.toHaveTextContent("command");
+    expect(calls.filter((c) => c.path.includes("/log"))).toEqual([]);
+  });
+
+  describe("a failed stop with no cause shows the end of the task's log", () => {
+    const session = { id: "s9", node_id: "merge_request", hook_point: "merge_request.open.open_draft", status: "failed", created_at: "2026-10-10T10:00:00Z" } as WorkerSession;
+    const line = (n: number, text: string) => ({ n, t: "", src: "agent", text, summary: text });
+    const failed = (over = {}) => ({ display_status: "failed", stop: stop("failed", { reason: "task failed in node merge_request: open_draft [agent]" }), worker_sessions: [session], ...over }) as Parameters<typeof detail>[0];
+    const tail = async () => within(screen.getByRole("region", { name: "Failed" }));
+
+    it("the last five lines, each clipped on its own, and the link to the full log", async () => {
+      stubFetch({ "GET /work-items/w1/sessions/s9/log": [200, { lines: [1, 2, 3, 4, 5, 6, 7].map((n) => line(n, n === 7 ? `last ${"x".repeat(400)}` : `line ${n}`)) }] });
+      show(failed());
+      const card = await tail();
+      await waitFor(() => expect(card.getByRole("list", { name: "Last lines of the log" })).toBeInTheDocument());
+      expect([...card.getByRole("list", { name: "Last lines of the log" }).children].map((li) => li.textContent?.slice(0, 6))).toEqual(["line 3", "line 4", "line 5", "line 6", "last x"]);
+      await userEvent.click(card.getByRole("link", { name: "Open the full log →" }));
+      expect(where).toBe("/work-items/w1?sel=merge_request.open.open_draft&tab=log");
+    });
+
+    it.each([
+      ["an empty log", [200, { lines: [] }], "The log is empty."],
+      ["no log for the attempt", [404, {}], "No log for this attempt yet."],
+    ] as const)("%s says so", async (_name, answer, words) => {
+      stubFetch({ "GET /work-items/w1/sessions/s9/log": [answer[0], answer[1]] });
+      show(failed());
+      expect(await (await tail()).findByText(words)).toBeInTheDocument();
+    });
+
+    it("says it is reading while the log loads, and that no session has one when none ran", async () => {
+      stubFetch({ "GET /work-items/w1/sessions/s9/log": [200, { lines: [] }] });
+      const { unmount } = show(failed());
+      expect((await tail()).getByText("Reading the log…")).toBeInTheDocument();
+      unmount();
+      show(failed({ worker_sessions: [] }));
+      expect((await tail()).getByText("No session log to show for this stop.")).toBeInTheDocument();
+    });
+  });
+
+  it("Retry says what it restarts, on which branch, and what the item has cost", () => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), branch: "kraft/design-the-cache-w1", budget_cap: { cap_usd: 10, source: "item", spent_usd: 0.04 } });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card).toHaveTextContent("Restarts open_draft on the kept branch kraft/design-the-cache-w1 · $0.040 of $10.00 spent");
+    expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveAccessibleDescription(/^Restarts open_draft/);
   });
 
   it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {
@@ -226,6 +283,32 @@ describe("StateCard", () => {
     expect(h.onCancel).toHaveBeenCalled();
   });
 
+  it("done leads with the outcome: the MR, the diff, spend against the cap, the time taken; Archive is its one action", async () => {
+    const calls = stubFetch({ ...WRITES, "POST /work-items/w1/archive": [200, {}] });
+    const files = [{ path: "a.py", insertions: 12, deletions: 3 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];
+    const { h } = { h: handlers() };
+    routed(<StateCard item={detail({ display_status: "done", stop: null, mr_ref: { number: 42, url: "https://forge/mr/42" }, budget_cap: { cap_usd: 10, source: "item", spent_usd: 2.5 }, running_time: { running_s: 754, cap_minutes: null } })} files={files} {...h} />);
+    const card = screen.getByRole("region", { name: "Done" });
+    expect(within(card).getByRole("link", { name: "!42" })).toHaveAttribute("href", "https://forge/mr/42");
+    expect(card).toHaveTextContent("changes2 files +13 −3");
+    expect(card).toHaveTextContent("spent$2.50 of $10.00");
+    expect(card).toHaveTextContent("took12m");
+    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(["Archive"]);
+    expect(within(card).getByRole("button", { name: "Archive" })).toHaveClass("btn-secondary");
+    await userEvent.click(within(card).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+  });
+
+  it("done with no MR says none was opened; a closed one says so", async () => {
+    stubFetch();
+    const { unmount } = show({ display_status: "done", stop: null, mr_ref: null });
+    expect(screen.getByRole("region", { name: "Done" })).toHaveTextContent("No merge request was opened.");
+    unmount();
+    stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "mr_closed", payload: { ref: 42 }, node_id: null, created_at: "t" }]] });
+    show({ display_status: "done", stop: null, mr_ref: { number: 42, url: "u" } });
+    expect(await within(screen.getByRole("region", { name: "Done" })).findByText(/closed on the forge/)).toBeInTheDocument();
+  });
+
   it("cancelled: the reason from the cancel event, Duplicate and Archive", async () => {
     stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "superseded", node_id: "verification" }, node_id: "verification", created_at: "t" }]] });
     const { h } = show({ display_status: "cancelled", stop: null });
@@ -247,7 +330,7 @@ describe("StateCard", () => {
     expect(within(screen.getByRole("region", { name: title })).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
   });
 
-  it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["done", null], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
+  it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
     stubFetch();
     // A question with its text has the question card (Banner's QuestionCard); without it, the card below.
     const { container } = routed(<StateCard item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null, needs_context_question: "Keep the header?" })} {...handlers()} />);
@@ -262,11 +345,14 @@ describe("PausedCard", () => {
     const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")] })} reload={reload} />);
-    await userEvent.type(screen.getByLabelText("Steer"), "look at reindex first");
-    await userEvent.click(screen.getByRole("button", { name: "Resume with steer" }));
+    // One primary at a time: Resume, then Resume with steer once a steer is typed.
+    expect(screen.queryByRole("button", { name: "Resume with steer" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await userEvent.type(screen.getByLabelText("Steer"), "look at reindex first");
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Resume with steer" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(2));
-    expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }, { steer: null }]);
+    expect(posts(calls).map((c) => c.body)).toEqual([{ steer: null }, { steer: "look at reindex first" }]);
   });
 
   it("offers no Resume when the server's actions refuse it (F4)", () => {
