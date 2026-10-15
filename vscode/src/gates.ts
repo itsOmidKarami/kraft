@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
+import { gateWords } from "../../frontend/src/ng/board/rowText";
 import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { Announcer, toastActions, type Announcement } from "./core/announcer";
+import { Announcer, toastActions, toastLevel, type Announcement } from "./core/announcer";
 import { announceable, onBoard, type Include } from "./core/board";
 import { approveOrRead, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
@@ -133,7 +134,7 @@ export function registerGates(
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
     if (stale) return readFirst(id, gate);
     note ??= await vscode.window.showInputBox({
-      prompt: `Why reject ${id} at ${gate}?`,
+      prompt: `Why reject ${store.item(id)?.title ?? id} at ${gateWords(gate)}?`,
       validateInput: (v) => (v.trim() ? undefined : "A reject needs a reason: it goes to the agent."),
     });
     if (!note?.trim()) return;
@@ -152,13 +153,15 @@ export function registerGates(
     for (const [item, a] of found) {
       if (a.kind === "gate") {
         const buttons = refusal() === null ? ["Open", "Reject…"] : ["Open"];
-        void vscode.window.showInformationMessage(`${item.id} · ${a.gate}: ${item.title}`, ...buttons).then((pick) => {
+        void vscode.window.showInformationMessage(`${item.title}: ${a.text}`, ...buttons).then((pick) => {
           if (pick === "Open") void openArtifact(item.id, a.gate);
           if (pick === "Reject…") void reject(item.id, a.gate);
         });
       } else {
         const buttons = toastActions(item, refusal() !== null);
-        void vscode.window.showInformationMessage(`${item.id}: ${item.title} — ${a.text}`, ...buttons.map((b) => b.label)).then((pick) => {
+        const text = `${item.title} — ${a.text}`;
+        const labels = buttons.map((b) => b.label);
+        void (toastLevel(item) === "warning" ? vscode.window.showWarningMessage(text, ...labels) : vscode.window.showInformationMessage(text, ...labels)).then((pick) => {
           const run = buttons.find((b) => b.label === pick);
           if (run) void vscode.commands.executeCommand(run.command, { item });
         });

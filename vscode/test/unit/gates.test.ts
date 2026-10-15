@@ -4,22 +4,22 @@ import type { ReviewThread } from "../../src/core/api";
 import type { Store } from "../../src/core/store";
 import type { ThreadCache } from "../../src/core/threadCache";
 import { registerGates } from "../../src/gates";
-import { stopped } from "./fixtures/item";
+import { item, stopped } from "./fixtures/item";
 import { C, T } from "./fixtures/thread";
 
 const GATE = "spec_approval";
-const atGate = stopped("gate", { id: "G-1", pending_gate: GATE, actions: ["approve", "reject"] });
+const atGate = stopped("gate", { id: "G-1", title: "Cache layer", pending_gate: GATE, actions: ["approve", "reject"] });
 const draft = T({ id: "t-d", comments: [C({ id: "c-d", review_id: null, draft: true })], draft: true });
 const mustFix = T({ id: "t-m", label: "must_fix", state: "open" });
 
 /** registerGates over fakes: the gate's document already read (digest `d1`)
  *  unless `unread`, its threads `threads`, and every command it registers in `handlers`. */
-function setup({ threads = [] as ReviewThread[], refusal = () => null as string | null, refresh = async () => true, unread = false, target = undefined as unknown } = {}) {
+function setup({ threads = [] as ReviewThread[], refusal = () => null as string | null, refresh = async () => true, unread = false, target = undefined as unknown, at = atGate } = {}) {
   const handlers = new Map<string, (...a: unknown[]) => unknown>();
   vi.spyOn(vscode.commands, "registerCommand").mockImplementation(((id: string, cb: (...a: unknown[]) => unknown) => (handlers.set(id, cb), { dispose() {} })) as never);
   const changes: ((ids: string[] | "all") => void)[] = [];
   const store = {
-    items: () => [atGate], item: (id: string) => (id === atGate.id ? atGate : undefined),
+    items: () => [at], item: (id: string) => (id === at.id ? at : undefined),
     refresh: vi.fn(refresh), onChange: (cb: (ids: string[] | "all") => void) => (changes.push(cb), () => {}),
   } as unknown as Store;
   const api = {
@@ -91,5 +91,35 @@ describe("a gate's notification", () => {
     const toast = vi.spyOn(vscode.window, "showInformationMessage");
     changes.forEach((cb) => cb([atGate.id]));
     expect(toast.mock.calls.map((c) => c.slice(1))).toEqual([buttons]);
+  });
+
+  it("leads with the title and says the gate in the board's words", () => {
+    const { changes } = setup();
+    const toast = vi.spyOn(vscode.window, "showInformationMessage");
+    changes.forEach((cb) => cb([atGate.id]));
+    expect(toast.mock.calls.map((c) => c[0])).toEqual(["Cache layer: approve spec"]);
+  });
+});
+
+describe("a stop's notification", () => {
+  it.each([
+    ["a failure warns", item({ id: "F-1", title: "Cache layer", display_status: "failed", stop: { kind: "failed", node: "implementation", reason: "x", resume_at: null } }), "showWarningMessage", "Cache layer — failed at implementation"],
+    ["a question only informs", stopped("question", { id: "Q-1", title: "Cache layer", stop: { kind: "question", node: "implementation", reason: "needs_context: Keep it?", resume_at: null } }), "showInformationMessage", "Cache layer — agent asks: Keep it?"],
+  ] as const)("%s", (_, at, level, text) => {
+    const { changes } = setup({ at });
+    const other = level === "showWarningMessage" ? "showInformationMessage" : "showWarningMessage";
+    const toast = vi.spyOn(vscode.window, level);
+    const wrong = vi.spyOn(vscode.window, other);
+    changes.forEach((cb) => cb([at.id]));
+    expect([toast.mock.calls.map((c) => c[0]), wrong.mock.calls.length]).toEqual([[text], 0]);
+  });
+});
+
+describe("kraft.reject", () => {
+  it("asks by title and the gate's words, not the id", async () => {
+    const { handlers } = setup();
+    const input = vi.spyOn(vscode.window, "showInputBox");
+    await handlers.get("kraft.reject")!("G-1", GATE);
+    expect(input.mock.calls[0][0]).toMatchObject({ prompt: "Why reject Cache layer at spec?" });
   });
 });

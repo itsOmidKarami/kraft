@@ -85,7 +85,7 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
         vscode.Uri.parse(rightUri(id, f)),
       ]);
       const note = diff.truncated || diff.landed?.truncated ? " (the daemon truncated its diff; every file is still listed)" : "";
-      await vscode.commands.executeCommand("vscode.changes", `Kraft ${id}: ${store.item(id)?.title ?? ""}${note}`, resources);
+      await vscode.commands.executeCommand("vscode.changes", `Kraft: ${store.item(id)?.title ?? "changes"}${note}`, resources);
       openedL.forEach((cb) => cb(id));
     } catch (e) {
       await reportError(e, store, id);

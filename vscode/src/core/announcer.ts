@@ -1,8 +1,9 @@
 import { reasonTail } from "../../../frontend/src/ng/board/rowText";
 import type { WorkItem } from "./api";
+import { isFault } from "./board";
 
 export type Announcement =
-  | { kind: "gate"; id: string; gate: string }
+  | { kind: "gate"; id: string; gate: string; text: string }
   | { kind: "needs"; id: string; text: string };
 
 /** What a toast is about, or none: a gate by name, else a `needs_you` or
@@ -30,6 +31,9 @@ export function toastActions(item: Pick<WorkItem, "stop" | "actions">, readOnly:
   return item.actions?.includes("resume") ? [web, { label: "Answer", command: "kraft.answer" }] : [web];
 }
 
+/** A stop that is a fault (failed, capped, over budget) toasts as a warning; the rest ask. */
+export const toastLevel = (item: Pick<WorkItem, "display_status" | "stop">): "warning" | "information" => (isFault(item) ? "warning" : "information");
+
 export class Announcer {
   announced = new Set<string>();
   private current = new Map<string, string>();
@@ -48,7 +52,9 @@ export class Announcer {
     if (key === `${item.id}:gate:${item.pending_gate}`) {
       if (this.announced.has(key)) return undefined;
       this.announced.add(key);
-      return { kind: "gate", id: item.id, gate: item.pending_gate! };
+      // The board's own words for it ("approve spec"), not the gate's id.
+      const text = reasonTail({ ...item, stop: { ...item.stop, kind: "gate" } as WorkItem["stop"] });
+      return { kind: "gate", id: item.id, gate: item.pending_gate!, text };
     }
     if (this.level() === "gates" || previous === key) return undefined;
     return { kind: "needs", id: item.id, text: reasonTail(item) };
