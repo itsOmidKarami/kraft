@@ -3,8 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 
 /** A value that edits in place (Decisions §12 "Values edit in place"): a button
- *  until clicked or Entered, then a one-line input. Enter or leaving it commits,
- *  Escape cancels. `onCommit` answers a refusal's message, which stays under the
+ *  until clicked or Entered, then a one-line input. Enter or leaving it commits (so does picking a
+ *  suggestion of a single-value list), Escape cancels. `onCommit` answers a refusal's message, which stays under the
  *  input with the input open and nothing saved, or null once it took. */
 export function ValueCell({ label, value, display, onCommit, mono = true, placeholder, bad, muted, changed, readOnly, choices, closed, multiple, noun = label }: {
   /** Names the control for a screen reader: "<label>, <display>. Edit". */
@@ -55,17 +55,17 @@ export function ValueCell({ label, value, display, onCommit, mono = true, placeh
     // Hand focus back only if nothing took it meanwhile (a click on the next cell).
     if (focus) requestAnimationFrame(() => { if (document.activeElement === document.body || !document.activeElement) button.current?.focus(); });
   };
-  const commit = async () => {
+  const commit = async (next = text) => {
     if (settled.current || busy) return;
-    if (text.trim() === value.trim()) return close(true);
-    const stray = closed && choices?.length ? notListed(unlisted(text, choices, multiple), noun) : null;
+    if (next.trim() === value.trim()) return close(true);
+    const stray = closed && choices?.length ? notListed(unlisted(next, choices, multiple), noun) : null;
     if (stray) {
       setError(stray);
       return input.current?.focus();
     }
     settled.current = true;
     setBusy(true);
-    const refused = await onCommit(text.trim());
+    const refused = await onCommit(next.trim());
     setBusy(false);
     if (refused) {
       settled.current = false;
@@ -110,7 +110,7 @@ export function ValueCell({ label, value, display, onCommit, mono = true, placeh
   return (
     <span className="adr-edit">
       {choices?.length ? (
-        <Combobox ref={input} {...field} value={text} choices={choices} closed={closed} multiple={multiple} noun={noun} listLabel={label} invalid={!!error} onChange={(t) => { setText(t); setError(null); }} />
+        <Combobox ref={input} {...field} value={text} choices={choices} closed={closed} multiple={multiple} noun={noun} listLabel={label} invalid={!!error} onChange={(t) => { setText(t); setError(null); }} onPick={multiple ? undefined : (t) => void commit(t)} />
       ) : (
         <input
           ref={input}

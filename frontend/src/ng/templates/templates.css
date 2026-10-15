@@ -164,8 +164,8 @@
 .adr-val:is(:hover, :focus-visible):not(:disabled) { background: var(--line); }
 .adr-val:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .adr-val:disabled { cursor: default; }
-.adr-pen { margin-left: 6px; vertical-align: -1px; color: var(--text-muted); opacity: 0; }
-.adr-val:is(:hover, :focus-visible) .adr-pen { opacity: 1; }
+.adr-pen { margin-left: 6px; vertical-align: -1px; color: var(--text-faint); }
+.adr-val:is(:hover, :focus-visible) .adr-pen { color: var(--text); }
 .adr-edit { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .adr-in { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: var(--fs-label); color: var(--text); }
 .adr-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

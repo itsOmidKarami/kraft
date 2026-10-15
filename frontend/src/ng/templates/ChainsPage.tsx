@@ -1,13 +1,11 @@
 import { NotFound } from "../ui/NotFound";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
 import { useResizable } from "../graph/useResizable";
 import { detailOf } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
-import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { ChainCanvas } from "./ChainCanvas";
 import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
@@ -24,7 +22,7 @@ import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
 import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
-import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
+import { pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
 /** An element's width and height, kept current. */
@@ -327,11 +325,6 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
             {surface === "yaml" ? "⇄ Canvas" : "YAML"}
           </Button>
-        )}
-        {!readOnly && s.level === "chain" && !review && surface === "canvas" && (
-          <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
-            <Pencil size={14} aria-hidden />
-          </IconButton>
         )}
         {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}

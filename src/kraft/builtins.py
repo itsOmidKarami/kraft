@@ -834,7 +834,7 @@ async def run_setup_command(
         raise RuntimeError(
             f"no setup_command declared for {repo} in repos.yaml, so {worktree.name}'s "
             'worktree cannot be prepared. Declare one (use "" for a repo that '
-            "deliberately needs no preparation), or tick No setup needed under "
+            "deliberately needs no preparation), or turn on No setup needed under "
             "Settings › Repos."
         )
     if not cmd:

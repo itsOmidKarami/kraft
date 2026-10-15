@@ -64,9 +64,8 @@ describe("area pane Config", () => {
     renderPage();
     const pane = await openConfig();
     await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
-    const select = within(pane).getByRole("combobox", { name: "runs on" });
-    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["item's harness", "claude", "claude-sandbox", "codex"]);
-    expect(select).toHaveValue("claude");
+    const list = within(document.body).getByRole("menu", { name: "runs on" });
+    expect(within(list).getAllByRole("menuitemradio").map((o) => o.textContent)).toEqual(["item's harness", "✓claude", "claude-sandbox", "codex"]);
   });
 
   it("keeps the current harness in the list when it is Never, so the problem can be seen", async () => {
@@ -74,8 +73,8 @@ describe("area pane Config", () => {
     renderPage();
     const pane = await openConfig();
     await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
-    const select = within(pane).getByRole("combobox", { name: "runs on" });
-    expect(within(select).getByRole("option", { name: "claude (Never)" })).toBeInTheDocument();
+    const list = within(document.body).getByRole("menu", { name: "runs on" });
+    expect(within(list).getByRole("menuitemradio", { name: /claude \(Never\)/ })).toBeInTheDocument();
   });
 
   it("reads an unset escalation harness as the item's, with the one it follows now, and a pick writes the other value unchanged", async () => {
@@ -83,10 +82,9 @@ describe("area pane Config", () => {
     renderPage();
     const pane = await openConfig();
     await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
-    const select = within(pane).getByRole("combobox", { name: "runs on" });
-    expect(select).toHaveValue("item");
-    expect(within(select).getByRole("option", { name: "item's harness (claude)" })).toBeInTheDocument();
-    await userEvent.selectOptions(select, "item");
+    const list = within(document.body).getByRole("menu", { name: "runs on" });
+    expect(within(list).getByRole("menuitemradio", { name: /item's harness \(claude\)/, checked: true })).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole("menuitemradio", { name: /item's harness/ }));
     await waitFor(() => expect(server.ops).toHaveLength(1));
     expect(server.ops[0]).toEqual([{ op: "set_escalation", harness: "item", grants: ["git-commit"] }]);
   });
