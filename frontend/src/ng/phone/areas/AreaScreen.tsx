@@ -18,7 +18,7 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
   /** The area's draft: the dirty bar, Review & publish and the YAML view read it. Absent on a save-on-change area. */
   draft?: ConfigDraft;
   /** A chip that is not the draft's (`saved on change`). */
-  status?: { label: string; tone?: "warn" | "bad" };
+  status?: { label: string; tone?: "warn" | "change" | "bad" };
   /** The YAML toggle, on by default; the text is the draft's files, else `yamlText`. */
   yaml?: boolean | string;
   children: ReactNode;
@@ -31,7 +31,7 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
   const n = view ? counts(view.result) : { changes: 0, problems: 0 };
   const dirty = !!view?.draft && n.changes > 0;
   const showYaml = params.get("yaml") === "1";
-  const chip = status ?? (view ? (dirty ? { label: `draft · ${n.changes} change${n.changes === 1 ? "" : "s"}`, tone: "warn" as const } : n.problems ? { label: `${n.problems} problem${n.problems === 1 ? "" : "s"}`, tone: "bad" as const } : { label: "published" }) : undefined);
+  const chip = status ?? (view ? (dirty ? { label: `draft · ${n.changes} change${n.changes === 1 ? "" : "s"}`, tone: "change" as const } : n.problems ? { label: `${n.problems} problem${n.problems === 1 ? "" : "s"}`, tone: "bad" as const } : { label: "published" }) : undefined);
 
   const publish = async () => {
     if (!draft) return;

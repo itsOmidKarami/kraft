@@ -74,6 +74,23 @@ const NOT_ROWS = new Set(["id", "kind", "icon"]);
 export const sourceRows = (r: Result, path: string) =>
   Object.entries(r.sources[path] ?? {}).filter(([f]) => !NOT_ROWS.has(f)).map(([field, s]) => ({ field, value: s.value, source: s.source, recovery: s.recovery }));
 
+/** A node's Config rows, a read-only one carrying why it is locked: a node with a fix loop cannot be read only (the prototype's lock). */
+export function settingRows(r: Result, path: string) {
+  const rows: (ReturnType<typeof sourceRows>[number] & { locked?: string })[] = sourceRows(r, path);
+  if (resolvedAt(r, path)?.fix_loop) rows.forEach((x) => { if (x.field === "read_only") x.locked = "A node with a fix loop cannot be read only"; });
+  return rows;
+}
+
+/** The chain's own caps, in two groups: `sources` has no row for the chain, so these read the file and say "policy" when unset. */
+export function chainCapGroups(r: Result, scope: Scope): { head: string; rows: { field: string; value: unknown; source: string }[] }[] {
+  const policy = (authoredAt(r, scope, "")?.policy ?? {}) as Record<string, unknown>;
+  const row = (f: string) => ({ field: `policy.${f}`, value: policy[f] ?? null, source: policy[f] === undefined ? "policy" : "chain" });
+  return [
+    { head: "Chain-wide time caps", rows: ["time_cap_minutes", "total_time_cap_minutes"].map(row) },
+    { head: "Fix loops in this chain", rows: ["max_attempts", "timeout_minutes"].map(row) },
+  ];
+}
+
 /** The header's two numbers. A YAML syntax error counts as a problem. */
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });
 

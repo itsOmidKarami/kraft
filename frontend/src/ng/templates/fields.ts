@@ -59,6 +59,9 @@ export const ROUTE_LABEL = { profile: "profile", model: "model + effort" } as co
 
 export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: field.replace(/^policy\./, "").replace(/_/g, " "), kind: "text" };
 
+/** What a row says when its cap is not this task's own but its recovery's. */
+export const RECOVERY_NOTE = "applies to its on-failure recovery";
+
 /** A value as a row shows it. */
 export function show(value: unknown, kind: FieldKind): string {
   if (value === null || value === undefined || value === "") return "not set";

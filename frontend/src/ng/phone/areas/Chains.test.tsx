@@ -1,8 +1,8 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChainNodeView, ChainsList, ChainView } from "./Chains";
-import { mountAt, posts, where } from "./testkit";
+import { mountAt, posts, view, where } from "./testkit";
 
 const NODES = [
   { id: "spec", kind: "exec", tasks: ["spec.main.author"], steps: [["spec.main.author"]], gate_after: null },
@@ -13,33 +13,104 @@ const CHAINS = [{ id: "default", nodes: NODES, gates: 1 }, { id: "docs_only", no
 const answers = (more: Record<string, [number, unknown]> = {}) => ({ "GET /templates/chains": [200, CHAINS] as [number, unknown], "GET /templates/chains/default": [200, { id: "default", text: "id: default\nnodes: []\n" }] as [number, unknown], ...more });
 afterEach(() => vi.unstubAllGlobals());
 
-describe("Chains, read only (L.1)", () => {
-  it("lists the chains with their node and gate counts, and the desktop footnote", async () => {
+describe("Chains (L.1)", () => {
+  it("lists the chains with their node and gate counts", async () => {
     const { calls } = mountAt(<ChainsList />, "/templates/chains", "/templates/chains", answers());
     expect(await screen.findByRole("link", { name: /^default/ })).toHaveTextContent("3 nodes · 1 gate");
     expect(screen.getByRole("link", { name: /^docs_only/ })).toHaveTextContent("1 nodes · 0 gates");
     // An add-on's chain says so; a local one does not.
     expect(screen.getByRole("link", { name: /^docs_only/ })).toHaveTextContent("release@acme 1.0.0");
     expect(screen.getByRole("link", { name: /^default/ })).not.toHaveTextContent("release@acme");
-    expect(screen.getByText(/The graph canvas, drag to reorder, adding steps, drafts and publish are on desktop/)).toBeInTheDocument();
+    expect(screen.queryByText(/are on desktop/)).toBeNull();
     expect(screen.getByText("no such library node")).toBeInTheDocument();
     expect(posts(calls)).toEqual([]);
     await userEvent.click(screen.getByRole("link", { name: /^default/ }));
     expect(where()).toBe("/templates/chains/default");
   });
 
-  it("a chain lists its nodes, says a desktop draft is open, shows its YAML, and sends nothing", async () => {
-    const { calls } = mountAt(<ChainView />, "/templates/chains/default", "/templates/chains/:chain", answers({ "GET /drafts": [200, [{ area: "chains", key: "default", files: ["chains/default.yaml"], changes: 2, problems: 0, updated_at: "x" }]] }));
-    expect(await screen.findByRole("heading", { level: 1, name: "default" })).toBeInTheDocument();
+  const src = (value: unknown, source = "default") => ({ value, source });
+  const SOURCES = {
+    "": {},
+    verification: { read_only: src(false), skippable: src(true, "chain"), model: src(null), effort: src("high", "chain"), "policy.time_cap_minutes": src(null), "policy.token_budget": src(5000, "chain"), "policy.timeout_minutes": { value: null, source: "default", recovery: true } },
+    spec_approval: { reject_to: src("spec", "chain"), message: src("Review the spec.", "chain") },
+    "verification.checks.lint": { command: src("just lint", "chain") },
+  };
+  const DRAFT = (r = {}) => view("chains", "default", { draft: true, files: { "chains/default.yaml": "id: default\n" } }, { sources: SOURCES as never, model: { "chains/default.yaml": { id: "default", nodes: [{ id: "spec", kind: "exec" }, { id: "spec_approval", kind: "gate" }, { id: "verification", kind: "exec" }] } } as never, changes: [{ path: "verification", kind: "change", summary: "effort high", fields: ["effort", "policy"] }, { path: "spec", kind: "change", summary: "x" }], ...r });
+  const OPS = [200, { ...DRAFT(), ops: [] }] as [number, unknown];
+  const open = (path = "/templates/chains/default", route = "/templates/chains/:chain", more: Record<string, [number, unknown]> = {}) => mountAt(path.includes("/nodes/") ? <ChainNodeView /> : <ChainView />, path, path.includes("/nodes/") ? "/templates/chains/:chain/nodes/:node" : route, answers({ "GET /drafts/chains/default": [200, DRAFT()], "POST /drafts/chains/default/ops": OPS, "GET /harnesses/profiles": [200, { profiles: [{ id: "claude", provider: "anthropic" }], agent_profiles: [{ id: "coder" }] }], "GET /harnesses/providers": [200, { valid: { anthropic: { capabilities: { effort: { values: ["low", "high"] } } } } }], ...more }));
+
+  it("a chain shows its draft, its nodes and caps, and its YAML read only", async () => {
+    const { calls } = open();
     expect(await screen.findByText("draft · 2 changes")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^verification/ })).toHaveTextContent("exec · 2 steps · fix loop");
     expect(screen.getByRole("link", { name: /^spec_approval/ })).toHaveTextContent("gate · reject to spec");
+    expect(screen.getByText("Adding, removing and reordering nodes and steps is on desktop.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chain-wide time caps" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     expect(await screen.findByText(/id: default/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Review & publish|Discard/ })).toBeNull();
-    // The footnote is said once, on the list.
-    expect(screen.queryByText(/The graph canvas, drag to reorder/)).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
     expect(posts(calls)).toEqual([]);
+  });
+
+  it("a chain-wide cap is parsed as the desktop parses it, then sent as set_field", async () => {
+    const { calls } = open();
+    await userEvent.click(await screen.findByRole("button", { name: /^running cap/ }));
+    const input = screen.getByLabelText("running cap", { selector: "input,textarea" });
+    await userEvent.type(input, "abc{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("A whole number above 0.");
+    expect(posts(calls)).toEqual([]);
+    await userEvent.clear(input);
+    await userEvent.type(input, "90{Enter}");
+    await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ ops: [{ op: "set_field", path: "", field: "policy.time_cap_minutes", value: 90 }] }]));
+  });
+
+  it("a node's settings edit through a switch and a sheet, and a changed one is marked", async () => {
+    const { calls } = open("/templates/chains/default/nodes/verification");
+    expect(await screen.findByText("effort")).toBeInTheDocument();
+    expect(screen.getByText("high").className).toContain("ph-is-changed");
+    // A policy key is reported by its group, so each one set shows as changed.
+    expect(screen.getByText("5000").className).toContain("ph-is-changed");
+    expect(screen.getAllByText("(changed)")).toHaveLength(2);
+    // A cap that is its recovery's says so, and is not folded away as unset.
+    expect(screen.getByRole("button", { name: /^wall clock.*applies to its on-failure recovery/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: /^Not set/ })).queryByText("wall clock")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^effort/ }));
+    await userEvent.click(await screen.findByRole("radio", { name: /^low/ }));
+    await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ ops: [{ op: "set_field", path: "verification", field: "effort", value: "low" }] }]));
+    await userEvent.click(screen.getByRole("switch", { name: /^skippable/ }));
+    await waitFor(() => expect(posts(calls)[1].body).toEqual({ ops: [{ op: "set_field", path: "verification", field: "skippable", value: false }] }));
+    expect(screen.getByText("Adding, removing and reordering nodes and steps is on desktop.")).toBeInTheDocument();
+  });
+
+  it("a gate's reject target is one of the nodes before it", async () => {
+    open("/templates/chains/default/nodes/spec_approval");
+    await userEvent.click(await screen.findByRole("button", { name: /^reject to/ }));
+    await userEvent.type(screen.getByLabelText("reject to", { selector: "input" }), "nope{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/exec node before this gate/);
+  });
+
+  it("a task's settings are its own path's", async () => {
+    const { calls } = open("/templates/chains/default/nodes/verification?sel=verification.checks.lint");
+    expect(await screen.findByRole("heading", { level: 1, name: "lint" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^command/ }));
+    await userEvent.type(screen.getByLabelText("command", { selector: "input,textarea" }), "x{Enter}");
+    await waitFor(() => expect(posts(calls)[0].body).toEqual({ ops: [{ op: "set_field", path: "verification.checks.lint", field: "command", value: "just lintx" }] }));
+  });
+
+  it("Review & publish sits behind the review sheet and publishes the chain's draft", async () => {
+    const { calls } = open("/templates/chains/default", "/templates/chains/:chain", { "POST /drafts/chains/default/publish": [200, { published: ["chains/default.yaml"] }] });
+    await userEvent.click(await screen.findByRole("button", { name: "Review & publish" }));
+    expect(await screen.findByText("effort high")).toBeInTheDocument();
+    expect(posts(calls)).toEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(posts(calls).map((c) => c.path)).toEqual(["/drafts/chains/default/publish"]));
+  });
+
+  it("an add-on's chain edits nothing", async () => {
+    open("/templates/chains/docs_only", "/templates/chains/:chain", { "GET /drafts/chains/docs_only": [200, view("chains", "docs_only", { addon: { id: "release@acme", version: "1.0.0" } })] });
+    expect(await screen.findByRole("link", { name: /^spec/ })).toBeInTheDocument();
+    expect(screen.queryByText(/on desktop/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /cap/ })).toBeNull();
   });
 
   it("a node page reads its fields, a gate's reject target included", async () => {
@@ -54,6 +125,5 @@ describe("Chains, read only (L.1)", () => {
     expect(screen.getByText("lint")).toBeInTheDocument();
     expect(screen.getByText("verification_fix_loop")).toBeInTheDocument();
     expect(screen.getByText("fix")).toBeInTheDocument();
-    expect(screen.queryByText(/The graph canvas, drag to reorder/)).toBeNull();
   });
 });
