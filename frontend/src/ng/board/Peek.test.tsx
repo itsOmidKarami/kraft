@@ -176,11 +176,18 @@ describe("Peek", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
   });
 
-  it("archives a done item from the footer", async () => {
+  it("archives a done item from its card, the footer repeating none of it", async () => {
     const calls = mount({ status: "completed", display_status: "done" });
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
     await act(async () => {});
     expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/work-items/w1/archive" });
+  });
+
+  // One primary per state, as on the item page: the card carries Retry on Overview; the footer holds it where no card is on screen.
+  it.each([["overview", 1], ["activity", 1]] as const)("a failed item has a single Retry on %s", async (start, n) => {
+    mount({ status: "needs_human", display_status: "failed", stop: stop("failed") }, { start });
+    await screen.findByRole("button", { name: "Open item ↗" });
+    expect(screen.getAllByRole("button", { name: /^Retry/ })).toHaveLength(n);
   });
 
   it("lists Activity newest first and pages back with before_seq; a node's line opens the item there", async () => {
