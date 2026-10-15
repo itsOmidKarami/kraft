@@ -5,10 +5,13 @@ navigation:
 description: The lifecycle, limits, permission model, and vocabulary behind Kraft.
 ---
 
-These pages explain how Kraft thinks, before you configure it. Start with how a
-[work item](/concepts/vocabulary#work-item) runs. Vocabulary is the glossary:
-look a term up there when a page uses one you do not know, rather than reading
-it through.
+Kraft runs a work item through a chain of nodes, and stops at a gate for you to
+decide. Limits bound every scope of that run, and a permission gate answers what
+a worker may do while nobody watches. These pages explain each idea before you
+configure it, and each ends with the guide that puts it to work.
+
+Start with how a [work item](/concepts/vocabulary#work-item) runs. Vocabulary
+is the glossary: look a term up there when a page uses one you do not know.
 
 ## In this section
 
