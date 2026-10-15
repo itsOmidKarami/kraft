@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { HeaderActionsHost, HeaderTailHost } from "../shell/HeaderActions";
 import { vi } from "vitest";
@@ -126,8 +125,7 @@ export function renderPage(query = "") {
   return { ...out, tail };
 }
 
-/** The floor's pane starts on its rail (AreaHarnesses paneOpen:false): expand it and return it. */
+/** The floor's pane starts open: wait for it and return it. */
 export async function openAreaPane() {
-  await userEvent.click(await screen.findByRole("button", { name: "Expand harnesses" }));
-  return screen.getByRole("complementary", { name: "harnesses pane" });
+  return screen.findByRole("complementary", { name: "harnesses pane" });
 }

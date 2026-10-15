@@ -8,15 +8,9 @@ import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
 import { useState } from "react";
 import { ModelField } from "./fields";
-import { ACCESS, enabledHelp, enableLabel, executableWord, HARNESS_FIELD, type Access, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
+import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
-
-const HELP: Record<Access, string> = {
-  available: "Tasks may select it. A repo can still narrow this in Repos.",
-  override: "Nothing selects it by default; an item or a retry override may name it.",
-  never: "No task, repo or override may use it.",
-};
 
 type Common = {
   draft: ConfigDraft;
@@ -117,7 +111,7 @@ function HarnessFields({ draft, h, status, changed, onYaml }: { draft: ConfigDra
   );
 }
 
-/** The pane of one harness (Decisions §11 Harness selected): its fields, Access, what the provider accepts. */
+/** The pane of one harness (Decisions §11 Harness selected): who may use it, its fields, what the provider accepts. */
 export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common & {
   h: HarnessView;
   lane: string | null;
@@ -164,18 +158,18 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       onCollapse={c.onCollapse}
       onExpand={c.onExpand}
     >
-      <Head>Harness</Head>
-      <HarnessFields draft={c.draft} h={h} status={status} changed={c.changes.has(`harnesses.${h.id}`)} onYaml={onYaml} />
-
-      <Head>Access</Head>
+      <Head>{ACCESS_SECTION}</Head>
       <div className="hn-field">
         <span className="hn-field-label">tasks may</span>
-        <Segmented label="Access" options={ACCESS} value={h.state} onChange={(state) => void run({ op: "set_access", harness: h.id, state })} />
-        <p className={`hn-field-help${c.changes.has(`access.${h.id}`) ? " is-changed" : ""}`}>{HELP[h.state]}</p>
+        <Segmented label={ACCESS_SECTION} options={ACCESS} value={h.state} onChange={(state) => void run({ op: "set_access", harness: h.id, state })} />
+        <p className={`hn-field-help${c.changes.has(`access.${h.id}`) ? " is-changed" : ""}`}>{ACCESS_HELP[h.state]}</p>
       </div>
-      <Note>Written to policy.yaml as allowed_harnesses: Available is in defaults and maxima, Override in maxima only, Never in neither. Each lane on the canvas shows this as a tag.</Note>
+      <Note>Whether the CLI is installed is separate: it is shown beside this on every lane.</Note>
       {c.r.escalation_effective.harness === h.id && <Note>Escalation turns run on this harness (area pane → Escalation).</Note>}
       {error && <p className="hn-error" role="alert">{error}</p>}
+
+      <Head>Harness</Head>
+      <HarnessFields draft={c.draft} h={h} status={status} changed={c.changes.has(`harnesses.${h.id}`)} onYaml={onYaml} />
 
       <Head>Provider accepts</Head>
       <Note>effort: {status?.efforts.length ? status.efforts.join(", ") : "none"}</Note>

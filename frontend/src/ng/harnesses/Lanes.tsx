@@ -23,6 +23,13 @@ function Glyph({ t, problems }: { t: TaskRef; problems: HProblem[] }) {
   );
 }
 
+/** A lane's tasks under the chain each belongs to, in first-seen order. */
+const byChain = (tasks: TaskRef[]): [string, TaskRef[]][] => {
+  const groups = new Map<string, TaskRef[]>();
+  for (const t of tasks) groups.set(t.chain, [...(groups.get(t.chain) ?? []), t]);
+  return [...groups];
+};
+
 /** The canvas's lanes (Decisions §11): a fixed 520px each; the canvas scrolls. */
 export function Lanes({ lanes, pill, selected, empty, problems, onOpen }: {
   lanes: Lane[];
@@ -45,15 +52,22 @@ export function Lanes({ lanes, pill, selected, empty, problems, onOpen }: {
           onClick={l.open ? (e) => { e.stopPropagation(); onOpen(l.open!); } : (e) => e.stopPropagation()}
         >
           {l.open ? (
-            <button type="button" className="hn-lane-head" onClick={(e) => { e.stopPropagation(); onOpen(l.open!); }} aria-label={`${l.title}${l.tag ? `, ${l.tag}` : ""}${l.red ? ", has a problem" : ""}`}>
+            <button type="button" className="hn-lane-head" onClick={(e) => { e.stopPropagation(); onOpen(l.open!); }} aria-label={`${l.title}${l.health ? `, ${l.health.word}` : ""}${l.tag ? `, ${l.tag}` : ""}${l.red ? ", has a problem" : ""}`}>
               <LaneHead l={l} />
             </button>
           ) : (
             <div className="hn-lane-head"><LaneHead l={l} /></div>
           )}
           {l.tasks.length > 0 && (
-            <div className="hn-glyphs">
-              {l.tasks.map((t) => <Glyph key={`${t.chain}/${t.path}${t.fallback ? "/f" : ""}`} t={t} problems={problems} />)}
+            <div className="hn-chains">
+              {byChain(l.tasks).map(([chain, tasks]) => (
+                <div key={chain} className="hn-chain" role="group" aria-label={`Chain ${chain}`}>
+                  <span className="hn-chain-name">{chain}</span>
+                  <div className="hn-glyphs">
+                    {tasks.map((t) => <Glyph key={`${t.chain}/${t.path}${t.fallback ? "/f" : ""}`} t={t} problems={problems} />)}
+                  </div>
+                </div>
+              ))}
               {l.more > 0 && <span className="hn-more">+{l.more} more</span>}
             </div>
           )}
@@ -71,6 +85,7 @@ function LaneHead({ l }: { l: Lane }) {
       <span className="hn-lane-title">{l.title}</span>
       {l.model && <><span className="hn-lane-arrow" aria-hidden>→</span><span className="hn-lane-model">{l.model}</span></>}
       {l.effort && <span className="hn-lane-chip">{l.effort}</span>}
+      {l.health && <span className="hn-lane-tag" data-found={l.health.ok}>{l.health.word}</span>}
       {l.tag && <span className="hn-lane-tag" data-access={l.tag.toLowerCase()}>{l.tag}</span>}
       <span className="hn-lane-gap" />
       <span className="hn-lane-right">{l.right}</span>

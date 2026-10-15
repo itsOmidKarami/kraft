@@ -13,6 +13,7 @@ describe("lane models", () => {
   it("floor: one lane per harness with its Access tag and own tasks, dimmed when Never and empty", () => {
     const lanes = floorLanes(resolved(), []);
     expect(lanes.map((l) => [l.title, l.tag])).toEqual([["claude", "Available"], ["claude-sandbox", "Override"], ["codex", "Available"], ["cursor", "Never"], ["gemini", "Never"]]);
+    expect(lanes.map((l) => l.health)).toEqual([...Array(4).fill({ word: "Installed", ok: true }), { word: "Not on PATH", ok: false }]);
     expect(lanes[0].right).toBe("claude · 4 tasks");
     expect(lanes[3].dim).toBe(true);
     expect(lanes[1].dim).toBe(false);
@@ -72,6 +73,9 @@ describe("the canvas", () => {
     const glyphs = await screen.findAllByRole("link", { name: /default › implement\.main\.implementer.*has a problem/ });
     expect(glyphs[0]).toHaveAttribute("href", "/templates/chains/default/nodes/implement");
     expect(screen.getAllByRole("link", { name: /default › spec\.main\.spec_author. Open in Chains/ })[0]).not.toHaveTextContent("problem");
+    const claude = screen.getByRole("region", { name: "claude" });
+    expect(within(claude).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Chain default"]);
+    expect(within(claude).getByText("Installed")).toBeInTheDocument();
   });
 
   it("goes up one level on a background click: lane, then selection", async () => {
@@ -98,9 +102,9 @@ describe("the canvas", () => {
     expect(canvas.style.paddingRight).toBe("");
   });
 
-  it("lanes are 520px wide", () => {
+  it("lanes are at most 520px wide", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "harnesses.css"), "utf-8");
-    expect(css).toMatch(/\.hn-lane \{[^}]*width: 520px/);
+    expect(css).toMatch(/\.hn-lane \{[^}]*width: min\(520px, 100%\)/);
     expect(css).toMatch(/\.hn-lane \{[^}]*flex: none/);
   });
 });

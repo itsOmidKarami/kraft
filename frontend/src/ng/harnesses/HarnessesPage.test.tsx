@@ -29,10 +29,11 @@ describe("HarnessesPage", () => {
     serve(view(resolved()));
     renderPage();
     const nav = await screen.findByRole("navigation", { name: "Harnesses and profiles" });
-    expect(within(nav).getByRole("heading", { name: "Harnesses · 5" })).toBeInTheDocument();
+    expect(within(nav).getByRole("heading", { level: 2, name: "Harnesses · 5" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "gemini, Not on PATH, Never" })).toBeInTheDocument();
     expect(within(nav).getByRole("heading", { name: "Profiles · 3" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "claude-sandbox, Override" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "cursor, Never" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "claude-sandbox, Installed, Override" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "cursor, Installed, Never" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "strong, 2 tasks" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "fast, 1 task" })).toBeInTheDocument();
   });
@@ -50,7 +51,7 @@ describe("HarnessesPage", () => {
     renderPage();
     const nav = await screen.findByRole("navigation", { name: "Harnesses and profiles" });
     const marked = within(nav).getAllByRole("button", { name: /has a problem/ }).map((b) => b.getAttribute("aria-label"));
-    expect(marked).toEqual(["claude, Available, has a problem", "codex, Available, has a problem", "strong, 2 tasks, has a problem", "fast, 1 task, has a problem"]);
+    expect(marked).toEqual(["claude, Installed, Available, has a problem", "codex, Installed, Available, has a problem", "strong, 2 tasks, has a problem", "fast, 1 task, has a problem"]);
   });
 
   it("selects from the query, and an unknown id says so with a way back", async () => {
@@ -91,16 +92,16 @@ describe("HarnessesPage", () => {
   it("a click selects, and the pane opens on that harness", async () => {
     serve(view(resolved()));
     renderPage();
-    await userEvent.click(within(await screen.findByRole("navigation", { name: "Harnesses and profiles" })).getByRole("button", { name: "codex, Available" }));
+    await userEvent.click(within(await screen.findByRole("navigation", { name: "Harnesses and profiles" })).getByRole("button", { name: "codex, Installed, Available" }));
     await waitFor(() => expect(screen.getByRole("complementary", { name: "codex pane" })).toBeInTheDocument());
   });
 });
 
 describe("HarnessesPage: the pane's first state", () => {
-  it("loads with the area's pane on its rail; a link to one harness opens its pane", async () => {
+  it("loads with the area's pane open; a link to one harness opens its pane", async () => {
     serve(view(resolved()));
     const { unmount } = renderPage();
-    expect(await screen.findByRole("complementary", { name: "harnesses pane, collapsed" })).toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "harnesses pane" })).toBeInTheDocument();
     unmount();
     renderPage("?harness=claude");
     expect(await screen.findByRole("complementary", { name: "claude pane" })).toBeInTheDocument();
