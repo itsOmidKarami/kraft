@@ -31,6 +31,9 @@
 .rp-yaml { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg); font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .rp-cfg { display: flex; flex-direction: column; gap: 2px; }
+.rp-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.rp-yaml-none { color: var(--text-muted); }
+.rp-yaml-val { font: var(--fs-meta) ui-monospace, Menlo, monospace; color: var(--text-sub); overflow-wrap: anywhere; }
 .rp-row-cfg { display: grid; grid-template-columns: minmax(70px, 108px) minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-label); }
 .rp-k { padding-top: 2px; color: var(--text-muted); }
 .rp-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

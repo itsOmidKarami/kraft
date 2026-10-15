@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capKey, KEYS, SEVERITY_KEY, STUCK_KEY } from "./keys";
+import { capKey, KEYS, limitLabel, SEVERITY_KEY, STUCK_KEY } from "./keys";
 import { sectionOfKey, sectionOfProblem, SECTIONS } from "./sections";
 import { parse, parseAge, parseSize, raw, show } from "./units";
 
@@ -29,6 +29,16 @@ describe("Policy sections", () => {
     expect(sectionOfProblem({ scope: "retries", field: null })).toBe("housekeeping");
     expect(sectionOfProblem({ scope: "harnesses", field: "allowed_harnesses" })).toBeNull();
   });
+});
+
+describe("Policy labels", () => {
+  it.each([
+    ["defaults.work_item.budget_usd", "work item dollars default"],
+    ["maxima.tasks.total_time_cap_minutes", "tasks wall clock maximum"],
+    ["budget.daily_usd", "per day"],
+    ["budget.work_item_usd", "outer ceiling"],
+    ["max_concurrent", undefined],
+  ])("names %s the way the Limits page does", (key, label) => expect(limitLabel(key)).toBe(label));
 });
 
 describe("Policy numbers", () => {

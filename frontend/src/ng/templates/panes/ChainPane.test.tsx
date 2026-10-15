@@ -26,6 +26,10 @@ function mount(path: string, result: Partial<Result> = {}) {
 }
 
 const configTab = () => userEvent.click(screen.getByRole("tab", { name: "Config" }));
+/** Opens the "N defaults · show" line under the rows. */
+const showDefaults = async () => {
+  for (const b of screen.queryAllByRole("button", { name: /defaults? · show/ })) await userEvent.click(b);
+};
 const rowOf = (label: string) => screen.getByText(label, { selector: ".cfg-k" }).closest(".cfg-row") as HTMLElement;
 const rowLabels = () => [...document.querySelectorAll(".cfg-k")].map((e) => e.textContent);
 
@@ -41,12 +45,14 @@ beforeEach(() => {
 });
 
 describe("Config tab", () => {
-  it("lists the server's rows in its order, each with its source chip, and keeps the order when one becomes an override", async () => {
+  it("lists the server's rows in its order, each with its source chip, folds the unset ones, and brings one out when it becomes an override", async () => {
     mount("implementation.main.implement");
     await configTab();
     const before = rowLabels();
-    expect(before.slice(0, 5)).toEqual(["runs", "steering", "skippable", "harness", "prompt"]);
+    expect(before.slice(0, 4)).toEqual(["runs", "skippable", "harness", "prompt"]);
+    expect(before).not.toContain("model");
     expect(within(rowOf("harness")).getByText("library")).toBeInTheDocument();
+    await showDefaults();
     expect(within(rowOf("model")).getByText("default")).toBeInTheDocument();
     expect(rowOf("harness").querySelector(".cfg-dot")).toBeNull();
 
@@ -55,7 +61,8 @@ describe("Config tab", () => {
     document.body.innerHTML = "";
     mount("implementation.main.implement", { sources });
     await configTab();
-    expect(rowLabels()).toEqual(before);
+    expect(rowLabels().filter((l) => l !== "model")).toEqual(before);
+    expect(rowLabels()).toContain("model");
     expect(within(rowOf("model")).getByText("this chain")).toHaveClass("is-own");
     expect(rowOf("model").querySelector(".cfg-dot")).not.toBeNull();
   });
@@ -77,6 +84,7 @@ describe("Config tab", () => {
   it("refuses a malformed value before sending, and sends nothing for an untouched one", async () => {
     const { draft } = mount("spec_approval");
     await configTab();
+    await showDefaults();
     await userEvent.click(within(rowOf("timeout")).getByRole("button", { name: "Edit timeout" }));
     await userEvent.type(within(rowOf("timeout")).getByRole("textbox"), "two days{Enter}");
     expect(screen.getByRole("alert")).toHaveTextContent("timeout: Like 30s, 5m, 2h or 1d.");
@@ -89,6 +97,7 @@ describe("Config tab", () => {
   it("edits on base change as restart_from, among this and the earlier exec nodes", async () => {
     const { draft } = mount("verification");
     await configTab();
+    await showDefaults();
     await userEvent.click(within(rowOf("on base change")).getByRole("button", { name: "Edit on base change" }));
     const select = within(rowOf("on base change")).getByRole("combobox");
     expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["not set", "spec", "implementation", "verification"]);

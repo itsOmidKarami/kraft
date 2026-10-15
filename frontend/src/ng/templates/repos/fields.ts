@@ -6,6 +6,7 @@ import type { RepoView } from "./types";
  *  `policy:` block; the rest are keys of the entry. */
 export interface RepoField {
   key: string;
+  group: (typeof GROUPS)[number];
   label: string;
   /** A fixed choice (a chain, a forge) instead of typed text. */
   choice?: "chain" | "forge";
@@ -24,30 +25,42 @@ export interface RepoField {
   placeholder?: string;
 }
 
+/** The section heads of the Config tab, in order. */
+export const GROUPS = ["Running", "Tests", "Agents", "Limits", "Forge"] as const;
+
 /** `test_command: ""`: a repo with no tests, whose items pass verify without
  *  running any. Not "not set", which stops every item at verify. */
 export const NO_TESTS = "no tests (passes verify)";
 
-const policy = (key: string, label: string, p: Pick<RepoField, "show" | "parse">): RepoField => ({ key: `policy.${key}`, label, ...p, placeholder: "not set" });
+const policy = (key: string, label: string, p: Pick<RepoField, "show" | "parse">, group: RepoField["group"] = "Limits"): RepoField => ({ key: `policy.${key}`, group, label, ...p, placeholder: "not set" });
 
 export const FIELDS: RepoField[] = [
-  { key: "default_chain", label: "default chain", choice: "chain", ...text, fallback: "default" },
-  { key: "test_command", label: "test command", ...command, none: "No tests", empty: NO_TESTS },
-  { key: "test_scopes", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
-  { key: "setup_command", label: "setup command", ...command, none: "No setup needed" },
-  { key: "intent_dir", label: "intent dir", ...text },
-  { key: "steering", label: "steering", ...list, source: "steering", choices: "steering", placeholder: "profile, profile" },
-  { key: "models", label: "models", ...models, source: "models", placeholder: "profile=model; …" },
-  { key: "deny_tools", label: "deny tools", ...list, source: "deny_tools", placeholder: "tool, tool" },
-  { key: "local_files", label: "local files", ...list, placeholder: "file, file" },
-  { key: "forge", label: "forge", choice: "forge", ...text },
-  { key: "project", label: "project", ...text },
+  { key: "default_chain", group: "Running", label: "default chain", choice: "chain", ...text, fallback: "default" },
+  { key: "test_command", group: "Tests", label: "test command", ...command, none: "No tests", empty: NO_TESTS },
+  { key: "test_scopes", group: "Tests", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
+  { key: "setup_command", group: "Running", label: "setup command", ...command, none: "No setup needed", empty: "none" },
+  { key: "intent_dir", group: "Running", label: "intent dir", ...text },
+  { key: "steering", group: "Agents", label: "steering", ...list, source: "steering", choices: "steering", placeholder: "profile, profile" },
+  { key: "models", group: "Agents", label: "models", ...models, source: "models", placeholder: "profile=model; …" },
+  { key: "deny_tools", group: "Agents", label: "deny tools", ...list, source: "deny_tools", placeholder: "tool, tool" },
+  { key: "local_files", group: "Running", label: "local files", ...list, placeholder: "file, file" },
+  { key: "forge", group: "Forge", label: "forge", choice: "forge", ...text },
+  { key: "project", group: "Forge", label: "project", ...text },
   policy("time_cap_minutes", "tasks running cap (min)", whole("Minutes")),
   policy("total_time_cap_minutes", "tasks wall clock cap (min)", whole("Minutes")),
   policy("token_budget", "tokens cap", whole("Tokens")),
   policy("budget_usd", "dollars cap", dollars),
-  { ...policy("allowed_tools", "allowed tools", list), placeholder: "tool, tool" },
-  { ...policy("allowed_harnesses", "allowed harnesses", list), choices: "harnesses", placeholder: "harness, harness" },
+  { ...policy("allowed_tools", "allowed tools", list, "Agents"), placeholder: "tool, tool" },
+  { ...policy("allowed_harnesses", "allowed harnesses", list, "Agents"), choices: "harnesses", placeholder: "harness, harness" },
+];
+
+/** Keys of an entry the Config tab has no row for; they are edited in the repo's YAML. */
+export const YAML_ONLY: { key: string; label: string }[] = [
+  { key: "env", label: "env" },
+  { key: "sandbox", label: "sandbox" },
+  { key: "ci_checks", label: "CI checks" },
+  { key: "library_auto_update", label: "library auto-update" },
+  { key: "automated_review", label: "automated review" },
 ];
 
 export const FORGES = ["gitlab", "github", "none"];

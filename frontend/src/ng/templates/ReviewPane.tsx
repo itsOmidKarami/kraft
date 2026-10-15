@@ -39,6 +39,8 @@ export interface ReviewArea {
   files: string[];
   toast: string;
   affects: (r: Result) => ReactNode;
+  /** The label a change's raw key goes by in the area's own screen; the key stays as a second line. */
+  label?: (path: string) => string | undefined;
 }
 
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
@@ -204,8 +206,9 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
           {r.changes.map((c, i) => (
             <button key={i} type="button" className="tpl-rv-change" onClick={() => onHighlight(c.path)}>
               <span className={`tpl-rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
-              <span className="tpl-rv-path">{c.path || "chain"}</span>
+              <span className="tpl-rv-path">{area?.label?.(c.path) ?? (c.path || "chain")}</span>
               <span className="tpl-rv-sum">{c.summary}{c.reaches?.length ? ` · reaches ${plural(c.reaches.length, "chain")}` : ""}</span>
+              {area?.label?.(c.path) && <span className="tpl-rv-key">{c.path}</span>}
             </button>
           ))}
           {joined && (

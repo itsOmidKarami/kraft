@@ -267,7 +267,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
           <Kv k="forge" v={forge ? `${forge}${typeof repo.entry.project === "string" ? ` · ${repo.entry.project}` : ""}` : "—"} muted={!forge} />
         </>
       )}
-      {tab === "config" && <RepoConfig draft={draft} repo={repo} chains={chains} />}
+      {tab === "config" && <RepoConfig draft={draft} repo={repo} chains={chains} onYaml={() => onTab("yaml")} />}
       {tab === "yaml" && (fragment.text === null
         ? <Note>{fragment.error ?? "Loading…"}</Note>
         : <><pre className="rp-yaml">{fragment.text}</pre><Note>Read-only. Edit the whole file with YAML in the header.</Note></>)}

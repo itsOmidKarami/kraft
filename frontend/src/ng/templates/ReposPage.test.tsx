@@ -282,6 +282,10 @@ describe("Repos page: connecting", () => {
 });
 
 describe("Repos page: the Config rows", () => {
+  /** Opens every group's "N defaults · show" line. */
+  const showDefaults = async () => {
+    for (const b of screen.queryAllByRole("button", { name: /defaults? · show/ })) await userEvent.click(b);
+  };
   const cleanPreview = () => vi.mocked(d.postOps).mockImplementation(() => ok({ ...reposView({}, true), ops: [] }));
 
   it("checks an edit with ?preview=1 first and sends it only when nothing new is wrong", async () => {
@@ -302,6 +306,7 @@ describe("Repos page: the Config rows", () => {
     vi.mocked(d.postOps).mockImplementation((_a, _k, _o, preview) => ok({ ...reposView({ problems: preview ? [problemAt("/src/platform", "allowed_tools", "'allowed_tools' cannot widen the inherited safety ceiling ['Read']; ['Bash'] is not allowed")] : [] }, true), ops: [] }));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
+    await showDefaults();
     await userEvent.click(screen.getByRole("button", { name: /^allowed tools, not set/ }));
     await userEvent.type(screen.getByRole("textbox", { name: "allowed tools" }), "Bash{Enter}");
     expect(await screen.findByText(/Refused: 'allowed_tools' cannot widen the inherited safety ceiling/)).toBeInTheDocument();
@@ -313,6 +318,7 @@ describe("Repos page: the Config rows", () => {
     cleanPreview();
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
+    await showDefaults();
     const none = screen.getByRole("checkbox", { name: "No setup needed" });
     expect(none).not.toBeChecked();
     await userEvent.click(none);
@@ -330,10 +336,23 @@ describe("Repos page: the Config rows", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
-    expect(screen.getByRole("button", { name: /^setup command, ""/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^setup command, none/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("checkbox", { name: "No setup needed" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: null } }]);
+  });
+
+  it("groups the rows, folds those at their default into one line per group, and shows the YAML-only keys", async () => {
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(within(agents).queryByRole("button", { name: /^allowed tools/ })).toBeNull();
+    await userEvent.click(within(agents).getByRole("button", { name: /defaults? · show/ }));
+    expect(within(agents).getByRole("button", { name: /^allowed tools, not set/ })).toBeInTheDocument();
+    const yaml = screen.getByRole("region", { name: "Edited in YAML" });
+    expect(within(yaml).getByText("sandbox")).toBeInTheDocument();
+    await userEvent.click(within(yaml).getByRole("button", { name: "Edit sandbox in YAML" }));
+    expect(await screen.findByText(/Read-only\. Edit the whole file/)).toBeInTheDocument();
   });
 
   it("says a repo whose test command is \"\" has no tests and passes verify, where clearing it would stop its items", async () => {
@@ -374,6 +393,7 @@ describe("Repos page: the Config rows", () => {
     cleanPreview();
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
+    await showDefaults();
     await userEvent.click(screen.getByRole("button", { name: /^tasks running cap \(min\), 60/ }));
     await userEvent.clear(screen.getByLabelText("tasks running cap (min)"));
     await userEvent.type(screen.getByLabelText("tasks running cap (min)"), "45{Enter}");

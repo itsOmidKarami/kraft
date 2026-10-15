@@ -136,3 +136,18 @@ export function Kv({ k, v, onClick, mono, muted }: { k: string; v: ReactNode; on
 
 export const Head = ({ children }: { children: ReactNode }) => <h3 className="pane-group">{children}</h3>;
 export const Note = ({ children, bad }: { children: ReactNode; bad?: boolean }) => <p className={`pane-note${bad ? " is-bad" : ""}`}>{children}</p>;
+
+/** The rows of a group that are at their default, folded into one line ("3 defaults · show"); opening it lists them as they are. */
+export function Fold({ count, noun = "default", lead, children }: { count: number; noun?: string; /** What the line starts with, when it also names the group. */ lead?: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  if (!count) return null;
+  return (
+    <>
+      <button type="button" className="pane-fold" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+        {lead}{count} {count === 1 ? noun : `${noun}s`} · {open ? "hide" : "show"}
+      </button>
+      <div id={id} hidden={!open} className="pane-fold-body">{open && children}</div>
+    </>
+  );
+}

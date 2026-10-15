@@ -4,7 +4,7 @@ import { IconButton } from "../../ui/IconButton";
 import { Switch } from "../../ui/Switch";
 import { authoredAt, authoredNodes, kindOf, resolvedAt, sourceRows, sourceWord } from "../draft/view";
 import { fieldMeta, parse, show, type ChoiceSource, type FieldMeta } from "../fields";
-import { Head, Note } from "./controls";
+import { Fold, Head, Note } from "./controls";
 import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
@@ -32,9 +32,24 @@ function restartTargets(ctx: PaneCtx): string[] {
   return nodes.slice(0, i + 1).filter((n) => kindOf(ctx.r, n) === "exec").map((n) => n.id);
 }
 
-/** The Config tab (Decisions §9 Config tab, Inherited vs overridden): one list
- *  in the server's order that never regroups; each row its value and source
- *  chip, an override bright with a dot, ✎ to override, ↺ to reset. */
+/** A row nothing sets: no value here or inherited, and not an override. It folds into one line. */
+const unsetRow = (x: Row) => (x.value == null || x.value === "" || (Array.isArray(x.value) && !x.value.length)) && x.source !== "chain" && !x.locked && !x.recovery;
+
+/** The rows, the unset ones folded after the others into "N defaults · show". */
+function Rows({ rows, ctx }: { rows: Row[]; ctx: PaneCtx }) {
+  const folded = rows.filter(unsetRow);
+  return (
+    <div className="cfg">
+      {rows.filter((x) => !unsetRow(x)).map((x) => <ConfigRow key={x.field} row={x} ctx={ctx} />)}
+      <Fold count={folded.length}>{folded.map((x) => <ConfigRow key={x.field} row={x} ctx={ctx} />)}</Fold>
+    </div>
+  );
+}
+
+/** The Config tab (Decisions §9 Config tab, Inherited vs overridden): the rows
+ *  in the server's order, those nothing sets folded away at the end; each row
+ *  its value and source chip, an override bright with a dot, ✎ to override,
+ *  ↺ to reset. */
 export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const { r, scope, path } = ctx;
   const readOnly = useContext(ReadOnly);
@@ -49,7 +64,7 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   return (
     <>
       <Head>Resolved config</Head>
-      <div className="cfg">{rows.map((x) => <ConfigRow key={x.field} row={x} ctx={ctx} />)}</div>
+      <Rows rows={rows} ctx={ctx} />
       {kind === "task" && <Note>on failure · {authoredAt(r, scope, path)?.on_failure ? "set" : "none"} · edit it in the pane below</Note>}
     </>
   );
@@ -63,9 +78,9 @@ function ChainConfig({ ctx }: { ctx: PaneCtx }) {
   return (
     <>
       <Head>Chain-wide time caps</Head>
-      <div className="cfg">{["time_cap_minutes", "total_time_cap_minutes"].map((f) => <ConfigRow key={f} row={row(f)} ctx={ctx} />)}</div>
+      <Rows rows={["time_cap_minutes", "total_time_cap_minutes"].map(row)} ctx={ctx} />
       <Head>Fix loops in this chain</Head>
-      <div className="cfg">{["max_attempts", "timeout_minutes"].map((f) => <ConfigRow key={f} row={row(f)} ctx={ctx} />)}</div>
+      <Rows rows={["max_attempts", "timeout_minutes"].map(row)} ctx={ctx} />
     </>
   );
 }

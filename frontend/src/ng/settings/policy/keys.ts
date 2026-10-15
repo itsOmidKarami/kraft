@@ -1,4 +1,4 @@
-import type { Unit } from "./types";
+import { CAP_LABEL, LEVEL_LABEL, type Unit } from "./types";
 
 /** The `set_value` ops the Policy page sends: a scope, the dotted key in
  *  `policy.yaml`, and how its number reads and parses. One table, so a key the
@@ -44,3 +44,14 @@ export const capKey = (kind: "default" | "maximum", level: string, cap: string):
   key: `${kind === "default" ? "defaults" : "maxima"}.${level}.${cap}`,
   unit: cap === "budget_usd" ? "usd" : cap === "token_budget" ? "tok" : "min",
 });
+
+const LIMIT_KEY = /^(defaults|maxima)\.(\w+)\.(\w+)$/;
+/** The label the Limits page gives a `policy.yaml` key (the cap cells' own names), or undefined for a key it has none for. */
+export function limitLabel(key: string): string | undefined {
+  if (key === KEYS.daily.key) return "per day";
+  if (key === KEYS.outer.key) return "outer ceiling";
+  const m = LIMIT_KEY.exec(key);
+  const level = m && LEVEL_LABEL[m[2]];
+  const cap = m && CAP_LABEL[m[3]];
+  return level && cap ? `${level.name} ${cap.name} ${m[1] === "defaults" ? "default" : "maximum"}` : undefined;
+}
