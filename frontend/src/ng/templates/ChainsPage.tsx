@@ -314,7 +314,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onClick={() => {
               const list = r.problems;
               if (!list.length) return;
-              goTo(list[nextProblem % list.length].path);
+              goTo(list[nextProblem % list.length].path ?? "");
               setNextProblem(nextProblem + 1);
             }}
           >

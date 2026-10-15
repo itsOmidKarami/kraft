@@ -12,7 +12,8 @@ export type Scope = { area: Area; key: string };
 export type Authored = Record<string, unknown>;
 
 export interface Problem {
-  path: string;
+  /** `null` for a problem about the chain itself (a chain cap under a task's own, say). */
+  path: string | null;
   field: string | null;
   message: string;
   file: string;

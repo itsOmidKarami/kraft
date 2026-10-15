@@ -100,7 +100,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   const root = d.inside === "";
   const taskKind = String(valueAt(r, scope, path, "kind") ?? "");
   const icon = FIXED_ICON[d.kind] ?? (typeof own?.icon === "string" ? own.icon : undefined);
-  const probs = r.problems.filter((p) => p.component === d.component || p.path === path || p.path.startsWith(`${path}.`));
+  const probs = r.problems.filter((p) => p.component === d.component || p.path === path || p.path?.startsWith(`${path}.`));
   const ext = typeof own?.extends === "string" ? ` · extends ${own.extends}` : "";
   const sub = (() => {
     const prefix = root ? `library ${SINGULAR[d.section]} · ` : "";

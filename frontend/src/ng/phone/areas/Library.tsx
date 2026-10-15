@@ -125,7 +125,7 @@ export function LibraryComponentView() {
   const instructions = typeof own?.instructions === "string" ? own.instructions : null;
   const pub = published?.components.find((c) => c.id === path);
   const uses = pub?.used_by_paths ?? [];
-  const problems = (draft.view?.result.problems ?? []).filter((p) => p.path === path || p.path.startsWith(`${path}.`) || p.component === path);
+  const problems = (draft.view?.result.problems ?? []).filter((p) => p.path === path || p.path?.startsWith(`${path}.`) || p.component === path);
 
   return (
     <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.addon ? ` · ${addonLabel(pub.addon)}` : ""}` : undefined} draft={draft}>

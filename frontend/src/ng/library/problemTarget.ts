@@ -4,6 +4,6 @@ import type { Problem } from "../templates/draft/types";
 export function componentOf(p: Problem): string | null {
   if (p.component) return p.component;
   if (p.chain || p.repo) return null;
-  const [section, name] = p.path.split(".");
+  const [section, name] = (p.path ?? "").split(".");
   return section && name ? `${section}.${name}` : null;
 }

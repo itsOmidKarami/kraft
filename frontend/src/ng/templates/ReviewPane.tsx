@@ -197,7 +197,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
               <span className="tpl-rv-path">{p.path || chain}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
               {problemWhere?.(p)}
-              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path, p)}>Fix →</button>
+              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path ?? "", p)}>Fix →</button>
             </div>
           ))}
         </>
