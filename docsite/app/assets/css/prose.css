@@ -18,11 +18,11 @@
    the text can be read and scroll sideways inside their own box,
    .diagram-scroll (ProseImg.vue wraps the image in it; structure.svg and
    everything in diagrams/portrait/ are portrait, fit as they were, and have
-   no box). The SVGs state no pixel width, so the overlay cannot show them
-   larger than the screen; the tap is switched off, as the diagram is already
-   readable here. The diagrams have no background of their own (docs-diagrams
-   in the justfile); on the dark theme each is a white card (the rule after
-   this comment).
+   no box; LandingShot.vue's wide screenshots use the same box, so it stays
+   after the old diagrams go). The SVGs state no pixel width, so the overlay
+   cannot show them larger than the screen; the tap is switched off, as the
+   diagram is already readable here. The diagrams have no background of their
+   own; on the dark theme each is a white card (the rule after this comment).
 
    Nothing showed that the diagram goes on to the right. The table's edge
    shadow (.scroll-hint) is a background of the scrolling box, and the

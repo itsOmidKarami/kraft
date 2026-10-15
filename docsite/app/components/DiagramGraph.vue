@@ -61,7 +61,7 @@ const props = defineProps<{
 /* Nodes side by side where two fit, one per row on a phone. */
 .diagram-graph__nodes {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
   gap: 0.75rem 1.5rem;
 }
 
