@@ -20,7 +20,7 @@ const stopAt = stages.findIndex(stage => stage.stop)
 
 <template>
   <figure class="hero-mono stage-strip">
-    <div role="list" aria-label="The default chain's stages, in order" class="stage-strip__nodes">
+    <div role="list" aria-label="The default chain's nodes, in order" class="stage-strip__nodes">
       <!-- The arrow sits inside its stage, so on a phone, where the stages
            stack, each line reads `→ plan` like a transcript. -->
       <span
