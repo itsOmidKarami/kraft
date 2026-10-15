@@ -26,7 +26,6 @@
 /* Filter bar (AreaBoard 24–33). */
 .board-filters { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
 .board-filter input { box-sizing: border-box; width: 230px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); }
-.board-filter input::placeholder { color: var(--text-muted); }
 .board-filter { position: relative; }
 .board-filter input { padding-right: 30px; }
 .board-filter-kbd { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; pointer-events: none; }
@@ -160,7 +159,6 @@
 .composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--ok); border-radius: 10px; background: color-mix(in oklab, var(--ok) 4%, var(--bg)); box-shadow: 0 12px 30px color-mix(in oklab, var(--side) 50%, transparent); }
 .composer-row { display: flex; align-items: center; gap: 12px; }
 .composer-title { all: unset; flex: 1; min-width: 0; font: 500 15px/1.3 var(--font-sans); color: var(--text); border-radius: 4px; }
-.composer-title::placeholder, .composer-brief::placeholder { color: var(--text-muted); }
 .composer-title:focus-visible, .composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .composer-hint { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .composer-indent { padding-left: 42px; }
@@ -198,7 +196,6 @@
 .draft-tag.is-ok { color: var(--ok); }
 .draft-title { flex: none; max-width: 900px; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 20px/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 .draft-brief { flex: none; max-width: 720px; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 12.5px/1.55 var(--font-sans); color: var(--text-sub); }
-.draft-title::placeholder, .draft-brief::placeholder { color: var(--text-muted); }
 .draft-title:focus-visible, .draft-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-chips { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-meta); color: var(--text-muted); }
 .draft-gap { width: 6px; }
@@ -232,7 +229,6 @@
 .draft-row-label { font-size: 12.5px; color: var(--text); }
 .draft-row-hint { font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .draft-input { flex: none; width: 132px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
-.draft-input::placeholder { color: var(--text-muted); }
 .draft-input:focus-visible, .draft-add-list input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-amber { color: var(--warn); }
 .draft-yaml { margin: 0; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); font: 11.5px/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }

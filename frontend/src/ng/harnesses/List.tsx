@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { NodeIcon } from "../icons";
+import { NoMatch } from "../ui/NoMatch";
 import { ACCESS_WORD, type HProblem, type Resolved, problemsOfHarness, problemsOfProfile } from "./model";
 
 export type Pick = { kind: "harness" | "profile"; id: string };
@@ -38,7 +39,7 @@ export function List({ r, problems, sel, onPick, onAdd }: {
     <nav className="hn-list" aria-label="Harnesses and profiles" ref={box} onKeyDown={move}>
       <input className="hn-search" type="search" aria-label="Search harnesses" placeholder="Search harnesses" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="hn-list-body">
-        <h3 className="hn-head">Harnesses · {r.harnesses.length}</h3>
+        <h3 className="hn-head">Harnesses · {harnesses.length}</h3>
         {harnesses.map((h) => {
           const bad = problemsOfHarness(r, problems, h.id).length > 0;
           const p: Pick = { kind: "harness", id: h.id };
@@ -51,7 +52,7 @@ export function List({ r, problems, sel, onPick, onAdd }: {
             </button>
           );
         })}
-        <h3 className="hn-head">Profiles · {Object.keys(r.profiles).length}</h3>
+        <h3 className="hn-head">Profiles · {profiles.length}</h3>
         {profiles.map((id) => {
           const bad = problemsOfProfile(r, problems, id).length > 0;
           const n = r.profiles[id].tasks.length;
@@ -65,7 +66,7 @@ export function List({ r, problems, sel, onPick, onAdd }: {
             </button>
           );
         })}
-        {rows.length === 0 && <p className="hn-empty">Nothing matches "{q}".</p>}
+        {rows.length === 0 && <NoMatch className="hn-empty" query={q} onClear={() => setQ("")} />}
         <button type="button" className="hn-row hn-add" onClick={onAdd}>+ Profile</button>
       </div>
     </nav>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NoMatch } from "../ui/NoMatch";
 import { plural } from "../../format";
 import type { CompareFile, ReviewThread } from "../../types";
 import { File, FileCode, FileCog, FileTerminal, FileText } from "../icons";
@@ -34,17 +35,19 @@ export function FileTree(p: {
     else n.add(dir);
     return n;
   });
+  const groups = folders(p.files, filter);
+  const shownN = groups.reduce((n, g) => n + g.files.length, 0);
   const untracked = p.untracked.filter((u) => u.toLowerCase().includes(filter.trim().toLowerCase()));
   return (
     <nav className="rv-tree" aria-label="Changed files">
       <div className="rv-tree-head">
-        <span className="rv-tree-count">{plural(p.files.length, "file")}</span>
+        <span className="rv-tree-count">{filter.trim() ? `${shownN} of ${plural(p.files.length, "file")}` : plural(p.files.length, "file")}</span>
         <span className="rv-add">+{add}</span>
         <span className="rv-del">−{del}</span>
       </div>
       <input className="rv-tree-filter" type="search" placeholder="Filter files" aria-label="Filter files" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <div className="rv-tree-body">
-        {folders(p.files, filter).map(({ dir, files }) => (
+        {groups.map(({ dir, files }) => (
           <div key={dir || "."} className="rv-folder">
             {dir && (
               <button type="button" className="rv-folder-row" aria-expanded={!closed.has(dir)} onClick={() => fold(dir)}>
@@ -74,6 +77,7 @@ export function FileTree(p: {
               })}
           </div>
         ))}
+        {filter.trim() && !shownN && !untracked.length && <NoMatch className="rv-tree-empty" query={filter} onClear={() => setFilter("")} />}
         {untracked.length > 0 && (
           <div className="rv-folder">
             <span className="rv-folder-row is-static">Untracked (not in the diff)</span>

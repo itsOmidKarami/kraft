@@ -78,7 +78,9 @@ describe("Repos page: the table", () => {
     expect(screen.queryByRole("region", { name: "Detected, not connected" })).toBeNull();
     expect(screen.queryByRole("option", { name: /^platform,/ })).toBeNull();
     await userEvent.type(screen.getByLabelText("Search repos"), "zzz");
-    expect(screen.getByText("No repo matches.")).toBeInTheDocument();
+    expect(screen.getByText("No match for “docszzz”.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByLabelText("Search repos")).toHaveValue("");
   });
 
   it("opens the repo in the URL and moves the selection with a click", async () => {

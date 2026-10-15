@@ -55,7 +55,9 @@ describe("Library list (L.2)", () => {
     list("/templates/library?kind=tasks");
     await screen.findByRole("link", { name: /^implementer/ });
     await userEvent.type(screen.getByRole("searchbox", { name: "Search the library" }), "zzz");
-    expect(await screen.findByText("Nothing matches.")).toBeInTheDocument();
+    expect(await screen.findByText("No match for “zzz”.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("searchbox", { name: "Search the library" })).toHaveValue("");
   });
 
   it("marks a component with a problem, and one the draft changed", async () => {

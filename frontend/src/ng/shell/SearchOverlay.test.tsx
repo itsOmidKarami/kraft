@@ -279,9 +279,11 @@ describe("SearchOverlay", () => {
     mount();
     const { user, input } = await open();
     await user.type(input, "zzzz");
-    await screen.findByText(/No matches/);
+    await screen.findByText("No match for “zzzz”.");
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    expect(input).toHaveValue("");
   });
 
   it.each([

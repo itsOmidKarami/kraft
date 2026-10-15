@@ -120,3 +120,5 @@ body:has(.dv-drawer) .toasts { top: auto; bottom: 16px; }
 .cbx.is-inline > .cbx-list, .cbx.is-inline > .cbx-none { position: static; margin-top: 4px; box-shadow: none; }
 
 .tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px color-mix(in oklab, var(--side) 50%, transparent); }
+
+.no-match-clear { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-decoration: underline; cursor: pointer; }

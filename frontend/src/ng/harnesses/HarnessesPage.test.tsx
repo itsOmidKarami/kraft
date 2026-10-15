@@ -68,6 +68,11 @@ describe("HarnessesPage", () => {
     const nav = list();
     expect(within(nav).queryByRole("button", { name: /^claude/ })).toBeNull();
     expect(within(nav).getByRole("button", { name: /^strong/ })).toBeInTheDocument();
+    expect(within(nav).getByRole("heading", { name: /^Profiles · 1$/ })).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search harnesses" }), "zzz");
+    expect(within(nav).getByText("No match for “strozzz”.")).toBeInTheDocument();
+    await userEvent.click(within(nav).getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("searchbox", { name: "Search harnesses" })).toHaveValue("");
   });
 
   it("moves through the list with the arrow keys, one tab stop", async () => {

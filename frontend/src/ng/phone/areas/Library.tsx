@@ -8,6 +8,7 @@ import { authoredAt } from "../../templates/draft/view";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { TabStrip } from "../ui/Rows";
+import { NoMatch } from "../../ui/NoMatch";
 
 /** The published library, for who uses what (`GET /templates/library`); read once per screen. */
 function usePublished() {
@@ -59,7 +60,7 @@ export function LibraryList() {
       </label>
       <TabStrip label="Library" value={kind} onChange={(k) => set({ kind: k === "nodes" ? "" : k })} tabs={SECTIONS.map((s) => ({ id: s, label: SECTION_LABEL[s] }))} />
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
-      {draft.view && rows.length === 0 && <p className="ph-empty">{q ? "Nothing matches." : `No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>}
+      {draft.view && rows.length === 0 && (q.trim() ? <NoMatch className="ph-empty" query={q} onClear={() => set({ q: "" })} /> : <p className="ph-empty">{`No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>)}
       <Group
         rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
       />
