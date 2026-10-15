@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +73,8 @@ describe("FirstRun", () => {
     const user = setup();
     mount();
     expect(screen.getByText(/Or drive it from an agent session/)).toHaveTextContent("kraft admin init");
+    // The step card leads; the agent route follows it.
+    expect(screen.getByRole("region", { name: "Connect a repo" }).compareDocumentPosition(screen.getByText(/Or drive it from an agent session/))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(await navigator.clipboard.readText()).toBe("kraft admin init");
     expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
@@ -365,8 +367,12 @@ describe("FirstRun", () => {
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
     expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
+    // The plugin prerequisite is the first item of the checklist, ahead of filing the item.
+    const [register, file] = within(screen.getByRole("list", { name: "Before and after the first work item" })).getAllByRole("heading");
+    expect(register).toHaveTextContent(/register Kraft with Claude Code/);
+    expect(file).toHaveTextContent("File the first work item");
     expect(screen.getByText(/Claude workers need Kraft's MCP server, or Kraft refuses to launch them/)).toBeInTheDocument();
-    expect(screen.getByText(/without the plugin, run/)).toHaveTextContent("kraft admin init");
+    expect(screen.getByText(/Without the plugin, run/)).toHaveTextContent("kraft admin init");
     // Step 1 connected the repo, so onboard checks it rather than connecting it.
     const onboard = screen.getByText(/open a Claude Code session in your repo and run/);
     expect(onboard).toHaveTextContent("/kraft:onboard");

@@ -274,11 +274,6 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             </li>
           ))}
         </ol>
-        <p className="fr-agent">
-          Or drive it from an agent session <code>kraft admin init</code>
-          <Button onClick={() => copy("kraft admin init")}><Copy size={12} aria-hidden />{copied === "kraft admin init" ? "Copied" : "Copy"}</Button>
-        </p>
-        <p className="fr-note"><code>kraft admin init</code> registers the MCP server and the /kraft:* skills. Everything Settings writes is plain YAML: diff it, revert it, git init it.</p>
       </div>
 
       <section className="fr-card" aria-label={STEPS[step - 1]}>
@@ -334,20 +329,24 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             </>
           )}
           {step === 3 && (
-            <>
-              <p>It is created paused, so nothing runs until you start it.</p>
-              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link> first.</p>}
-              <div className="fr-actions">
-                <Link className="btn btn-primary" to="/?new=1" onClick={finish}>+ New work item</Link>
-                <Button onClick={finish}>Go to the board</Button>
-              </div>
-              <h3>Before you start it: register Kraft with Claude Code</h3>
-              <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>
-              <pre className="fr-cmd">{PLUGIN_COMMANDS}</pre>
-              <Button onClick={() => copy(PLUGIN_COMMANDS)}><Copy size={14} aria-hidden />{copied === PLUGIN_COMMANDS ? "Copied" : "Copy commands"}</Button>
-              <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. The repo is connected already: it checks the setup and test commands against the repo's own docs and CI, offers to rehearse them with <code>kraft repo connect --verify</code>, and confirms <code>kraft admin doctor</code> passes.</p>
-              <p>Or, without the plugin, run <code>kraft admin init</code>. Not both.</p>
-            </>
+            <ol className="fr-tasks" aria-label="Before and after the first work item">
+              <li>
+                <h3>Before you start it: register Kraft with Claude Code</h3>
+                <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>
+                <pre className="fr-cmd">{PLUGIN_COMMANDS}</pre>
+                <Button onClick={() => copy(PLUGIN_COMMANDS)}><Copy size={14} aria-hidden />{copied === PLUGIN_COMMANDS ? "Copied" : "Copy commands"}</Button>
+                <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. The repo is connected already: it checks the setup and test commands against the repo's own docs and CI, offers to rehearse them with <code>kraft repo connect --verify</code>, and confirms <code>kraft admin doctor</code> passes. Without the plugin, run <code>kraft admin init</code> instead. Not both.</p>
+              </li>
+              <li>
+                <h3>File the first work item</h3>
+                <p>It is created paused, so nothing runs until you start it.</p>
+                {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link> first.</p>}
+                <div className="fr-actions">
+                  <Link className="btn btn-primary" to="/?new=1" onClick={finish}>+ New work item</Link>
+                  <Button onClick={finish}>Go to the board</Button>
+                </div>
+              </li>
+            </ol>
           )}
         </div>
         <aside className="fr-aside">
@@ -371,6 +370,13 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
           {step === 3 && <><h3>On create</h3><p>Filed from a title, or from an existing spec or plan. It waits for you to start it.</p></>}
         </aside>
       </section>
+      <div className="fr-route">
+        <p className="fr-agent">
+          Or drive it from an agent session <code>kraft admin init</code>
+          <Button onClick={() => copy("kraft admin init")}><Copy size={12} aria-hidden />{copied === "kraft admin init" ? "Copied" : "Copy"}</Button>
+        </p>
+        <p className="fr-note"><code>kraft admin init</code> registers the MCP server and the /kraft:* skills. Everything Settings writes is plain YAML: diff it, revert it, git init it.</p>
+      </div>
     </div>
   );
 }

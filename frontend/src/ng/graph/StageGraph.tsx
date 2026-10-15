@@ -32,6 +32,8 @@ type Props = {
   /** Fold the stages the run has passed, and those past the next, to one pill each (`foldStages`); a click opens
    *  one in place for this page view. The item page's; an editor draws every node. */
   fold?: boolean;
+  /** With `fold`: the stages after the current one that stay open (default 1). */
+  foldAhead?: number;
   onSelect?: (id: string) => void;
   onOpen?: (id: string) => void;
   onFocusNode?: (id: string) => void;
@@ -49,9 +51,9 @@ const seamKey = (at: number) => `s:${at}`;
 const foldKey = (key: string) => `f:${key}`;
 
 /** The chain canvas: a chain in one row (StageGraph.dc.html), node by node or with its stages folded. */
-export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams = [], opening = "fit", focus, reserve = 0, cover = 0, fit, fold = false, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
+export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams = [], opening = "fit", focus, reserve = 0, cover = 0, fit, fold = false, foldAhead, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  const row = useMemo(() => (fold ? foldStages(nodes, opened, selected) : nodes), [fold, nodes, opened, selected]);
+  const row = useMemo(() => (fold ? foldStages(nodes, opened, selected, foldAhead) : nodes), [fold, foldAhead, nodes, opened, selected]);
   const lay = useMemo(() => layout(row), [row]);
   const seams = useMemo(() => rowSeams(nodes, row, chainSeams), [nodes, row, chainSeams]);
   const shapes = useMemo(() => arcShapes(lay, arcs), [lay, arcs]);
