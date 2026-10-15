@@ -61,6 +61,18 @@ export function repoStops(repo: Repo): string | null {
   return stops.length ? `${repoName(repo.path)} ${stops.join("; and it ")}.` : null;
 }
 
+/** The composer's own draft, kept per tab so a reload or a click on a row (which closes it) does not lose the text. */
+export const COMPOSER_KEY = "kraft.ng.composer";
+const blank: Draft = { title: "", brief: "", repo: "", chain: "", spec: "", plan: "" };
+function loadComposerDraft(): Draft {
+  try {
+    const saved = sessionStorage.getItem(COMPOSER_KEY);
+    if (saved) return { ...blank, ...JSON.parse(saved) };
+  } catch { /* nothing kept */ }
+  return blank;
+}
+const forgetComposerDraft = () => { try { sessionStorage.removeItem(COMPOSER_KEY); } catch { /* nothing kept */ } };
+
 const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
@@ -72,7 +84,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [roots, setRoots] = useState<Set<string>>(new Set());
   const [chains, setChains] = useState<TemplateSummary[]>([]);
-  const [d, setD] = useState<Draft>({ title: "", brief: "", repo: "", chain: "", spec: "", plan: "" });
+  const [d, setD] = useState<Draft>(loadComposerDraft);
   const [ask, setAsk] = useState(false);
   const [preview, setPreview] = useState<{ run: DryRun } | { error: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +94,12 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   useEffect(() => { if (d.title.trim()) setTried(false); }, [d.title]);
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
+  useEffect(() => {
+    if (!dirty) return forgetComposerDraft();
+    try { sessionStorage.setItem(COMPOSER_KEY, JSON.stringify(d)); } catch { /* nothing kept */ }
+  }, [d, dirty]);
+  // Discard, More options and Create hand the draft on or end it; closing any other way keeps it.
+  const discard = () => { forgetComposerDraft(); onClose(); };
 
   useEffect(() => {
     api.getRepos().then((r) => {
@@ -124,6 +142,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
 
   // More options hands the draft to the draft item page (Decisions §7b): title, brief, repo, chain and attachments.
   const more = (members: boolean) => {
+    forgetComposerDraft();
     onClose();
     navigate("/work-items/new", { state: { draft: d, members } });
   };
@@ -136,6 +155,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
     if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
     sayIfFiledPaused(autostart, r.body);
+    forgetComposerDraft();
     await useStore.getState().bootstrap().catch(() => {});
     onCreated(r.body.id);
   };
@@ -194,7 +214,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         {ask ? (
           <>
             <span className="composer-ask">Discard this draft? Nothing has been created.</span>
-            <button type="button" className="btn btn-danger" onClick={onClose}>Discard</button>
+            <button type="button" className="btn btn-danger" onClick={discard}>Discard</button>
             <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(false)}>Keep editing</button>
           </>
         ) : (

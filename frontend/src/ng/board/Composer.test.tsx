@@ -1,9 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, TemplateSummary } from "../../types";
-import { Composer, sayIfFiledPaused } from "./Composer";
+import { COMPOSER_KEY, Composer, sayIfFiledPaused } from "./Composer";
 
 const N = (id: string, kind: "exec" | "gate" = "exec", covered_by: string | null = null) => ({ id, kind, covered_by, gate_after: null, tasks: [] }) as unknown as ChainNode;
 const DEFAULT = [N("spec", "exec", "spec"), N("spec_approval", "gate", "spec"), N("implementation"), N("final_review", "gate")];
@@ -39,6 +39,7 @@ const mount = (dry?: [number, unknown], props: { repoFilter?: string } = {}) => 
 };
 
 beforeEach(() => {
+  sessionStorage.clear();
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.spyOn(api, "getRepos").mockResolvedValue({ repos: REPOS });
   vi.spyOn(api, "getTemplates").mockResolvedValue(CHAINS);
@@ -192,6 +193,23 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem(COMPOSER_KEY)).toBeNull();
+  });
+
+  it("keeps its text when closed any way but Discard (a click on a row, a reload), and restores it", async () => {
+    const first = mount();
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "half an idea" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Brief" }), { target: { value: "and a line" } });
+    cleanup();
+    first.onClose.mockClear();
+    mount();
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("half an idea");
+    expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue("and a line");
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(sessionStorage.getItem(COMPOSER_KEY)).toBeNull();
   });
 
   it("starts on the board's repo filter and resets the chain to a picked repo's default", async () => {
