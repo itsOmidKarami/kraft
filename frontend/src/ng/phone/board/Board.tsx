@@ -9,7 +9,7 @@ import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
 import { chainOf, groupOf, groupsOf, matches, type GroupKey } from "../../board/model";
-import { nodeWords, stopFilterOptions, stopWords } from "../../board/rowText";
+import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords } from "../../board/rowText";
 import { useBoardPrefs } from "../../board/prefs";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -119,8 +119,8 @@ export function Board() {
       </div>
       <div className="ph-chips ph-filters" role="group" aria-label="Filter">
         <button type="button" className={`ph-pill${chain ? " ph-is-set" : ""}`} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chain}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className={`ph-pill${gate ? " ph-is-set" : ""}`} onClick={() => sheet.open("gate")}>{gate ? `Gate · ${gateLabel}` : "Gate"}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className={`ph-pill${stop ? " ph-is-set" : ""}`} onClick={() => sheet.open("stop")}>{stop ? `Stop · ${stopLabel}` : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className={`ph-pill${gate ? " ph-is-set" : ""}`} onClick={() => sheet.open("gate")}>{gate ? gateChip(gateLabel) : "Gate"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className={`ph-pill${stop ? " ph-is-set" : ""}`} onClick={() => sheet.open("stop")}>{stop ? stopChip(stopLabel) : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></button>
       </div>
       <div className="ph-content ph-board">
         {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
@@ -167,7 +167,7 @@ export function Board() {
         <ChoiceSheet
           title="Gate"
           value={gate}
-          options={[{ value: "", label: "All gates" }, ...gates.map((g) => ({ value: g.value, label: g.label, hint: String(g.n) })), ...(gate && !gates.some((g) => g.value === gate) ? [{ value: gate, label: gateLabel, hint: "0" }] : [])]}
+          options={[{ value: "", label: ALL_GATES }, ...gates.map((g) => ({ value: g.value, label: g.label, hint: String(g.n) })), ...(gate && !gates.some((g) => g.value === gate) ? [{ value: gate, label: gateLabel, hint: "0" }] : [])]}
           onPick={(v) => sheet.closeThen(() => set({ gate: v }))}
           onClose={sheet.close}
         />
@@ -176,7 +176,7 @@ export function Board() {
         <ChoiceSheet
           title="Stop reason"
           value={stop}
-          options={[{ value: "", label: "All stop reasons" }, ...stops.map((s) => ({ value: s.value, label: s.label, hint: String(s.n) })), ...(stop && !stops.some((s) => s.value === stop) ? [{ value: stop, label: stopLabel, hint: "0" }] : [])]}
+          options={[{ value: "", label: ALL_STOPS }, ...stops.map((s) => ({ value: s.value, label: s.label, hint: String(s.n) })), ...(stop && !stops.some((s) => s.value === stop) ? [{ value: stop, label: stopLabel, hint: "0" }] : [])]}
           onPick={(v) => sheet.closeThen(() => set({ stop: v }))}
           onClose={sheet.close}
         />

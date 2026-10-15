@@ -18,7 +18,7 @@ import { NoMatch } from "../ui/NoMatch";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
-import { nodeWords, stopFilterOptions, stopWords, type RowAction } from "./rowText";
+import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords, type RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
 import { Composer } from "./Composer";
@@ -292,9 +292,9 @@ export function BoardPage() {
         <Menu
           label="Gate"
           triggerClass={`board-menu-btn${query.gate ? " is-set" : ""}`}
-          trigger={<>{query.gate ? `Gate · ${gateLabel(query.gate)}` : "Gate"} <span aria-hidden className="board-caret">▾</span></>}
+          trigger={<>{query.gate ? gateChip(gateLabel(query.gate)) : "Gate"} <span aria-hidden className="board-caret">▾</span></>}
           items={[
-            { label: "All gates", checked: !query.gate, onSelect: () => setQuery({ gate: "" }) },
+            { label: ALL_GATES, checked: !query.gate, onSelect: () => setQuery({ gate: "" }) },
             ...gates.map((g) => ({ label: g.label, checked: query.gate === g.value, hint: String(g.n), onSelect: () => setQuery({ gate: g.value }) })),
             ...(query.gate && !gates.some((g) => g.value === query.gate) ? [{ label: gateLabel(query.gate), checked: true, hint: "0", onSelect: () => {} }] : []),
           ]}
@@ -302,9 +302,9 @@ export function BoardPage() {
         <Menu
           label="Stop reason"
           triggerClass={`board-menu-btn${query.stop ? " is-set" : ""}`}
-          trigger={<>{query.stop ? `Stop · ${stopLabel(query.stop)}` : "Stop reason"} <span aria-hidden className="board-caret">▾</span></>}
+          trigger={<>{query.stop ? stopChip(stopLabel(query.stop)) : "Stop reason"} <span aria-hidden className="board-caret">▾</span></>}
           items={[
-            { label: "All stop reasons", checked: !query.stop, onSelect: () => setQuery({ stop: "" }) },
+            { label: ALL_STOPS, checked: !query.stop, onSelect: () => setQuery({ stop: "" }) },
             ...stops.map((s) => ({ label: s.label, checked: query.stop === s.value, hint: String(s.n), onSelect: () => setQuery({ stop: s.value }) })),
             ...(query.stop && !stops.some((s) => s.value === query.stop) ? [{ label: stopLabel(query.stop), checked: true, hint: "0", onSelect: () => {} }] : []),
           ]}

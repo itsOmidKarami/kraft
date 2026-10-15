@@ -85,6 +85,12 @@ function fallbackName(to: unknown): string {
 /** A stop kind as a filter and its Analytics row say it: the kind in words, `mr_closed` as "MR closed". */
 export const stopWords = (kind: string) => (kind === "mr_closed" ? "MR closed" : nodeWords(kind));
 
+/** What the Gate and Stop reason filters say, on the desktop's menus and the phone's sheets alike. */
+export const ALL_GATES = "All gates";
+export const ALL_STOPS = "All stop reasons";
+export const gateChip = (label: string) => `Gate · ${label}`;
+export const stopChip = (label: string) => `Stop · ${label}`;
+
 export interface FilterOption { value: string; label: string; n: number }
 
 /** The gates items wait at and the kinds they are stopped on, as the Gate and Stop filters list them: named by what
