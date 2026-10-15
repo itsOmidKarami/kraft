@@ -228,7 +228,6 @@ describe("Chains page: the chain canvas", () => {
     await canvas();
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     expect(screen.getByRole("region", { name: "chains/default.yaml, YAML" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Chain settings" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "⇄ Canvas" }));
     expect(screen.queryByRole("region", { name: "chains/default.yaml, YAML" })).toBeNull();
 

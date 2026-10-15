@@ -1,7 +1,8 @@
-import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Pencil } from "lucide-react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
+import { Switch } from "../../ui/Switch";
 import { ReadOnly } from "../addon";
+import { ValueMenu, type Option } from "../draft/ValueMenu";
 
 /** A text field that sends on a pause (Decided 3): the page's `field(…, pause)`
  *  debounces, blur flushes. It follows the server's value while not focused.
@@ -90,10 +91,10 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
   );
 }
 
-export type Option = { value: string; label: string; disabled?: boolean };
+export type { Option };
 
-/** A labelled select, edited in place like a ValueCell: the chosen option and a pencil, then the select on a click.
- *  `check` adds the checkbox the gate's document row has; `plain` keeps the select showing, for a picker that is no edit. */
+/** A labelled pick, edited in place like a ValueCell: the chosen option and a pencil, then the list on a click.
+ *  `check` adds the switch the gate's document row has; `plain` is a picker that is no edit. */
 export function SelectRow({ label, value, options, onPick, sub, bad, check, plain }: {
   label: string;
   value: string;
@@ -104,43 +105,19 @@ export function SelectRow({ label, value, options, onPick, sub, bad, check, plai
   check?: { label: string; on: boolean; onToggle: () => void };
   plain?: boolean;
 }) {
-  const id = useId();
-  const [editing, setEditing] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
   const readOnly = useContext(ReadOnly);
   const shown = options.find((o) => o.value === value)?.label ?? value;
   if (readOnly) return <Kv k={label} v={`${shown}${check?.on ? ` · ${check.label}` : ""}`} />;
-  const close = () => {
-    setEditing(false);
-    requestAnimationFrame(() => { if (document.activeElement === document.body || !document.activeElement) button.current?.focus(); });
-  };
   return (
     <div className="tpl-pf">
-      <label htmlFor={id} className="tpl-pf-label">{label}</label>
+      <span className="tpl-pf-label">{label}</span>
       <div className="tpl-pf-line">
-        {plain || editing ? (
-          <select
-            id={id}
-            autoFocus={!plain}
-            className={`tpl-pf-select${bad ? " is-bad" : ""}`}
-            value={value}
-            onChange={(e) => { onPick(e.target.value); if (!plain) close(); }}
-            onBlur={plain ? undefined : () => setEditing(false)}
-            onKeyDown={plain ? undefined : (e) => { if (e.key === "Escape") { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); close(); } }}
-          >
-            {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
-          </select>
-        ) : (
-          <button ref={button} id={id} type="button" className={`adr-val${bad ? " is-bad" : ""}`} aria-label={`${label}, ${shown}. Edit`} onClick={() => setEditing(true)}>
-            {shown}
-            <Pencil size={12} className="adr-pen" aria-hidden />
-          </button>
-        )}
+        <ValueMenu label={label} value={value} options={options} onPick={onPick} bad={bad} plain={plain} />
         {check && (
-          <label className="tpl-pf-check">
-            <input type="checkbox" checked={check.on} onChange={check.onToggle} />
+          <span className="tpl-pf-check">
+            <Switch checked={check.on} onChange={check.onToggle} label={check.label} />
             {check.label}
-          </label>
+          </span>
         )}
       </div>
       {sub && <p className={`tpl-pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}

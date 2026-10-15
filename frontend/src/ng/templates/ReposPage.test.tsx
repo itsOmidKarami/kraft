@@ -50,6 +50,13 @@ beforeEach(() => {
 
 const row = (name: string) => screen.getByRole("option", { name: new RegExp(`^${name},`) });
 
+/** The pane opens on Overview, the first tab; the rows are on Config. */
+const openConfig = async () => {
+  await screen.findByRole("listbox", { name: "Repos" });
+  expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+  await userEvent.click(screen.getByRole("tab", { name: "Config" }));
+};
+
 describe("Repos page: the table", () => {
   it("lists the repos with chain, whether each can run work, tests and state, the open count and the detected ones", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/platform", kind: "change", summary: "policy", fields: ["policy"] }, { path: "/src/docs-site", kind: "add", summary: "" }] }, true)));
@@ -298,7 +305,7 @@ describe("Repos page: the Config rows", () => {
   it("checks an edit with ?preview=1 first and sends it only when nothing new is wrong", async () => {
     cleanPreview();
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await userEvent.click(screen.getByRole("button", { name: /^test command, make test/ }));
     await userEvent.clear(screen.getByLabelText("test command"));
     await userEvent.type(screen.getByLabelText("test command"), "pytest -q{Enter}");
@@ -312,7 +319,7 @@ describe("Repos page: the Config rows", () => {
   it("leaves the input open with the server's message, and saves nothing, when the preview adds a problem", async () => {
     vi.mocked(d.postOps).mockImplementation((_a, _k, _o, preview) => ok({ ...reposView({ problems: preview ? [problemAt("/src/platform", "allowed_tools", "'allowed_tools' cannot widen the inherited safety ceiling ['Read']; ['Bash'] is not allowed")] : [] }, true), ops: [] }));
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await showDefaults();
     await userEvent.click(screen.getByRole("button", { name: /^allowed tools, not set/ }));
     await userEvent.type(screen.getByRole("textbox", { name: "allowed tools" }), "Bash{Enter}");
@@ -324,9 +331,9 @@ describe("Repos page: the Config rows", () => {
   it("says a repo needs no setup with a checkbox, or a typed \"\", both the empty command, never two quote marks", async () => {
     cleanPreview();
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await showDefaults();
-    const none = screen.getByRole("checkbox", { name: "No setup needed" });
+    const none = screen.getByRole("switch", { name: "No setup needed" });
     expect(none).not.toBeChecked();
     await userEvent.click(none);
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
@@ -342,16 +349,16 @@ describe("Repos page: the Config rows", () => {
     const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, setup_command: "" } } : r));
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     expect(screen.getByRole("button", { name: /^setup command, none/ })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: "No setup needed" }));
+    await userEvent.click(screen.getByRole("switch", { name: "No setup needed" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: null } }]);
   });
 
   it("groups the rows, folds those at their default into one line per group, and shows the YAML-only keys", async () => {
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(within(agents).queryByRole("button", { name: /^allowed tools/ })).toBeNull();
     await userEvent.click(within(agents).getByRole("button", { name: /defaults? · show/ }));
@@ -367,9 +374,9 @@ describe("Repos page: the Config rows", () => {
     const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, test_command: "" } } : r));
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     expect(screen.getByRole("button", { name: /^test command, no tests \(passes verify\)/ })).toBeInTheDocument();
-    const none = screen.getByRole("checkbox", { name: "No tests" });
+    const none = screen.getByRole("switch", { name: "No tests" });
     expect(none).toBeChecked();
     await userEvent.click(none);
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
@@ -381,7 +388,7 @@ describe("Repos page: the Config rows", () => {
     const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, forge: "fake" } } : r));
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     const forge = screen.getByRole("radiogroup", { name: "forge" });
     expect(within(forge).getByRole("radio", { name: "fake" })).toBeChecked();
     expect(within(forge).getByRole("radio", { name: "gitlab" })).not.toBeChecked();
@@ -390,7 +397,7 @@ describe("Repos page: the Config rows", () => {
   it("clears a value this repo sets with Reset, which sends null", async () => {
     cleanPreview();
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await userEvent.click(screen.getByRole("button", { name: "Reset test command" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { test_command: null } }]);
@@ -399,7 +406,7 @@ describe("Repos page: the Config rows", () => {
   it("sets a policy key inside the entry's policy block", async () => {
     cleanPreview();
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await showDefaults();
     await userEvent.click(screen.getByRole("button", { name: /^tasks running cap \(min\), 60/ }));
     await userEvent.clear(screen.getByLabelText("tasks running cap (min)"));
@@ -417,7 +424,7 @@ describe("Repos page: the Config rows", () => {
 describe("Repos page: disconnecting and enabling", () => {
   it("refuses to disconnect a repo with an open item, and says why, without sending anything", async () => {
     mount();
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(screen.getByRole("alert")).toHaveTextContent("platform has 1 open item; finish or cancel it first. Disconnect is refused until then.");
     expect(d.postOps).not.toHaveBeenCalled();
@@ -425,7 +432,7 @@ describe("Repos page: disconnecting and enabling", () => {
 
   it("disconnects an idle repo with remove_repo and moves to a neighbour", async () => {
     mount("/settings/repos/docs-site");
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledWith("repos", "repos", [{ op: "remove_repo", path: "/src/docs-site" }], undefined));
     await waitFor(() => expect(where).not.toBe("/settings/repos/docs-site"));
@@ -433,7 +440,7 @@ describe("Repos page: disconnecting and enabling", () => {
 
   it("enables and disables with set_repo", async () => {
     mount("/settings/repos/docs-site");
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     await userEvent.click(screen.getByRole("button", { name: "Enable" }));
     expect(d.postOps).toHaveBeenCalledWith("repos", "repos", [{ op: "set_repo", path: "/src/docs-site", patch: { enabled: true } }], undefined);
   });
@@ -443,7 +450,7 @@ describe("Repos page: problems", () => {
   it("marks a repo with a problem, shows it on its field row, and Fix → in review selects it", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/docs-site", kind: "change", summary: "", fields: [] }], problems: [problemAt("/src/docs-site", "test_command", "docs-site: not a command")] }, true)));
     mount("/settings/repos/platform");
-    await screen.findByRole("listbox", { name: "Repos" });
+    await openConfig();
     expect(within(row("docs-site")).getByRole("img", { name: "has a problem" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
     await userEvent.click(await screen.findByRole("button", { name: "Fix →" }));

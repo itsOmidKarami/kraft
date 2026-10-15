@@ -7,6 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_ENTRY, TASKS, renderPage, resolved, serve, view } from "./testkit";
 
 afterEach(() => vi.unstubAllGlobals());
+/** A harness field edits in place: a button until clicked, then its input. */
+const open = async (p: HTMLElement, label: string, role: "textbox" | "combobox" = "textbox") => {
+  await userEvent.click(within(p).getByRole("button", { name: new RegExp(`^${label}, .*\\. Edit$`) }));
+  return within(p).getByRole(role, { name: label });
+};
 const pane = (name: string) => screen.findByRole("complementary", { name: `${name} pane` });
 
 describe("harness pane", () => {
@@ -16,8 +21,8 @@ describe("harness pane", () => {
     const p = await pane("gemini");
     expect(within(p).getByText("Not on PATH")).toBeInTheDocument();
     expect(within(p).getByRole("switch", { name: "Disable gemini" })).toBeChecked();
-    expect(within(p).getByRole("textbox", { name: "executable" })).toHaveValue("");
-    expect(within(p).getByRole("textbox", { name: "default model" })).toHaveValue("");
+    expect(within(p).getByRole("button", { name: /^executable, .*\. Edit$/ })).toBeInTheDocument();
+    expect(within(p).getByRole("button", { name: "default model, not set. Edit" })).toBeInTheDocument();
     expect(within(p).queryByRole("radiogroup", { name: "Default effort" })).toBeNull();
     expect(within(p).queryByText("permission mode")).toBeNull();
     expect(within(p).getByText(/effort: none/)).toBeInTheDocument();
@@ -29,31 +34,29 @@ describe("harness pane", () => {
     const p = await pane("claude");
     expect(await within(p).findByText("effort: low, medium, high, xhigh, max")).toBeInTheDocument();
     expect(await within(p).findByText("models: sonnet, opus, haiku")).toBeInTheDocument();
-    expect(within(p).getByRole("combobox", { name: "default model" })).toHaveValue("sonnet");
+    expect(within(p).getByRole("button", { name: "default model, sonnet. Edit" })).toBeInTheDocument();
     expect(within(p).getByRole("radio", { name: "not set", checked: true })).toBeInTheDocument();
     expect(within(p).getByRole("radio", { name: "acceptEdits" })).toBeChecked();
   });
 
-  it("each control sends one set_harness patch with its own field, and an empty one clears", async () => {
+  it("each control sends one set_harness patch with its own field", async () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude-sandbox");
     const p = await pane("claude-sandbox");
     await userEvent.click(within(p).getByRole("switch", { name: "Disable claude-sandbox" }));
-    const exe = within(p).getByRole("textbox", { name: "executable" });
+    const exe = await open(p, "executable");
     await userEvent.clear(exe);
     await userEvent.type(exe, "/opt/claude{Enter}");
-    await userEvent.clear(exe);
-    await userEvent.type(exe, "{Enter}");
-    const model = within(p).getByRole("combobox", { name: "default model" });
+    const model = await open(p, "default model", "combobox");
+    await userEvent.clear(model);
     await userEvent.type(model, "opus{Enter}");
     await userEvent.click(within(p).getByRole("radio", { name: "max" }));
     await userEvent.click(within(p).getByRole("radio", { name: "plan" }));
     const id = "claude-sandbox";
-    await waitFor(() => expect(server.ops).toHaveLength(6));
+    await waitFor(() => expect(server.ops).toHaveLength(5));
     expect(server.ops.flat()).toEqual([
       { op: "set_harness", id, patch: { enabled: false } },
       { op: "set_harness", id, patch: { executable: "/opt/claude" } },
-      { op: "set_harness", id, patch: { executable: null } },
       { op: "set_harness", id, patch: { defaults: { model: "opus" } } },
       { op: "set_harness", id, patch: { defaults: { effort: "max" } } },
       { op: "set_harness", id, patch: { defaults: { permission_mode: "plan" } } },
@@ -65,14 +68,15 @@ describe("harness pane", () => {
     renderPage("?harness=claude");
     const p = await pane("claude");
     await within(p).findByText("models: sonnet, opus, haiku");
-    const model = within(p).getByRole("combobox", { name: "default model" });
+    const model = await open(p, "default model", "combobox");
     await userEvent.clear(model);
-    expect(within(screen.getByRole("listbox", { name: "Known models" })).getAllByRole("option").map((o) => o.textContent)).toEqual(["sonnet", "opus", "haiku"]);
+    expect(within(screen.getByRole("listbox", { name: "default model" })).getAllByRole("option").map((o) => o.textContent)).toEqual(["sonnet", "opus", "haiku"]);
     await userEvent.type(model, "hai");
-    await userEvent.keyboard("{ArrowDown}{Enter}");
+    await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
     await waitFor(() => expect(server.ops).toHaveLength(1));
-    await userEvent.clear(model);
-    await userEvent.type(model, "claude-next{Enter}");
+    const again = await open(p, "default model", "combobox");
+    await userEvent.clear(again);
+    await userEvent.type(again, "claude-next{Enter}");
     await waitFor(() => expect(server.ops).toHaveLength(2));
     expect(server.ops.flat()).toEqual([
       { op: "set_harness", id: "claude", patch: { defaults: { model: "haiku" } } },
@@ -84,7 +88,7 @@ describe("harness pane", () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude");
     const p = await pane("claude");
-    const model = within(p).getByRole("combobox", { name: "default model" });
+    const model = await open(p, "default model", "combobox");
     await userEvent.clear(model);
     await userEvent.type(model, "{Enter}");
     await userEvent.click(within(p).getByRole("radiogroup", { name: "Permission mode" }).querySelector('[role="radio"]') as HTMLElement);
@@ -101,7 +105,7 @@ describe("harness pane", () => {
     });
     renderPage("?harness=claude");
     const p = await pane("claude");
-    expect(within(p).getByRole("textbox", { name: "executable" })).toHaveClass("is-changed");
+    expect(within(p).getByRole("button", { name: /^executable, .*\. Edit$/ })).toHaveClass("is-changed");
     await userEvent.click(within(p).getByRole("switch", { name: "Disable claude" }));
     expect(await within(p).findByRole("alert")).toHaveTextContent("executable is a command name");
   });
@@ -138,7 +142,7 @@ describe("a profile's lane under a harness", () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude&lane=strong");
     const p = await pane("strong");
-    const model = within(p).getByRole("combobox", { name: "model" });
+    const model = await open(p, "model", "combobox");
     await userEvent.clear(model);
     await userEvent.type(model, "opus{Enter}");
     await userEvent.click(within(p).getByRole("radio", { name: "max" }));
@@ -163,7 +167,7 @@ describe("a profile's lane under a harness", () => {
     expect(within(p).getByText("fast has no codex entry.")).toBeInTheDocument();
     const add = within(p).getByRole("button", { name: "Add codex entry" });
     expect(add).toBeDisabled();
-    await userEvent.type(within(p).getByRole("textbox", { name: "codex model" }), "gpt-5{Enter}");
+    await userEvent.type(await open(p, "codex model"), "gpt-5{Enter}");
     await userEvent.click(add);
     await waitFor(() => expect(server.ops).toHaveLength(1));
     expect(server.ops[0]).toEqual([{ op: "set_profile", name: "fast", patch: { providers: { codex: { model: "gpt-5" } } } }]);

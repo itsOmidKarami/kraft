@@ -28,8 +28,9 @@ export interface MenuItem {
  *  pick list; Escape, or picking an item, closes the list and
  *  hands focus back to the button. With `triggerClass` the trigger is a text
  *  button named by its own text (the list keeps `label`); `note` is a line
- *  under the items, `heading` a small title above them. */
-export function Menu({ label, trigger, items, triggerClass, note, heading }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string; heading?: string }) {
+ *  under the items, `heading` a small title above them, `triggerLabel` the
+ *  text trigger's accessible name when its own text is not enough. */
+export function Menu({ label, trigger, items, triggerClass, note, heading, triggerLabel }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string; heading?: string; triggerLabel?: string }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -49,7 +50,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
 
   return (
     <>
-      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : tip(label))} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : tip(label))} {...(triggerLabel ? { "aria-label": triggerLabel } : {})} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>
