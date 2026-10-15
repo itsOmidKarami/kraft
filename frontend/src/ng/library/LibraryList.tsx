@@ -56,7 +56,8 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
   const head = useRef<HTMLDivElement>(null);
   // Groups the person folded; a search or the selection's own group opens one again.
   const [folded, setFolded] = useState<ReadonlySet<Section>>(new Set());
-  const shown = shownRows(rows, q, hidden).filter((x) => !only || x.section === only);
+  // A tile asked for its section, so the kind filter does not empty it.
+  const shown = only ? shownRows(rows, q, new Set()).filter((x) => x.section === only) : shownRows(rows, q, hidden);
   const selectedSection = rows.find((x) => x.id === selected)?.section;
   const isFolded = (s: Section) => folded.has(s) && !q.trim();
   const reachable = shown.filter((x) => !isFolded(x.section));

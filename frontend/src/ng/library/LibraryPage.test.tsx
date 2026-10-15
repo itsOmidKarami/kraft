@@ -72,9 +72,24 @@ describe("Library page: the list", () => {
     expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
     await u.click(within(box).getByRole("option", { name: /implementer/ }));
     expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    // Opening what a component extends stays inside the section.
+    await u.click(within(box).getByRole("option", { name: /code_review/ }));
+    await u.click(await screen.findByRole("button", { name: "extends implementer" }));
+    expect(where()).toBe("/templates/library/tasks.implementer");
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: "Show all" }));
     expect(within(await list()).getByRole("group", { name: "Nodes" })).toBeInTheDocument();
     expect(screen.queryByText("Showing tasks only")).toBeNull();
+  });
+
+  it("a tile's section shows even when the kind filter hides it", async () => {
+    const u = userEvent.setup();
+    mount();
+    await u.click(await screen.findByRole("button", { name: "Filter kinds" }));
+    await u.click(await screen.findByRole("checkbox", { name: /Tasks/ }));
+    await u.keyboard("{Escape}");
+    await u.click(within(await screen.findByRole("list", { name: "Components per section" })).getByRole("link", { name: /tasks/ }));
+    expect(within(await list()).getByRole("option", { name: /implementer/ })).toBeInTheDocument();
   });
 
   it("opens a component by its ref in the URL, and says so for one that isn't there", async () => {

@@ -62,6 +62,7 @@ describe("Library: a steering profile", () => {
     // An unused profile has nothing to pick: words, not an empty select.
     expect(screen.getByText("Not used by any chain")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Use" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Repository" })).toBeNull();
   });
 
   it("says to connect a repository when there is none", async () => {

@@ -40,13 +40,13 @@
 .lib-only-all:hover { color: var(--text); }
 .lib-only-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .lib-empty { margin: 10px 8px; font-size: var(--fs-label); color: var(--text-muted); }
-.lib-row { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text-sub); cursor: pointer; }
+.lib-row { min-height: 24px; display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text-sub); cursor: pointer; }
 .lib-row:hover { background: var(--surface-2); }
 .lib-row.is-sel { background: var(--surface-2); color: var(--text); }
 .lib-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* A long id stays on one line and ends in an ellipsis (the row's title has the whole id), so every row is one height. */
-.lib-name { flex: 1 1 0; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.lib-used { flex: none; font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
+.lib-name { flex: 1 1 0; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-label)/14px ui-monospace, Menlo, monospace; }
+.lib-used { flex: none; font-size: var(--fs-label); line-height: 14px; color: var(--text-muted); white-space: nowrap; }
 .lib-mark, .lib-prob { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .lib-mark.is-add { background: var(--ok); }
 .lib-mark.is-change { background: var(--mark-change-line); }

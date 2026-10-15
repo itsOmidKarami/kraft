@@ -50,6 +50,8 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [params, setParams] = useSearchParams();
   const asked = params.get("section");
   const only = SECTIONS.find((s) => s === asked);
+  // Where a component lives: the same section narrowing rides along while the target is in it.
+  const go = (ref: string) => ({ pathname: refUrl(ref), search: only && ref.split(".")[0] === only ? `?section=${only}` : "" });
   const r = draft.view!.result;
   const [published, reloadPublished] = usePublished();
   // Review & publish takes the pane's place (Decisions §10 Publish); the canvas stays.
@@ -126,14 +128,14 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const add = async (section: Section, name: string, kind?: string) => {
     const a = await draft.ops([{ op: "add_component", section, name, ...(kind ? { kind } : {}) }], { quiet: true });
     if (a.status !== 200) return detailOf(a.body);
-    navigate(refUrl(`${section}.${name}`));
+    navigate(go(`${section}.${name}`));
     return null;
   };
 
   const stepProblems = () => {
     const ids = [...new Set(r.problems.map(componentOf).filter((x): x is string => !!x && rows.some((y) => y.id === x)))];
     if (!ids.length) return;
-    navigate(refUrl(ids[nextProblem % ids.length]));
+    navigate(go(ids[nextProblem % ids.length]));
     setNextProblem(nextProblem + 1);
   };
 
@@ -170,7 +172,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         </Button>
         {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : "Review & publish"}</Button>}
       </HeaderActions>
-      <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate({ pathname: refUrl(x), search: only ? `?section=${only}` : "" })} onAdd={add} />
+      <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate(go(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>
         {surface === "yaml" ? (
           <div className="lib-yaml">
@@ -196,7 +198,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onOpen={(p) => expand(p)}
               onEscape={paneOpen ? collapse : () => {}}
               onBackground={() => pick(row.id)}
-              onGoTo={(x) => navigate(refUrl(x))}
+              onGoTo={(x) => navigate(go(x))}
             />
             {review ? null : <LibraryPane
               draft={shownDraft}
@@ -212,7 +214,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
                 const cur = shown.current;
                 if (cur !== from && !cur.startsWith(`${from}.`)) return;
                 // A component's rename moves the URL; a part of one moves the selection.
-                if (to.split(".").length <= 2) navigate(refUrl(to), { replace: true });
+                if (to.split(".").length <= 2) navigate(go(to), { replace: true });
                 else setSub(to + cur.slice(from.length));
               }}
               onRemoved={(removed) => {
@@ -220,9 +222,9 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
                 // The next row of the list takes the selection, else the previous, else the empty list.
                 const i = rows.findIndex((x) => x.id === removed);
                 const next = rows[i + 1] ?? rows[i - 1];
-                navigate(next ? refUrl(next.id) : "/templates/library", { replace: true });
+                navigate(next ? go(next.id) : "/templates/library", { replace: true });
               }}
-              onDuplicated={(to) => navigate(refUrl(to))}
+              onDuplicated={(to) => navigate(go(to))}
               onCollapse={collapse}
               onExpand={() => expand()}
               copyable={!addonRepo(row.addon)}
@@ -238,12 +240,12 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             size={size}
             onCollapse={() => setReviewOpen(false)}
             onExpand={() => setReviewOpen(true)}
-            onHighlight={(path) => { const c = path.split(".").slice(0, 2).join("."); setReview(false); if (rows.some((x) => x.id === c)) navigate(refUrl(c)); }}
+            onHighlight={(path) => { const c = path.split(".").slice(0, 2).join("."); setReview(false); if (rows.some((x) => x.id === c)) navigate(go(c)); }}
             onFix={(path, p) => {
               // A problem is fixed in the library component it names, else the one its own path names.
               const target = componentOf(p) ?? path.split(".").slice(0, 2).join(".");
               setReview(false);
-              if (rows.some((x) => x.id === target)) navigate(refUrl(target));
+              if (rows.some((x) => x.id === target)) navigate(go(target));
             }}
             onDone={() => { setReview(false); resetLibrary(); void reloadPublished(); }}
             problemWhere={(p) => <ProblemWhere p={p} />}
