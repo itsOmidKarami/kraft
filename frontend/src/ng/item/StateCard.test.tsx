@@ -314,6 +314,7 @@ describe("StateCard", () => {
     const { h } = show({ display_status: "cancelled", stop: null });
     const card = screen.getByRole("region", { name: "Cancelled" });
     expect(await within(card).findByText("superseded")).toBeInTheDocument();
+    expect(within(card).getByText("work kept")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "Duplicate as new item" }));
     expect(h.onDuplicate).toHaveBeenCalled();
   });

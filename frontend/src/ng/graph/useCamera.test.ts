@@ -28,6 +28,8 @@ describe("camera maths", () => {
     ["on the focus", { floor: 0.45, left: 12, focus: 1000 }, { W: 2600, H: 250 }, -105],
     ["clamped at the right end", { floor: 0.45, left: 12, focus: 2500 }, { W: 2600, H: 250 }, 690 - 2600 * 0.45 - 12],
     ["clamped at the left end", { floor: 0.45, left: 12, focus: 100 }, { W: 2600, H: 250 }, 12],
+    ["keeping the start mark whole while the focus still fits beside it", { floor: 0.45, left: 12, focus: 1000, start: 27 }, { W: 2600, H: 250 }, 12 - 27 * 0.45],
+    ["centred on a focus too far right to keep the start mark", { floor: 0.45, left: 12, focus: 1800, start: 27 }, { W: 2600, H: 250 }, 690 / 2 - 1800 * 0.45],
     ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
     ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
   ])("fits to a floor %s", (_, rule, world, tx) => {

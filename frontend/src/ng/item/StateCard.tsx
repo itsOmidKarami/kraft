@@ -4,7 +4,7 @@ import * as api from "../../api";
 import { ago, elapsed, logLineText, plural, until, usd } from "../../format";
 import { humanSize } from "../../sizes";
 import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types";
-import { CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
+import { Ban, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { admits, neverStarted, RELEASED, spentLine } from "./status";
@@ -226,10 +226,10 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;
     return {
-      tone: "muted", glyph: <Pause size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${at}` : undefined, node: at,
+      tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${at}` : undefined, node: at,
       text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
-        ["kept", "the branch, the worktree until it is archived, findings and threads"],
+        ["work kept", "the branch, the worktree until it is archived, findings and threads"],
         ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
         ["reason", str(ev?.payload.reason) || "no reason given"],
       ],

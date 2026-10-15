@@ -88,6 +88,14 @@ describe("Brief", () => {
     expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings. Bounded." } }]);
   });
 
+  it("offers one clear way in when empty: an Add a brief button, no bare edit", async () => {
+    render(<Brief id="w1" brief="" onSaved={() => {}} />);
+    expect(screen.queryByText("No brief.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "edit" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Add a brief" }));
+    expect(screen.getByRole("textbox", { name: "Brief" })).toBeInTheDocument();
+  });
+
   it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
     const calls = stubFetch(WRITES);
     const onSaved = vi.fn();

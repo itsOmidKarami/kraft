@@ -50,7 +50,7 @@ describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
-    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
 
@@ -173,6 +173,12 @@ describe("Peek", () => {
     expect(screen.getByRole("dialog", { name: "Pause this item?" })).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Open item ↗" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
+  });
+
+  it("names the header's full-page button for what it does", async () => {
+    mount({ display_status: "running" });
+    fireEvent.click(await screen.findByRole("button", { name: /Full page/ }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
   });
 

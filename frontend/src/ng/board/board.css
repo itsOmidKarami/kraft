@@ -65,8 +65,7 @@
 .board-meta-chain { flex: none; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }
 .board-meta-age { flex: none; }
 .board-meta-id { flex: none; } /* never shrinks: the id is whole at any width (R10) */
-.board-meta-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-sub); }
-.board-meta-tail { display: flex; align-items: center; gap: 4px; }
+.board-meta-tail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-sub); display: flex; align-items: center; gap: 4px; }
 .board-tail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .board-cue { flex: none; }
 /* Amber stays "needs you"; the stop's kind is told by icon and weight, and a failure by --bad as everywhere else. */
