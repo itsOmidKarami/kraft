@@ -112,14 +112,32 @@ describe("Policy page: Limits", () => {
     expect(within(row).getByRole("button", { name: /maximum, 240 min/ })).toHaveClass("is-bad");
   });
 
-  it("nests each scope inside the one it can't exceed, under a Limits heading with Preview beside it (ST-1)", async () => {
+  it("lists the scopes flat, in the order each can't exceed the one before, under a Limits heading with Preview beside it (ST-1)", async () => {
     mount();
     const tasks = await screen.findByRole("region", { name: "tasks" });
-    const chain = ["tasks", "steps", "nodes", "work item", "instance"].map((name) => screen.getByRole("region", { name }));
-    chain.slice(1).forEach((outer, i) => expect(outer).toContainElement(chain[i]));
+    const order = ["instance", "work item", "nodes", "steps", "tasks"].map((name) => screen.getByRole("region", { name }));
+    order.slice(1).forEach((next, i) => {
+      expect(order[i].compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(order[i]).not.toContainElement(next);
+    });
     expect(tasks).toBeInTheDocument();
     const head = screen.getByRole("heading", { name: "Limits" }).parentElement!;
     expect(within(head).getByRole("button", { name: "Preview on a chain" })).toBeInTheDocument();
+  });
+
+  it("folds a scope that sets nothing into one line that opens to its caps", async () => {
+    const bare = JSON.parse(JSON.stringify(RESOLVED));
+    for (const c of Object.values(bare.limits.caps.steps) as { default: { value: null }; maximum: { value: null } }[]) {
+      c.default.value = null;
+      c.maximum.value = null;
+    }
+    vi.mocked(d.getDraft).mockImplementation(() => ok(policyView({}, bare)));
+    mount();
+    const steps = await screen.findByRole("region", { name: "steps" });
+    expect(within(steps).queryByRole("group")).toBeNull();
+    await userEvent.click(within(steps).getByRole("button", { name: /4 unset caps · show/ }));
+    expect(within(steps).getAllByRole("group")).toHaveLength(4);
+    expect(within(screen.getByRole("region", { name: "tasks" })).queryByRole("button", { name: /unset caps/ })).toBeNull();
   });
 
   it("draws no below column and no Preview button when the server sends no below lists", async () => {

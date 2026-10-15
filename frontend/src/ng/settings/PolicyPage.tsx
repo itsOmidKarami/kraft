@@ -14,6 +14,7 @@ import { Limits } from "./policy/Limits";
 import { Loops } from "./policy/Loops";
 import { PreviewPane } from "./policy/PreviewPane";
 import { SECTIONS, sectionOfKey, sectionOfProblem, type Section } from "./policy/sections";
+import { limitLabel } from "./policy/keys";
 import { policyOf } from "./policy/types";
 import "./policy/policy.css";
 
@@ -83,6 +84,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
     crumb: "Policy",
     files: ["policy.yaml"],
     toast: "Published policy · applies to items filed from now",
+    label: limitLabel,
     affects: () => (
       <>
         <Kv k="new items" v="use the published policy from now on" />

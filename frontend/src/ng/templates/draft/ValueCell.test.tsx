@@ -17,6 +17,12 @@ describe("ValueCell", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /tasks cap/ })).toBeInTheDocument());
   });
 
+  it("carries a pencil as its edit cue, unless it cannot be edited", () => {
+    const { container } = render(<><ValueCell label="a" value="1" display="1" onCommit={() => null} /><ValueCell label="b" value="2" display="2" readOnly onCommit={() => null} /></>);
+    expect(container.querySelectorAll(".adr-pen")).toHaveLength(1);
+    expect(container.querySelector(".adr-val:not(:disabled) .adr-pen")).not.toBeNull();
+  });
+
   it("cancels on Escape, sends nothing for an unchanged value, and Escape does not reach the page", async () => {
     const onCommit = vi.fn(() => null);
     const page = vi.fn();

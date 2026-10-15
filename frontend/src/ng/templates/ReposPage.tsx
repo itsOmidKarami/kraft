@@ -163,7 +163,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       </div>
                     );
                   })}
-                  {!matches.length && repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>}
+                  {!matches.length && (repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>)}
                 </div>
                 {data.detected.length > 0 && !q.trim() && (
                   <section className="rp-detected" aria-label="Detected, not connected">
@@ -267,7 +267,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
           <Kv k="forge" v={forge ? `${forge}${typeof repo.entry.project === "string" ? ` · ${repo.entry.project}` : ""}` : "—"} muted={!forge} />
         </>
       )}
-      {tab === "config" && <RepoConfig draft={draft} repo={repo} chains={chains} />}
+      {tab === "config" && <RepoConfig draft={draft} repo={repo} chains={chains} onYaml={() => onTab("yaml")} />}
       {tab === "yaml" && (fragment.text === null
         ? <Note>{fragment.error ?? "Loading…"}</Note>
         : <><pre className="rp-yaml">{fragment.text}</pre><Note>Read-only. Edit the whole file with YAML in the header.</Note></>)}

@@ -18,6 +18,11 @@
 .pol-card.is-dashed { border-style: dashed; }
 .pol-card.is-bad { border-color: var(--bad); }
 .pol-body[data-flash="work_item"] .pol-card[data-scope="work_item"], .pol-body[data-flash="nodes"] .pol-card[data-scope="nodes"], .pol-body[data-flash="steps"] .pol-card[data-scope="steps"], .pol-body[data-flash="tasks"] .pol-card[data-scope="tasks"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
+.pol-scope { display: flex; flex-direction: column; gap: 2px; padding: 8px 0 10px; border-top: 1px solid var(--line); }
+.pol-scope.is-bad { border-top-color: var(--bad); }
+.pol-scope .pane-fold { display: flex; align-items: center; gap: 8px; align-self: stretch; padding: 4px 8px; }
+.pol-scope .pane-fold .pol-card-sub { flex: 1; text-align: left; }
+.pol-body[data-flash="work_item"] .pol-scope[data-scope="work_item"], .pol-body[data-flash="nodes"] .pol-scope[data-scope="nodes"], .pol-body[data-flash="steps"] .pol-scope[data-scope="steps"], .pol-body[data-flash="tasks"] .pol-scope[data-scope="tasks"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
 .pol-card-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 6px; }
 .pol-card-ico { display: flex; color: var(--text-sub); }
 .pol-card-name { font-size: var(--fs-meta); font-weight: 500; color: var(--text); }

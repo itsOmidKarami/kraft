@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Segmented } from "../../ui/Segmented";
 import { detailOf } from "../../http";
 import type { ConfigDraft } from "../draft/useConfigDraft";
@@ -7,7 +7,8 @@ import { ValueCell } from "../draft/ValueCell";
 import { harnessChoices, steeringChoices } from "../choices";
 import { useHarnessOptions } from "../panes/useHarnessOptions";
 import { useLibrary } from "../useLibrary";
-import { FIELDS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "./fields";
+import { FIELDS, forgeOptions, GROUPS, YAML_ONLY, patchFor, sourceOf, valueOf, type RepoField } from "./fields";
+import { Fold, Head } from "../panes/controls";
 import { problemsOf, type RepoView } from "./types";
 
 const key = (p: Problem) => `${p.repo}|${p.field}|${p.message}`;
@@ -26,24 +27,61 @@ export async function setRepo(draft: ConfigDraft, repo: RepoView, patch: Record<
 }
 
 /** Every Config row of a repo (GAP §2 #33), each with its source word and a
- *  Reset on a value this repo sets. */
-export function RepoConfig({ draft, repo, chains }: { draft: ConfigDraft; repo: RepoView; chains: string[] }) {
+ *  Reset on a value this repo sets, under the section heads of `GROUPS`. A row
+ *  still at its default folds into one line per group unless it has a problem
+ *  or a change. The keys with no row say they are edited in YAML. */
+export function RepoConfig({ draft, repo, chains, onYaml }: { draft: ConfigDraft; repo: RepoView; chains: string[]; onYaml: () => void }) {
   const r = draft.view!.result;
   const own = problemsOf(r, repo.path);
   const diff = r.changes.find((c) => c.path === repo.path)?.fields ?? [];
+  const row = (f: RepoField) => {
+    const problem = own.find((p) => p.field === f.key || (f.key.startsWith("policy.") && p.field === f.key.slice(7)));
+    const changed = diff.includes(f.key.split(".")[0]);
+    return { f, changed, problem, folded: !isSet(repo, f) && !problem && !changed };
+  };
+  const draw = ({ f, changed, problem }: ReturnType<typeof row>) => <Row key={f.key} draft={draft} repo={repo} f={f} chains={chains} problem={problem} changed={changed} />;
   return (
     <div className="rp-cfg">
-      {FIELDS.map((f) => (
-        <Row key={f.key} draft={draft} repo={repo} f={f} chains={chains} problem={own.find((p) => p.field === f.key || (f.key.startsWith("policy.") && p.field === f.key.slice(7)))} changed={diff.includes(f.key.split(".")[0])} />
-      ))}
+      {GROUPS.map((g) => {
+        const rows = FIELDS.filter((f) => f.group === g).map(row);
+        return (
+          <section key={g} aria-label={g} className="rp-group">
+            <Head>{g}</Head>
+            {rows.filter((x) => !x.folded).map(draw)}
+            <Fold count={rows.filter((x) => x.folded).length}>{rows.filter((x) => x.folded).map(draw)}</Fold>
+          </section>
+        );
+      })}
+      <section aria-label="Edited in YAML" className="rp-group">
+        <Head>Edited in YAML</Head>
+        {YAML_ONLY.map(({ key, label }) => (
+          <div key={key} className="rp-row-cfg">
+            <span className="rp-k">{label}</span>
+            <span className="rp-v">{yamlValue(repo.entry[key])}</span>
+            <span className="rp-src"><button type="button" className="rp-reset" aria-label={`Edit ${label} in YAML`} onClick={onYaml}>Edit in YAML</button></span>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
 
+/** A key the Config tab has no row for, as its entry holds it. */
+function yamlValue(v: unknown): ReactNode {
+  if (v === undefined || v === null || (typeof v === "object" && !Object.keys(v).length)) return <span className="rp-yaml-none">not set</span>;
+  return <span className="rp-yaml-val">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>;
+}
+
+/** The entry sets the field (an empty list or map counts as unset, an empty string as set). */
+const isSet = (repo: RepoView, f: RepoField) => {
+  const v = valueOf(repo, f);
+  return v != null && !(Array.isArray(v) && v.length === 0) && !(typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length);
+};
+
 function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft; repo: RepoView; f: RepoField; chains: string[]; problem?: Problem; changed: boolean }) {
   const v = valueOf(repo, f);
   const shown = v === "" && f.empty ? f.empty : f.show(f.key === "steering" ? repo.resolved.steering : v);
-  const set = v != null && !(Array.isArray(v) && v.length === 0);
+  const set = isSet(repo, f);
   const source = sourceOf(repo, f);
   const library = useLibrary();
   const opts = useHarnessOptions();

@@ -1,3 +1,4 @@
+import { Pencil } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 
@@ -84,6 +85,7 @@ export function ValueCell({ label, value, display, onCommit, mono = true, placeh
         onClick={() => setEditing(true)}
       >
         {display}
+        {!readOnly && <Pencil size={12} className="adr-pen" aria-hidden />}
       </button>
     );
   const field = {
