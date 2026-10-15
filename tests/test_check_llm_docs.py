@@ -104,10 +104,11 @@ def test_check_channel_refuses_a_build_with_no_raw_pages(cl, tmp_path):
     assert cl.check_channel(tmp_path, BASE)
 
 
-def test_main_checks_both_channels(cl, tmp_path, capsys):
-    stable = _site(tmp_path, "", "")
-    nxt = tmp_path / "next"
-    nxt.mkdir()
-    _site(nxt, "[x](/bad)", "")
-    assert cl.main(["check", str(stable)]) == 1
-    assert "next/raw/page.md:1" in capsys.readouterr().out
+@pytest.mark.parametrize("version", ["next", "v1"])
+def test_main_checks_both_channels(cl, tmp_path, capsys, version):
+    latest = _site(tmp_path, "", "")
+    folder = tmp_path / version
+    folder.mkdir()
+    _site(folder, "[x](/bad)", "")
+    assert cl.main(["check", str(latest)]) == 1
+    assert f"{version}/raw/page.md:1" in capsys.readouterr().out

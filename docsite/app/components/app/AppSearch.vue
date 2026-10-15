@@ -3,9 +3,9 @@
      cell or list item ends in " · " so snippets do not run them together, and
      a page's syntax-highlighting <style>, which showed up in result snippets
      as Shiki's CSS, is left out), and the page's HTML entities are decoded
-     there too. On a /next/ URL answered
-     by the stable build's root 404.html this searches the release docs, so the
-     dialog says so. A Reference hit is ranked lower (below), so "raise budget"
+     there too. On a /next/ or /v1/ URL
+     answered by the latest build's root 404.html this searches the latest
+     docs, so the dialog says so. A Reference hit is ranked lower (below), so "raise budget"
      opens on the guide and not on the HTTP route. -->
 <script setup lang="ts">
 import type { ContentNavigationItem } from '@nuxt/content'
@@ -16,7 +16,7 @@ const props = defineProps<{
 
 const { forced: forcedColorMode } = useDocusColorMode()
 const docs = useRuntimeConfig().public.docs
-const at = useDocsChannel()
+const at = useDocsVersion()
 
 const { data: files } = useLazyAsyncData('search_docs', async () => {
   const pages = await queryCollection('docs').where('extension', '=', 'md').select('path', 'title', 'description', 'body').all()
@@ -85,8 +85,11 @@ const searchNavigation = computed(() => props.navigation?.length
   ? [{ title: '', path: '/__results', children: props.navigation }] as ContentNavigationItem[]
   : props.navigation)
 
-const stableOnNext = computed(() => at.value.channel === 'next' && docs.channel !== 'next')
-const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`)
+// The root 404.html answers a missing page of another version too, and its
+// search is this build's: say so.
+const elsewhere = computed(() => at.value.current && at.value.current.id !== docs.version
+  ? { was: at.value.current.name, searched: docs.versions.find(v => v.id === docs.version)?.name ?? 'these docs' }
+  : null)
 </script>
 
 <template>
@@ -96,8 +99,8 @@ const releaseDocs = computed(() => `the ${docs.stableVersion || 'release'} docs`
     :fuse="fuse"
     v-model:search-term="term"
     :color-mode="!forcedColorMode"
-    :title="stableOnNext ? `Search ${releaseDocs}` : undefined"
-    :description="stableOnNext ? `This page is not in the next docs; this searches ${releaseDocs}.` : undefined"
-    :placeholder="stableOnNext ? `Search ${releaseDocs}…` : undefined"
+    :title="elsewhere ? `Search ${elsewhere.searched}` : undefined"
+    :description="elsewhere ? `This page is not in ${elsewhere.was}; this searches ${elsewhere.searched}.` : undefined"
+    :placeholder="elsewhere ? `Search ${elsewhere.searched}…` : undefined"
   />
 </template>
