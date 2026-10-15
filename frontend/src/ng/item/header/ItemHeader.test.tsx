@@ -263,7 +263,7 @@ describe("ItemHeader", () => {
   // One primary per state: on the item page a state whose banner or card carries its action has no main button in the header,
   // and the panel's doors it would have held are on the ⋮; a state with no card keeps its button (a null `moved`).
   const stop = (kind: string, more: object = {}) => ({ stop: { kind, node: "verification", task: null, resume_at: null, reason: null, ...more } as never });
-  it.each<[string, Parameters<typeof detail>[0], string | null]>([
+  it.each<[string, Parameters<typeof detail>[0], string | false | null]>([
     ["a gate", { display_status: "needs_you", ...stop("gate") }, "Cancel…"],
     ["a question", { display_status: "needs_you", needs_context_question: "Which?", ...stop("question") }, "Cancel…"],
     ["a cap", { display_status: "needs_you", ...stop("cap") }, "Cancel…"],
@@ -274,7 +274,8 @@ describe("ItemHeader", () => {
     ["a paused item", { display_status: "paused", current_node_id: "verification" }, "Cancel…"],
     ["a cancelled item", { display_status: "cancelled" }, "Archive"],
     ["a running item", { display_status: "running" }, null],
-    ["a done item", { display_status: "done" }, null],
+    // Its card holds Archive: the header keeps neither a main button nor a menu item for it.
+    ["a done item", { display_status: "done" }, false],
     ["a never-started item", { display_status: "paused", current_node_id: null }, null],
     ["an escalated item", { display_status: "escalated" }, null],
     ["a question with no text", { display_status: "needs_you", ...stop("question") }, null],
@@ -282,7 +283,11 @@ describe("ItemHeader", () => {
   ])("on the item page, %s", async (_name, over, moved) => {
     show(over, {}, true);
     expect(!!document.querySelector(".item-main-action")).toBe(moved === null);
-    if (!moved) return;
+    if (moved === null) return;
+    if (moved === false) {
+      await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+      return expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+    }
     await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
     expect(screen.getByRole("menuitem", { name: moved })).toBeInTheDocument();
   });

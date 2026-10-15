@@ -17,6 +17,8 @@ describe("eventLine", () => {
     [ev("fix_cycle_finished", { cycle: 1, committed: false }, "verification"), "verification · fix loop round 2 · the fix changed nothing"],
     [ev("fix_cycle_finished", { cycle: 1, committed: null }, "verification"), "verification · fix loop round 2"],
     [ev("work_item_needs_human", { reason: "needs_context: Allow it?" }, "verification"), "stopped at verification: Allow it?"],
+    // The auto-escalation sentence is read whole; the row clamps it on screen.
+    [ev("escalation_message", { message: "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)" }, "verification"), "escalation on verification: (Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)"],
     [ev("mr_closed", { ref: 142, by: "mara" }), "MR !142 closed by mara"],
     [ev("work_item_archived", { by: "auto" }), "archived"],
     [ev("work_item_archived", { by: "auto", kept_branch: "kraft/x", unpushed_commits: 3 }), "archived · kept kraft/x: 3 unpushed commits"],

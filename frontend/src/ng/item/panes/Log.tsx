@@ -4,34 +4,20 @@ import { clock, lineCount, logLineText } from "../../../format";
 import type { LogLine } from "../../../types";
 import { useModal } from "../../../useModal";
 import { Maximize2 } from "../../icons";
-import { logTextUrl, logUrl } from "../../../api";
-import { request } from "../../http";
+import { logTextUrl } from "../../../api";
+import { POLL_MS, useLogLines } from "../useLogLines";
 
 const SOURCES = ["sys", "stdout", "agent", "tool"] as const;
-export const POLL_MS = 3000;
+export { POLL_MS };
 
 /** A session's log (GAP §2 #4, #40): source chips, follow, copy, the whole
  *  file when the view was cut, full screen. Read again every few seconds
  *  while the session runs. */
 export function Log({ workItemId, sessionId, running, title, crumb }: { workItemId: string; sessionId: string; running: boolean; title: string; crumb?: string }) {
-  const [lines, setLines] = useState<LogLine[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { lines, error } = useLogLines(workItemId, sessionId, running);
   const [off, setOff] = useState<Set<string>>(new Set());
   const [follow, setFollow] = useState(true);
   const [full, setFull] = useState(false);
-  useEffect(() => {
-    let live = true;
-    const read = () =>
-      request<{ lines: LogLine[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
-        if (!live) return;
-        // A pending attempt has no log yet: once it runs, a read that succeeds clears the note.
-        if (r.status === 200) { setLines(r.body.lines); setError(null); }
-        else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
-      });
-    read();
-    const t = running ? setInterval(read, POLL_MS) : undefined;
-    return () => { live = false; if (t) clearInterval(t); };
-  }, [workItemId, sessionId, running]);
 
   const cut = lines?.find((l) => l.truncated);
   const shown = (lines ?? []).filter((l) => !l.truncated && !off.has(l.src));

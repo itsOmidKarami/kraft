@@ -101,6 +101,11 @@
 .item-card-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 .item-card-fix code { font: 12px ui-monospace, Menlo, monospace; }
 .item-card-open { margin-left: auto; }
+.item-card-note { overflow-wrap: anywhere; }
+.item-card-list { margin: 0; padding: 0; list-style: none; }
+.item-tail { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.item-tail-lines { align-self: stretch; margin: 0; padding: 6px 8px; list-style: none; border-radius: 6px; background: var(--bg); font: 12px/1.45 ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.item-tail-lines li { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
 .item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }
 @media (max-height: 719px) { .item-card-facts { max-height: 64px; overflow-y: auto; } }
 
@@ -118,6 +123,8 @@
 .ip-recent-more { margin-top: 6px; font-size: 12px; }
 .ip-recent-age { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .ip-recent-line { padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); font: inherit; text-align: left; line-height: 1.45; }
+.ip-recent-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.ip-recent li:is(:hover, :focus-within) .ip-recent-line { -webkit-line-clamp: unset; display: block; }
 button.ip-recent-line { cursor: pointer; }
 button.ip-recent-line:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
