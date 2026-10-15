@@ -75,7 +75,7 @@ describe("Webhook channel (O.2)", () => {
     channel("webhook", "?tab=config");
     await userEvent.click(await screen.findByRole("switch", { name: /enabled/ }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ enabled: false }));
-    await userEvent.click(screen.getByRole("switch", { name: /gate_requested/ }));
+    await userEvent.click(screen.getByRole("switch", { name: /^A decision is waiting/ }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ events: ["work_item_needs_human"] }));
     await userEvent.click(screen.getByRole("button", { name: /^link back/ }));
     const box = screen.getByLabelText("Link back", { selector: "input" });
@@ -177,39 +177,47 @@ describe("Browser alerts channel (O.2)", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Allow notifications/ })).toBeNull());
   });
 
-  it("states what each permission means", async () => {
-    for (const [perm, text] of [["granted", /Allowed in this browser/], ["denied", /Blocked in the browser's site settings/], ["default", /has not been asked yet/]] as const) {
-      stubNotification(perm);
-      serve();
-      const { unmount } = (() => { channel("browser"); return { unmount: () => document.body.replaceChildren() }; })();
-      expect(await screen.findByText(text)).toBeInTheDocument();
-      unmount();
-    }
+  it.each([
+    ["granted", /Notifications are allowed/],
+    ["denied", /Notifications are blocked/],
+    ["default", /^Allow notifications$/],
+    [null, /This browser can't show notifications/],
+  ] as const)("leads with what a %s permission means, before the switch", async (perm, text) => {
+    stubNotification(perm);
+    serve();
+    channel("browser", "?tab=config");
+    const lead = await screen.findByText(text);
+    const sw = screen.queryByRole("switch", { name: /Alerts on this device/ });
+    if (perm === null) expect(sw).toBeNull();
+    else expect(lead.compareDocumentPosition(sw!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    if (perm !== "granted" && perm !== null) expect(sw).toBeDisabled();
+    if (perm === null) expect(screen.queryByRole("button", { name: /^Send a test/ })).toBeNull();
   });
 
-  it("a denied permission leaves the test disabled and never asks", async () => {
-    const { N } = stubNotification("denied") as { N: { requestPermission: ReturnType<typeof vi.fn> } };
+  it("a denied permission gives the steps and a Check again that picks up an allowed one, and never asks", async () => {
+    const { N } = stubNotification("denied") as { N: { permission: string; requestPermission: ReturnType<typeof vi.fn> } };
     serve();
     channel("browser", "?tab=config");
     expect(await screen.findByRole("button", { name: /^Send a test/ })).toBeDisabled();
+    expect(screen.getByText(/1\. Open the site settings/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Allow notifications/ })).toBeNull();
+    expect(screen.getByText(/^1\. Open the site settings/)).toBeInTheDocument();
+    expect(screen.getByText(/^2\. Set Notifications to Allow/)).toBeInTheDocument();
+    expect(screen.queryByText("Unblock notifications first.")).toBeNull();
+    N.permission = "granted";
+    await userEvent.click(screen.getByRole("button", { name: /^Check again/ }));
+    expect(await screen.findByText(/Notifications are allowed/)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Alerts on this device/ })).toBeEnabled();
     expect(N.requestPermission).not.toHaveBeenCalled();
   });
 
-  it("with no Notification at all, says so and disables the switch", async () => {
-    stubNotification(null);
-    serve();
-    channel("browser", "?tab=config");
-    expect(await screen.findByRole("switch", { name: /Alerts on this device/ })).toBeDisabled();
-    expect(screen.getByText(/This browser has no notifications/)).toBeInTheDocument();
-  });
-
-  it("has the same event switches as the webhook, kept in this browser only", async () => {
+  it("has the same event switches as the webhook, led by what each means, kept in this browser only", async () => {
     stubNotification("granted");
     const put = serve();
     channel("browser", "?tab=config");
-    const gate = await screen.findByRole("switch", { name: /^gate_requested/ });
+    const gate = await screen.findByRole("switch", { name: /^A decision is waiting/ });
     expect(gate).toBeChecked();
+    expect(screen.getByText("gate_requested")).toBeInTheDocument();
     await userEvent.click(gate);
     expect(gate).not.toBeChecked();
     expect(JSON.parse(localStorage.getItem("kraft.browserNotify.events") ?? "[]")).not.toContain("gate_requested");

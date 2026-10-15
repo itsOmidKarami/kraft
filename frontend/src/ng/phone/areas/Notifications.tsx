@@ -5,7 +5,7 @@ import { enabledEvents, isEnabled, NOTIFY_EVENTS, notificationText, requestPermi
 import { ago } from "../../../format";
 import type { Notify } from "../../../types";
 import { WEBHOOK_OFF } from "../../ui/reasons";
-import { browserActive as browserOn, channelState, CHANNELS, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, evLine, PERMISSION_SHORT, PERMISSION_TEXT, permissionNow, PROGRESS_NOTE, toggled, webhookActive, type Channel, type Permission } from "../../settings/notifyWords";
+import { ALLOW, browserActive as browserOn, BROWSER_OFF, BROWSER_WHY, channelState, CHANNELS, CHECK_AGAIN, CLEAR_URL, CLEAR_URL_TEXT, CLEAR_URL_TITLE, eventMeaning, evLine, PERMISSION_LEAD, PERMISSION_SHORT, permissionNow, PROGRESS_NOTE, toggled, webhookActive, type Channel, type Permission } from "../../settings/notifyWords";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { TabStrip } from "../ui/Rows";
@@ -39,7 +39,7 @@ export function NotificationsList() {
           foot={PROGRESS_NOTE}
           rows={[
             { key: "webhook", label: CHANNELS.webhook, to: `${AREA}/webhook`, sub: `${notify.events.length ? notify.events.join(", ") : "no events"} · URL ${notify.url_set ? "set" : "not set"}`, chips: [{ label: channelState(webhookActive(notify)), tone: webhookActive(notify) ? "ok" : undefined }] },
-            { key: "browser", label: CHANNELS.browser, to: `${AREA}/browser`, sub: `This device only · ${PERMISSION_TEXT[permission].replace(/\.$/, "").toLowerCase()}`, chips: [{ label: channelState(browserIsActive), tone: browserIsActive ? "ok" : undefined }] },
+            { key: "browser", label: CHANNELS.browser, to: `${AREA}/browser`, sub: permission === "granted" ? "This device only" : `This device only · ${PERMISSION_SHORT[permission]}`, chips: [{ label: channelState(browserIsActive), tone: browserIsActive ? "ok" : undefined }] },
           ]}
         />
       )}
@@ -124,7 +124,7 @@ function Webhook({ notify, setNotify, tab }: { notify: Notify; setNotify: (n: No
   return (
     <>
       <Group rows={[{ label: "enabled", sw: notify.enabled, onSwitch: (on) => void put("enabled", { enabled: on }), ...mark("enabled") }]} />
-      <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: e.id, mono: true, sub: e.label, sw: notify.events.includes(e.id), onSwitch: () => void put("events", { events: notify.events.includes(e.id) ? notify.events.filter((x) => x !== e.id) : [...notify.events, e.id] }), ...mark("events") }))} />
+          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: e.id, sw: notify.events.includes(e.id), onSwitch: () => void put("events", { events: notify.events.includes(e.id) ? notify.events.filter((x) => x !== e.id) : [...notify.events, e.id] }), ...mark("events") }))} />
       <Group
         title="Delivery"
         rows={[
@@ -172,23 +172,40 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
       <>
         <Group rows={[
           { label: "status", value: channelState(browserOn(on, permission)), sub: "Alerts show only while this tab is in the background." },
-          { label: "permission", value: PERMISSION_SHORT[permission], sub: PERMISSION_TEXT[permission] },
+          ...(permission === "granted" ? [] : [{ label: "permission", value: PERMISSION_SHORT[permission], sub: PERMISSION_LEAD[permission].title } as RowSpec]),
           { label: "notifies", value: evLine(events) },
         ]} />
         <Preview link={location.origin} />
       </>
     );
+  const lead = PERMISSION_LEAD[permission];
+  const off = permission !== "granted" ? BROWSER_WHY[permission] : !on ? BROWSER_OFF : null;
   return (
     <>
       <Group
-        note="Kept in this browser only: another device is its own switch."
+        title="Permission"
         rows={[
-          { label: "Alerts on this device", sw: on, disabled: permission === "unsupported", onSwitch: toggle, sub: PERMISSION_TEXT[permission] },
-          ...(permission === "default" ? [{ label: "Allow notifications", onClick: () => void requestPermission().then(setPermission), sub: "Asks the browser once." } as RowSpec] : []),
-          { label: "Send a test", onClick: testBrowser, disabled: permission !== "granted", sub: permission === "granted" ? "Shows an alert on this device now." : "Allow notifications first." },
+          permission === "default"
+            ? { label: ALLOW, sub: lead.text, onClick: () => void requestPermission().then(setPermission) }
+            : permission === "denied"
+              ? { label: lead.title, sub: lead.text }
+              : { label: lead.title, sub: lead.text },
+          ...(permission === "denied" ? (lead.steps ?? []).map((t, i): RowSpec => ({ label: `${i + 1}. ${t}` })) : []),
+          ...(permission === "denied" ? [{ label: CHECK_AGAIN, onClick: () => setPermission(permissionNow()) } as RowSpec] : []),
         ]}
       />
-      <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: e.id, mono: true, sub: e.label, sw: events.includes(e.id), onSwitch: () => toggleEvent(e.id) }))} foot={PROGRESS_NOTE} />
+      {permission !== "unsupported" && (
+        <>
+          <Group
+            note="Kept in this browser only: another device is its own switch."
+            rows={[
+              { label: "Alerts on this device", sw: on, disabled: permission !== "granted", onSwitch: toggle },
+              { label: "Send a test", onClick: testBrowser, disabled: !!off, sub: off ? undefined : "Shows an alert on this device now." },
+            ]}
+          />
+          <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: e.id, sw: events.includes(e.id), onSwitch: () => toggleEvent(e.id) }))} foot={PROGRESS_NOTE} />
+        </>
+      )}
     </>
   );
 }

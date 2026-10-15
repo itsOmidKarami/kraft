@@ -12,6 +12,25 @@ export const PERMISSION_TEXT: Record<Permission, string> = {
 };
 export const PERMISSION_SHORT: Record<Permission, string> = { granted: "allowed", default: "not asked yet", denied: "blocked", unsupported: "not supported" };
 
+/** The browser pane opens on this: what the permission is, and the one thing to do about it. `steps` is for a blocked one. */
+export const PERMISSION_LEAD: Record<Permission, { title: string; text: string; steps?: string[] }> = {
+  granted: { title: "Notifications are allowed", text: "This browser can show Kraft's alerts." },
+  default: { title: "Allow notifications", text: "This browser has not been asked yet. It asks once, when you press the button." },
+  denied: {
+    title: "Notifications are blocked",
+    text: "Kraft cannot ask again. Unblock it in this browser:",
+    steps: ["Open the site settings from the icon beside the address.", "Set Notifications to Allow.", "Come back and check again."],
+  },
+  unsupported: { title: "This browser can't show notifications", text: "Use the webhook, or open Kraft in a browser that can." },
+};
+export const ALLOW = "Allow notifications";
+export const CHECK_AGAIN = "Check again";
+/** Why the browser's own controls are disabled: the one line for the switch and the test, on both layouts. */
+export const BROWSER_WHY: Record<Permission, string> = { granted: "", default: "Allow notifications first.", denied: "Unblock notifications first.", unsupported: "Not supported in this browser." };
+export const BROWSER_OFF = "Turn on alerts on this device first.";
+/** An event's words with a capital, for a row that leads with its meaning. */
+export const eventMeaning = (label: string): string => label.charAt(0).toUpperCase() + label.slice(1);
+
 export const CHANNELS = { webhook: "Webhook", browser: "This browser" } as const;
 export type Channel = keyof typeof CHANNELS;
 

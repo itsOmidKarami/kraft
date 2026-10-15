@@ -129,6 +129,7 @@
 .sk-ticks { height: 4px; }
 
 /* The selection bar (AreaBoard 92–94), floating over the list's bottom. */
+body:has(.bulk-bar) { --toast-bottom: 88px; }
 .bulk-wrap { position: absolute; left: 0; right: 0; bottom: 18px; z-index: 8; display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
 .bulk-bar { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 100%; box-sizing: border-box; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px color-mix(in oklab, var(--side) 60%, transparent); font-size: var(--fs-label); color: var(--text); }
 .bulk-confirm-text { max-width: 340px; line-height: 1.45; color: var(--bad); }
@@ -192,6 +193,7 @@
 .composer-cross { border-color: var(--border); color: var(--text-sub); }
 
 /* The draft item page (NewItemDraft.dc.html): the item page for an item that does not exist yet. */
+body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; padding: 18px 24px 20px; }
 .draft-tag { flex: none; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; white-space: nowrap; color: var(--mark-change); }
 .draft-tag.is-ok { color: var(--text); }
