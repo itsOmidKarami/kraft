@@ -6,7 +6,9 @@ line (and, from PR 2b, the prompt) stays on every view."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 import sys
 from collections.abc import Iterable
 from typing import ClassVar
@@ -150,6 +152,13 @@ class KraftConsole(App):
     def on_mount(self) -> None:
         self.show("board")
         self.run_worker(self.live.run, name="live")
+        # The child is in its own session, so a closed terminal or a `kill` never
+        # reaches it; leaving through `exit()` runs `on_unmount`, which ends it.
+        # Not the main thread, or no signals here: nothing to hand over.
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGHUP, signal.SIGTERM):
+                loop.add_signal_handler(sig, self.exit)
         # After the first paint: a cold cache reads the release feed over the network.
         self.call_after_refresh(self.run_worker, self._check_update, name="update")
 
@@ -188,15 +197,28 @@ class KraftConsole(App):
             return None
         panel = self.get_screen("output", OutputPanel)
         run = self.command = runner.Run(argv, panel.write_line)
-        if self.screen is not panel:
-            await self.push_screen(panel)
-        panel.begin(argv)
+        # An app worker owns the bookkeeping: the caller's worker dies with the
+        # screen it ran on, and must then only stop waiting. Quitting cancels
+        # this one too, and `on_unmount` ends the command then.
+        done = asyncio.Future[int]()
+        self.run_worker(self._run(run, panel, done), group="command")
+        return await asyncio.shield(done)
+
+    async def _run(self, run: runner.Run, panel: OutputPanel, done: asyncio.Future[int]) -> None:
+        await self._show_panel()
+        panel.begin(run.argv)
         code = await run.finish()
-        # Not in a `finally`: only quitting cancels this worker, and `on_unmount` ends
-        # the command then; a future cancel path must clear `self.command` itself.
         self.command = None
         panel.end(code)
-        return code
+        done.set_result(code)
+
+    async def _show_panel(self) -> None:
+        """The panel on top, once: Ctrl+P can open over it."""
+        panel = self.get_screen("output", OutputPanel)
+        if panel not in self.screen_stack:
+            await self.push_screen(panel)
+        while self.screen is not panel:
+            await self.pop_screen()
 
     def stop_command(self) -> None:
         """SIGINT; pressed again while the same command runs, the kill."""
@@ -215,7 +237,7 @@ class KraftConsole(App):
             await self.command.end()
 
     def action_output(self) -> None:
-        self.push_screen("output")
+        self.run_worker(self._show_panel())
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:

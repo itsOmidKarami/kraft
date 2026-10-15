@@ -10,6 +10,7 @@ import time
 
 import pytest
 from rich.color import Color
+from textual.screen import Screen
 
 from kraft.console import output, runner
 from kraft.console.output import OutputPanel
@@ -164,3 +165,61 @@ def test_the_stop_button_interrupts_the_command(console, kraft_is):
         True,
         ["kraft repo connect --verify", "up", "cleaned up", "exit 130"],
     )
+
+
+def test_a_popped_screen_does_not_strand_the_command(console, kraft_is):
+    """Textual cancels the workers of a screen it pops. The command's end must
+    not depend on the worker that asked for it."""
+    kraft_is("import time; time.sleep(0.5); print('done')")
+
+    class Asker(Screen):
+        def on_mount(self) -> None:
+            self.run_worker(self.app.run_command(["view", "list"]))
+
+    async def scenario(app, pilot):
+        await app.push_screen(Asker())
+        await console.until(pilot, lambda: console.output(app)[-1:] == ["kraft view list"])
+        await app.pop_screen()  # the panel the command opened over it
+        await app.pop_screen()  # and the screen itself
+        await console.until(pilot, lambda: app.command is None)
+        return await app.run_command(["view", "list"]), console.output(app)
+
+    code, lines = console.run(scenario)
+    assert code == 0
+    assert lines[:3] == ["kraft view list", "done", "exit 0"]
+
+
+@pytest.mark.parametrize("sig", [signal.SIGHUP, signal.SIGTERM], ids=["hangup", "terminate"])
+def test_a_hangup_or_terminate_stops_the_command_and_leaves(console, kraft_is, tmp_path, sig):
+    """The child is in its own session: a closed terminal never reaches it."""
+    stopped = tmp_path / "stopped"
+    kraft_is(WAITS.replace('print("cleaned up", flush=True)', f"open({str(stopped)!r}, 'w')"))
+
+    async def scenario(app, pilot):
+        app.run_worker(app.run_command(["repo", "connect", "--verify"]))
+        await console.until(pilot, lambda: "up" in console.output(app))
+        pid = app.command.process.pid
+        os.kill(os.getpid(), sig)
+        await console.until(pilot, lambda: not app.is_running)
+        return pid
+
+    pid = console.run(scenario)
+    deadline = time.monotonic() + 5
+    while not stopped.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert stopped.exists()
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pid, 0)
+
+
+def test_ctrl_p_over_the_panel_does_not_stack_a_second_copy(console, kraft_is):
+    kraft_is("print('x')")
+
+    async def scenario(app, pilot):
+        app.run_worker(app.run_command(["view", "list"]))
+        await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
+        await app.push_screen(Screen())
+        await app.run_command(["view", "list"])
+        return [type(s).__name__ for s in app.screen_stack]
+
+    assert console.run(scenario) == ["Screen", "OutputPanel"]

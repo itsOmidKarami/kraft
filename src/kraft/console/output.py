@@ -28,6 +28,10 @@ class OutputPanel(ModalScreen[None]):
         Binding("x", "stop", "stop"),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._pending: list[Text] = []
+
     def compose(self) -> ComposeResult:
         with Vertical(id="output"):
             yield RichLog(id="output-log", wrap=True, max_lines=MAX_LINES)
@@ -39,6 +43,7 @@ class OutputPanel(ModalScreen[None]):
         self.query_one(RichLog).focus()
 
     def begin(self, argv: list[str]) -> None:
+        self._flush()
         log = self.query_one(RichLog)
         if log.lines:
             log.write("")
@@ -46,11 +51,20 @@ class OutputPanel(ModalScreen[None]):
         self.query_one("#stop", Button).disabled = False
 
     def write_line(self, line: str) -> None:
+        # One write per burst, not per line: 100k lines would stall the loop.
         # from_ansi, not markup: a child's own colours draw, and `[/]` is text.
         # The `\r` of CRLF output would blank the line: from_ansi keeps what follows the last one.
-        self.query_one(RichLog).write(Text.from_ansi(line.removesuffix("\r")))
+        if not self._pending:
+            self.app.call_later(self._flush)
+        self._pending.append(Text.from_ansi(line.removesuffix("\r")))
+
+    def _flush(self) -> None:
+        lines, self._pending = self._pending, []
+        if lines:
+            self.query_one(RichLog).write(Text("\n").join(lines))
 
     def end(self, code: int) -> None:
+        self._flush()
         theme = self.app.current_theme
         colour = theme.error if code else self.app.theme_variables["kraft-muted"]
         self.query_one(RichLog).write(Text(f"exit {code}", style=colour))
