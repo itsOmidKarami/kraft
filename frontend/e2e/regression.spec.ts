@@ -52,7 +52,7 @@ test("chains: a change to a chain publishes to its file", async ({ page }) => {
 
 test("library: a component lists the chains that use it, and links to them", async ({ page }) => {
   await page.goto("/templates/library/tasks.implementer");
-  await page.getByRole("link", { name: "quick-task" }).click();
+  await page.locator("#library-pane-panel").getByRole("link", { name: "quick-task" }).click();
   await expect(page).toHaveURL(/\/templates\/chains\/quick-task\/nodes\/implementation$/);
 });
 
