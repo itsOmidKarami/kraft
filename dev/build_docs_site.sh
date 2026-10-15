@@ -48,6 +48,10 @@ mkdir -p "$TMP/docsite" "$TMP/frontend/public"
   --exclude ./.nuxt --exclude ./.output --exclude ./.data --exclude ./dist-site .) | tar -xf - -C "$TMP/docsite"
 cp "$ROOT/frontend/public/icon.svg" "$TMP/frontend/public/"
 git -C "$ROOT" archive "$TAG" docsite/content .github/assets | tar -xf - -C "$TMP"
+# The tag was cut before its release stamped the "Added in next" notes (the stamp
+# pull request comes after), so stamp this copy the way that pull request does.
+python3 "$ROOT/dev/stamp_docs_added_in.py" "${TAG#v}" "$TMP/docsite/content" >/dev/null ||
+  echo "::warning::$TAG's docs still carry _Added in next_ notes: a feature shipped under a patch label"
 # A release up to v2.0.0 shows its diagrams as images from public/diagrams/,
 # which main no longer has (its diagrams are markup: the Diagram*.vue
 # components), so they come from the tag with its pages.

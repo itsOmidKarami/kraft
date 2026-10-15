@@ -173,6 +173,19 @@ The release label, the `## Changelog` section, the docs page a change must
 update, and the `## Removed tests` block are all in
 [CONTRIBUTING.md](CONTRIBUTING.md). Read it before opening one.
 
+### Docs: mark what is new
+
+A docs page, section or CLI verb that is new since the latest release carries a
+note: `_Added in next_` on its own line directly under its heading (a new page:
+under its title, which covers its sections), or at the end of the verb's table
+cell. Never write a version number, because the release rewrites `next` into
+`_Added in X.Y_` itself. Never put the note in heading text, or anywhere but
+under a heading or at a cell's end. A heading that is an old one under a new
+name gets `<!-- renamed from: Old heading -->` instead, and text newly written
+about something 2.0 already shipped gets `<!-- not new: why -->`.
+`dev/check_docs_added_in.py` fails `lint` on a new heading with neither.
+CONTRIBUTING.md's "User-facing docs" has the details.
+
 ### The test tree mirrors the source tree
 
 A test for `src/kraft/<pkg>/<mod>.py` lives at `tests/<pkg>/test_<mod>.py` — not

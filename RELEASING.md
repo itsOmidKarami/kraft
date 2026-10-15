@@ -232,6 +232,34 @@ tag through setuptools-scm, and the `.vsix` gets its version from the
 `vsce package <version>` command line and its changelog from the build. The
 stamp pull request then brings `main` up to date.
 
+## Docs "Added in" notes
+
+A docs page, section or CLI verb that is new since the last release carries
+`_Added in next_`, written by its author (see CONTRIBUTING.md,
+"User-facing docs"). Nobody writes a version number, because the release does,
+in the stamp pull request, with `dev/stamp_docs_added_in.py VERSION`:
+
+- **X.Y.0 (Y above 0):** every `next` becomes `X.Y`, so the site's chip reads
+  "Added in 2.1" instead of "Unreleased".
+- **X.0.0:** every note is removed, numbered ones too. A new major starts clean,
+  and the site's version menu already says which major you are reading.
+- **X.Y.Z (Z above 0):** a patch adds no features, so a `next` note means one
+  shipped under a patch label. The script writes nothing and exits 1; the stamp
+  step warns, adds a line to the stamp pull request, and still stamps the plugin
+  manifests and changelogs. Until someone takes the notes off by hand, or relabels
+  and cuts the release again as a minor, `dev/check_docs_added_in.py` fails
+  `lint` on `main`, because a `next` note now sits on what the release has.
+
+Every release also deletes the `<!-- renamed from: ... -->` and
+`<!-- not new: ... -->` comments, which only excuse a heading from a note until
+the next release is the comparison point.
+
+The tag is cut before the stamp pull request merges, so the tag's own pages still
+say `next`. `dev/build_docs_site.sh` stamps its copy of the tag's content the same
+way, so the release docs at `/kraft/` show the number from the moment they are
+built. Between the tag and the stamp pull request merging, `lint` fails on `main`
+for the same reason as above; it clears when that pull request merges.
+
 ## Verify a release
 
 Run the workflow with **dry run** ticked first. The summary page must show the
