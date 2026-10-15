@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CommentReview, FixTarget, GatelessChanges, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
+import { gateName, nameOf } from "../board/rowText";
 import { detailOf, jsonBody, request } from "../http";
 import { placeUrl } from "../item/url";
 import { Button } from "../ui/Button";
@@ -12,7 +13,7 @@ import { REQUEST_CHANGES, approveBlock, barText, drafts, outcomes } from "./fini
 import { rangeName, threadRange } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
-type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_target">;
+type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_target" | "chain_definition">;
 const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } as const;
 
 /** Sends a review and moves on (G.5, G.6): a refusal comes back as the server's words. */
@@ -39,13 +40,13 @@ export function useSubmit(item: Item, gate: string | null, threads: ReviewThread
       return null;
     }
     if (outcome === "approve") {
-      showToast(`Approved · ${gate} passed`);
+      showToast(`Approved · ${gateName(item.chain_definition?.nodes, gate!)} passed`);
       navigate(placeUrl(item.id, { sel: { kind: "chain" } }));
       return null;
     }
     const gateless = !atGate ? (body as GatelessChanges) : null;
     const target = gateless?.target ?? item.fix_target?.node ?? null;
-    showToast(`Requested changes · ${threadsSent} sent to ${target ?? "the fix node"}${gateless ? ` · ${ACTION[gateless.action] ?? gateless.action}` : ""}`);
+    showToast(`Requested changes · ${threadsSent} sent to ${target ? nameOf(item.chain_definition?.nodes, target) : "the fix node"}${gateless ? ` · ${ACTION[gateless.action] ?? gateless.action}` : ""}`);
     navigate(placeUrl(item.id, { sel: target ? { kind: "node", node: target } : { kind: "chain" } }));
     return null;
   };

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FixTarget, ReviewComment, ReviewThread, WorkItem } from "../../types";
 import * as http from "../http";
+import { Toaster } from "../ui/Toast";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
 import { approveBlock, gateConsequence, outcomes } from "./finish";
 
@@ -18,7 +19,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("outcomes", () => {
   it("builds request changes from fix_target, shortening a long path", () => {
     expect(text(outcomes(item(), "final_review", [th()], FIX))).toEqual([
-      ["request_changes", "Sends these threads back to implementation, the node this item runs a fix round on. Chain resumes from there: verification → work_brief → … → final_review. Fix round 2 of 3.", false],
+      ["request_changes", "Sends these threads back to implementation, the node this item runs a fix round on. Chain resumes from there: verification → work brief → … → approve final review. Fix round 2 of 3.", false],
       ["comment", "Agents answer questions in-thread. No code runs; the gate stays open.", false],
       ["approve", "Marks final_review approved, same as Approve on the gate.", false],
     ]);
@@ -161,6 +162,20 @@ describe("FinishDialog", () => {
     expect(screen.getByRole("dialog", { name: "Finish your review" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Request changes/ })).toBeDisabled();
     expect(screen.getByText("Finding the node this would send the threads to…")).toBeInTheDocument();
+  });
+
+  it("names the gate and the fix node in its toasts, not their ids", async () => {
+    vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
+    const chain = { template_id: "t", nodes: [{ id: "final_review", kind: "gate", artifact: "spec" }, { id: "work_brief", kind: "exec" }] } as WorkItem["chain_definition"];
+    const fix: FixTarget = { ...FIX, node: "work_brief" };
+    const it = item({ chain_definition: chain, fix_target: fix });
+    const first = routed(<><Toaster /><Finish it={it} threads={[]} /></>);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    expect(await screen.findByText(/^Approved · approve spec passed/)).toBeInTheDocument();
+    first.unmount();
+    routed(<><Toaster /><Finish it={it} threads={[th()]} initial="request_changes" /></>);
+    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Request changes" }).at(-1)!));
+    expect(await screen.findByText(/sent to work brief/)).toBeInTheDocument();
   });
 
   it("carries a chain revision's digest on Approve only", async () => {

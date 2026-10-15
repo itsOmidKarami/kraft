@@ -18,7 +18,7 @@ import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
-import { capitalise, gateName } from "../../board/rowText";
+import { capitalise, gateName, nameOf } from "../../board/rowText";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -99,7 +99,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const [openFile, setOpenFile] = useState<string | null>(place.file);
   useEffect(() => setOpenFile(place.file), [place.file]);
 
-  if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
+  if (params.get("compose") === "reject") return <ReviewComposer target={target && nameOf(item.chain_definition.nodes, target)} submit={submit} />;
   // Comments are written on the desktop; this screen reads the change and decides the gate.
   const readOnly = "Read-only here: add comments on the desktop.";
 

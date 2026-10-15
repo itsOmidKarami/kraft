@@ -21,6 +21,7 @@ export const isComposeKind = (v: string | null): v is ComposeKind => COMPOSE_KIN
 const gateOf = (item: ItemDetail) => item.pending_gate ?? item.stop?.node ?? "";
 const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
 /** The node as a reader names it. */
+const rejectName = (i: ItemDetail) => { const id = rejectTarget(i.chain_definition.nodes, gateOf(i)); return id ? nameOf(i.chain_definition.nodes, id) : "the previous node"; };
 const nodeName = (item: ItemDetail) => { const id = nodeOf(item); return id ? nameOf(item.chain_definition.nodes, id) : null; };
 
 /** Sends the note through the door `steerDoor` names. A stopped item's retry
@@ -65,10 +66,10 @@ const SPEC: Record<ComposeKind, Spec> = {
   },
   reject: {
     title: REQUEST_CHANGES,
-    help: (i) => `${sendsBack(false)}${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}, with your note as the first thing the agent reads.`,
+    help: (i) => `${sendsBack(false)}${rejectName(i)}, with your note as the first thing the agent reads.`,
     placeholder: "What needs to change?",
     label: REQUEST_CHANGES,
-    target: (i) => `Goes back to: ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}`,
+    target: (i) => `Goes back to: ${rejectName(i)}`,
   },
   answer: {
     title: "Answer",
