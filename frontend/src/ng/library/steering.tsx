@@ -9,7 +9,7 @@ import type { Use } from "./types";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
-/** A steering profile's Instructions tab: one text, saved on a pause (W10's 800 ms), empty is a problem. */
+/** A steering profile's text, on the canvas: one text, saved on a pause (W10's 800 ms), empty is a problem. */
 export function Instructions({ draft, path }: { draft: ConfigDraft; path: string }) {
   const text = str(authoredAt(draft.view!.result, draft.scope, path)?.instructions);
   return (
@@ -50,7 +50,7 @@ function useRepoNames(): string[] | null {
 /** What an agent task reads at launch, in launch order (Decisions §10 Steering): for one use of the profile
  *  in a chain and one repository, every section the server builds, each expanding to its text. It reads the
  *  published templates, so a draft change to the profile is not in it, and the pane says so. */
-export function SteeringCanvas({ row, uses, reserve }: { row: Row; uses: Use[] | null; reserve: number }) {
+export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: Use[] | null; reserve: number; draft: ConfigDraft }) {
   const repos = useRepoNames();
   const [useAt, setUseAt] = useState(0);
   const [repoAt, setRepoAt] = useState(0);
@@ -89,6 +89,7 @@ export function SteeringCanvas({ row, uses, reserve }: { row: Row; uses: Use[] |
 
   return (
     <div className="lib-preview" style={{ right: reserve }}>
+      <div className="lib-instructions"><Instructions draft={draft} path={row.id} /></div>
       <h2 className="lib-preview-title">Launch order</h2>
       <div className="lib-preview-pick">
         <label>

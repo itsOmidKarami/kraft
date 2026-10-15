@@ -20,14 +20,14 @@ import { problemText } from "../templates/problems";
 import { LibraryConfig } from "./config";
 import { libCrumbs, libDescribe } from "./describe";
 import { LibraryOverview } from "./overview";
-import { Instructions } from "./steering";
 import { UsedBy } from "./UsedBy";
 import type { Use } from "./types";
 import { ReadOnly } from "../templates/addon";
 import { yamlOf } from "../phone/areas/yaml";
 
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }];
-const STEERING_TABS = [{ value: "instructions", label: "Instructions" }, { value: "used", label: "Used by" }, { value: "yaml", label: "YAML" }];
+// A steering profile's text is edited on the canvas, where there is room; the pane keeps who uses it and its YAML.
+const STEERING_TABS = [{ value: "used", label: "Used by" }, { value: "yaml", label: "YAML" }];
 const FIXED_ICON: Record<string, string> = { fixloop: "refresh-cw", judge: "scale", steering: "scroll-text" };
 const SINGULAR = { nodes: "node", steps: "step", tasks: "task", steering: "steering profile" } as const;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -215,9 +215,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
       >
         {d.kind === "fixloop" ? (
           <LibraryOverview d={d} ctx={ctx} uses={null} />
-        ) : shown === "instructions" ? <Instructions draft={draft} path={path} />
-          : shown === "used" ? <UsedBy uses={uses ?? []} />
-          : shown === "config" ? <LibraryConfig ctx={ctx} />
+        ) : shown === "used" ? <UsedBy uses={uses ?? []} />
+          : shown === "config" ? <LibraryConfig ctx={ctx} kind={d.kind} />
           : shown === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} fixed={readOnly ? yamlOf(own ?? {}) : undefined} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
             : <LibraryOverview d={d} ctx={ctx} uses={uses} />}
       </Inspector>

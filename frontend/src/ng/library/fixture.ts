@@ -8,7 +8,7 @@ export const LIB_MODEL = {
   steering: { "project-standards": { instructions: "Keep changes focused." }, "never-signal-processes-you-didnt-start": { instructions: "Never signal a process you did not start." } },
   tasks: {
     implementer: { kind: "agent", prompt: "Implement the plan." },
-    code_review: { extends: "implementer", prompt: "Review it." },
+    code_review: { extends: "implementer", prompt: "Review it.", skill: "review" },
     verify: { kind: "subprocess", command: "make check" },
     await_ci: { kind: "forge", target: "mr.ci" },
   },

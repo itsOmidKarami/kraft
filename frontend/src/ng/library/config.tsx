@@ -2,6 +2,7 @@ import { Head, Note } from "../templates/panes/controls";
 import { ConfigRow, type Row } from "../templates/panes/Config";
 import type { PaneCtx } from "../templates/panes/Overview";
 import { authoredAt } from "../templates/draft/view";
+import type { LibKind } from "./describe";
 
 /** What a component writes in structure, not as a setting: the Overview and the canvas show these. */
 const NOT_SETTINGS = new Set(["id", "kind", "icon", "extends", "steps", "tasks", "on_failure", "fix_loop", "escalation", "auto_review", "judge", "on_conflict", "instructions"]);
@@ -23,11 +24,20 @@ export function ownRows(own: Record<string, unknown> | null): Row[] {
   return rows;
 }
 
-/** The Config tab of a library component: the keys it writes itself. The library has no inherited values to
- *  chip (its draft answers no `sources`), so each row is the component's own: ✎ edits, ↺ removes the key. */
-export function LibraryConfig({ ctx }: { ctx: PaneCtx }) {
-  const rows = ownRows(authoredAt(ctx.r, ctx.scope, ctx.path));
-  if (!rows.length) return <Note>This component writes no settings of its own.</Note>;
+/** What the Overview tab already edits, per kind: Config leaves these out, so a field has one home. */
+const ON_OVERVIEW: Partial<Record<LibKind, ReadonlySet<string>>> = {
+  task: new Set(["prompt", "harness", "profile", "model", "effort", "fallback", "ref", "scope", "execution", "command", "target", "wait.polling.initial_interval", "policy.total_time_cap_minutes"]),
+  gate: new Set(["message", "timeout"]),
+};
+
+/** The Config tab of a library component: the keys it writes that the Overview tab does not edit. The library has no
+ *  inherited values to chip (its draft answers no `sources`), so each row is the component's own: ✎ edits, ↺ removes the key. */
+export function LibraryConfig({ ctx, kind }: { ctx: PaneCtx; kind: LibKind }) {
+  const own = authoredAt(ctx.r, ctx.scope, ctx.path);
+  const all = ownRows(own);
+  const rows = all.filter((x) => !ON_OVERVIEW[kind]?.has(x.field));
+  if (!all.length) return <Note>This component writes no settings of its own.</Note>;
+  if (!rows.length) return <Note>Everything this component writes is edited on the Overview tab.</Note>;
   return (
     <>
       <Head>Settings it writes</Head>

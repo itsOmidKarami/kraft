@@ -81,6 +81,9 @@ describe("Library: a steering profile's pane", () => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...libView(), ops: [{ op: "set_field" }] }) as never);
     open();
     const field = await screen.findByLabelText("instructions");
+    // The text is on the canvas; the pane keeps Used by and YAML.
+    expect(field.closest("aside")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Instructions" })).toBeNull();
     expect(field).toHaveValue("Keep changes focused.");
     await u.type(field, "!");
     await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "set_field", path: "steering.project-standards", field: "instructions", value: "Keep changes focused.!" }]), { timeout: 3000 });

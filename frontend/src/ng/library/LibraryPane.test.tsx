@@ -75,16 +75,24 @@ describe("Library pane: Config and YAML", () => {
   it("lists the keys a component writes, and an edit sends one set_field at the library path", async () => {
     const u = userEvent.setup();
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...libView(), ops: [{ op: "set_field" }] }) as never);
+    await pane("tasks.code_review");
+    await tab("Config");
+    // The prompt is the Overview's to edit; Config holds only what the Overview does not.
+    expect([...document.querySelectorAll(".cfg-k")].map((e) => e.textContent)).toEqual(["skill"]);
+    await u.click(screen.getByRole("button", { name: "Edit skill" }));
+    const field = screen.getByRole("textbox", { name: "skill" });
+    await u.clear(field);
+    await u.type(field, "audit");
+    await u.keyboard("{Enter}");
+    await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "set_field", path: "tasks.code_review", field: "skill", value: "audit" }], undefined));
+    expect(within(screen.getByRole("tab", { name: "Config" }).closest("aside") ?? document.body).queryByLabelText("overridden here")).toBeNull();
+  });
+
+  it("says a task whose fields are all on the Overview has nothing for Config", async () => {
     await pane("tasks.implementer");
     await tab("Config");
-    expect([...document.querySelectorAll(".cfg-k")].map((e) => e.textContent)).toEqual(["prompt"]);
-    await u.click(screen.getByRole("button", { name: "Edit prompt" }));
-    const field = screen.getByRole("textbox", { name: "prompt" });
-    await u.clear(field);
-    await u.type(field, "Do it well.");
-    await u.keyboard("{Enter}");
-    await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "set_field", path: "tasks.implementer", field: "prompt", value: "Do it well." }], undefined));
-    expect(within(screen.getByRole("tab", { name: "Config" }).closest("aside") ?? document.body).queryByLabelText("overridden here")).toBeNull();
+    expect(screen.getByText("Everything this component writes is edited on the Overview tab.")).toBeInTheDocument();
+    expect(document.querySelector(".cfg-k")).toBeNull();
   });
 
   it("reads the component's own YAML from the library draft", async () => {
