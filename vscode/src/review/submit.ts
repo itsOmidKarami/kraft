@@ -109,12 +109,12 @@ export function registerReviewSubmit(
         if (r === "refused") return not("must-fix");
         if (r === "read-first") return info(`Read ${g} first: the document is open.`), not("read-first");
         if (r === "cancelled" || !sent) return not("cancelled");
-        info(submitMessage("approve", sent, { id, n, gate: g, fixNode: null, paused: false }));
+        info(submitMessage("approve", sent, { id, title: detail!.title, n, gate: g, fixNode: null, paused: false }));
       } else {
         const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }), ...(outcome === "request_changes" && node && { node }) });
         // The gate's document will be revised: the render shown so far no longer binds an approve.
         if (gate && outcome === "request_changes") shown.forget(id);
-        info(submitMessage(outcome, r, { id, n, gate, fixNode, paused: detail!.status === "paused" }));
+        info(submitMessage(outcome, r, { id, title: detail!.title, n, gate, fixNode, paused: detail!.status === "paused" }));
       }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.

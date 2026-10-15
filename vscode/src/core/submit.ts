@@ -1,4 +1,5 @@
 import type { FixTarget, GatelessChanges, ReviewResult, WorkItemDetail } from "./api";
+import { approvedMessage } from "./approve";
 import { NO_ROUNDS, outOfRounds } from "./restart";
 
 export type Outcome = "request_changes" | "comment" | "approve";
@@ -31,11 +32,11 @@ const ACTION: Record<GatelessChanges["action"], string> = { retried: "retried", 
 export function submitMessage(
   outcome: Outcome,
   r: ReviewResult,
-  ctx: { id: string; n: number; gate: string | null; fixNode: string | null | undefined; paused: boolean },
+  ctx: { id: string; title: string; n: number; gate: string | null; fixNode: string | null | undefined; paused: boolean },
 ): string {
   const sent = ctx.n === 1 ? "1 thread" : `${ctx.n} threads`;
   if (outcome === "comment") return `${sent} sent · ${"gate" in r && r.gate ? "gate stays open" : "the item keeps going"}`;
-  if (outcome === "approve") return `Approved · ${ctx.gate} passed`;
+  if (outcome === "approve") return approvedMessage(ctx.title, ctx.gate ?? "", "current_node_id" in r ? r : null);
   if ("action" in r && "target" in r) {
     const stays = r.action === "queued" && ctx.paused ? `. ${ctx.id} stays paused until you resume it.` : "";
     return `Requested changes · ${sent} sent to ${r.target} · ${ACTION[r.action]}${stays}`;

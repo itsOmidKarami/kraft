@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ALREADY_STARTING, alreadyRunning, oneAtATime, startFailure, startInvocation } from "../../src/core/start";
+import { ALREADY_STARTING, alreadyRunning, startButtons, oneAtATime, startFailure, startInvocation } from "../../src/core/start";
 
 const ARGS = ["admin", "start", "--detach"];
 
@@ -63,3 +63,8 @@ describe("oneAtATime", () => {
     await expect(once(async () => 1)).resolves.toBe(1);
   });
 });
+
+it.each([
+  ["not installed: get it, or point at it", { code: "ENOENT" }, ["Get Kraft", "Open Settings"]],
+  ["any other failure: no buttons", { code: 1 }, []],
+])("startButtons: %s", (_, err, want) => expect(startButtons(err)).toEqual(want));

@@ -5,7 +5,7 @@ import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { Announcer, toastActions, toastLevel, type Announcement } from "./core/announcer";
 import { announceable, onBoard, type Include } from "./core/board";
-import { approveOrRead, isStaleRevision } from "./core/approve";
+import { approvedMessage, approveOrRead, consequenceQuestion, gateConsequence, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
 import { showRefusal } from "./review/refusal";
 import type { Artifact } from "./core/api";
@@ -99,9 +99,15 @@ export function registerGates(
     // Read once the approve is about to go: drafts written since the document opened go with it.
     const send = async (digest: string | undefined) => {
       const n = drafts(await cache.load(id)).length;
+      const item = store.item(id);
+      const what = item && gateConsequence(item, g);
+      if (!n && what) {
+        const ok = await vscode.window.showWarningMessage(consequenceQuestion(item.title, what), { modal: true }, "Approve");
+        if (ok !== "Approve") return false;
+      }
       if (!n) return api.approve(id, g, digest).then(() => true);
       const ok = await vscode.window.showWarningMessage(
-        `Approve ${g} and send ${n} draft comment${n === 1 ? "" : "s"} with it? No agent acts on comments sent with an approval.`,
+        `Approve ${g} and send ${n} draft comment${n === 1 ? "" : "s"} with it?${what ? ` This also ${what === "merge" ? "merges it into the target branch" : "pushes it"}.` : ""} No agent acts on comments sent with an approval.`,
         { modal: true },
         "Approve and Send",
       );
@@ -120,7 +126,11 @@ export function registerGates(
       });
       if (outcome === "read-first") void vscode.window.showInformationMessage(`Read ${g} first: the document is open.`);
       // The approve went through: a failed re-read is not a failed approve.
-      if (outcome === "approved") await store.refresh(id).catch(() => {});
+      if (outcome === "approved") {
+        const title = store.item(id)?.title ?? id;
+        await store.refresh(id).catch(() => {});
+        void vscode.window.showInformationMessage(approvedMessage(title, g, store.item(id)));
+      }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.
       if (isStaleRevision(e) && !(await openArtifact(id, g))) return;

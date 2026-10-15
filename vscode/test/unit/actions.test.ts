@@ -50,3 +50,16 @@ it.each<[string, { code: number | undefined } | undefined, boolean, boolean, str
   for (const cb of closes) await cb(closed);
   expect([warn.mock.calls, exec.mock.calls]).toEqual([said, ran]);
 });
+
+// Archive deletes the worktree, as the bulk archive says: one confirms too, unless there is no worktree.
+it.each<[string, boolean, string | undefined, string[], number]>([
+  ["with a worktree, confirmed", true, "Archive", ["Archive Cache embeddings? Its worktree is deleted."], 1],
+  ["with a worktree, declined", true, undefined, ["Archive Cache embeddings? Its worktree is deleted."], 0],
+  ["without a worktree: no question", false, undefined, [], 1],
+])("a single archive %s", async (_, worktree, answer, asked, archived) => {
+  const api = { archive: vi.fn(async () => {}) };
+  const store = { refresh: vi.fn(async () => true) } as unknown as Store;
+  const ask = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(answer as never);
+  await runAction(api as never, store, item({ id: "A-1", title: "Cache embeddings", worktree_exists: worktree }), "archive");
+  expect([ask.mock.calls.map((c) => c[0]), api.archive.mock.calls.length]).toEqual([asked, archived]);
+});
