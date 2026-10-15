@@ -15,6 +15,7 @@ import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
 import { DiffView, pickOf, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
+import { GateConsequence } from "./GateConsequence";
 import { GateReview } from "./GateReview";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
 import { byNodes, folders, unresolved } from "./model";
@@ -157,6 +158,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         prefs={diff.prefs}
         setPrefs={diff.set}
       />
+      <GateConsequence item={item} gate={place.gate} className="rv-next" />
       {diff.error && <p className="rv-error rv-bar-error" role="alert">{diff.error}</p>}
       <div className={`rv-body${treeOpen ? " has-tree" : ""}${overlay ? " is-overlay" : ""}`}>
         {treeOpen && (
