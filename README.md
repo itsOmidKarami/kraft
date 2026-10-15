@@ -29,7 +29,7 @@ proposes, and rehearses them with `--verify`.
 [What's new in 2.0](https://kraft-sdlc.dev/next/get-started/whats-new)
 has the rest, and what to check before you upgrade from 1.4.
 
-![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
+![The Kraft board: work items grouped by Needs you (a paused, a failed and two waiting at a gate, each with its one button), Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; reject with a note and the node that wrote it
@@ -63,7 +63,7 @@ then approve, or reject with a note that re-runs the node that wrote it.
 </td>
 <td width="40%">
 
-![The board at a 390px phone viewport, with bottom tab navigation](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
+![The board at a 390px phone viewport, with bottom tab navigation and cards for a paused, a failed and two gate-waiting items, each with one button](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
 </td>
 </tr>
@@ -170,7 +170,7 @@ Lead time, cost, and where both go — by node and by repo, over the last 8
 weeks (on a phone, the last 7, 30 or 90 days). Built from the same events the
 board renders live, not a separate pipeline.
 
-![The Analytics view over the last 8 weeks: completed count, median lead time and cost; merged items per week; the top of the cost-by-node table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
+![The Analytics view over the last 8 weeks, with Range, Repo and Chain menus: completed count, median lead time, cost and repairs; merged items per week; a Waiting at each gate table; the top of the cost-by-node table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
 
 ## Where to go next
 
