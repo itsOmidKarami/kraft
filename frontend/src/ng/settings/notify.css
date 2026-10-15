@@ -4,7 +4,7 @@
 .nt-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
 .nt-title h1 { margin: 0; font-size: 16px; font-weight: 500; }
 .nt-title .lede { flex: 1; min-width: 220px; margin: 0; line-height: 1.5; }
-.nt-h2 { margin: 6px 2px 0; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.nt-h2 { margin: 6px 2px 0; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .nt-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
 .nt-card:hover { background: var(--surface); }
 .nt-card.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
@@ -13,7 +13,7 @@
 .nt-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--line); color: var(--text-sub); }
 .nt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .nt-name { font-size: 13px; }
-.nt-sub { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.nt-sub { font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .nt-chips { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 3px; }
 .nt-card:not(.is-on) .nt-chip { border-style: dashed; }
 .nt-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: 10.5px/16px ui-monospace, Menlo, monospace; color: var(--text-sub); }
@@ -22,7 +22,7 @@
 .nt-card.is-on .nt-status { color: var(--ok); }
 .nt-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
 .nt-card.is-on .nt-dot { background: var(--ok); }
-.nt-extra { font-size: 10.5px; color: var(--text-muted); }
+.nt-extra { font-size: var(--fs-label); color: var(--text-muted); }
 .nt-extra.is-bad { color: var(--bad); }
 .nt-test { flex: none; }
 .nt-on { color: var(--ok); }

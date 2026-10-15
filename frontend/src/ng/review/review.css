@@ -26,9 +26,9 @@
 .rv-check { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12.5px; text-align: left; cursor: pointer; }
 .rv-check:is(:hover, :focus-visible) { background: var(--line); }
 .rv-check-label { flex: 1 1 auto; }
-.rv-check-count { color: var(--text-muted); font-size: 11.5px; }
+.rv-check-count { color: var(--text-muted); font-size: var(--fs-meta); }
 .rv-check-rule { height: 1px; margin: 4px 0; background: var(--line); }
-.rv-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 1; color: transparent; }
+.rv-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; font-size: var(--fs-meta); line-height: 1; color: transparent; }
 .rv-box.is-on { border-color: var(--text-sub); background: var(--text-sub); color: var(--bg); }
 .rv-tick { flex: none; width: 16px; text-align: center; }
 .rv-mono { font-family: ui-monospace, Menlo, monospace; }
@@ -53,10 +53,10 @@
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }
 .rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
 .rv-folder-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 11.5px; text-align: left; cursor: pointer; }
+.rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .rv-folder-row.is-static { cursor: default; }
 .rv-folder-row:not(.is-static):is(:hover, :focus-visible) { background: var(--line); }
-.rv-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; }
+.rv-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; font-size: var(--fs-meta); }
 .rv-file-row.is-nested { padding-left: 20px; }
 .rv-file-row.is-on { background: var(--line); }
 .rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
@@ -67,8 +67,8 @@
 .rv-file-row.is-viewed > :is(.rv-file-icon, .rv-file-name) { opacity: 0.6; }
 .rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .rv-file-row.is-on .rv-file-name { color: var(--text); }
-.rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 10.5px; text-align: center; }
-.rv-tree-foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-muted); }
+.rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: var(--fs-label); text-align: center; }
+.rv-tree-foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-muted); }
 
 /* Diff (prototype 419–490). Tints follow theme.diff.colours; the marks stay,
    so the diff reads without colour (Decisions §13). */
@@ -81,7 +81,7 @@
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; }
 .rv-file-note { color: var(--text-muted); white-space: nowrap; }
-.rv-file-threads { padding: 1px 7px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 11px; white-space: nowrap; }
+.rv-file-threads { padding: 1px 7px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: var(--fs-meta); white-space: nowrap; }
 .rv-viewed-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-sub); font-size: 12px; white-space: nowrap; cursor: pointer; }
 .rv-viewed-btn[aria-pressed="true"] { color: var(--text); }
 .rv-viewed-btn:is(:hover, :focus-visible) { background: var(--line); }
@@ -93,7 +93,7 @@
 .rv-lines { width: max-content; min-width: 100%; font: 12px/1.6 ui-monospace, Menlo, monospace; }
 .rv-files.is-wrap .rv-lines { width: auto; }
 .rv-lines:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.rv-hunk { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; white-space: pre; }
+.rv-hunk { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: var(--fs-meta); white-space: pre; }
 .rv-expand { display: inline-flex; gap: 2px; }
 .rv-expand > .icon-btn { min-width: 24px; min-height: 24px; }
 .rv-row { display: flex; align-items: stretch; min-width: 100%; }
@@ -140,7 +140,7 @@
 .rv-tag.is-must_fix { background: color-mix(in oklab, var(--bad) 12%, transparent); color: color-mix(in oklab, var(--bad) 80%, var(--text)); }
 .rv-tag.is-question { background: color-mix(in oklab, var(--info) 12%, transparent); color: color-mix(in oklab, var(--info) 80%, var(--text)); }
 .rv-tag.is-nit { background: var(--surface-2); color: var(--text-muted); }
-.rv-claim { padding: 1px 7px; border-radius: 5px; font-size: 11px; background: var(--surface-2); color: var(--text-sub); }
+.rv-claim { padding: 1px 7px; border-radius: 5px; font-size: var(--fs-meta); background: var(--surface-2); color: var(--text-sub); }
 .rv-claim.is-fixed, .rv-claim.is-answered { color: var(--ok); }
 .rv-reply { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0 12px; border-left: 2px solid var(--line); }
 .rv-reply.is-agent { border-left-color: var(--border); }
@@ -152,7 +152,7 @@
 .rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 13px/1.5 var(--font-sans); resize: vertical; }
 .rv-textarea.rv-mono { font: 12px/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }
 .rv-chips { display: inline-flex; gap: 4px; }
-.rv-chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: 11.5px; cursor: pointer; }
+.rv-chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: var(--fs-meta); cursor: pointer; }
 .rv-chip.is-on, .rv-chip[aria-pressed="true"] { border-color: var(--text-sub); background: var(--line); color: var(--text); }
 .rv-chip:is(:hover, :focus-visible) { background: var(--line); }
 .rv-preview { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
@@ -196,7 +196,7 @@
 .rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
 .rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .rv-gate-name { color: var(--text); font-size: 13px; }
-.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: color-mix(in oklab, var(--warn) 80%, var(--text)); font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: color-mix(in oklab, var(--warn) 80%, var(--text)); font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
 .rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
 .rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: 13.5px; line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }
@@ -205,7 +205,7 @@
 .rv-gate-doc-title { color: var(--text); font-size: 16px; font-weight: 600; }
 .rv-gate-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
 .rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: 12px; color: var(--text-sub); }
-.rv-gate-side-head > span:first-child { font-size: 11px; letter-spacing: .06em; color: var(--text-muted); }
+.rv-gate-side-head > span:first-child { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--text-muted); }
 .rv-gate-side > .rv-tree { flex: 1 1 0; width: auto; border: 0; border-radius: 0; }
 .rv-gate-side > .rv-tree .rv-tree-head { display: none; }
 .rv-gate-side-foot { padding: 10px 12px; border-top: 1px solid var(--line); }

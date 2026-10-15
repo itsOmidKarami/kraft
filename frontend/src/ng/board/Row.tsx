@@ -1,9 +1,10 @@
 import type { KeyboardEvent, MouseEvent } from "react";
+import { CircleAlert, CircleHelp, Clock, Pause, TriangleAlert } from "../icons";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { chainOf, groupOf } from "./model";
-import { admittedRowAction, glyphOf, reasonTail, ticksOf, type RowAction } from "./rowText";
+import { admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction, type StopCue } from "./rowText";
 import { Ticks } from "./Ticks";
 
 export interface RowProps {
@@ -22,6 +23,8 @@ export interface RowProps {
   own?: { label: string; run: () => void; tail: string; age: string };
 }
 
+const CUE_ICON: Record<StopCue, typeof Clock> = { failed: CircleAlert, paused: Pause, gate: Clock, question: CircleHelp, limit: TriangleAlert, other: TriangleAlert };
+
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
 export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own }: RowProps) {
@@ -29,6 +32,8 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   const act = own ? null : admittedRowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
+  const cue = hot ? stopCueOf(item) : null;
+  const Cue = cue ? CUE_ICON[cue] : null;
   // A row's action is named by what it does ("Review to approve") and described by its item:
   // five alike in a row read the same to a screen reader without it (R8b-11).
   const titleId = `board-title-${item.id}`;
@@ -57,7 +62,10 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className={`board-meta-tail${hot ? " is-hot" : ""}`}>{own?.tail ?? reasonTail(item, now)}</span>
+          <span className={`board-meta-tail${hot ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
+            {Cue && <Cue size={12} aria-hidden className="board-cue" />}
+            <span className="board-tail-text">{own?.tail ?? reasonTail(item, now)}</span>
+          </span>
         </span>
       </button>
       <Ticks ticks={ticksOf(item)} />
