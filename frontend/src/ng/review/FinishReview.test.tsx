@@ -80,11 +80,12 @@ describe("FinishDialog", () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
     routed(<Finish />);
     expect(screen.getByRole("radio", { name: /Request changes/ })).toBeChecked();
-    // GR-11: at the gate, Request changes says it is a rejection, and where it goes.
-    expect(screen.getByText(/goes back to/).closest("p")).toHaveTextContent("Reject final_review · goes back to implementation");
+    // GR-11: where it goes is said once, in the outcome's own sentence.
+    expect(screen.getAllByText(/back to/)).toHaveLength(1);
+    expect(screen.getByText(/Sends these threads back to/).closest(".rv-outcome-sub")).toHaveTextContent("implementation");
     expect(screen.queryByRole("button", { name: "Submit review" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Overall note" }), { target: { value: " Bound it. " } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reject to implementation" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Request changes" })));
     expect(vi.mocked(http.request).mock.calls.at(-1)![0]).toBe("/work-items/w1/gates/final_review/review");
     expect(body()).toEqual({ outcome: "request_changes", summary: "Bound it." });
     expect(where).toBe("/work-items/w1?sel=implementation");
@@ -111,7 +112,7 @@ describe("FinishDialog", () => {
     routed(<Finish it={item({ pending_gate: null, fix_target: null })} gate={null} />);
     expect(await screen.findByText("verification")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Approve/ })).toBeDisabled();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Request changes" })));
     expect(vi.mocked(http.request).mock.calls.at(-1)![0]).toBe("/work-items/w1/review");
     expect(body()).toEqual({ outcome: "request_changes" });
     expect(where).toBe("/work-items/w1?sel=verification");
@@ -127,18 +128,30 @@ describe("FinishDialog", () => {
     expect(where).toBe("/work-items/w1/review");
   });
 
-  it("with no threads it opens on Approve; asked for Request changes it will not send with nothing to send", () => {
-    const { unmount } = routed(<Finish threads={[]} />);
+  it("with no threads it opens on Approve", () => {
+    routed(<Finish threads={[]} />);
     expect(screen.getByRole("radio", { name: /Approve/ })).toBeChecked();
     expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
-    unmount();
+  });
+
+  it("opened on Request changes with nothing to send it is one action: a focused note, a press that asks for the text, no other outcomes", async () => {
+    const request = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
     routed(<Finish threads={[]} initial="request_changes" />);
-    expect(screen.getByText("No threads yet. Add a comment on a line or a file first.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reject to implementation" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reject to implementation" })).toHaveAccessibleDescription("Add a comment or a note first.");
-    fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
-    expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
-    expect(screen.queryByText(/goes back to/)).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Request changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByText(/No threads yet/)).toBeNull();
+    const note = screen.getByRole("textbox", { name: "Overall note" });
+    expect(note).toHaveFocus();
+    // Quiet until a press finds nothing to send.
+    const send = screen.getByRole("button", { name: "Request changes" });
+    expect(send).toBeEnabled();
+    expect(screen.queryByText("Write what needs to change first.")).toBeNull();
+    fireEvent.click(send);
+    expect(request).not.toHaveBeenCalled();
+    expect(note).toHaveAccessibleDescription("Write what needs to change first.");
+    expect(send).not.toHaveAttribute("aria-describedby");
+    fireEvent.change(note, { target: { value: "Bound it." } });
+    expect(screen.queryByText("Write what needs to change first.")).toBeNull();
   });
 
   it("carries a chain revision's digest on Approve only", async () => {
@@ -148,7 +161,7 @@ describe("FinishDialog", () => {
     expect(body()).toEqual({ outcome: "approve", digest: "d1" });
     unmount();
     routed(<Finish digest="d1" />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reject to implementation" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Request changes" })));
     expect(body()).toEqual({ outcome: "request_changes" });
   });
 

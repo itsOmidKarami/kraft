@@ -216,7 +216,7 @@ describe("Request changes (F.3)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
     expect(screen.getByText("Goes back to: plan")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Reject to plan" });
+    const send = screen.getByRole("button", { name: "Request changes" });
     expect(send).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "bound the cache");
     await userEvent.click(send);
@@ -262,7 +262,7 @@ describe("Request changes (F.3)", () => {
   it("stays on the composer, with the text, when the server refuses", async () => {
     mount(gateItem(), "/work-items/w1/review?compose=reject", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "no fix rounds left" }] });
     await userEvent.type(await screen.findByRole("textbox", { name: "Your note" }), "x");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
     expect(screen.getByRole("textbox", { name: "Your note" })).toHaveValue("x");
   });

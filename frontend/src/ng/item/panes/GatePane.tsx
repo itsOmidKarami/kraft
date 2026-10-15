@@ -1,4 +1,4 @@
-import { REQUEST_CHANGES, rejectTo } from "../../review/finish";
+import { REQUEST_CHANGES } from "../../review/finish";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChainNode, KraftEvent } from "../../../types";
@@ -108,7 +108,7 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
         <textarea autoFocus aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
-          <Button variant="danger" disabled={busy || !note.trim()} onClick={reject}>{to ? rejectTo(to) : REQUEST_CHANGES}</Button>
+          <Button variant="danger" disabled={busy || !note.trim()} onClick={reject}>{REQUEST_CHANGES}</Button>
           <Button onClick={() => { refocus.current = true; setRejecting(false); }}>Cancel</Button>
         </div>
       </div>

@@ -8,7 +8,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, rejectTo } from "../../review/finish";
+import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -269,7 +269,7 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{target ? rejectTo(target) : REQUEST_CHANGES}</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{REQUEST_CHANGES}</Button>
       </div>
     </>
   );

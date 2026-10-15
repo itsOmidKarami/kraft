@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CommentReview, FixTarget, GatelessChanges, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { placeUrl } from "../item/url";
 import { Button } from "../ui/Button";
 import { useReason } from "../ui/Reason";
-import { ADD_TO_SUBMIT } from "../ui/reasons";
+import { ADD_NOTE, ADD_TO_SUBMIT } from "../ui/reasons";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
-import { REQUEST_CHANGES, approveBlock, barText, drafts, outcomes, rejectTo } from "./finish";
+import { REQUEST_CHANGES, approveBlock, barText, drafts, outcomes } from "./finish";
 import { rangeName, threadRange } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
@@ -108,16 +108,26 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const approveFirst = !threads.length && !rows.find((r) => r.key === "approve")?.disabled;
   const firstOpen = approveFirst ? "approve" : rows.find((r) => !r.disabled)?.key ?? "comment";
   const [picked, setPicked] = useState<ReviewOutcome | null>(initial ?? null);
-  const outcome = picked && !rows.find((r) => r.key === picked)?.disabled ? picked : firstOpen;
+  // Opened on Request changes there is one action to take: the choice of outcomes would only offer it again, with Approve beside it.
+  const request = rows[0];
+  const focused = initial === "request_changes" && (!request.disabled || !fix);
+  const outcome = focused ? "request_changes" : picked && !rows.find((r) => r.key === picked)?.disabled ? picked : firstOpen;
   const [note, setNote] = useState("");
+  const [tried, setTried] = useState(false);
+  const noteBox = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toSend = drafts(threads);
   const canSend = outcome === "approve" || toSend.length > 0 || !!note.trim();
-  const noSend = useReason(canSend ? null : ADD_TO_SUBMIT);
-  // At the gate, Request changes is a rejection (the review route calls reject_gate): the dialog says so, and where it goes (GR-11).
-  const rejectNode = atGate && outcome === "request_changes" ? fix?.node ?? null : null;
+  // Said after a press that had nothing to send, and gone once there is something.
+  const noSend = useReason(tried && !canSend ? (focused ? ADD_NOTE : ADD_TO_SUBMIT) : null);
+  const waiting = outcome === "request_changes" && !fix;
   const go = async () => {
+    if (!canSend) {
+      setTried(true);
+      noteBox.current?.focus();
+      return;
+    }
     setBusy(true);
     const e = await submit(outcome, note);
     setBusy(false);
@@ -126,19 +136,20 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   };
   return (
     <Dialog
-      title="Finish your review"
+      title={focused ? REQUEST_CHANGES : "Finish your review"}
       onClose={onClose}
       dirty={!!note.trim()}
       footer={
         <>
           <Button onClick={onClose}>Keep reviewing</Button>
           {noSend.note}
-          <Button variant="primary" disabled={!canSend || busy} {...noSend.attrs} onClick={go}>{rejectNode ? rejectTo(rejectNode) : "Submit review"}</Button>
+          <Button variant="primary" disabled={busy || waiting} onClick={go}>{outcome === "request_changes" ? REQUEST_CHANGES : "Submit review"}</Button>
         </>
       }
     >
       <div className="rv-finish">
-        <ul className="rv-finish-list" aria-label="To send">
+        {focused && <p className="rv-muted">{request.parts.map((p, i) => <span key={i} className={p.mono ? "rv-mono" : undefined}>{p.t}</span>)}</p>}
+        {(toSend.length > 0 || !focused) && <ul className="rv-finish-list" aria-label="To send">
           {toSend.map(({ thread: t, comment: c }) => (
             <li key={c.id}>
               {t.label && <span className={`rv-tag is-${t.label}`}>{{ must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" }[t.label]}</span>}
@@ -148,9 +159,10 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
             </li>
           ))}
           {!toSend.length && <li className="rv-muted">No threads yet. Add a comment on a line or a file first.</li>}
-        </ul>
-        <textarea className="rv-textarea" aria-label="Overall note" placeholder="Overall note for the agent (optional), markdown supported" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(go, canSend && !busy)} />
-        <fieldset className="rv-outcomes">
+        </ul>}
+        <textarea ref={noteBox} autoFocus={focused} className="rv-textarea" aria-label="Overall note" {...noSend.attrs} placeholder={focused && !toSend.length ? "What needs to change? The agent reads this first, markdown supported" : "Overall note for the agent (optional), markdown supported"} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !waiting)} />
+        {noSend.note}
+        {!focused && <fieldset className="rv-outcomes">
           <legend className="review-visually-hidden">Outcome</legend>
           {rows.map((r) => (
             <label key={r.key} className={`rv-outcome${r.disabled ? " is-off" : ""}${outcome === r.key ? " is-on" : ""}`}>
@@ -161,8 +173,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
               </span>
             </label>
           ))}
-        </fieldset>
-        {rejectNode && <p className="rv-muted">Reject <code>{gate}</code> · goes back to <code>{rejectNode}</code></p>}
+        </fieldset>}
         {error && <p className="rv-error" role="alert">{error}</p>}
       </div>
     </Dialog>

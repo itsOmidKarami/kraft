@@ -40,9 +40,9 @@ describe("GateFooter", () => {
     await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     const card = screen.getByRole("group", { name: "Reject plan_approval" });
     expect(card).toHaveTextContent("goes back to plan");
-    expect(screen.getByRole("button", { name: "Reject to plan" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
   });
 
@@ -92,7 +92,7 @@ describe("GateFooter", () => {
     render(<GateFooter item={pending} gate={gate} reload={reload} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
     expect(screen.getByRole("group", { name: "Reject plan_approval" })).toBeInTheDocument();
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveValue("Add the invalidation story.");

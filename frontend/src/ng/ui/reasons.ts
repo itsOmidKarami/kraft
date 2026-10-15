@@ -6,3 +6,4 @@ export const WEBHOOK_OFF = (urlSet: boolean, typing = false) => (urlSet ? "Turn 
 export const CHOOSE_REPO = "Choose a repo to create it in.";
 export const COMMENT_NEEDS_TEXT = "A comment needs some text.";
 export const ADD_TO_SUBMIT = "Add a comment or a note first.";
+export const ADD_NOTE = "Write what needs to change first.";

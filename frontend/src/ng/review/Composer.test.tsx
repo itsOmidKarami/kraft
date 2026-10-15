@@ -21,7 +21,8 @@ describe("Composer", () => {
     const { onSubmit } = compose(NEW);
     expect(screen.getByRole("group", { name: "Comment: Lines 5–6" })).toBeInTheDocument();
     const add = screen.getByRole("button", { name: "Add to review" });
-    expect(add).toBeDisabled();
+    expect(add).toBeEnabled();
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Cap it lower" } });
     fireEvent.click(screen.getByRole("radio", { name: "Must fix" }));
     // The chosen label is filled and checked, not only tinted; Preview is a toggle, not a label.
@@ -127,10 +128,13 @@ describe("Composer", () => {
   it("sends on ⌘↵ or Ctrl+↵ from the comment or the suggestion, never with no text", async () => {
     const { onSubmit } = compose(NEW);
     const box = screen.getByRole("textbox", { name: "Comment" });
+    // Quiet until a send finds no text, and gone once there is some.
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Add to review" })).toHaveAccessibleDescription("A comment needs some text.");
+    expect(box).toHaveAccessibleDescription("A comment needs some text.");
     fireEvent.change(box, { target: { value: "Cap it lower" } });
+    expect(screen.queryByText("A comment needs some text.")).toBeNull();
     // A plain Enter is a new line.
     await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
     expect(onSubmit).not.toHaveBeenCalled();
