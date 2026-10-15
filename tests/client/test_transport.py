@@ -232,7 +232,8 @@ def test_a_call_with_no_usable_answer_is_one_sentence(monkeypatch, handler, kind
 
 def test_the_client_raises_no_bare_value_error():
     """The console catches `ClientError` and lets anything else crash as a
-    bug, so a refusal raised as a plain ValueError would crash it."""
+    bug, so a refusal raised as a plain ValueError would crash it. It pins
+    literal raises only; an implicit ValueError from json parsing is not caught."""
     bare = [
         f"{path.name}:{node.lineno}"
         for path in sorted(Path(client.__file__).parent.glob("*.py"))
@@ -244,21 +245,40 @@ def test_the_client_raises_no_bare_value_error():
     assert bare == []
 
 
+_ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
+
+
 @pytest.mark.parametrize(
-    ("call", "kind"),
+    ("call", "kind", "answer"),
     [
-        (lambda: client.health(), client.Failure.OTHER_INSTANCE),
-        (lambda: client.reject_gate("  ", "spec_approval", "w1"), client.Failure.REFUSED),
-        (lambda: client.get_work_item(), client.Failure.REFUSED),
+        (lambda: client.health(), client.Failure.OTHER_INSTANCE, _ELSEWHERE),
+        (
+            lambda: client.reject_gate("  ", "spec_approval", "w1"),
+            client.Failure.REFUSED,
+            _ELSEWHERE,
+        ),
+        (lambda: client.get_work_item(), client.Failure.REFUSED, _ELSEWHERE),
+        (
+            lambda: client.update_repo("/r", {}),
+            client.Failure.SERVER_ERROR,
+            httpx.Response(500, text="Internal Server Error"),
+        ),
+        (
+            lambda: client.pause(work_item_id="w1"),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, text="<html>proxy</html>"),
+        ),
     ],
-    ids=["other-instance", "blank-note", "no-item"],
+    ids=["other-instance", "blank-note", "no-item", "text-500", "text-200-post"],
 )
-def test_a_refusal_the_client_makes_itself_is_a_client_error(monkeypatch, tmp_path, call, kind):
+def test_a_refusal_the_client_makes_itself_is_a_client_error(
+    monkeypatch, tmp_path, call, kind, answer
+):
     """The client's own checks refuse before or after a request; the console
     tells them from a crash the same way it does a server's refusal."""
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
     monkeypatch.chdir(tmp_path)  # not a Kraft worktree, so no item to default to
-    _serve(monkeypatch, lambda request: httpx.Response(200, json={"run_dir": "/elsewhere"}))
+    _serve(monkeypatch, lambda request: answer)
     with pytest.raises(client.ClientError) as caught:
         asyncio.run(call())
     assert caught.value.kind == kind

@@ -371,8 +371,8 @@ async def permission_request(
             },
             **({"timeout": ENFORCE_TIMEOUT} if mode == "enforce" else {}),
         )
-    # `_send` raises ValueError for a server that is not there; httpx's own
-    # errors (a timeout) are the same answer.
+    # `_send` turns every transport error into a ClientError (a ValueError), so
+    # the `httpx.HTTPError` catch only meets decoding and redirect errors.
     # Both failures read as the one line a refused call reads as everywhere
     # (`transport.refusal`): `kraft: 404: unknown session`, never `kraft 404:`.
     except (ValueError, httpx.HTTPError) as exc:

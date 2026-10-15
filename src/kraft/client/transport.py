@@ -240,13 +240,13 @@ async def _patch(path: str, payload: dict) -> dict:
     wrong, and every caller here turns that into the same one-sentence error
     `_get`/`_act` already give."""
     response = await _send("PATCH", path, json=payload)
+    if response.status_code < 400:
+        return _json(response)
     try:
         body = response.json()
     except ValueError:
         body = {"detail": response.text}
-    if response.status_code >= 400:
-        raise status_error(response.status_code, detail_of(body))
-    return body
+    raise status_error(response.status_code, detail_of(body))
 
 
 async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, dict]:
@@ -255,7 +255,9 @@ async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, 
     reach httpx's request (a caller's own `timeout`)."""
     response = await _send("POST", path, json=payload or {}, **kwargs)
     try:
-        body = response.json()
+        body = _json(response) if response.status_code < 400 else response.json()
+    except ClientError:
+        raise
     except ValueError:
         body = {"detail": response.text}
     return response.status_code, body
