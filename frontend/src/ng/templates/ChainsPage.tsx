@@ -304,7 +304,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {view.draft
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="tpl-published" id={publishedId}>published <span className="reason is-quiet">· nothing to publish</span></span>}
+          : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>nothing to publish</span></>}
         {n.problems > 0 && (
           <button
             type="button"
@@ -336,7 +336,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
-          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} aria-describedby={view.draft ? undefined : publishedId} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
+          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} aria-describedby={view.draft ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

@@ -149,7 +149,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         {row?.addon && <AddonBadge addon={row.addon} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="lib-published" id={publishedId}>published <span className="reason is-quiet">· nothing to publish</span></span>}
+          : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>nothing to publish</span></>}
         {n.problems > 0 && (
           <button type="button" className="lib-problems" title="Step through the problems" onClick={stepProblems}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
@@ -160,7 +160,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
-        {surface === "canvas" && <Button variant="primary" aria-pressed={review} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft ? undefined : publishedId} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button>}
+        {surface === "canvas" && <Button variant="primary" aria-pressed={review} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button>}
       </HeaderActions>
       <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>
