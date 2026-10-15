@@ -37,10 +37,15 @@ describe("camera maths", () => {
     ["letting the start mark go when the reach would not fit beside it", { floor: 0.45, left: 12, focus: 600, start: 27, reach: [1550] }, { W: 2600, H: 250 }, 678 - 1550 * 0.45],
     ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
     ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
+    ["under the gate rail: from the left even when it fits whole", { floor: 0.45, left: 12, top: 60 }, { W: 1000, H: 250 }, 12],
   ])("fits to a floor %s", (_, rule, world, tx) => {
     const cam = fitCam(world, { w: 690, h: 700 }, "chain", rule);
     expect(cam.s).toBeGreaterThanOrEqual(0.45);
     expect(cam.tx).toBeCloseTo(tx);
+  });
+  it("puts a run under the gate rail at the top, its boxes `top` px down, not centred in the view", () => {
+    // Boxes start 69px into the world (L.CY − L.BOX / 2).
+    expect(fitCam({ W: 600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.95, left: 12, top: 60 }).ty).toBe(60 - 69);
   });
   it("centres the current node across and 30% down at 100%", () => {
     expect(currentCam(500, 96, { w: 800, h: 401 })).toEqual({ s: 1, tx: -100, ty: 120 - 96 });
@@ -96,6 +101,12 @@ describe("useCamera", () => {
     const click = { stopPropagation: () => (click.stopped = true), stopped: false };
     h.result.current.bind.onClickCapture(click as never);
     expect(click.stopped).toBe(true);
+  });
+  it("centres the view across on a world x at the zoom it has, as the chain overview asks, which frees fit", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
+    act(() => h.result.current.centre(1200));
+    expect(h.result.current.cam.tx).toBe(1040 / 2 - 1200 * 0.5);
+    expect(h.result.current.mode).toBe("free");
   });
   it("slides the view by a pan, which frees fit", () => {
     const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });

@@ -103,8 +103,12 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
       setMode("free");
     },
     reset: () => zoomCentre(1 / cam.s),
-    /** Keep the view where it is while the world changes under it (a folded stage opening in place). */
-    hold: () => setMode("free"),
+    /** Centre the view across on world x, as the chain overview does. */
+    centre: (x: number) => {
+      if (!view) return;
+      setCam((c) => ({ ...c, tx: view.w / 2 - x * c.s }));
+      setMode("free");
+    },
     fit: () => { setAsked(true); setMode("fit"); },
     toCurrent: current ? () => setMode("current") : undefined,
     /** Pan just enough to show a world box, e.g. the node keyboard focus moved to. */

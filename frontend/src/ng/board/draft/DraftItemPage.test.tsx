@@ -95,14 +95,16 @@ describe("DraftItemPage", () => {
     expect(creates(calls).at(-1)?.body).toMatchObject({ title: "Cache it", description: "By hash.", autostart: false });
   });
 
-  it("folds the stages it has not reached to pills and opens at the item page's readable fit", async () => {
+  it("draws a chain that fits whole node by node, read by name, at the item page's readable fit", async () => {
     stub();
     mount({ draft: { title: "Cache it", brief: "", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });
     await settle();
     // jsdom has no layout, so a plain fit would floor at 30%.
     expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.95)");
-    expect(screen.getByRole("button", { name: /^final review stage, 2 nodes/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^implementation,/ })).toBeNull();
+    // Four nodes fit whole: no overview above them.
+    expect(screen.queryByRole("group", { name: "Chain overview" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^approve spec, gate/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^implementation, node/ })).toBeInTheDocument();
   });
 
   it("asks for a title before it can create", async () => {
@@ -122,8 +124,7 @@ describe("DraftItemPage", () => {
     expect(screen.queryByRole("button", { name: "Skip on this item" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
     expect(screen.getByRole("switch", { name: "Skip on this item" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /^final review stage/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^final_review,/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^final review,/ }));
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
     fireEvent.click(screen.getByRole("button", { name: "Skip on this item" }));
     await settle();

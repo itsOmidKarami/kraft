@@ -13,7 +13,7 @@ const nodes: ChainNode[] = [
 ];
 
 describe("ChainStrip", () => {
-  it("lays out a column for each node and a pill for each folded stage", () => {
+  it("lays out a column for each node and a pill for each folded run", () => {
     const lay = stripLayout(stripRow(nodes, new Set(), "implement"));
     expect(lay.items.map((i) => i.node.id)).toEqual(["implement", "merge"]);
     expect(lay.folds.map((f) => [f.fold.words, f.fold.passed])).toEqual([["approve spec", true]]);
@@ -25,22 +25,32 @@ describe("ChainStrip", () => {
     expect(lay.edges.map((e) => e.todo)).toEqual([false, true]);
   });
 
-  it("labels every node of the viewed stage and folds the others to a pill named by their gate", () => {
+  it("labels every node of the viewed run and folds the others to a pill named by their gate", () => {
     render(<ChainStrip nodes={nodes} viewing="implement" />);
     expect(screen.getByText("implement")).toBeInTheDocument();
     expect(screen.getByText("merge")).toBeInTheDocument();
     expect(screen.queryByText("spec")).toBeNull();
-    expect(screen.getByRole("button", { name: "approve spec stage, 2 nodes, passed: expand" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "approve spec, 2 nodes, passed: expand" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "merge, gate, not started" })).toBeInTheDocument();
   });
 
-  it("opens a folded stage in place and lands on its first node", async () => {
+  it("folds its pills to their glyph and count when the strip is wider than its bar, so none is cut at an edge", () => {
+    const full = stripLayout(stripRow(nodes, new Set(), "implement"));
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(full.W - 1);
+    render(<ChainStrip nodes={nodes} viewing="implement" />);
+    const pill = screen.getByRole("button", { name: "approve spec, 2 nodes, passed: expand" });
+    expect(pill).toHaveTextContent(/^✓2$/);
+    expect(stripLayout(stripRow(nodes, new Set(), "implement"), true).W).toBeLessThan(full.W);
+    vi.restoreAllMocks();
+  });
+
+  it("opens a folded run in place and lands on its first node", async () => {
     const user = userEvent.setup();
     render(<ChainStrip nodes={nodes} viewing="implement" />);
-    await user.click(screen.getByRole("button", { name: /^approve spec stage/ }));
+    await user.click(screen.getByRole("button", { name: /^approve spec, / }));
     // An id wraps after its underscores, never cut to an ellipsis.
     expect([...document.querySelectorAll(".strip-label")].map((l) => l.textContent)).toContain("approve_\u200bspec");
-    expect(screen.queryByRole("button", { name: /^approve spec stage/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^approve spec, / })).toBeNull();
     expect(screen.getByRole("button", { name: /^spec, node/ })).toHaveFocus();
   });
 
@@ -52,7 +62,7 @@ describe("ChainStrip", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: /^implement/ })).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
-    expect(screen.getByRole("button", { name: /^approve spec stage/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^approve spec, / })).toHaveFocus();
     await user.keyboard("{ArrowRight}{ArrowRight}{Enter}");
     expect(onOpen).toHaveBeenCalledWith("merge");
     await user.click(screen.getByRole("button", { name: "Back to the chain" }));

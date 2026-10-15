@@ -103,6 +103,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         seams={seams}
         opening="fit"
         fit={EDITOR_FIT}
+        // A long chain draws under its overview; its nodes keep their ids, which are what an author edits.
+        overview
         onDrag={review || readOnly ? undefined : onDrag}
         reserve={reserve}
         onSelect={onSelect}

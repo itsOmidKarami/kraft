@@ -100,7 +100,7 @@
 .graph-node { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .graph-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .graph-node:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
-.graph-label { padding: 0 3px; border-radius: 3px; background: var(--bg); text-align: center; line-height: 1.3; font: 400 var(--fs-graph-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.graph-label { padding: 0 3px; border-radius: 3px; background: var(--bg); text-align: center; line-height: 1.3; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .graph-node.is-bold .graph-label { font-weight: 600; color: var(--text); }
 .graph-node.is-todo .graph-label { color: var(--text-muted); }
 .graph-node.is-ghost .graph-label { color: var(--text-muted); text-decoration: line-through; }
@@ -123,7 +123,7 @@
 .graph-sub-dot.tone-muted { background: var(--text-muted); }
 
 /* Seams: the dashed green insert points, shown on hover and on focus as well (R6). */
-.seam { position: absolute; z-index: 2; width: 20px; height: 20px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 var(--fs-meta)/17px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.seam { position: absolute; z-index: 2; width: 24px; height: 24px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 var(--fs-meta)/21px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }
 .seam:is(:hover, :focus-visible), .seam.is-open, .seam.is-always { opacity: 1; }
 .seam:hover, .seam.is-open { background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
 
@@ -140,14 +140,14 @@
 .step-frame.mark-add { border: 1px dashed var(--ok); }
 .step-frame.mark-change { border-color: var(--mark-change-line); }
 .step-frame.is-prob { border-color: var(--bad); }
-.step-label { position: absolute; z-index: 1; box-sizing: border-box; margin: 0; padding: 2px 4px; border: 0; border-radius: 5px; background: var(--bg); text-align: center; font: 400 var(--fs-graph-caption) ui-monospace, Menlo, monospace; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.step-label { position: absolute; z-index: 1; box-sizing: border-box; margin: 0; padding: 2px 4px; border: 0; border-radius: 5px; background: var(--bg); text-align: center; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .step-label:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
 .step-label.is-sel { font-weight: 600; color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
 .step-label.mark-add { color: var(--ok); }
 .step-label.mark-change { color: var(--mark-change); }
 .step-prob { color: var(--bad); }
 .graph-node.is-task { gap: 5px; }
-.graph-node.is-task .graph-label { font-size: var(--fs-graph-caption); overflow-wrap: anywhere; }
+.graph-node.is-task .graph-label { overflow-wrap: anywhere; }
 .graph-node.is-task .graph-meta { margin-top: -2px; }
 .graph-node.is-warn .graph-label, .graph-node.is-side .graph-label { color: var(--warn); }
 .graph-node.is-slot .graph-label { color: var(--ok); }
@@ -155,7 +155,9 @@
 .mark-start.is-node { width: 18px; height: 18px; font-size: var(--fs-label); }
 .seam.is-node { opacity: .6; }
 .seam.is-node:is(:hover, :focus-visible) { opacity: 1; }
-.node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: var(--fs-graph-caption); white-space: nowrap; color: var(--text-muted); }
+.seam-below { position: absolute; z-index: 2; transform: translateX(-50%); height: 24px; box-sizing: border-box; margin: 0; padding: 0 10px; border-radius: 12px; border: 1px dashed var(--ok); background: var(--bg); color: var(--ok); font-size: var(--fs-label); white-space: nowrap; cursor: pointer; opacity: .7; }
+.seam-below:is(:hover, :focus-visible) { opacity: 1; background: color-mix(in srgb, var(--ok) 15%, var(--bg)); }
+.node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: var(--fs-label); white-space: nowrap; color: var(--text-muted); }
 
 /* ChainStrip */
 .strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
@@ -181,7 +183,7 @@
 .gateview-col { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 440px; }
 .gateview-row { display: flex; align-items: flex-start; justify-content: center; }
 .gateview-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 140px; margin: 0; padding: 4px 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.gateview-label { padding: 0 3px; background: var(--bg); font: 400 var(--fs-graph-caption) ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.gateview-label { padding: 0 3px; background: var(--bg); font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .gateview-label.is-gate, .gateview-item.is-sel .gateview-label { color: var(--text); }
 .gateview-item.is-sel .gateview-label { font-weight: 600; }
 .gateview-label.is-add { color: var(--ok); }
@@ -257,7 +259,7 @@
 .pane-facts dd { margin: 0; color: var(--text); }
 
 /* An open changed-test-scope task: a frame of repositories, each with its scopes as chips. */
-.canvas-world.is-glide :is(.graph-node, .step-label, .step-frame, .mark-end, .arc-label, .node-footer, .seam, .scope-frame) { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
+.canvas-world.is-glide :is(.graph-node, .step-label, .step-frame, .mark-end, .arc-label, .node-footer, .seam, .seam-below, .scope-frame) { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
 .canvas-world.is-glide :is(.edge, .arc path) { transition: d .42s cubic-bezier(.2,.8,.2,1); }
 .canvas-world.is-glide .dot { transition: cx .42s cubic-bezier(.2,.8,.2,1), cy .42s cubic-bezier(.2,.8,.2,1); }
 .graph-node.is-away { pointer-events: none; }
@@ -327,10 +329,29 @@
 .scope-key { padding: 0 6px; border: 1px dashed var(--border); border-radius: 6px; font-size: var(--fs-label); color: var(--text-muted); }
 .scope-key.is-ring { display: block; width: 12px; height: 12px; padding: 0; box-sizing: border-box; border-radius: 50%; align-self: center; }
 
-/* A folded stage (StageGraph `fold`): one pill on the row, its gate's glyph and words, a done mark once passed. */
-.fold-pill { display: flex; align-items: center; gap: 2px; box-sizing: border-box; padding: 0 12px 0 1px; border: 1px solid var(--stroke); border-radius: 17px; background: var(--bg); font: 400 var(--fs-graph-label) ui-monospace, Menlo, monospace; white-space: nowrap; color: var(--text-sub); }
-.graph-fold:hover .fold-pill { border-color: var(--text-muted); }
-.graph-fold.is-todo .fold-pill { border-style: dashed; color: var(--text-muted); }
+/* A folded pill's done mark (ChainStrip). */
 .fold-done { margin-left: 4px; color: var(--ok); }
 /* A column the view cuts at an edge is not drawn: the edge's cue counts it instead. */
 .graph-node.is-clipped { opacity: 0; pointer-events: none; }
+
+/* The chain overview (StageGraph `overview`): every node small over a long chain's canvas, a frame on the part in
+   view. The block is as tall as its content. */
+.chain-mapped { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; }
+.chain-mapped > .canvas { position: relative; inset: auto; flex: none; height: 268px; border-top: 1px solid var(--line); }
+.minimap { position: relative; flex: none; margin: 8px 0 6px; cursor: pointer; touch-action: none; user-select: none; }
+.minimap-svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+.minimap-edge { stroke: var(--stroke); stroke-width: 1; }
+.minimap-edge.is-todo { stroke-dasharray: 2 2; }
+.minimap-frame { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border: 1px solid var(--text-muted); border-radius: 5px; background: color-mix(in srgb, var(--text) 5%, transparent); pointer-events: none; }
+.minimap-node { position: absolute; box-sizing: border-box; margin: 0; padding: 0; border: 1px solid var(--stroke); border-radius: 3px; background: var(--bg); cursor: pointer; }
+.minimap-node.is-gate { border-radius: 1px; transform: rotate(45deg); }
+.minimap-node.is-done { border-color: var(--text-muted); background: var(--text-muted); }
+.minimap-node.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
+.minimap-node.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
+.minimap-node.is-failed { border: 1.5px solid var(--bad); }
+.minimap-node.is-todo { border-style: dashed; }
+.minimap-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* An edge of the canvas with more of the chain past it. */
+.canvas-fade { position: absolute; top: 0; bottom: 0; z-index: 2; width: 40px; pointer-events: none; }
+.canvas-fade.is-left { left: 0; background: linear-gradient(to right, var(--bg), transparent); }
+.canvas-fade.is-right { right: 0; background: linear-gradient(to left, var(--bg), transparent); }

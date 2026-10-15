@@ -44,8 +44,8 @@ describe("chainGraph", () => {
     ["failed", { kind: "failed", node: "verification" }, { state: "failed", meta: "failed", metaTone: "red" }, "verification, node, failed"],
     ["needs_you", { kind: "cap", node: "verification" }, { state: "current", capped: true, attemptStopped: true, meta: "capped" }, "verification, node, capped"],
     ["paused", null, { state: "current", paused: true, sub: "paused" }, "verification, node, paused"],
-    ["needs_you", { kind: "question", node: "verification" }, { state: "current", sub: "needs you" }, "verification, node, needs you"],
-    ["needs_you", { kind: "stuck", node: "verification" }, { state: "current", sub: "needs you" }, "verification, node, needs you"],
+    ["needs_you", { kind: "question", node: "verification" }, { state: "current", sub: "needs you", needs: true }, "verification, node, needs you"],
+    ["needs_you", { kind: "stuck", node: "verification" }, { state: "current", sub: "needs you", needs: true }, "verification, node, needs you"],
     ["waiting", { kind: "rate_limit", node: "verification" }, { state: "current", running: false, wait: "waiting · rate limit" }, "verification, node, waiting · rate limit"],
     ["waiting", { kind: "wait", node: "verification" }, { state: "current", running: false, wait: "waiting on CI" }, "verification, node, waiting on CI"],
     ["running", null, { state: "current", running: true }, "verification, node, running"],
@@ -64,7 +64,7 @@ describe("chainGraph", () => {
   it("draws a gate waiting for you as the current gate (the amber diamond)", () => {
     const item = detail({ current_node_id: "plan_approval", display_status: "needs_you", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } });
     const gate = chainGraph(item, [], NOW).nodes[1];
-    expect(gate).toMatchObject({ kind: "gate", state: "current", sub: "needs you" });
+    expect(gate).toMatchObject({ kind: "gate", state: "current", sub: "needs you", needs: true });
     expect(accessibleName(gate, "gate")).toBe("plan_approval, gate, needs you");
   });
 

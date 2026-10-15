@@ -43,8 +43,6 @@ describe("Workspace", () => {
   it("opens on the chain's pane, and a node click selects it in the URL", async () => {
     mount();
     expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
-    // The run is past plan_approval: its stage opens from its pill first.
-    await userEvent.click(screen.getByRole("button", { name: "plan stage, 2 nodes, passed: expand" }));
     await userEvent.click(screen.getByRole("button", { name: "plan, node, done" }));
     expect(where()).toBe("/work-items/w1?sel=plan");
     expect(screen.getByRole("complementary", { name: "plan pane" })).toBeInTheDocument();

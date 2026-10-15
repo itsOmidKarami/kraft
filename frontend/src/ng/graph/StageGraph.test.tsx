@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChainNode } from "./layout";
-import { StageGraph } from "./StageGraph";
+import { layout, type ChainNode } from "./layout";
+import { MAP } from "./Minimap";
+import { overviewFor, StageGraph } from "./StageGraph";
 
 const nodes: ChainNode[] = [
   { id: "spec", kind: "exec", state: "done" },
@@ -94,20 +95,78 @@ describe("StageGraph", () => {
     expect(onBackground).toHaveBeenCalledTimes(1);
   });
 
-  it("folds a passed stage to one pill, one roving stop, that opens in place on Enter or a click and hands focus to its first node", async () => {
-    const user = userEvent.setup();
-    render(<StageGraph name="c" nodes={nodes} fold />);
-    expect(screen.queryByRole("button", { name: /^spec,/ })).toBeNull();
-    const pill = screen.getByRole("button", { name: "approve spec stage, 2 nodes, passed: expand" });
-    expect(pill).toHaveAttribute("data-tip", "spec → approve_spec");
-    await user.tab();
-    expect(btn(/^implement/)).toHaveFocus();
-    await user.keyboard("{ArrowLeft}");
-    expect(pill).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(btn(/^spec,/)).toHaveFocus();
-    expect(btn(/^approve_spec/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /stage, .*expand$/ })).toBeNull();
+  describe("a chain too long to read whole", () => {
+    afterEach(() => vi.restoreAllMocks());
+    // Nine nodes, 1330px at 100%: past what the item page shows whole. The item waits at final_review.
+    const long: ChainNode[] = [
+      { id: "spec", kind: "exec", state: "done" }, { id: "spec_approval", kind: "gate", state: "done" },
+      { id: "build", kind: "exec", state: "done" }, { id: "test", kind: "exec", state: "done" }, { id: "describe", kind: "exec", state: "done" },
+      { id: "final_review", kind: "gate", state: "current", sub: "needs you", needs: true },
+      { id: "open_mr", kind: "exec", state: "todo" }, { id: "await_ci", kind: "exec", state: "todo" }, { id: "merge", kind: "exec", state: "todo" },
+    ];
+    const overview = () => within(screen.getByRole("group", { name: "Chain overview" }));
+    const cam = () => {
+      const [, tx, s] = /translate\((-?[\d.]+)px.*scale\(([\d.]+)\)/.exec((document.querySelector(".canvas-world") as HTMLElement).style.transform)!;
+      return { tx: Number(tx), s: Number(s) };
+    };
+    const sized = () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    };
+
+    it("draws every node under an overview of the whole chain, by name, with one start and one end; a chain that fits has none", () => {
+      expect(overviewFor(nodes)).toBe(false);
+      const { rerender } = render(<StageGraph name="c" nodes={long} overview names />);
+      expect(overview().getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+        "spec, done", "approve spec, done", "build, done", "test, done", "describe, done", "final review, needs you", "open mr, not started", "await ci, not started", "merge, not started",
+      ]);
+      expect(overview().getByRole("button", { name: "final review, needs you" })).toHaveClass("is-gate", "is-amber");
+      expect(overview().getByRole("button", { name: "merge, not started" })).toHaveClass("is-todo");
+      // No grouping below: every node, one ▶ and one ■, and the edges fade instead of counting what is off-screen.
+      expect(document.querySelectorAll(".canvas .graph-node")).toHaveLength(9);
+      expect(document.querySelectorAll(".mark-start, .mark-end")).toHaveLength(2);
+      expect(screen.queryByRole("button", { name: /off-screen/ })).toBeNull();
+      expect(document.querySelector(".canvas-fade")).not.toBeNull();
+      expect(screen.getByRole("group", { name: "c" })).toContainElement(screen.getByRole("group", { name: "Chain overview" }));
+      rerender(<StageGraph name="c" nodes={nodes} overview names />);
+      expect(screen.queryByRole("group", { name: "Chain overview" })).toBeNull();
+      expect(btn(/^approve spec,/)).toHaveAccessibleName("approve spec, gate, done");
+    });
+
+    it("moves the canvas to a node clicked on the overview, and follows a drag along it", () => {
+      sized();
+      render(<StageGraph name="c" nodes={long} overview fit={{ floor: 1, left: 12 }} />);
+      const at = (id: string) => layout(long).items.find((i) => i.node.id === id)!.cx;
+      fireEvent.click(overview().getByRole("button", { name: "merge, not started" }));
+      // Centred across the 600px view, at the zoom the canvas has.
+      const { s } = cam();
+      expect(cam().tx).toBeCloseTo(300 - at("merge") * s);
+      const strip = screen.getByRole("group", { name: "Chain overview" });
+      const k = Math.min(MAP.K, (600 - 2 * MAP.PAD) / layout(long).W);
+      fireEvent.pointerDown(strip, { button: 0, clientX: MAP.PAD + at("build") * k });
+      expect(cam().tx).toBeCloseTo(300 - at("build") * s);
+      fireEvent.pointerMove(window, { clientX: MAP.PAD + at("test") * k });
+      expect(cam().tx).toBeCloseTo(300 - at("test") * s);
+      fireEvent.pointerUp(window);
+      // The frame marks what the canvas shows: the world from 300px left of test to 300px right of it.
+      const frame = document.querySelector(".minimap-frame") as HTMLElement;
+      expect(parseFloat(frame.style.left)).toBeCloseTo(MAP.PAD + (at("test") - 300 / s) * k - 3);
+      expect(parseFloat(frame.style.width)).toBeCloseTo((600 / s) * k + 6);
+    });
+
+    it("enters the overview on where the run stands, moves along it with ←/→, goes down to the node with ↓ and back up with ↑", async () => {
+      const user = userEvent.setup();
+      render(<StageGraph name="c" nodes={long} overview />);
+      const glyph = (name: RegExp) => overview().getByRole("button", { name });
+      await user.tab();
+      expect(glyph(/^final_review,/)).toHaveFocus();
+      await user.keyboard("{ArrowRight}{ArrowRight}");
+      expect(glyph(/^await_ci,/)).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(btn(/^await_ci, node/)).toHaveFocus();
+      await user.keyboard("{ArrowLeft}{ArrowUp}");
+      expect(glyph(/^open_mr,/)).toHaveFocus();
+    });
   });
 
   describe("with a view narrower than the chain", () => {
@@ -130,22 +189,11 @@ describe("StageGraph", () => {
       expect(screen.queryByRole("button", { name: /more nodes? off-screen/ })).toBeNull();
     });
 
-    it("counts a folded stage past the edge by its nodes", () => {
-      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
-      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
-      // n0..n2 and a gate end the first stage, the run stands on n3; the last stage, three nodes past the next, folds.
-      const staged: ChainNode[] = [...ten.slice(0, 3).map((n) => ({ ...n, state: "done" as const })), { id: "g1", kind: "gate", state: "done" }, { ...ten[3], state: "current" }, { id: "g2", kind: "gate" }, ten[4], { id: "g3", kind: "gate" }, ...ten.slice(5, 8)];
-      render(<StageGraph name="c" nodes={staged} fit={{ floor: 1, left: 12 }} fold />);
-      expect(screen.getByRole("button", { name: "n7 stage, 3 nodes, not started: expand" })).toHaveClass("is-clipped");
-      // From 12px in at 100%: the first stage's pill (112), n3, g2 and n4 end by x = 582; g3 and the last pill run past 600.
-      expect(screen.getByRole("button", { name: "4 more nodes off-screen" })).toBeInTheDocument();
-    });
-
     it("opens on the node the run waits at with its next stage whole beside it", () => {
       vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
       vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
       const waiting: ChainNode[] = [...ten.slice(0, 3).map((n) => ({ ...n, state: "done" as const })), { id: "g1", kind: "gate", state: "amber" }, ten[3], ten[4], { id: "g2", kind: "gate", state: "todo" }, ...ten.slice(5, 8)];
-      render(<StageGraph name="c" nodes={waiting} fit={{ floor: 1, left: 12 }} focus="current" fold />);
+      render(<StageGraph name="c" nodes={waiting} fit={{ floor: 1, left: 12 }} focus="current" />);
       // Centred on g1, the view would cut n4 and g2; it slides left until g2 ends 12px in from the edge.
       expect(btn(/^g2,/)).not.toHaveClass("is-clipped");
       expect(btn(/^g1,/)).not.toHaveClass("is-clipped");

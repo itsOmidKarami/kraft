@@ -138,9 +138,9 @@ describe("Chains page: the chain canvas", () => {
     await userEvent.dblClick(within(g).getByRole("button", { name: "implementation, node" }));
     const strip = await screen.findByRole("button", { name: "Back to the chain" });
     const node = (name: string) => strip.closest(".strip")!.querySelector<HTMLElement>(`[aria-label="${name}, node"]`);
-    // The viewed stage is drawn node by node; the one before it is a pill until opened.
+    // The viewed run is drawn node by node; the one before it is a pill until opened.
     expect(node("spec")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /^spec stage, .*expand$/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^approve spec, .*expand$/ }));
     expect(glyph(node("spec"))).toContain("lucide-sparkles");
     expect(glyph(node("verification"))).toContain("lucide-layers");
     expect(glyph(screen.getByRole("complementary", { name: "implementation pane" }).querySelector<HTMLElement>(".pane-glyph"))).toContain("lucide-sparkles");
@@ -208,7 +208,8 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.queryByRole("button", { name: "Review & publish" })).toBeNull();
     expect(screen.getByRole("button", { name: "Back to editing" })).not.toHaveAttribute("aria-pressed");
     await waitFor(() => expect(within(g).getByRole("button", { name: "plan, node, removed" })).toBeInTheDocument());
-    const names = within(g).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    // The canvas's nodes, not the chain overview's glyphs above them.
+    const names = within(g).getAllByRole("button").filter((b) => b.classList.contains("graph-node")).map((b) => b.getAttribute("aria-label"));
     expect(names.slice(0, 4)).toEqual(["spec, node", "spec_approval, gate", "plan, node, removed", "implementation, node"]);
     expect(within(g).getByRole("button", { name: "spec, node" })).toHaveClass("is-faded");
     const impl = within(g).getByRole("button", { name: "implementation, node" });

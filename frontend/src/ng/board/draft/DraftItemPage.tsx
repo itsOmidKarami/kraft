@@ -252,10 +252,10 @@ export function DraftItemPage() {
           nodes={nodes}
           selected={sel ?? undefined}
           reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
-          // The item page's fit: labels stay readable, Fit shows the whole chain, and its stages fold to pills (a click opens one in place).
+          // The item page's fit and overview: labels stay readable, and a long chain shows whole above them.
           fit={ITEM_FIT}
-          fold
-          foldAhead={0}
+          overview
+          names
           onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
           onOpen={(id) => { setSel(id); setPaneOpen(true); }}
           onEscape={() => setSel(null)}

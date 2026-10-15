@@ -33,7 +33,7 @@ describe("Workspace with a draft", () => {
     mount("/work-items/w1", draft([{ op: "add_node", after: "verification", node: { id: "scan", extends: "security" }, passed: false }]));
     const node = await screen.findByRole("button", { name: "scan, node, not started" });
     expect(node.className).toContain("is-add");
-    expect(screen.getByRole("button", { name: "merge_request, node, not started" }).className).not.toContain("is-add");
+    expect(screen.getByRole("button", { name: "merge request, node, not started" }).className).not.toContain("is-add");
   });
 
   it("marks the overridden task in its node view, and only it", async () => {
@@ -45,7 +45,7 @@ describe("Workspace with a draft", () => {
 
   it("draws the item's own chain when there is no draft", async () => {
     mount("/work-items/w1", { ...draft([]), 1: { ...draft([])[1], nodes: V1 } });
-    expect(await screen.findByRole("button", { name: "merge_request, node, not started" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "merge request, node, not started" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^scan,/ })).toBeNull();
   });
 
@@ -61,7 +61,7 @@ describe("Workspace with a draft", () => {
 
   it("offers no seam on an ended item", async () => {
     mount("/work-items/w1", draft([]), { display_status: "done" });
-    await screen.findByRole("button", { name: /^merge_request, node/ });
+    await screen.findByRole("button", { name: /^merge request, node/ });
     expect(screen.queryByRole("button", { name: "Add a library node here" })).toBeNull();
   });
 

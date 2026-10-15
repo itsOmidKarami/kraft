@@ -1,4 +1,3 @@
-import type { Fold, RowEntry } from "./stages";
 import type { GraphItem } from "./types";
 
 /** Chain canvas geometry, from StageGraph.dc.html `static L`. */
@@ -10,6 +9,8 @@ export type ChainNode = GraphItem & {
   subTone?: "amber" | "muted";
   /** What a node the run stands on waits for, in words ("waiting on CI"), for a pane or a row; the canvas does not draw it. */
   wait?: string;
+  /** The run stands here waiting on a person: the gate rail marks its run in amber. */
+  needs?: boolean;
 };
 export type ChainArc =
   | { kind: "loop"; node: string; tone?: "idle" | "active" | "red"; label?: string }
@@ -17,33 +18,27 @@ export type ChainArc =
   | { kind: "reject"; from: string; to: string };
 export type Seam = { at: number; open?: boolean; always?: boolean; title?: string };
 
+/** A seam's "+" button: the 24px a pointer target needs. */
+export const SEAM = 24;
+
 /** The start mark: its centre and radius, so a camera can keep its left edge in view. */
 export const START = { cx: 36, h: 9 };
 
-/** A folded stage's pill: as tall as a small glyph and its border, and its column's room past the pill. */
-export const FOLD = { H: 34, GAP: 24 } as const;
-/** A pill's column: its words (11.5px monospace, about 7px a character), the glyph, the done mark, never under a gate's. */
-export const foldWidth = (f: Fold) => Math.max(L.COLG, 60 + f.words.length * 7 + (f.passed ? 14 : 0) + FOLD.GAP);
-
 type Pt = { cx: number; h: number; todo?: boolean };
 
-/** Columns left to right: exec 138 wide, gate 96, a folded stage as wide as its
- *  pill, each at its column's centre; edges between the start mark, the row and the end mark. */
-export function layout(row: RowEntry[]) {
+/** Columns left to right: exec 138 wide, gate 96, each at its column's centre; edges between the start mark, the row
+ *  and the end mark. */
+export function layout(row: ChainNode[]) {
   let x = L.PAD;
-  const cols = row.map((entry) => {
-    const w = entry.kind === "fold" ? foldWidth(entry) : entry.kind === "gate" ? L.COLG : L.COLE;
+  const items = row.map((node) => {
+    const w = node.kind === "gate" ? L.COLG : L.COLE;
     const cx = x + w / 2;
     x += w;
-    return { entry, w, cx };
+    return { node, w, cx };
   });
-  const items = cols.flatMap(({ entry, w, cx }) => (entry.kind === "fold" ? [] : [{ node: entry, w, cx }]));
-  const folds = cols.flatMap(({ entry, w, cx }) => (entry.kind === "fold" ? [{ fold: entry, w, cx }] : []));
   const W = x + L.PAD;
-  // Half-widths the edges stop short of: a box's half, a diamond's half-diagonal, a pill's half, the marks' radii.
-  const half = (e: RowEntry, w: number) => (e.kind === "fold" ? (w - FOLD.GAP) / 2 : e.kind === "gate" ? L.GATE * 0.72 : L.BOX / 2);
-  const todo = (e: RowEntry) => (e.kind === "fold" ? !e.passed : e.state === "todo");
-  const pts: Pt[] = [{ cx: START.cx, h: START.h }, ...cols.map((c) => ({ cx: c.cx, h: half(c.entry, c.w), todo: todo(c.entry) })), { cx: W - 36, h: 8 }];
+  // Half-widths the edges stop short of: a box's half, a diamond's half-diagonal, the marks' radii.
+  const pts: Pt[] = [{ cx: START.cx, h: START.h }, ...items.map((c) => ({ cx: c.cx, h: c.node.kind === "gate" ? L.GATE * 0.72 : L.BOX / 2, todo: c.node.state === "todo" })), { cx: W - 36, h: 8 }];
   const edges = pts.slice(1).map((b, i) => {
     const a = pts[i];
     const x1 = a.cx + a.h + 5, x2 = b.cx - b.h - 5;
@@ -52,7 +47,7 @@ export function layout(row: RowEntry[]) {
   });
   // A midpoint dot on every edge but the first and the last.
   const dots = edges.slice(1, -1).map((e) => ({ x: (e.x1 + e.x2) / 2, y: L.CY, todo: e.todo }));
-  return { items, folds, W, H: L.H, edges, dots };
+  return { items, W, H: L.H, edges, dots };
 }
 export type ChainLayout = ReturnType<typeof layout>;
 
@@ -61,11 +56,10 @@ export const seamX = (lay: ChainLayout, at: number) => (lay.edges[at] ? (lay.edg
 
 export type ArcShape = { key: string; d: string; arrow: string; tone: "idle" | "active" | "red" | "reject"; dashed: boolean; label?: { x: number; y: number; text: string } };
 
-/** The three arc kinds: a loop above a node, a rebase above the chain, a reject below it. A rebase or reject
- *  to or from a node in a folded stage starts or ends at its pill; a loop on one is not drawn. */
+/** The three arc kinds: a loop above a node, a rebase above the chain, a reject below it. An arc to or from a node
+ *  the row does not draw (another run's) is not drawn. */
 export function arcShapes(lay: ChainLayout, arcs: ChainArc[]): ArcShape[] {
   const own = new Map(lay.items.map((i) => [i.node.id, i.cx]));
-  const pos = new Map([...lay.folds.flatMap((f) => f.fold.nodes.map((n) => [n.id, f.cx] as const)), ...own]);
   const top = L.CY - L.BOX / 2;
   return arcs.flatMap((a, k): ArcShape[] => {
     if (a.kind === "loop") {
@@ -74,7 +68,7 @@ export function arcShapes(lay: ChainLayout, arcs: ChainArc[]): ArcShape[] {
       const tone = a.tone ?? "idle";
       return [{ key: `loop${k}`, tone, dashed: tone !== "active", d: `M${cx + 12} ${top - 3} C${cx + 34} ${top - 44} ${cx - 34} ${top - 44} ${cx - 12} ${top - 3}`, arrow: `M${cx - 18} ${top - 9} L${cx - 12} ${top - 3} L${cx - 6} ${top - 10}`, label: a.label ? { x: cx, y: top - 40, text: a.label } : undefined }];
     }
-    const f = pos.get(a.from), t = pos.get(a.to);
+    const f = own.get(a.from), t = own.get(a.to);
     if (f == null || t == null || f === t) return [];
     if (a.kind === "rebase") {
       const fx = f - 24, tx = t + 24;
