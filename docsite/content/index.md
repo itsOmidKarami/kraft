@@ -54,7 +54,7 @@ ui:
 :::landing-shot
 ---
 src: /assets/board.png
-alt: 'The Kraft board: work items grouped by Needs you, Running, Not started, and Done'
+alt: 'The Kraft board: work items grouped by Needs you (a paused, a failed and two waiting at a gate, each with its one button), Running, Not started, and Done'
 crop: 210 0 1230 688
 width: 1440
 ---
@@ -72,8 +72,8 @@ ui:
 :::::landing-shot
 ---
 src: /assets/item.png
-alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Review changes, Approve and Reject buttons"
-crop: 1036 240 380 444
+alt: "The spec_approval gate on an item's page: waiting for you, the files it decides on, an open thread, reject to spec, and Read spec.md, Review changes, Approve and Reject buttons"
+crop: 1036 250 380 434
 width: 1440
 ---
 **The gate.** What it decides on, where a rejection goes, and the buttons. [The review page](/reference/web-ui/review-page)
@@ -92,11 +92,11 @@ width: 1440
 :::::landing-shot
 ---
 src: /assets/mobile.png
-alt: 'The board at a 390px phone viewport: a failed item with a Retry button, and an item waiting at approve spec with Approve and Reject on the card'
+alt: 'The board at a 390px phone viewport: a failed item with a Retry button, and an item waiting at approve spec with a Review to approve button on the card'
 crop: 0 330 390 444
 width: 390
 ---
-**On your phone.** The same board at the same address, laid out for a phone. Approve or reject a gate from the card itself, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)
+**On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)
 :::::
 ::::
 

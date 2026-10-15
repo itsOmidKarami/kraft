@@ -226,8 +226,9 @@ pin the same thing in both.
 ## Retaking the screenshots in `.github/assets/`
 
 Ten images are shown, in six places: the root README uses `board`, `gate`,
-`mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
-`analytics` and `mobile`; the first-work-item page `board` and `gate`; the web
+`mobile` and `analytics`; the docs home uses `board`, `item`, `review`
+and `mobile` (cropped); the first-work-item page `board`, and the real-chain
+page `gate`; the web
 UI reference (`docsite/content/5.reference/00.web-ui/`) `board`, `item`,
 `review`, `analytics`, `chains` and `policy`; the phone guide
 (`docsite/content/3.guides/1.day-to-day/8.kraft-on-a-phone.md`) `mobile`; and
@@ -238,16 +239,16 @@ Retake the ones whose screen changed, and all of them when a release is cut:
 
 | File | Size | Shows |
 |---|---|---|
-| `board.png` | 1440×700 | the board, grouped by status |
+| `board.png` | 1440×700 | the board, grouped by status: Needs you (paused, failed and two gates, each with its one button), Running, Not started, and the top of Done |
 | `gate.png` | 1440×700 | a work item at `spec_approval`: the review page with the gate's spec rendered |
 | `search.png` | 1440×700 | Ctrl/⌘K with `caching` typed: an item and two documents, over the board |
-| `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: the chain as a graph, and the inspector with the gate's files, open thread and Approve and Reject… |
+| `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: a Review and decide banner, the chain as a graph fitted beside the inspector with a +N cue for what lies past the edge, and the inspector with the gate's files, open thread, what it decides on, and Read spec.md, Review changes, Approve and Reject… |
 | `review.png` | 1440×700 | the review page of that item on `calc.py`, with a comment being written on lines −2 to +2 (the removed line and its replacement), Must fix selected |
-| `analytics.png` | 1440×660 | the Analytics page |
+| `analytics.png` | 1440×660 | the Analytics page: the Range, Repo and Chain menus, the four overview figures, Throughput by week, the Waiting at each gate table and the top of By node |
 | `chains.png` | 1440×700 | Templates › Chains on the `default` chain, with the `spec_approval` gate selected and its settings in the inspector |
 | `policy.png` | 1440×700 | Settings › Policy on its Limits section |
 | `setup.png` | 1440×700 | the setup wizard's first step, on a home with no repo connected |
-| `mobile.png` | 390×844 | the board in the phone layout |
+| `mobile.png` | 390×844 | the board in the phone layout: a paused and a failed card, and a gate card whose Review to approve button opens its review |
 
 All are the default look (graphite, dark, no accent), of a repo named `repo`
 and the items `just dev-seed` files, plus more filed in step 3. `setup` is the
@@ -260,7 +261,18 @@ command without `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766` in front acts on your own
 Kraft, in `~/.kraft`: run these from the repository root, and type the two
 variables on each one.**
 
-1. Start a clean, seeded instance. No comment sits in these blocks: an
+1. Start a clean, seeded instance. The footer under the sidebar prints the
+   installed version, and a clone without tags builds `0.1.devN`, which also
+   brings an "update" badge. Pin the version a release screenshot shows before
+   anything else (`SETUPTOOLS_SCM_PRETEND_VERSION` is read when the package is
+   built, so it has to reinstall it), and look at the footer in the first
+   picture:
+
+   ```bash
+   SETUPTOOLS_SCM_PRETEND_VERSION=2.0.0 uv sync --reinstall-package kraft-sdlc
+   ```
+
+   Then the instance. No comment sits in these blocks: an
    interactive zsh does not read `#` as one. In one terminal, the backend on
    :8766, serving `frontend/dist`:
 
@@ -295,9 +307,9 @@ variables on each one.**
 3. Give the gate something to show. The seeded item's spec is the fake agent's:
    its front matter says `title: fake spec` (that becomes the heading) and its
    body `fake spec body`. Replace both with something real in
-   `.dev/run/worktrees/<id>/.engineering/specs/<id>.md` and commit the change
-   with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
-   `add -A`, which would also stage the agent's `.engineering/sessions/` file.
+   `.dev/run/items/<id>/docs/spec.md`, where Kraft keeps an item's documents
+   outside the repository; nothing is committed, and the review page reads the
+   file as it is. Keep the front matter and change only the `title:` and the body.
    The item's id is in its address on the board. For `item`, which lists an
    open thread, add one:
    `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment <id> --body "why is this here?"`
