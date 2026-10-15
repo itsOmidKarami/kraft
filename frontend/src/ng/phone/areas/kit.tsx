@@ -23,7 +23,7 @@ export interface RowSpec {
   /** A switch row: the whole row is the control. */
   sw?: boolean;
   onSwitch?: (on: boolean) => void;
-  chips?: { label: string; tone?: "ok" | "warn" | "bad" }[];
+  chips?: { label: string; tone?: "ok" | "warn" | "bad" | "change" }[];
   icon?: LucideIcon;
   disabled?: boolean;
   danger?: boolean;

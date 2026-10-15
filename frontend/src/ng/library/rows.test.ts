@@ -16,10 +16,11 @@ describe("library rows", () => {
     ]);
   });
 
-  it("says who uses it from the published list: N chains, unused, unpublished, and nothing until it arrives", () => {
+  it("says who uses it from the published list: N chains, unused, unpublished, and nothing for one chain or until it arrives", () => {
     const by = Object.fromEntries(rows().map((x) => [x.id, x.used]));
     expect(by["tasks.implementer"]).toBe("2 chains");
-    expect(by["tasks.code_review"]).toBe("1 chain");
+    // One chain is the usual case and says nothing.
+    expect(by["tasks.code_review"]).toBe("");
     expect(by["tasks.verify"]).toBe("unused");
     // In the draft but not in the published library: new.
     expect(by["nodes.approval"]).toBe("unpublished");

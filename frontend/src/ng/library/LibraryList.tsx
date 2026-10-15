@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ListFilter, Plus, Search } from "lucide-react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ChevronDown, ChevronRight, ListFilter, Plus, Search } from "lucide-react";
 import { useRoving } from "../graph/useRoving";
 import { isTextField } from "../keys";
 import { NodeIcon } from "../icons";
@@ -25,12 +25,13 @@ const NEW: { label: string; section: Section; kind?: string }[] = [
   { label: "Steering profile", section: "steering" },
 ];
 
+/** The heading each `+ New` item sits under. */
+const NEW_GROUP: Record<Section, string> = { nodes: "Node", steps: "Step", tasks: "Task", steering: "Steering" };
+
 function RowGlyph({ row }: { row: Row }) {
   if (row.glyph.gate) return <span className="lib-diamond" aria-hidden="true" />;
   return <NodeIcon name={row.glyph.icon} kind={row.glyph.taskKind} size={14} />;
 }
-
-const usedWord = (row: Row) => (row.used === "" ? "" : row.used);
 
 /** The library's list (Decisions §10): grouped by kind, a kind filter and a
  *  search, `+ New` through an id step, a row per component with its used-by
@@ -50,8 +51,16 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
   const search = useRef<HTMLInputElement>(null);
   const filterBtn = useRef<HTMLButtonElement>(null);
   const head = useRef<HTMLDivElement>(null);
+  // Groups the person folded; a search or the selection's own group opens one again.
+  const [folded, setFolded] = useState<ReadonlySet<Section>>(new Set());
   const shown = shownRows(rows, q, hidden);
-  const roving = useRoving(selected, shown[0]?.id);
+  const selectedSection = rows.find((x) => x.id === selected)?.section;
+  const isFolded = (s: Section) => folded.has(s) && !q.trim();
+  const reachable = shown.filter((x) => !isFolded(x.section));
+  const roving = useRoving(selected, reachable[0]?.id);
+  useEffect(() => {
+    if (selectedSection) setFolded((f) => (f.has(selectedSection) ? new Set([...f].filter((x) => x !== selectedSection)) : f));
+  }, [selectedSection, selected]);
 
   // "/" jumps to the search, unless a field has the key.
   useEffect(() => {
@@ -72,10 +81,10 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
   };
 
   const move = (e: KeyboardEvent, from: number) => {
-    const to = e.key === "ArrowDown" ? from + 1 : e.key === "ArrowUp" ? from - 1 : e.key === "Home" ? 0 : e.key === "End" ? shown.length - 1 : null;
-    if (to === null || !shown[to]) return;
+    const to = e.key === "ArrowDown" ? from + 1 : e.key === "ArrowUp" ? from - 1 : e.key === "Home" ? 0 : e.key === "End" ? reachable.length - 1 : null;
+    if (to === null || !reachable[to]) return;
     e.preventDefault();
-    roving.go(shown[to].id);
+    roving.go(reachable[to].id);
   };
 
   const takenIn = (s: Section) => rows.filter((x) => x.section === s).map((x) => x.name);
@@ -94,7 +103,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setQ("");
-              else if (e.key === "ArrowDown" && shown[0]) { e.preventDefault(); roving.go(shown[0].id); }
+              else if (e.key === "ArrowDown" && reachable[0]) { e.preventDefault(); roving.go(reachable[0].id); }
             }}
           />
         </div>
@@ -105,7 +114,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
         <Menu
           label="New component"
           trigger={<Plus size={14} aria-hidden />}
-          items={NEW.map((n) => ({ label: n.label, onSelect: () => { setRefused(null); setAdding(n); } }))}
+          items={NEW.map((n) => ({ label: n.label, onSelect: () => { setRefused(null); setAdding(n); }, group: NEW_GROUP[n.section] }))}
         />
       </div>
       <Popover anchor={filterBtn} open={filterOpen} onClose={() => { setFilterOpen(false); filterBtn.current?.focus(); }} role="dialog" label="Show kinds">
@@ -144,8 +153,13 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
           if (!inGroup.length) return null;
           return (
             <div key={s} role="group" aria-label={SECTION_LABEL[s]}>
-              <h2 className="lib-group">{SECTION_LABEL[s]} <span className="lib-count">{inGroup.length}</span></h2>
-              {inGroup.map((row) => (
+              <h2 className="lib-group">
+                <button type="button" className="lib-group-btn" aria-expanded={!isFolded(s)} onClick={() => setFolded((f) => new Set(f.has(s) ? [...f].filter((x) => x !== s) : [...f, s]))}>
+                  {isFolded(s) ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
+                  {SECTION_LABEL[s]} <span className="lib-count">{inGroup.length}</span>
+                </button>
+              </h2>
+              {!isFolded(s) && inGroup.map((row) => (
                 <button
                   key={row.id}
                   ref={roving.ref(row.id)}
@@ -155,14 +169,14 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
                   tabIndex={roving.tabIndex(row.id)}
                   className={`lib-row${row.id === selected ? " is-sel" : ""}`}
                   onClick={() => onSelect(row.id)}
-                  onKeyDown={(e) => move(e, shown.indexOf(row))}
+                  onKeyDown={(e) => move(e, reachable.indexOf(row))}
                 >
                   <RowGlyph row={row} />
-                  <span className="lib-name" data-allow-ellipsis title={row.name}>{row.name}</span>
+                  <span className="lib-name">{row.name.split(/(?<=[_\-.:])/).map((part, i) => <Fragment key={i}>{i > 0 && <wbr />}{part}</Fragment>)}</span>
                   {row.addon && <AddonBadge addon={row.addon} />}
                   {row.problem && <span className="lib-prob" role="img" aria-label="has a problem" />}
                   {row.mark && <span className={`lib-mark is-${row.mark}`} role="img" aria-label={row.mark === "add" ? "added in the draft" : "changed in the draft"} />}
-                  <span className="lib-used">{usedWord(row)}</span>
+                  {row.used && <span className={`lib-used${row.used === "unused" ? " is-unused" : ""}`}>{row.used}</span>}
                 </button>
               ))}
             </div>

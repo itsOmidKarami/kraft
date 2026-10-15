@@ -47,7 +47,6 @@ describe("An add-on's component in the Library", () => {
 
     await userEvent.click(within(list).getByRole("option", { name: /^implementer/ }));
     const local = await screen.findByRole("complementary", { name: "implementer pane" });
-    expect(within(local).getByRole("button", { name: "Edit prompt" })).toBeInTheDocument();
     await userEvent.click(within(local).getByRole("tab", { name: "Overview" }));
     expect(within(local).getByRole("textbox", { name: "prompt" })).toBeInTheDocument();
     expect(within(local).getByRole("button", { name: "implementer" })).toBeInTheDocument();

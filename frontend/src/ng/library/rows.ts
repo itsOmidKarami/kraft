@@ -16,7 +16,7 @@ export interface Row {
   section: Section;
   name: string;
   glyph: Glyph;
-  /** `3 chains`, `unused`, `unpublished` (no published counterpart), or "" until the published list arrives. */
+  /** `3 chains`, `unused`, `unpublished` (no published counterpart), or "" until the published list arrives and for the usual one chain. */
   used: string;
   mark?: "add" | "change";
   problem: boolean;
@@ -70,7 +70,7 @@ export function listRows(r: Result, published: PublishedComponent[] | null, addo
         section,
         name,
         glyph,
-        used: published === null || (shipped && !pub) ? "" : !pub ? "unpublished" : n === 0 ? "unused" : `${n} chain${n === 1 ? "" : "s"}`,
+        used: published === null || (shipped && !pub) ? "" : !pub ? "unpublished" : n === 0 ? "unused" : n === 1 ? "" : `${n} chains`,
         mark: change ? (change.path === id && change.kind === "add" ? "add" : "change") : undefined,
         problem: r.problems.some((p) => p.component === id || under(p.path, id)),
         // Until the published list names its add-on, the namespace stands in for it.

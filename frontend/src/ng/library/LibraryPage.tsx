@@ -13,6 +13,7 @@ import { ReviewPane } from "../templates/ReviewPane";
 import { DraftLibrary, resetLibrary } from "../templates/useLibrary";
 import { YamlView } from "../templates/YamlView";
 import { LibraryCanvas } from "./LibraryCanvas";
+import { LibraryLanding } from "./LibraryLanding";
 import { LibraryList } from "./LibraryList";
 import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
@@ -169,9 +170,9 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             <YamlView draft={draft} scope={draft.scope} published={published === null ? undefined : published === "failed" ? null : published.text} />
           </div>
         ) : (
-          <div className="lib-canvas" style={{ right: reserve }}>
+          <div className={`lib-canvas${refId ? "" : " is-landing"}`} style={{ right: reserve }}>
             <Button className="lib-back" onClick={() => navigate("/templates/library")}>← Library</Button>
-            {!refId ? <p>Pick a component.</p> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : null}
+            {!refId ? <LibraryLanding rows={rows} loaded={published !== null} /> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : null}
           </div>
         )}
         {surface === "canvas" && row && (

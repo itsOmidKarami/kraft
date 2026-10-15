@@ -4,7 +4,8 @@ import { SECTION_LABEL, SECTIONS, parseRef, addonLabel, refUrl, type PublishedLi
 import { listRows } from "../../library/rows";
 import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
-import { authoredAt } from "../../templates/draft/view";
+import { authoredAt, normalise, type NodeA } from "../../templates/draft/view";
+import { fieldMeta, ROUTE_LABEL, routeOf } from "../../templates/fields";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { TabStrip } from "../ui/Rows";
@@ -62,11 +63,29 @@ export function LibraryList() {
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
       {draft.view && rows.length === 0 && (q.trim() ? <NoMatch className="ph-empty" query={q} onClear={() => set({ q: "" })} /> : <p className="ph-empty">{`No ${SECTION_LABEL[kind].toLowerCase()} yet.`}</p>)}
       <Group
-        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "warn" }] : undefined }))}
+        rows={rows.map((r): RowSpec => ({ key: r.id, label: r.name, mono: true, sub: r.used ? `used in ${r.used}` : undefined, to: refUrl(r.id), icon: undefined, chips: r.addon ? [{ label: addonLabel(r.addon) }] : r.problem ? [{ label: "problem", tone: "bad" }] : r.mark ? [{ label: r.mark === "add" ? "new" : "changed", tone: "change" }] : undefined }))}
       />
     </AreaScreen>
   );
 }
+
+const taskLabel = (t: { id: string; kind?: unknown; extends?: unknown }) => `${typeof t.kind === "string" ? t.kind : "task"}${t.extends ? ` · extends ${String(t.extends)}` : ""}`;
+
+/** A node's steps and what it does around them, in the desktop Overview's words. */
+function nodeRows(own: NodeA): RowSpec[] {
+  const steps = normalise(own)?.steps ?? [];
+  const lone = steps.length === 1 && steps[0].id === "main";
+  const fix = own.fix_loop as NodeA | null | undefined;
+  const esc = own.escalation as { id?: unknown } | null | undefined;
+  return [
+    ...steps.map((s): RowSpec => ({ key: `step:${s.id}`, label: lone ? s.tasks.map((t) => t.id).join(", ") || "main" : s.id, mono: true, value: `${s.tasks.length} ${s.tasks.length === 1 ? "task" : "tasks"}${s.tasks.length > 1 ? " · parallel" : ""}` })),
+    { key: "fix_loop", label: "fix loop", value: fix ? `${normalise(fix)?.steps.length ?? 0} repair ${(normalise(fix)?.steps.length ?? 0) === 1 ? "step" : "steps"}` : "none" },
+    { key: "escalation", label: "escalation", mono: !!esc, value: esc ? String(esc.id ?? "") : "none" },
+    { key: "on_failure", label: "on failure", value: own.on_failure ? "node handler" : "none" },
+  ];
+}
+
+const stepRows = (own: NodeA): RowSpec[] => ((own.tasks as { id: string; kind?: unknown; extends?: unknown }[] | undefined) ?? []).map((t): RowSpec => ({ key: `task:${t.id}`, label: t.id, mono: true, value: taskLabel(t) }));
 
 /** `/templates/library/:ref`: one component's rows. Its scalar settings are editable through the same `set_field` op the desktop sends, a steering profile's instructions too; the rest is read-only. */
 export function LibraryComponentView() {
@@ -87,16 +106,22 @@ export function LibraryComponentView() {
   const changed = (field: string) => !!draft.view?.result.changes.some((c) => c.path === path && (c.fields ?? []).includes(field));
 
   const settings: RowSpec[] = ownRows(own).map(({ field, value }): RowSpec => {
-    const base: RowSpec = { key: field, label: field, mono: true, changed: changed(field) };
+    // The label is the desktop's own for the field (`ref` is the action, `scope` what it runs over).
+    const label = fieldMeta(field).label;
+    const base: RowSpec = { key: field, label, mono: true, changed: changed(field) };
     if (shipped) return { ...base, value: show(value) };
     if (typeof value === "boolean") return { ...base, sw: value, onSwitch: (on) => void setField(field, on) };
     // An action or a target is one of the values the draft lists, not free text.
     const choices = field === "ref" || field === "target" ? draft.view?.result.choices?.[field] ?? [] : [];
     const listed = choices.length ? { choices, closed: true, noun: field === "ref" ? "action" : "target" } : undefined;
     if (typeof value === "string" || typeof value === "number")
-      return { ...base, value: show(value), onEdit: () => edit({ kind: "text", title: field, value: String(value), listed, set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
+      return { ...base, value: show(value), onEdit: () => edit({ kind: "text", title: label, value: String(value), listed, set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
     return { ...base, value: show(value) };
   });
+  // An agent task's route is how it picks its model, not a key of its own; a node's structure is its steps and handlers.
+  const agent = !!own && (own.kind === "agent" || !!own.prompt || !!own.profile || !!own.model || !!own.effort);
+  const route = own && parsed?.section === "tasks" && agent ? ROUTE_LABEL[routeOf(own)] : null;
+  const structure: RowSpec[] = own && parsed?.section === "nodes" ? nodeRows(own as NodeA) : own && parsed?.section === "steps" ? stepRows(own as NodeA) : [];
   const instructions = typeof own?.instructions === "string" ? own.instructions : null;
   const pub = published?.components.find((c) => c.id === path);
   const uses = pub?.used_by_paths ?? [];
@@ -106,11 +131,12 @@ export function LibraryComponentView() {
     <AreaScreen title={parsed?.name ?? "Library"} sub={parsed ? `${SECTION_LABEL[parsed.section].replace(/s$/, "")}${pub?.addon ? ` · ${addonLabel(pub.addon)}` : ""}` : undefined} draft={draft}>
       {draft.view && !own && <p className="ph-empty">There is no component {path}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problems.map((p, i): RowSpec => ({ key: `p${i}`, label: p.message.replace(/^Value error, /, ""), sub: [p.chain && `breaks ${p.chain}`, p.repo && `repo ${p.repo}`].filter(Boolean).join(" · ") || undefined }))} />}
-      {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...settings]} />}
+      {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...(route ? [{ label: "route", value: route, mono: true } as RowSpec] : []), ...settings]} />}
+      {structure.length > 0 && <Group title={parsed?.section === "nodes" ? "Steps, in order" : "Tasks"} rows={structure} />}
       {instructions !== null && (
         <Group title="Instructions" rows={[{ label: instructions.trim() ? instructions : "Required.", mono: false, onEdit: shipped ? undefined : () => edit({ kind: "text", title: "Instructions", value: instructions, set: (v) => (v.trim() ? setField("instructions", v) : Promise.resolve("Instructions can't be empty.")) }) }]} note="Added to what an agent task reads at launch, after the repository's own steering." />
       )}
-      {parsed && <Group title="Used in" rows={uses.length ? uses.map((u, i): RowSpec => ({ key: `${u.chain}:${u.path}:${i}`, label: u.chain, mono: true, sub: `${u.path}${u.via ? ` via ${u.via}` : ""}`, to: `/templates/chains/${encodeURIComponent(u.chain)}` })) : [{ label: published ? "Not used by any chain." : "Reading…" }]} />}
+      {parsed && own && <Group title="Used in" rows={uses.length ? uses.map((u, i): RowSpec => ({ key: `${u.chain}:${u.path}:${i}`, label: u.chain, mono: true, sub: `${u.path}${u.via ? ` via ${u.via}` : ""}`, to: `/templates/chains/${encodeURIComponent(u.chain)}` })) : [{ label: published ? "Not used by any chain." : "Reading…" }]} />}
       {sheet}
     </AreaScreen>
   );

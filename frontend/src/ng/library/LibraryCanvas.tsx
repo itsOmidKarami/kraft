@@ -3,6 +3,7 @@ import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf } from "../http";
 import { isTextField } from "../keys";
 import { showToast } from "../ui/Toast";
+import { tip } from "../ui/Tooltip";
 import { BottomPane, handlerOf, type BottomTab } from "../templates/BottomPane";
 import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { authoredAt, normalise, valueAt } from "../templates/draft/view";
@@ -119,14 +120,13 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
     const base = authoredAt(r, scope, row.id)?.extends;
     return (
       <div className="lib-glyph-area" style={{ right: reserve }}>
-        <button type="button" className="lib-glyph" aria-label={`${row.name}, ${kind || "task"} task`} onClick={() => onOpen(row.id)}>
+        <button type="button" className="lib-glyph" {...tip(`${row.name}, ${kind || "task"} task`)} onClick={() => onOpen(row.id)}>
           <NodeGlyph size="lg" icon={row.glyph.icon} taskKind={row.glyph.taskKind} sel={path === row.id} prob={row.problem} mark={row.mark} />
-          <span className="lib-glyph-name">{row.name}</span>
         </button>
         <span className="lib-glyph-sub">{kind || "task"}</span>
         {typeof base === "string" && <button type="button" className="tpl-phrase" onClick={() => onGoTo(`tasks.${base}`)}>extends {base}</button>}
       </div>
     );
   }
-  return <SteeringCanvas row={row} uses={uses} reserve={reserve} />;
+  return <SteeringCanvas row={row} uses={uses} reserve={reserve} draft={draft} />;
 }

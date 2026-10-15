@@ -73,11 +73,26 @@ describe("Library component (L.2)", () => {
     open("tasks.implementer");
     expect(await screen.findByRole("heading", { level: 1, name: "implementer" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^profile/ })).toHaveTextContent("strong");
-    expect(screen.getByRole("button", { name: /^policy.time_cap_minutes/ })).toHaveTextContent("120");
+    expect(screen.getByRole("button", { name: /^running cap/ })).toHaveTextContent("120");
     expect(screen.getByText("a, b")).toBeInTheDocument();
+    // An agent task shows how it picks its model, as the desktop's route.
+    expect(screen.getByText("route").closest("div, a, button")).toHaveTextContent("profile");
     const used = await screen.findByRole("region", { name: "Used in" });
     expect(within(used).getByRole("link", { name: /default/ })).toHaveAttribute("href", "/templates/chains/default");
     expect(within(used).getByRole("link", { name: /docs_only/ })).toHaveTextContent("via nodes.implementation");
+  });
+
+  it("a missing component says so and does not claim to be unused", async () => {
+    open("tasks.ghost");
+    expect(await screen.findByText("There is no component tasks.ghost.")).toBeInTheDocument();
+    expect(screen.queryByText("Not used by any chain.")).toBeNull();
+  });
+
+  it("a node shows its steps and handlers, not just its kind", async () => {
+    open("nodes.verification");
+    expect(await screen.findByText("fix loop")).toBeInTheDocument();
+    expect(screen.getByText("escalation")).toBeInTheDocument();
+    expect(screen.getByText("on failure")).toBeInTheDocument();
   });
 
   it("an add-on's task is listed with its add-on and read with nothing to tap, beside a local one that edits", async () => {
@@ -108,8 +123,8 @@ describe("Library component (L.2)", () => {
 
   it("a number is sent as a number, and a non-number is refused before the call", async () => {
     const { calls } = open("tasks.implementer", { ...lib(), "POST /drafts/library/library/ops": [200, { ...view("library", "library", { draft: true }, { model: MODEL as never }), ops: [] }] });
-    await userEvent.click(await screen.findByRole("button", { name: /^policy.time_cap_minutes/ }));
-    const input = screen.getByLabelText("policy.time_cap_minutes", { selector: "input" });
+    await userEvent.click(await screen.findByRole("button", { name: /^running cap/ }));
+    const input = screen.getByLabelText("running cap", { selector: "input" });
     await userEvent.clear(input);
     await userEvent.type(input, "abc{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a number.");

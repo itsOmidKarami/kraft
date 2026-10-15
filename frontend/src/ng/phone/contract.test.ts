@@ -75,6 +75,7 @@ const ALLOWED = [
   "templates/repos/fields", // the Repos rows: label, parse, patch, source
   "templates/repos/types", // reposOf, runningOf, problemsOf
   "templates/repos/RepoConfig", // setRepo only: the preview-checked set_repo
+  "templates/fields", // fieldMeta labels and routeOf: a task field goes by one name on both layouts
   "templates/choices", // the steering profiles and harnesses a typed list takes, as data
   "templates/useLibrary", // the published library's components, read once
   "templates/panes/useHarnessOptions", // the harness profiles, read once

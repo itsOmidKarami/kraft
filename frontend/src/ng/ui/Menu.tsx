@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import "./ui.css";
 import { tip } from "./Tooltip";
@@ -19,6 +19,8 @@ export interface MenuItem {
   dotLabel?: string;
   /** A glyph before the label. */
   icon?: ReactNode;
+  /** A heading drawn above the first of each run of items that share it. */
+  group?: string;
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
@@ -54,8 +56,9 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
         <div className="menu">
           {heading && <span className="menu-heading" aria-hidden="true">{heading}</span>}
           {items.map((it, i) => (
+            <Fragment key={it.label}>
+            {it.group && it.group !== items[i - 1]?.group && <span className="menu-heading" aria-hidden="true">{it.group}</span>}
             <button
-              key={it.label}
               ref={(el) => void (refs.current[i] = el)}
               type="button"
               role={it.checked === undefined ? "menuitem" : "menuitemradio"}
@@ -81,6 +84,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
               {it.dot && <span className={`menu-dot is-${it.dot}`} role="img" aria-label={it.dotLabel ?? (it.dot === "draft" ? "unpublished draft" : "has a problem")} />}
               {it.hint && <span className="menu-hint">{it.hint}</span>}
             </button>
+            </Fragment>
           ))}
           {note && <p className="menu-note">{note}</p>}
         </div>
