@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backLabel, parentOf, screenKey, tabOf } from "./route";
+import { backLabel, parentOf, screenKey, tabOf, tabsHidden } from "./route";
 
 describe("parentOf", () => {
   it("has no parent on a tab's own page", () => {
@@ -44,21 +44,28 @@ describe("parentOf", () => {
 });
 
 describe("backLabel", () => {
-  it("names the parent", () => {
+  it("is the name of the parent screen, never a generic word", () => {
+    const item = (id: string) => (id === "a" ? { title: "Fix login" } : undefined);
     expect(backLabel("/work-items/a")).toBe("Board");
-    expect(backLabel("/work-items/a/nodes/n")).toBe("Chain");
-    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("Node");
-    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).toBe("Task");
-    // An empty `scope` names nothing: the screen is the task.
-    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("Node");
-    expect(parentOf("/work-items/a/nodes/n?sel=n.s.t&scope=")).toBe("/work-items/a/nodes/n");
-    expect(backLabel("/work-items/a/review")).toBe("Back");
-    expect(backLabel("/work-items/a?doc=x")).toBe("Back");
-    expect(backLabel("/work-items/a?attached=spec")).toBe("Back");
+    expect(backLabel("/work-items/a/nodes/merge_request", item)).toBe("Fix login");
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("n");
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t&scope=%3Ajust+test")).toBe("t");
+    expect(backLabel("/work-items/a/review", item)).toBe("Fix login");
+    expect(backLabel("/work-items/a?doc=x", item)).toBe("Fix login");
+    expect(backLabel("/work-items/a?attached=spec", item)).toBe("Fix login");
     expect(backLabel("/templates/chains")).toBe("More");
     expect(backLabel("/templates/chains/default")).toBe("Chains");
     // A node of a chain names the chain it came from.
     expect(backLabel("/templates/chains/default/nodes/verification")).toBe("default");
+    expect(backLabel("/templates/chains/default/nodes/code_review")).toBe("default");
+    expect(backLabel("/settings/repos/kraft")).toBe("Repos");
+  });
+});
+
+describe("tabsHidden", () => {
+  it("hides the tab bar over an item and keeps it on an address no screen answers", () => {
+    expect(tabsHidden("/work-items/a/review")).toBe(true);
+    expect(tabsHidden("/nope")).toBe(false);
   });
 });
 

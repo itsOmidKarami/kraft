@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
@@ -9,6 +9,8 @@ import { HeaderActions } from "./HeaderActions";
 import { Shell } from "./Shell";
 
 afterEach(() => window.history.pushState({}, "", "/"));
+
+const Where = () => <output data-testid="where">{useLocation().pathname + useLocation().search}</output>;
 
 const inShell = (page: JSX.Element) =>
   render(
@@ -60,5 +62,67 @@ describe("ng Shell", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "Not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to the board" })).toHaveAttribute("href", "/");
+  });
+
+  it("opens the board's composer from N on another page", async () => {
+    window.history.pushState({}, "", "/settings/about");
+    render(<App />);
+    fireEvent.keyDown(document.body, { key: "N" });
+    expect(window.location.pathname).toBe("/settings/about");
+    await userEvent.keyboard("{Shift>}N{/Shift}");
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/?new=1"));
+  });
+
+  it("offers the section above an unknown address inside Settings", () => {
+    window.history.pushState({}, "", "/settings/nope");
+    render(<App />);
+    expect(screen.getByRole("link", { name: "Up to Policy" })).toHaveAttribute("href", "/settings/policy");
+  });
+});
+
+describe("ng Shell chrome", () => {
+  it("sets the tab title from the route", () => {
+    inShell(<p>page</p>);
+    expect(document.title).toBe("Board · Kraft");
+  });
+
+  it("moves focus to the new page's heading on a route change, not into an open field", async () => {
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route path="*" element={<><h1>Page</h1><input aria-label="Box" /></>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Analytics" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Page" })).toHaveFocus());
+    screen.getByRole("textbox", { name: "Box" }).focus();
+    fireEvent.click(screen.getByRole("link", { name: "Chains" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("heading", { name: "Page" })).not.toHaveFocus();
+  });
+
+  it("leaves focus where it is inside a dialog, even when the dialog is hosted inside the app header", async () => {
+    inShell(<><h1>Page</h1><div className="ng-header"><div role="dialog" aria-label="Doc"><button>Close doc</button></div></div></>);
+    screen.getByRole("button", { name: "Close doc" }).focus();
+    fireEvent.click(screen.getByRole("link", { name: "Chains" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("button", { name: "Close doc" })).toHaveFocus();
+  });
+
+  it("opens the one shortcut help from ? on any page, but not from a field or over a dialog", async () => {
+    inShell(<><h1>Anything</h1><input aria-label="Box" /><Where /></>);
+    await userEvent.type(screen.getByRole("textbox", { name: "Box" }), "?");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    screen.getByRole("textbox", { name: "Box" }).blur();
+    await userEvent.keyboard("?");
+    const help = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(help).toHaveTextContent("Search");
+    expect(help).toHaveTextContent("New work item");
+    await userEvent.keyboard("{Shift>}N{/Shift}");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 });

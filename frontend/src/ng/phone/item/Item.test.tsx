@@ -37,6 +37,8 @@ function mount(it: ReturnType<typeof detail>, path: string | { pathname: string;
   );
   return calls;
 }
+/** The inline refusal, not the error toast that repeats it. */
+const inlineAlert = async () => (await screen.findAllByRole("alert")).find((a) => !a.classList.contains("ph-toast"))!;
 const posts = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
 const lastPost = (calls: Call[]) => calls.filter((c) => c.method !== "GET").at(-1);
 const where = () => screen.getByLabelText("where").textContent;
@@ -192,7 +194,7 @@ describe("Pause (C.5)", () => {
     mount(item("running"), "/work-items/w1", { "POST /work-items/w1/pause": [409, { detail: "work item is already paused" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await userEvent.click(screen.getByRole("button", { name: "Pause now" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("already paused");
+    expect(await inlineAlert()).toHaveTextContent("already paused");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
@@ -567,7 +569,7 @@ describe("raising the cap that stopped the item (R73)", () => {
     const reads = () => calls.filter((c) => c.method === "GET" && c.path === "/work-items/w1").length;
     const before = reads();
     await type("600");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Raised to 600, but the retry was refused: already running");
+    expect(await inlineAlert()).toHaveTextContent("Raised to 600, but the retry was refused: already running");
     expect(reads()).toBeGreaterThan(before);
     expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]);
   });

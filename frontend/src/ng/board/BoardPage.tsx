@@ -27,14 +27,21 @@ import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { countIn } from "./counts";
-import { Shortcuts } from "./Shortcuts";
+import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
 
-const isTextField = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+/** What the board adds to the shared shortcut help. */
+const BOARD_KEYS: ShortcutRow[] = [
+  { keys: ["/"], does: "Focus the filter" },
+  { keys: ["↑", "↓"], does: "Move between rows" },
+  { keys: ["↵"], does: "Open the row in the side panel" },
+  { keys: ["Space"], does: "Select or unselect the row" },
+  { keys: [mod("↵")], does: "Open the row's full page" },
+  { keys: ["Esc"], does: "Close the side panel" },
+];
 
 type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
 
@@ -81,7 +88,7 @@ export function BoardPage() {
   const filterRef = useRef<HTMLInputElement>(null);
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
   const [budgetEdit, setBudgetEdit] = useState(false);
-  const [keys, setKeys] = useState(false);
+  useShortcutRows("Board", BOARD_KEYS);
   const [body, bodyW] = useWidth();
   const bodyEl = useRef<HTMLDivElement | null>(null);
   const bodyRef = useCallback((el: HTMLDivElement | null) => { body(el); bodyEl.current = el; }, [body]);
@@ -172,16 +179,13 @@ export function BoardPage() {
     if (lost) requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
   }, [query.sel, setQuery]);
 
-  // "/" focuses the filter, "?" lists the shortcuts; Escape clears the selection once menus have had it.
+  // "/" focuses the filter; Escape clears the selection once menus have had it.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "?" && !isTextField(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        setKeys(true);
       } else if (e.key === "Escape" && query.sel) closePeek();
     };
     window.addEventListener("keydown", onKey);
@@ -291,7 +295,7 @@ export function BoardPage() {
           trigger={<><span className="board-menu-key">Sort</span> {SORT_LABEL[query.sort]} <span aria-hidden className="board-caret">▾</span></>}
           items={(Object.keys(SORT_LABEL) as SortBy[]).map((s) => ({ label: SORT_LABEL[s], checked: query.sort === s, onSelect: () => setQuery({ sort: s }) }))}
         />
-        <button type="button" className="board-keys-btn" {...tip("Keyboard shortcuts")} aria-keyshortcuts="?" onClick={() => setKeys(true)}><Kbd>?</Kbd></button>
+        <button type="button" className="board-keys-btn" {...tip("Keyboard shortcuts")} aria-keyshortcuts="?" onClick={openShortcutHelp}><Kbd>?</Kbd></button>
       </div>
 
       <div className="board-body" ref={bodyRef}>
@@ -357,7 +361,6 @@ export function BoardPage() {
         )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
-      {keys && <Shortcuts onClose={() => setKeys(false)} />}
     </div>
   );
 }

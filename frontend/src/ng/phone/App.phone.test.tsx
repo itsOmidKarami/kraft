@@ -169,3 +169,34 @@ describe("one address space across a resize", () => {
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
   });
 });
+
+describe("the phone's unknown address", () => {
+  it("says Not found once, keeps the tab bar, and offers the way up", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/nope");
+    render(<App />);
+    expect(await screen.findAllByRole("heading", { name: "Not found" })).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Up to More" })).toHaveAttribute("href", "/more");
+    expect(document.title).toBe("Not found · Kraft");
+  });
+
+  it("offers the area's own list for a deep unknown address, not More", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/repos/x/y");
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "Up to Repos" })).toHaveAttribute("href", "/settings/repos");
+  });
+
+  it("titles each screen and moves focus to its heading on a tab change", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/");
+    render(<App />);
+    await userEvent.click(screen.getByRole("link", { name: "More" }));
+    await waitFor(() => expect(document.title).toBe("More · Kraft"));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "More" })).toHaveFocus());
+  });
+});

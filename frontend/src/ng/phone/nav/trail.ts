@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useStore } from "../../../store";
 import { backLabel, parentOf, screenKey } from "./route";
 
 /** What each history entry showed, by its index (react-router keeps `idx` in
@@ -24,9 +25,10 @@ export function useBack() {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const href = pathname + search;
+  const items = useStore((s) => s.workItems);
   const parent = parentOf(href);
   return {
-    label: backLabel(href),
+    label: backLabel(href, (id) => items[id]),
     parent,
     go: () => {
       if (!parent) return;

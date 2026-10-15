@@ -87,6 +87,8 @@ const ALLOWED = [
   "library/types", // the four sections and the ref grammar
   "shell/useDraftCounts", // the draft dots of More
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
+  "shell/pageName", // a screen's name: the tab title, the Back label and the not-found links, one source with the desktop
+  "shell/usePageChrome", // the tab title and the focus on a new screen's heading, one source with the desktop
   "shell/routes", // the list of pages, as data: Search's Go to rows
   "board/cue", // the stop-kind icon of a Needs you reason, drawn the same on the card and the row
   "offline", // the offline state and its words: one banner text, both layouts

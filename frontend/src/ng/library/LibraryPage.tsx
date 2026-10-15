@@ -84,7 +84,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const publishedId = useId();
 
   useEffect(() => {
-    if (draft.error) showToast(draft.error);
+    if (draft.error) showToast(draft.error, { tone: "error" });
   }, [draft.error]);
   // A new component starts at its root, pane open.
   useEffect(() => {

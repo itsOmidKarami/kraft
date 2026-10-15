@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, TemplateSummary } from "../../types";
+import { ShortcutHelp } from "../shell/ShortcutHelp";
 import { COMPOSER_KEY, Composer, sayIfFiledPaused } from "./Composer";
 
 const N = (id: string, kind: "exec" | "gate" = "exec", covered_by: string | null = null) => ({ id, kind, covered_by, gate_after: null, tasks: [] }) as unknown as ChainNode;
@@ -56,6 +57,13 @@ const settle = async () => {
 };
 
 describe("Composer", () => {
+  it("adds its own ⌘↵ row to the shortcut help while it is open", async () => {
+    stubFetch();
+    mount();
+    render(<ShortcutHelp onClose={() => {}} />);
+    expect(await screen.findByText("Create the item, paused")).toBeInTheDocument();
+  });
+
   it("lists only the chosen repo's own repo library chains, and switching the repo changes the list", async () => {
     const lib = (repo: string) => ({ id: `${repo}:ship`, nodes: [N("implementation")], gates: 0, addon: { id: `library@repo:${repo}`, version: "abc", repo } });
     vi.spyOn(api, "getTemplates").mockResolvedValue([...CHAINS, lib("plugins"), lib("docs")]);

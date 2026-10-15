@@ -60,7 +60,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   }, [lane, harness, profile, sel, go]);
 
   useEffect(() => {
-    if (draft.error) showToast(draft.error);
+    if (draft.error) showToast(draft.error, { tone: "error" });
   }, [draft.error]);
 
   const area = useMemo(() => ({

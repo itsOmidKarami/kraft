@@ -61,7 +61,7 @@ export function AboutScreen() {
   const held = health?.storage?.state === "held";
   const invalid = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
   const problems = invalid + (held ? 1 : 0);
-  const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => showToast(done), () => showToast("Could not copy: select the text instead")) ?? showToast("Could not copy: select the text instead");
+  const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => showToast(done), () => showToast("Could not copy: select the text instead", { tone: "error" })) ?? showToast("Could not copy: select the text instead", { tone: "error" });
   const diagnostics = [
     `kraft ${installed || "unknown"}${update ? ` (${update.channel})` : ""}`,
     `health: ${health ? health.status : "unknown"}`,

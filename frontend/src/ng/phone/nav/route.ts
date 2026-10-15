@@ -1,6 +1,8 @@
 /** Where a phone location sits in the stack (W17 brief A.3, A.4). The URL is
  *  the stack: every screen's parent is a pure function of its own address. */
 
+import { pageName } from "../../shell/pageName";
+
 export type Tab = "board" | "search" | "analytics" | "more";
 
 const AREA = /^\/(?:templates\/(?:chains|library)|settings\/(?:repos|harnesses|policy|auto-intake|notifications|access|appearance|storage|about))/;
@@ -58,19 +60,10 @@ export function parentOf(href: string): string | null {
   return "/";
 }
 
-/** The label of the Back control: it names the parent, as the prototype does. */
-export function backLabel(href: string): string {
-  const { pathname, q } = split(href);
+/** The label of the Back control: the name of the screen it goes to, never "Back" or a generic word. */
+export function backLabel(href: string, item?: Parameters<typeof pageName>[1]): string {
   const parent = parentOf(href);
-  if (q.has("doc") || q.has("attached") || q.has("yaml") || q.has("compose")) return "Back";
-  if (parent === "/") return "Board";
-  if (parent === "/more") return "More";
-  // A chain's node comes back to the chain it names, not to a word for it.
-  if (pathname.startsWith("/templates/chains/") && pathname.includes("/nodes/") && !q.has("sel")) return decodeURIComponent(pathname.split("/")[3]);
-  if (pathname.includes("/nodes/")) return q.has("sel") ? (q.get("scope") ? "Task" : "Node") : "Chain";
-  if (pathname.endsWith("/review")) return "Back";
-  if (parent && AREA.test(parent) && parent !== pathname) return parent.split("/").filter(Boolean).at(-1)!.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
-  return "Back";
+  return parent ? pageName(parent, item) : "Board";
 }
 
 /** The tab a location belongs to; null when the tab bar is hidden (item, node, task, review, new item). */
@@ -82,6 +75,9 @@ export function tabOf(href: string): Tab | null {
   if (pathname === "/more" || pathname === "/archived" || AREA.test(pathname)) return "more";
   return null;
 }
+
+/** Whether the tab bar is out of the way: an item, its nodes, its review and the new-item page fill the screen. */
+export const tabsHidden = (href: string) => split(href).pathname.startsWith("/work-items");
 
 /** `pathname`, `sel` and a task's `scope` only: whether two addresses are the same screen. */
 export const screenKey = (href: string) => {

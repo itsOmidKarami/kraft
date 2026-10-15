@@ -1,3 +1,4 @@
+import { useEffect, useSyncExternalStore } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 /** Whether this keyboard's modifier is ⌘: a Mac, or an iPad or iPhone with a keyboard. */
@@ -40,3 +41,50 @@ export const holdsText = (t: EventTarget | null) => {
 /** An Escape the page may act on: not one that ends an input method's composition, which
  *  belongs to the field (Safari sends it with `isComposing` set). */
 export const isEscape = (e: ReactKeyboardEvent) => e.key === "Escape" && !e.nativeEvent.isComposing;
+
+/** One line of the shortcut help: the keys, and what they do. */
+export interface ShortcutRow {
+  keys: string[];
+  does: string;
+}
+
+/** The rows every page answers to, as the shell binds them. */
+export const globalShortcuts = (): ShortcutRow[] => [
+  { keys: [mod("K")], does: "Search" },
+  { keys: ["⇧N"], does: "New work item" },
+  { keys: [mod("\\")], does: "Pin or collapse the sidebar" },
+  { keys: [mod("↵")], does: "Send, in a field that has a send button" },
+  { keys: ["?"], does: "Show this list" },
+];
+
+/** Pages add their own rows while mounted, and the one help dialog lists them
+ *  after the global ones. Rows of a page are named by `page` in the dialog. */
+const pages = new Map<symbol, { page: string; rows: ShortcutRow[] }>();
+const listeners = new Set<() => void>();
+let snapshot: { page: string; rows: ShortcutRow[] }[] = [];
+const publish = () => {
+  snapshot = [...pages.values()];
+  listeners.forEach((l) => l());
+};
+
+/** Registers `rows` for as long as the calling page is mounted. Pass a stable `rows`. */
+export function useShortcutRows(page: string, rows: ShortcutRow[]) {
+  useEffect(() => {
+    const id = Symbol(page);
+    pages.set(id, { page, rows });
+    publish();
+    return () => void (pages.delete(id), publish());
+  }, [page, rows]);
+}
+
+/** The rows pages have registered right now. */
+export const useRegisteredShortcuts = () => useSyncExternalStore((cb) => (listeners.add(cb), () => void listeners.delete(cb)), () => snapshot);
+
+/** Whether a key press is a bare printable press, one a page shortcut may take: not in a field, no modifier. */
+export const isBareKey = (e: KeyboardEvent) => !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing && !isTextField(e.target);
+
+/** Shortcuts stand down while a dialog is open: it owns the keyboard. */
+export const dialogOpen = () => !!document.querySelector('[role="dialog"], [role="alertdialog"]');
+
+/** Opens the shortcut help from anywhere (the board's "?" button). */
+export const openShortcutHelp = () => window.dispatchEvent(new Event("kraft:shortcuts"));
