@@ -58,3 +58,13 @@ export function rowSeams<S extends { at: number }>(nodes: ChainNode[], row: RowE
     return a === b ? [] : [{ ...s, at: b, node: s.at }];
   });
 }
+
+/** The row a node view's strip draws: the stage holding the viewed node (and any in `open`) node by node, every other
+ *  stage a pill. A stage is passed once every node in it is done. */
+export function stripRow(nodes: ChainNode[], open: ReadonlySet<string>, viewing: string): RowEntry[] {
+  return stagesOf(nodes).flatMap((s): RowEntry[] => {
+    if (open.has(s.key) || s.nodes.some((n) => n.id === viewing)) return s.nodes;
+    const words = s.gate ? gateWords(s.gate.id) : nodeWords(s.key);
+    return [{ kind: "fold", key: s.key, words, nodes: s.nodes, passed: s.nodes.every((n) => n.state === "done") }];
+  });
+}

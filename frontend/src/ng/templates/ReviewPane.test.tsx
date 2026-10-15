@@ -65,6 +65,13 @@ describe("Review & publish pane", () => {
     expect(screen.getByText("✕ doesn't resolve · 1 problem block publishing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Publish" })).toHaveAccessibleDescription("Fix the 1 problem first.");
+    // The reason is body text above the buttons, not sub-text beside them.
+    expect(screen.getByText("Fix the 1 problem first.")).toHaveClass("tpl-rv-why");
+    expect(screen.getByText("'steps' must not be empty")).toBeInTheDocument();
+    // The YAML diff has the pane to itself: the problems shrink to one line that goes back to them.
+    await userEvent.click(screen.getByRole("tab", { name: "YAML diff" }));
+    expect(screen.queryByText("'steps' must not be empty")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "See them →" }));
     expect(screen.getByText("'steps' must not be empty")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Fix →" }));
     expect(onFix).toHaveBeenCalledWith("lint", expect.objectContaining({ path: "lint" }));

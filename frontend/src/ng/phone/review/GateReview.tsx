@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { docBody } from "../../../format";
 import type { KraftEvent, ReviewThread } from "../../../types";
+import { gateMessage, materialized } from "../../item/chainValues";
 import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
@@ -87,6 +88,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const blockId = useId();
   const waiting = !!gate && item.pending_gate === gate;
   const next = gateConsequence(item, gate);
+  const message = gate ? gateMessage(materialized(item), gate) : undefined;
   // At the waiting gate the server's `fix_target` names where a rejection goes, and its null that there is
   // none (a legacy row, where the reject route answers 409): only a server that sends no `fix_target` gets
   // the chain's guess, as does a gate the item is not waiting at.
@@ -126,6 +128,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>
           <p className="ph-review-sub">{sub}</p>
+          {message && <p className="ph-review-msg">{message}</p>}
           {next && <p className="ph-review-next">{next}</p>}
           <p className="ph-review-next">{readOnly}</p>
         </div>

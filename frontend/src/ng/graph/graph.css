@@ -161,7 +161,7 @@
 .strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .strip-back { flex: none; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; font-size: var(--fs-label); color: var(--text-sub); white-space: nowrap; cursor: pointer; }
 .strip-back:is(:hover, :focus-visible) { background: var(--surface-2); }
-.strip-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.strip-scroll { mask-image: linear-gradient(to right, transparent, var(--bg) 16px, var(--bg) calc(100% - 16px), transparent); flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .strip-scroll::-webkit-scrollbar { display: none; }
 .strip-world { position: relative; margin: 0 auto; }
 .strip-world svg { position: absolute; left: 0; top: 0; }
@@ -170,7 +170,11 @@
 .strip-node { position: absolute; width: 90px; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; z-index: 1; }
 .strip-btn { display: flex; margin: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; pointer-events: auto; }
 .strip-btn:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
-.strip-label { font: 600 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); white-space: nowrap; }
+.strip-label { overflow-wrap: anywhere; text-align: center; line-height: 1.25; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.strip-label.is-viewing { font-weight: 600; color: var(--text); }
+.strip-fold { position: absolute; z-index: 1; display: flex; align-items: center; gap: 4px; box-sizing: border-box; margin: 0; padding: 0 10px 0 2px; border: 1px solid var(--stroke); border-radius: 13px; background: var(--bg); font: 400 var(--fs-label) ui-monospace, Menlo, monospace; white-space: nowrap; color: var(--text-sub); cursor: pointer; }
+.strip-fold:is(:hover, :focus-visible) { border-color: var(--text-muted); }
+.strip-fold-n { margin-left: 4px; color: var(--text-muted); }
 
 /* GateView */
 .gateview { position: absolute; top: 0; left: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; }

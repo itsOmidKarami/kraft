@@ -23,4 +23,5 @@
 .ph-review-group { margin: 0; padding: 10px 14px 2px; font-size: var(--fs-label); font-weight: 600; color: var(--text-muted); }
 .ph-thread-quote { margin: 0 0 6px; padding: 6px 8px; overflow-x: auto; border-radius: 6px; background: var(--side); font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; }
 .ph-thread-pending { display: inline-block; margin-bottom: 2px; font-size: var(--fs-label); font-weight: 600; color: var(--mark-change); }
+.ph-review-msg { margin: 6px 0 0; font-size: var(--fs-body); color: var(--text); overflow-wrap: anywhere; }
 .ph-review-next { margin: 4px 0 0; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; }

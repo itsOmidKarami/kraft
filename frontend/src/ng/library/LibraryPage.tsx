@@ -161,7 +161,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
-        {surface === "canvas" && <Button variant="primary" aria-pressed={review} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button>}
+        {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : "Review & publish"}</Button>}
       </HeaderActions>
       <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>

@@ -40,7 +40,7 @@ export function PreviewPane({ draft, chains, size, onClose }: { draft: ConfigDra
 
   return (
     <Inspector id="policy-preview" open size={size} crumbs={[{ label: "Policy", onClick: onClose }]} icon="workflow" title="On a chain" sub="read-only · edit values on the page" onCollapse={onClose} onExpand={() => {}}>
-      <SelectRow label="chain" value={chain} options={chains.map((c) => ({ value: c, label: c }))} onPick={setChain} />
+      <SelectRow plain label="chain" value={chain} options={chains.map((c) => ({ value: c, label: c }))} onPick={setChain} />
       <Head>Caps at each scope</Head>
       <Note>What each scope would get under this draft. Gates are left out: they wait for a person.</Note>
       {error && <Note bad>{error}</Note>}

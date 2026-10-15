@@ -78,6 +78,9 @@ describe("AreaFrame", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Review & publish" }));
     expect(await screen.findByRole("heading", { name: "Draft · 1 change" })).toBeInTheDocument();
     expect(screen.getByText("nothing runs")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review & publish" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Back to editing" }));
+    expect(screen.getByRole("button", { name: "Review & publish" })).toBeInTheDocument();
   });
 
   it("undoes with ⌘Z outside a text field, and leaves the browser's own undo inside one", async () => {

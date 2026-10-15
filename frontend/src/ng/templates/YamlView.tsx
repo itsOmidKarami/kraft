@@ -67,7 +67,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
     edit(`${text.slice(0, a)}  ${text.slice(b)}`);
     requestAnimationFrame(() => el.setSelectionRange(a + 2, a + 2));
   };
-  const status = readOnly ? "published" : err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "parsed · live draft";
+  const status = readOnly ? "published" : err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : view.draft ? "parsed · draft" : "parsed · matches published";
   const width = Math.max(40, ...lines.map((l, i) => l.length + (msgs.has(i) ? 60 : 0))) + 4;
 
   return (

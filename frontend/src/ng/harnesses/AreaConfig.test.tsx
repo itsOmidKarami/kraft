@@ -63,6 +63,7 @@ describe("area pane Config", () => {
     serve(view(resolved()));
     renderPage();
     const pane = await openConfig();
+    await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
     const select = within(pane).getByRole("combobox", { name: "runs on" });
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["item's harness", "claude", "claude-sandbox", "codex"]);
     expect(select).toHaveValue("claude");
@@ -72,6 +73,7 @@ describe("area pane Config", () => {
     serve(view(resolved({ access: { claude: "never" } })));
     renderPage();
     const pane = await openConfig();
+    await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
     const select = within(pane).getByRole("combobox", { name: "runs on" });
     expect(within(select).getByRole("option", { name: "claude (Never)" })).toBeInTheDocument();
   });
@@ -80,6 +82,7 @@ describe("area pane Config", () => {
     const server = serve(view(resolved({ escalation: { harness: null, grants: ["git-commit"] }, escalation_effective: { harness: "claude", set: false } })));
     renderPage();
     const pane = await openConfig();
+    await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
     const select = within(pane).getByRole("combobox", { name: "runs on" });
     expect(select).toHaveValue("claude");
     await userEvent.selectOptions(select, "item");

@@ -87,7 +87,8 @@ export function FallbackRows({ value, harness, harnesses, profiles, onChange }: 
         </ol>
       )}
       <p className="tpl-pf-sub">
-        {entries.length ? "Tried in order when a launch is rate-limited or its harness unavailable." : Array.isArray(value) ? "None: a launch is never retried elsewhere." : "None. An agent profile's own list applies."} A model or effort is set in YAML.
+        What runs instead when a launch is rate-limited or its harness is unavailable, tried in order.{" "}
+        {entries.length ? "" : Array.isArray(value) ? "None: a launch is never retried elsewhere." : "None: an agent profile's own list applies."} A model or effort is set in YAML.
       </p>
       <button type="button" className="fb-add" onClick={add} disabled={!harnesses}>+ Add a fallback</button>
     </div>
