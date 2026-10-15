@@ -38,13 +38,27 @@ export interface Filter {
   q: string;
   repo: string;
   chain: string;
+  /** The node id of the gate an item waits at. */
+  gate?: string;
+  /** The kind of stop an item is on (`stop.kind`). */
+  stop?: string;
 }
+
+/** The gate a Needs you item waits at, or "". */
+export const gateOf = (i: Pick<WorkItem, "display_status" | "stop" | "pending_gate">) =>
+  i.display_status === "needs_you" && i.stop?.kind === "gate" ? (i.pending_gate ?? i.stop.node ?? "") : "";
+
+/** The kind of stop an item that needs a person is on, or "". */
+export const stopOf = (i: Pick<WorkItem, "display_status" | "stop">) =>
+  i.display_status === "needs_you" || i.display_status === "failed" ? (i.stop?.kind ?? "") : "";
 
 export const chainOf = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) => (i.chain_template || i.chain_definition?.template_id) ?? "default";
 
 export function matches(i: WorkItem, f: Filter): boolean {
   if (f.repo && i.repo !== f.repo) return false;
   if (f.chain && chainOf(i) !== f.chain) return false;
+  if (f.gate && gateOf(i) !== f.gate) return false;
+  if (f.stop && stopOf(i) !== f.stop) return false;
   const q = f.q.trim().toLowerCase();
   if (!q) return true;
   return [i.title, i.id, i.bead_id ?? "", i.repo].some((s) => s.toLowerCase().includes(q));

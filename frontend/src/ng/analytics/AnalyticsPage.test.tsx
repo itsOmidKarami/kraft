@@ -17,7 +17,7 @@ const REPORT: Analytics = {
   by_repo: [{ repo: "/Users/dev/code/kraft", items: 14, mrs: 9, tokens: 1.2e7, cost_usd: 70.2, cost_complete: true, done: 9, cycles: 2 }],
   rejected_gates_by_gate: [{ gate: "spec_approval", n: 2 }],
   gate_waits: [{ gate: "spec_approval", n: 3, median_ms: 3.6e6, total_ms: 1.2e7 }],
-  stop_reasons: [{ label: "agent needs context", n: 2 }],
+  stop_reasons: [{ label: "agent needs context", n: 2 }, { label: "gate · plan_approval", n: 2 }, { label: "budget", n: 1 }, { label: "cap breach", n: 1 }],
 };
 
 const show = async (r: Analytics, heading = "Overview") => {
@@ -57,10 +57,14 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByRole("cell", { name: "2.0" })).toBeInTheDocument();
   });
 
-  it("links a repo row to the board for that repo and the gate and stop rows to the board for the page's scope", async () => {
+  it("links a repo row to the board for that repo and the gate and stop rows to the board narrowed to that gate or stop kind", async () => {
     await show(REPORT);
     expect(screen.getByRole("link", { name: "kraft" })).toHaveAttribute("href", "/?repo=%2FUsers%2Fdev%2Fcode%2Fkraft");
-    expect(screen.getByRole("link", { name: "spec_approval" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "spec_approval" })).toHaveAttribute("href", "/?gate=spec_approval");
+    expect(screen.getByRole("link", { name: "gate · plan_approval" })).toHaveAttribute("href", "/?gate=plan_approval");
+    expect(screen.getByRole("link", { name: "budget" })).toHaveAttribute("href", "/?stop=budget");
+    expect(screen.getByRole("link", { name: "cap breach" })).toHaveAttribute("href", "/?stop=cap");
+    // A bucket judged from the stop's text spans several kinds: it narrows nothing.
     expect(screen.getByRole("link", { name: "agent needs context" })).toHaveAttribute("href", "/");
   });
 

@@ -9,6 +9,10 @@ import type { GroupBy, SortBy } from "./model";
 export interface BoardQuery {
   repo: string;
   chain: string;
+  /** The node id of the gate an item waits at. */
+  gate: string;
+  /** The kind of stop (`stop.kind`). */
+  stop: string;
   q: string;
   group: GroupBy;
   sort: SortBy;
@@ -30,6 +34,8 @@ export function readBoardQuery(p: URLSearchParams, themeGroup?: BoardGroupBy): B
   return {
     repo: p.get("repo") ?? "",
     chain: p.get("chain") ?? "",
+    gate: p.get("gate") ?? "",
+    stop: p.get("stop") ?? "",
     q: p.get("q") ?? "",
     group: GROUPS.includes(group) ? group : groupFromTheme(themeGroup),
     sort: SORTS.includes(sort) ? sort : "attention",

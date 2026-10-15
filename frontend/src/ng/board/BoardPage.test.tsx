@@ -7,6 +7,7 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
+import { SIDEBAR_KEY } from "../shell/sidebarPref";
 import { Shell } from "../shell/Shell";
 import { reload } from "../offline";
 import { BoardPage } from "./BoardPage";
@@ -172,6 +173,31 @@ describe("BoardPage", () => {
     expect(where()).toBe("/archived");
   });
 
+  it.each([
+    ["steps back to its rail on arrival at a narrow width, before any peek", 1024, null, "rail"],
+    ["stays pinned on a wide screen", 1500, null, "pinned"],
+    ["keeps the reader's pinned choice", 1024, "pinned", "pinned"],
+  ] as const)("the sidebar %s", async (_n, width, stored, want) => {
+    vi.stubGlobal("innerWidth", width);
+    if (stored) localStorage.setItem(SIDEBAR_KEY, stored);
+    put(item("a1", "running"));
+    board();
+    await screen.findByText("Item a1");
+    expect(document.documentElement.dataset.sidebar).toBe(want);
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens on a gate from a link, says so when nothing waits there, and Clear drops it", async () => {
+    put(item("n1", "needs_you"));
+    board("/?gate=spec_approval&stop=budget");
+    expect(await screen.findByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gate · spec approval/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).toBe("/");
+    expect(screen.getByText("Item n1")).toBeInTheDocument();
+  });
+
   it("draws only the groups that hold rows, and one line with Clear when a filter leaves none", async () => {
     put(item("n1", "needs_you"), item("d3", "done"));
     board();
@@ -188,7 +214,12 @@ describe("BoardPage", () => {
   });
 
   it("filters by text, repo crumb and Chain menu, and groups and sorts from their menus, all in the URL", async () => {
-    put(item("a1", "running", { repo: "/r/kraft-api" }), item("b2", "running", { repo: "/r/kraft-core", chain_template: "docs_only" }));
+    put(
+      item("a1", "running", { repo: "/r/kraft-api" }),
+      item("b2", "running", { repo: "/r/kraft-core", chain_template: "docs_only" }),
+      item("g1", "needs_you", { pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } }),
+      item("m1", "needs_you", { stop: { kind: "mr_closed", node: "merge_request", resume_at: null, reason: null } }),
+    );
     board();
     const user = userEvent.setup();
     await user.type(await screen.findByRole("searchbox", { name: "Filter" }), "a1");
@@ -207,6 +238,26 @@ describe("BoardPage", () => {
     await user.click(screen.getByRole("menuitemradio", { name: /docs_only/ }));
     expect(screen.getByRole("button", { name: /Chain · docs_only/ })).toBeInTheDocument();
     expect(screen.queryByText("Item a1")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Chain · docs_only/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All chains/ }));
+
+    // Gate lists the gates by what they decide, Stop reason the kinds of stop in words; neither shows ids.
+    await user.click(screen.getByRole("button", { name: /^Gate/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /approve plan/ }));
+    expect(where()).toContain("gate=plan_approval");
+    expect(screen.getByRole("button", { name: /Gate · approve plan/ })).toBeInTheDocument();
+    expect(screen.getByText("Item g1")).toBeInTheDocument();
+    expect(screen.queryByText("Item a1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Gate · / }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All gates/ }));
+    await user.click(screen.getByRole("button", { name: /^Stop reason/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /^MR closed/ }));
+    expect(where()).toContain("stop=mr_closed");
+    expect(screen.getByText("Item m1")).toBeInTheDocument();
+    expect(screen.queryByText("Item g1")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Stop · MR closed/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /All stop reasons/ }));
 
     await user.click(screen.getByRole("button", { name: /Group/ }));
     await user.click(screen.getByRole("menuitemradio", { name: "Repo" }));

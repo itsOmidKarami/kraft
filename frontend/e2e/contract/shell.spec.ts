@@ -36,8 +36,13 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
   },
   {
+    // A page with no pane to open: the Board is the exception, below.
     name: "sidebar: open by default on a 900px window",
-    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/analytics"); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+  },
+  {
+    name: "sidebar: the Board steps back to its rail on a 900px window, so its peek moves nothing",
+    run: async (p) => { await p.setViewportSize({ width: 900, height: 800 }); await app(p, "/"); expect(await sideEdge(p)).toBeLessThan(OPEN); },
   },
   {
     name: "sidebar: the toggle collapses it and the pointer leaving keeps it collapsed",
