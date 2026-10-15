@@ -42,9 +42,9 @@
 /get-started/install#licences: /project/status-and-support#licenses
 /get-started/first-work-item#next-run-it-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
 /get-started/why-kraft#why-the-name: /get-started/why-kraft
-/concepts/caps-and-budgets#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
-/concepts/caps-and-budgets#budget-stops-and-what-the-interface-offers: /guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers
-/concepts/caps-and-budgets#raising-a-budget-from-the-command-line: /guides/day-to-day/raise-a-cap#raising-a-budget-from-the-command-line
+/concepts/caps-and-budgets#raising-a-cap-in-the-interface: /reference/web-ui/cap-stops-and-raises#raising-a-cap-in-the-interface
+/concepts/caps-and-budgets#budget-stops-and-what-the-interface-offers: /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers
+/concepts/caps-and-budgets#raising-a-budget-from-the-command-line: /reference/web-ui/cap-stops-and-raises#raising-a-budget-from-the-command-line
 /concepts/caps-and-budgets#harnesses-that-report-no-cost: /reference/harnesses/cost-reporting#harnesses-that-report-no-cost
 /guides/harnesses/switch-harness#_1-check-the-harness-profile: /guides/harnesses/switch-harness#_1-add-the-harness-profile
 /guides/harnesses/switch-harness#_2-pick-which-tasks-move: /guides/harnesses/switch-harness#_3-pick-which-tasks-move
@@ -188,8 +188,8 @@
 /project/status-and-support#maturity: /project/status-and-support
 /guides/day-to-day/the-board#the-first-run: /guides/day-to-day/first-run
 /guides/day-to-day/the-board#the-board: /reference/web-ui/board
-/guides/day-to-day/the-board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
-/guides/day-to-day/the-board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers
+/guides/day-to-day/the-board#raise-cap-on-a-row: /reference/web-ui/cap-stops-and-raises#raising-a-cap-in-the-interface
+/guides/day-to-day/the-board#raise-budget-on-a-row: /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers
 /guides/day-to-day/the-board#filter-group-and-sort: /reference/web-ui/board#filter-group-and-sort
 /guides/day-to-day/the-board#selecting-several-items: /reference/web-ui/board#selecting-several-items
 /guides/day-to-day/the-board#archived-items: /reference/web-ui/board#archived-items
@@ -214,8 +214,8 @@
 /guides/run/remote-access#on-the-phone: /guides/day-to-day/kraft-on-a-phone
 /guides/the-board#the-first-run: /guides/day-to-day/first-run
 /guides/the-board#the-board: /reference/web-ui/board
-/guides/the-board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
-/guides/the-board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers
+/guides/the-board#raise-cap-on-a-row: /reference/web-ui/cap-stops-and-raises#raising-a-cap-in-the-interface
+/guides/the-board#raise-budget-on-a-row: /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers
 /guides/the-board#filter-group-and-sort: /reference/web-ui/board#filter-group-and-sort
 /guides/the-board#selecting-several-items: /reference/web-ui/board#selecting-several-items
 /guides/the-board#archived-items: /reference/web-ui/board#archived-items
@@ -400,8 +400,8 @@
 /reference/http-api#other-routes: /reference/http-api#in-this-section
 /reference/cli/item#less-common-item-verbs: /reference/cli/item#skip-escalate-end-or-drop-an-item
 /reference/cli/admin#verb-details: /reference/cli/admin#run-the-server
-/reference/web-ui/board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface
-/reference/web-ui/board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers
+/reference/web-ui/board#raise-cap-on-a-row: /reference/web-ui/cap-stops-and-raises#raising-a-cap-in-the-interface
+/reference/web-ui/board#raise-budget-on-a-row: /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers
 /guides/day-to-day/kraft-on-a-phone#on-a-phone: /guides/day-to-day/kraft-on-a-phone#the-layout
 /guides/day-to-day/kraft-on-a-phone#on-the-phone: /guides/day-to-day/kraft-on-a-phone
 /guides/day-to-day/agent-integration#without-the-kraft-server: /guides/day-to-day/agent-integration#next-steps
@@ -627,3 +627,10 @@
 /guides/run/upgrade-from-1-4#the-interface: /reference/changes-from-1-4#the-interface
 /guides/run/upgrade-from-1-4#where-the-pages-moved: /reference/changes-from-1-4#where-the-pages-moved
 /guides/run/upgrade-from-1-4#your-theme: /reference/changes-from-1-4#your-theme
+/guides/day-to-day/raise-a-cap#which-cap-stopped-the-item: /reference/web-ui/cap-stops-and-raises#which-cap-stopped-the-item
+/guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface: /reference/web-ui/cap-stops-and-raises#raising-a-cap-in-the-interface
+/guides/day-to-day/raise-a-cap#a-dollar-stop-in-the-interface: /reference/web-ui/cap-stops-and-raises#a-dollar-stop-in-the-interface
+/guides/day-to-day/raise-a-cap#budget-stops-and-what-the-interface-offers: /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers
+/guides/day-to-day/raise-a-cap#raising-a-time-or-attempts-cap-from-the-command-line: /reference/web-ui/cap-stops-and-raises#raising-a-time-or-attempts-cap-from-the-command-line
+/guides/day-to-day/raise-a-cap#raising-a-budget-from-the-command-line: /reference/web-ui/cap-stops-and-raises#raising-a-budget-from-the-command-line
+/guides/day-to-day/raise-a-cap#before-you-start: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
