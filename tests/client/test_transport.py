@@ -137,8 +137,22 @@ def sent(monkeypatch):
         (lambda: client.resolve_thread(".."), "/api/threads/%2E%2E/resolve"),
         (lambda: client.document("attachment:w1:spec"), "/api/documents/attachment%3Aw1%3Aspec"),
         (lambda: client.harness(HOSTILE), f"/api/harnesses/profiles/{ENCODED}"),
+        (
+            lambda: client.cancel_preview(HOSTILE),
+            f"/api/work-items/{ENCODED}/cancel-preview",
+        ),
     ],
-    ids=["item", "action", "events", "gate", "thread", "dot-segment", "doc", "profile"],
+    ids=[
+        "item",
+        "action",
+        "events",
+        "gate",
+        "thread",
+        "dot-segment",
+        "doc",
+        "profile",
+        "cancel-preview",
+    ],
 )
 def test_an_id_is_one_path_segment_whatever_it_holds(sent, call, path):
     """Unencoded, httpx resolved the dot segments before sending: MCP's
@@ -248,3 +262,11 @@ def test_a_refusal_the_client_makes_itself_is_a_client_error(monkeypatch, tmp_pa
     with pytest.raises(client.ClientError) as caught:
         asyncio.run(call())
     assert caught.value.kind == kind
+
+
+def test_update_available_asks_for_the_channel_given(sent):
+    """The console's top line names a waiting release; with no channel the
+    server answers for the installed one's."""
+    asyncio.run(client.update_available())
+    asyncio.run(client.update_available("beta"))
+    assert sent == ["/api/update", "/api/update?channel=beta"]

@@ -16,6 +16,19 @@ from kraft.paths import RunDirs, default_run_dir
 from kraft.vocab import ThreadState, WorkItemStatus
 
 
+async def board_rows(*, include_abandoned: bool = False) -> tuple[list[dict], int]:
+    """The board's rows as the server sends them, and the event cursor they
+    reflect: what the web board and the console draw from (`display_status`,
+    `actions`, `stop`, `updated_at`), where `board()` trims for the CLI and
+    MCP."""
+    # As a param, not in the path: `_get` always hands httpx a `params` dict,
+    # and httpx replaces a query written into the URL with it.
+    payload = await transport._get(
+        "/work-items", include_abandoned="true" if include_abandoned else None
+    )
+    return payload["items"], payload["cursor"]
+
+
 async def board(
     status: str | None = None, *, include_abandoned: bool = False
 ) -> tuple[list[dict], int]:
@@ -31,11 +44,9 @@ async def board(
     `with_cursor=True` flag on `list_work_items` that returns two different
     types: two fields, one caller that needs both.
     """
-    # As a param, not in the path: `_get` always hands httpx a `params` dict,
-    # and httpx replaces a query written into the URL with it.
     wanted = include_abandoned or status == WorkItemStatus.ABANDONED
-    payload = await transport._get("/work-items", include_abandoned="true" if wanted else None)
-    return trim_work_items(payload["items"], status), payload["cursor"]
+    rows, cursor = await board_rows(include_abandoned=wanted)
+    return trim_work_items(rows, status), cursor
 
 
 async def list_work_items(
@@ -171,16 +182,39 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
     return item.get("worker_sessions", [])
 
 
-async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[dict]:
+async def events(
+    work_item_id: str | None = None,
+    after_seq: int = 0,
+    *,
+    limit: int | None = None,
+    before_seq: int | None = None,
+) -> list[dict]:
     """The chain's own history: node transitions, gate decisions, escalations.
 
     This is the "why is it stopped" view, where the log is the "what is it
-    saying" view.
+    saying" view. Oldest first. `before_seq` pages back instead: the last
+    `limit` events before it. The server refuses `after_seq` alongside it, so
+    only one of the two is sent.
     """
     target = await context.resolve_work_item(work_item_id)
+    since = {"before_seq": before_seq} if before_seq is not None else {"after_seq": after_seq}
     return await transport._get(
-        f"/work-items/{transport.segment(target)}/events", after_seq=after_seq
+        f"/work-items/{transport.segment(target)}/events", limit=limit, **since
     )
+
+
+async def update_available(channel: str | None = None) -> dict:
+    """What the About page reads: the installed version, the newest release on
+    `channel` (the installed one's when None) and whether this is behind;
+    `behind` is None when the feed could not be read."""
+    return await transport._get("/update", channel=channel)
+
+
+async def cancel_preview(work_item_id: str | None = None) -> dict:
+    """What cancelling would do, changing nothing: what the web's cancel
+    dialog shows before the person commits."""
+    target = await context.resolve_work_item(work_item_id)
+    return await transport._get(f"/work-items/{transport.segment(target)}/cancel-preview")
 
 
 def _log_path(work_item_id: str | None, session_id: str) -> str:
