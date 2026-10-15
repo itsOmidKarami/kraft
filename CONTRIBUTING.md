@@ -75,13 +75,12 @@ The two local hooks need `just` on `PATH`:
 just docs       # cd docsite && npm ci && npm run dev
 ```
 
-The site is served at <http://localhost:3000/kraft/>, not at the root: it is
-built for GitHub Pages under `/kraft/`. The dev server logs a few warnings as it
-starts; the site works regardless.
+The site is served at <http://localhost:3000/>. The dev server logs a few
+warnings as it starts; the site works regardless.
 
 `just docs` serves `main`'s pages alone. To see the site as it publishes, with
-the latest release at <http://localhost:8000/kraft/> and `main` at
-<http://localhost:8000/kraft/next/>, run `just docs-site`.
+the latest release at <http://localhost:8000/>, each older major at
+`/vN/` and `main` at <http://localhost:8000/next/>, run `just docs-site`.
 
 ## Finding something to work on
 

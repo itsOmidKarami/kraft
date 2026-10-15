@@ -143,7 +143,7 @@ inside the workflow. It needs an access token from
 1. **GitHub Release** `vX.Y.Z`, with the wheel and `kraft-X.Y.Z.vsix` attached.
    Needs nothing: the workflow's own `GITHUB_TOKEN`. Check:
    `gh release view vX.Y.Z --json assets --jq '.assets[].name'` lists both files.
-2. **Docs rebuild**, a dispatch of the `docs` workflow so `/kraft/` serves the
+2. **Docs rebuild**, a dispatch of the `docs` workflow so `/` serves the
    new tag. Needs nothing (`GITHUB_TOKEN`, `actions: write`), and only warns
    when it can't dispatch. Check: `gh run list --workflow docs --limit 1` shows
    success.
@@ -257,7 +257,7 @@ the next release is the comparison point.
 
 The tag is cut before the stamp pull request merges, so the tag's own pages still
 say `next`. `dev/build_docs_site.sh` stamps its copy of the tag's content the same
-way, so the release docs at `/kraft/` show the number from the moment they are
+way, so the release docs at `/` show the number from the moment they are
 built. Between the tag and the stamp pull request merging, the check warns on
 `main` for the same reason as above, without failing `lint`; it clears when that
 pull request merges.
