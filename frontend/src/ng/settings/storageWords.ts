@@ -33,5 +33,8 @@ export const CLEAN_SELECTED = "Clean up selected";
 export const CLEANABLE = "can be cleaned up";
 export const cleanAll = (count: number, bytes: number) => `Clean up all (${count}, ${humanSize(bytes)})`;
 
-/** The key figure, said once above the bar: what the worktrees use, against the limit when there is one. */
-export const usageFigure = (used: number, limit: number | null) => (limit != null ? `${humanSize(used)} used of the ${humanSize(limit)} limit` : `${humanSize(used)} used by worktrees`);
+/** What `used_bytes` measures: the three categories the quota and limit govern, not the worktrees alone. */
+export const COUNTED = "worktrees, sandboxes and documents";
+
+/** The key figure, said once above the bar: what is counted, against the limit when there is one. */
+export const usageFigure = (used: number, limit: number | null) => (limit != null ? `${humanSize(used)} counted against the ${humanSize(limit)} limit` : `${humanSize(used)} counted: ${COUNTED}`);

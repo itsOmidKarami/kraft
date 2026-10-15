@@ -20,12 +20,12 @@ const open = (u = usage()) =>
 describe("Storage (phone)", () => {
   it("shows the usage against the quota and limit, the desktop's categories and its state note", async () => {
     open();
-    expect(await screen.findByText("worktrees use")).toBeInTheDocument();
+    expect(await screen.findByText("counted")).toBeInTheDocument();
     expect(screen.getByText("Over the limit: starts are held until you make room.")).toBeInTheDocument();
     const where = screen.getByRole("region", { name: "Where it goes" });
     for (const [, label] of CATEGORIES) expect(within(where).getByText(label)).toBeInTheDocument();
     expect(within(where).getByText("12 GB")).toBeInTheDocument();
-    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.queryByText("Read only")).toBeNull();
   });
 
   it("previews a clean-up, says what is lost, and archives only on confirm", async () => {

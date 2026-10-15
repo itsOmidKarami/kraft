@@ -26,7 +26,7 @@ describe("Settings › Storage, usage", () => {
   ] as const)("%s: the bar takes the state's look and the page says what it means", async (state, used, cls, note) => {
     stubFetch({ "GET /storage": [200, storageUsage({ state, used_bytes: used })] });
     mount();
-    expect(await screen.findByRole("img", { name: /^.* used of the 10 GB limit$/ })).toHaveClass(cls);
+    expect(await screen.findByRole("img", { name: /^.* counted against the 10 GB limit$/ })).toHaveClass(cls);
     expect(screen.getByRole("status")).toHaveTextContent(note);
     if (!note) expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
@@ -34,11 +34,12 @@ describe("Settings › Storage, usage", () => {
   it("marks the quota and the limit on the bar", async () => {
     stubFetch({ "GET /storage": [200, storageUsage({ state: "ok", used_bytes: 5 * GB })] });
     mount();
-    const bar = await screen.findByRole("img", { name: "5 GB used of the 10 GB limit" });
+    const bar = await screen.findByRole("img", { name: "5 GB counted against the 10 GB limit" });
     expect((bar.querySelector(".set-st-fill") as HTMLElement).style.width).toBe("50%");
     expect([...bar.querySelectorAll<HTMLElement>(".set-st-mark")].map((m) => m.style.left)).toEqual(["80%", "100%"]);
-    expect(screen.getByText("5 GB used of the 10 GB limit")).toHaveClass("set-st-figure");
-    expect(screen.getByText("Read only")).toHaveClass("saved-note");
+    // used_bytes, the governed total: the fixture's worktrees category is 11 GB.
+    expect(screen.getByText("5 GB counted against the 10 GB limit")).toHaveClass("set-st-figure");
+    expect(screen.queryByText("Read only")).toBeNull();
     expect(screen.getByText(/Quota 8 GB · limit 10 GB/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Edit in Policy › Housekeeping" })).toHaveAttribute("href", "/settings/policy/housekeeping");
   });
@@ -47,7 +48,7 @@ describe("Settings › Storage, usage", () => {
     stubFetch({ "GET /storage": [200, storageUsage({ state: null, quota_bytes: null, limit_bytes: null })] });
     mount();
     expect(await screen.findByText(/No limit set/)).toBeInTheDocument();
-    expect(screen.getByText("12 GB used by worktrees")).toHaveClass("set-st-figure");
+    expect(screen.getByText("12 GB counted: worktrees, sandboxes and documents")).toHaveClass("set-st-figure");
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByRole("link", { name: /Set one in Policy › Housekeeping/ })).toHaveAttribute("href", "/settings/policy/housekeeping");
   });
@@ -65,13 +66,13 @@ describe("Settings › Storage, usage", () => {
   it("refreshes with ?refresh=1, says it is measuring, and keeps the figures on screen meanwhile", async () => {
     const held = holdFetch(/refresh=1/, { "GET /storage": [200, storageUsage()] });
     mount();
-    await screen.findByText(/12 GB used/);
+    await screen.findByText(/12 GB counted/);
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(screen.getByRole("button", { name: "Measuring…" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("Measuring…");
-    expect(screen.getByText(/12 GB used/)).toBeInTheDocument();
+    expect(screen.getByText(/12 GB counted/)).toBeInTheDocument();
     held[0](storageUsage({ state: "over_quota", used_bytes: 9 * GB }));
-    expect(await screen.findByText(/9 GB used/)).toBeInTheDocument();
+    expect(await screen.findByText(/9 GB counted/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
     expect(screen.getByRole("status")).not.toHaveTextContent("Measuring…");
   });
@@ -82,7 +83,7 @@ describe("Settings › Storage, usage", () => {
     expect(await screen.findByText(/Measuring the run folder/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Measuring…" })).toBeDisabled();
     held[0](storageUsage());
-    expect(await screen.findByRole("img", { name: /used of the 10 GB limit/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /counted against the 10 GB limit/ })).toBeInTheDocument();
     expect(screen.queryByText(/Measuring the run folder/)).toBeNull();
   });
 
@@ -90,11 +91,11 @@ describe("Settings › Storage, usage", () => {
     const answers: Record<string, [number, unknown]> = { "GET /storage": [200, storageUsage()] };
     stubFetch(answers);
     mount();
-    await screen.findByText(/12 GB used/);
+    await screen.findByText(/12 GB counted/);
     answers["GET /storage"] = [500, { detail: "the walk failed" }];
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("the walk failed");
-    expect(screen.getByText(/12 GB used/)).toBeInTheDocument();
+    expect(screen.getByText(/12 GB counted/)).toBeInTheDocument();
   });
 });
 
@@ -192,7 +193,7 @@ describe("Settings › Storage worktrees", () => {
     const answers: Record<string, [number, unknown]> = { "GET /storage": [200, storageUsage()], "POST /storage/preview": [200, storagePreview()], "POST /work-items/bulk": bulkOk("w1", "w4") };
     const held = holdFetch(/refresh=1/, answers);
     mount();
-    await screen.findByText(/12 GB used/);
+    await screen.findByText(/12 GB counted/);
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await userEvent.click(await screen.findByRole("checkbox", { name: "Select Cache embeddings" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Old spike" }));
@@ -201,12 +202,12 @@ describe("Settings › Storage worktrees", () => {
     const after = storageUsage();
     answers["GET /storage"] = [200, storageUsage({ items: [after.items[0]], reclaimable_bytes: 0, used_bytes: 9 * GB, state: "over_quota" })];
     await userEvent.click(await within(dialog).findByRole("button", { name: "Clean up 2 items and free 3 GB" }));
-    expect(await screen.findByText(/9 GB used/)).toBeInTheDocument();
+    expect(await screen.findByText(/9 GB counted/)).toBeInTheDocument();
     // The re-read answered first, and the Refresh is still out.
     expect(screen.getByRole("button", { name: "Measuring…" })).toBeDisabled();
     held[0](storageUsage());
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
-    expect(screen.getByText(/9 GB used/)).toBeInTheDocument();
+    expect(screen.getByText(/9 GB counted/)).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Select Old spike" })).toBeNull();
   });
 

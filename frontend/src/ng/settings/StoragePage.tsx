@@ -7,9 +7,7 @@ import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
 import { CleanupDialog } from "./CleanupDialog";
 import { CATEGORIES, CLEAN_SELECTED, CLEANABLE, cleanAll, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote, usageFigure } from "./storageWords";
-import { HeaderActions } from "../shell/HeaderActions";
-import { Block, SavedCue } from "./parts";
-import { SAVED } from "./savedWords";
+import { Block } from "./parts";
 import "./settings.css";
 import "./storage.css";
 
@@ -72,7 +70,6 @@ export function StoragePage() {
 
   return (
     <div className="ng-settings">
-      <HeaderActions><SavedCue word={SAVED.readOnly} /></HeaderActions>
       <div className="set-page is-cards">
         <div className="set-title">
           <h1>Storage</h1>
