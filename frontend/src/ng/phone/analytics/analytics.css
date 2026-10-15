@@ -4,6 +4,9 @@
 .ph-tile-value { font-size: var(--fs-ph-h1); font-weight: 600; overflow-wrap: anywhere; }
 .ph-tile-sub { font-size: var(--fs-label); line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-stat-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; min-height: 44px; padding: 8px 14px; align-items: center; border-top: 1px solid var(--line); }
+.ph-stat-link { color: inherit; text-decoration: none; }
+.ph-stat-link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ph-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .ph-stat-row:first-child { border-top: 0; }
 .ph-stat-name { font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .ph-stat-meta { grid-column: 1; font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; }
