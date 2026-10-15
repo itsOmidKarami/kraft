@@ -265,25 +265,32 @@ describe("Policy page: Housekeeping", () => {
   });
 });
 
-describe("Policy page: the section menu and problems", () => {
-  const open = async () => {
-    await screen.findByRole("region", { name: "work item" });
-    await userEvent.click(screen.getByRole("button", { name: /^Limits/ }));
-  };
-
-  it("marks a section with a change and one with a problem red, and switches by route", async () => {
+describe("Policy page: the section tabs and problems", () => {
+  it("shows every section as a tab, marks one with a change and one with a problem, and switches by route", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(policyView({
       changes: [{ path: "max_concurrent", kind: "change", summary: "5 → 7", file: "policy.yaml" }],
       problems: [problem({ scope: "limits", level: "tasks", field: "defaults.tasks.time_cap_minutes", message: "too high" })],
     }, RESOLVED, true)));
     mount();
-    await open();
-    const menu = screen.getByRole("menu");
-    expect(within(within(menu).getByRole("menuitemradio", { name: /Limits/ })).getByRole("img", { name: "has a problem" })).toBeInTheDocument();
-    expect(within(within(menu).getByRole("menuitemradio", { name: /Housekeeping/ })).getByRole("img", { name: "unpublished changes" })).toBeInTheDocument();
-    expect(within(within(menu).getByRole("menuitemradio", { name: /Loops/ })).queryByRole("img")).toBeNull();
-    await userEvent.click(within(menu).getByRole("menuitemradio", { name: /Loops/ }));
+    await screen.findByRole("region", { name: "work item" });
+    const tabs = screen.getByRole("tablist", { name: "Policy section" });
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Limits", "Loops", "Housekeeping"]);
+    expect(within(tabs).getByRole("tab", { name: /Limits/, selected: true })).toBeInTheDocument();
+    expect(within(within(tabs).getByRole("tab", { name: /Limits/ })).getByRole("img", { name: "has a problem" })).toBeInTheDocument();
+    expect(within(within(tabs).getByRole("tab", { name: /Housekeeping/ })).getByRole("img", { name: "unpublished draft" })).toBeInTheDocument();
+    expect(within(within(tabs).getByRole("tab", { name: /Loops/ })).queryByRole("img")).toBeNull();
+    await userEvent.click(within(tabs).getByRole("tab", { name: /Loops/ }));
     expect(where).toBe("/settings/policy/loops");
+  });
+
+  it.each([["limits", "Limits"], ["loops", "Loops"], ["housekeeping", "Housekeeping"]])("opens %s on the same page title", async (section, title) => {
+    mount(`/settings/policy/${section}`);
+    expect(await screen.findByRole("heading", { level: 2, name: title })).toBeInTheDocument();
+  });
+
+  it("says once, under the attempts and wall-clock block, which of a loop's numbers wins", async () => {
+    mount("/settings/policy/loops");
+    expect(await screen.findByText(/^The most specific wins: an item's own policy/)).toBeInTheDocument();
   });
 
   it("puts a problem on its cell and its card, blocks Publish, and Fix → flashes the card", async () => {

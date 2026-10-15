@@ -22,3 +22,6 @@ export function sectionOfProblem(p: { scope?: string; field?: string | null; pat
   if (p.scope === "housekeeping" || p.scope === "retries") return "housekeeping";
   return null;
 }
+
+/** Which of a fix loop's numbers wins, said once under the attempts and wall-clock blocks on Loops (docsite "Fix loop and judge" › Limits). */
+export const LOOP_WINS = "The most specific wins: an item's own policy, then the loop's own keys, then its node, then its entry below (else the row for loops without one).";

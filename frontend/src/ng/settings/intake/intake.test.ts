@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkText, nextCheck } from "./checks";
-import { describeCron } from "./cron";
+import { CRON_PRESETS, cronProblem, describeCron } from "./cron";
 import { intakeOf } from "./types";
 import { intervalFromText, showMinutes, toMinutes } from "./units";
 
@@ -13,6 +13,8 @@ describe("Auto-intake", () => {
     ["0 9 * * 0", "Sundays 09:00 UTC"],
     ["0 9 * * 7", "Sundays 09:00 UTC"],
     ["*/15 * * * *", "every 15 minutes"],
+    ["0 * * * *", "hourly"],
+    ["20 * * * *", "hourly at :20"],
     ["*/1 * * * *", "every 1 minute"],
     ["0 9 1 * *", "0 9 1 * *"],
     ["nonsense", "nonsense"],
@@ -23,6 +25,24 @@ describe("Auto-intake", () => {
     ["*/90 * * * *", "*/90 * * * *"],
   ])("describes %j as %j, leaving what it cannot draw as written", (cron, words) => {
     expect(describeCron(cron)).toBe(words);
+  });
+
+  it.each([
+    ["0 9 * * 1", null],
+    ["*/5 9-17 * * 1-5", null],
+    ["0 9 * *", "A schedule has five parts (minute, hour, day of month, month, day of week); this has 4. Pick a preset, or write it like 0 9 * * 1."],
+    ["61 9 * * *", "The minute can be 0 to 59; 61 is outside that."],
+    ["0 9 * * 8", "The day of week can be 0 to 7; 8 is outside that."],
+    ["0 9 * * mon", "The day of week “mon” is not a number, a range like 1-5, a step like */15, or a list of those."],
+    ["*/0 * * * *", "The minute “*/0” has a step that is not a positive number. A step looks like */15."],
+    ["0 17-9 * * *", "The hour range 17-9 runs backwards."],
+  ])("says in words why %j is refused", (cron, problem) => expect(cronProblem(cron)).toBe(problem));
+
+  it("offers only presets it can draw and the scheduler runs", () => {
+    for (const { cron } of CRON_PRESETS) {
+      expect(cronProblem(cron)).toBeNull();
+      expect(describeCron(cron)).not.toBe(cron);
+    }
   });
 
   it("converts the interval between seconds on the wire and minutes on the page, in one place", () => {

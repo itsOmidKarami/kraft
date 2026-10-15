@@ -3,21 +3,20 @@ import { useNavigate, useParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { subscribeLive } from "../../live";
 import { checkText, hhmm } from "../../settings/intake/checks";
-import { pickup } from "../../settings/intake/pickup";
-import { describeCron } from "../../settings/intake/cron";
-import { intakeOf, problemsOfSchedule, type Check, type IntakeResolved, type Schedule } from "../../settings/intake/types";
+import { pickup, REMOVE_SCHEDULE } from "../../settings/intake/pickup";
+import { CRON_PRESETS, cronProblem, describeCron } from "../../settings/intake/cron";
+import { repoChoice, repoLabel, type NamedRepo } from "../../settings/intake/repos";
+import { intakeOf, problemsOfSchedule, scheduleProblemText, type Check, type IntakeResolved, type Schedule } from "../../settings/intake/types";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "../../settings/intake/units";
 import type { Op } from "../../templates/draft/types";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
-import { Group, useEditor, type RowSpec } from "./kit";
+import { Group, repairElsewhere, useEditor, type RowSpec } from "./kit";
 
 const CHECKS_EVERY_MS = 30_000;
 const AREA = "/settings/auto-intake";
-type NamedRepo = { path: string; name?: string | null };
-const repoLabel = (path: string, repos: NamedRepo[]) => repos.find((r) => r.path === path)?.name || path.split("/").filter(Boolean).pop() || path || "no repo";
 
 /** The pickup rule in one line: the desktop's sentence, led by whether it is on. */
 export const statusLine = (i: IntakeResolved): string => `${i.enabled ? "On" : "Off"} · ${pickup(i)}`;
@@ -80,7 +79,7 @@ export function IntakeScreen() {
   return (
     <AreaScreen title="Auto-intake" sub="Picks up ready beads on a timer, and files scheduled items." draft={draft}>
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">Auto-intake could not be read.</p>}
-      {r && !data && <p className="ph-error" role="alert">intake.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. Open YAML to repair it.</p>}
+      {r && !data && <p className="ph-error" role="alert">intake.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. {repairElsewhere("intake.yaml")}</p>}
       {data && (
         <>
           <p className={`ph-intake-status${data.enabled ? " ph-is-on" : ""}`}>{statusLine(data)}</p>
@@ -88,7 +87,7 @@ export function IntakeScreen() {
             { label: "enabled", sw: data.enabled, changed: changed("intake.yaml", "enabled"), onSwitch: (on) => void set({ enabled: on }).then((e) => e && showToast(e)) },
             { label: "check every", value: showMinutes(data.interval_s), changed: changed("intake.yaml", "interval_s"), onEdit: () => edit({ kind: "text", title: "Check every", help: "In minutes. Not more often than every 30 seconds.", value: String(toMinutes(data.interval_s)), set: async (t) => { const v = intervalFromText(t); return "error" in v ? v.error : set({ interval_s: v.seconds }); } }) },
             { label: "priority at or below", value: `P${data.priority_ceiling}`, changed: changed("intake.yaml", "priority_ceiling"), onEdit: () => edit({ kind: "choice", title: "Priority at or below", value: String(data.priority_ceiling), options: PRIORITIES, set: (v) => set({ priority_ceiling: Number(v) }) }) },
-            { label: "repos", value: data.repos.length ? data.repos.join(", ") : "every enabled repo", changed: changed("intake.yaml", "repos"), onEdit: () => edit({ kind: "text", title: "Repos", help: "Comma separated paths. Empty means every enabled repo.", value: data.repos.join(", "), placeholder: repos.map((x) => x.path).join(", ") || "every enabled repo", listed: { choices: repos.map((x) => ({ value: x.path })), multiple: true, noun: "repo" }, set: (t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) }) }) },
+            { label: "repos", value: data.repos.length ? data.repos.join(", ") : "every enabled repo", changed: changed("intake.yaml", "repos"), onEdit: () => edit({ kind: "text", title: "Repos", help: "Comma separated paths. Empty means every enabled repo.", value: data.repos.join(", "), placeholder: repos.map((x) => x.path).join(", ") || "every enabled repo", listed: { choices: repos.map((x) => ({ value: x.path })), closed: true, multiple: true, noun: "repo" }, set: (t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) }) }) },
           ]} />
           <Group
             title="Recent checks"
@@ -127,10 +126,21 @@ export function ScheduleScreen() {
   const own = s && r ? problemsOfSchedule(r, s.index) : [];
   const changed = (field: string) => !!s && !!r?.changes.some((c) => c.path === `schedules.${s.index}.${field}`);
   const patch = (p: Record<string, unknown>) => send(draft, { op: "set_schedule", index: s!.index, patch: p });
-  const bad = (field: string) => own.find((p) => p.field === field)?.message;
+  const bad = (field: string) => { const p = own.find((x) => x.field === field); return p && scheduleProblemText(p, s!); };
 
-  const textRow = (field: "title" | "cron" | "description", label: string, o: { multiline?: boolean; sub?: string } = {}): RowSpec => ({
-    key: field, label, value: s![field] || "not set", mono: field === "cron", changed: changed(field),
+  const cronRow = (): RowSpec => ({
+    key: "cron", label: "runs", value: describeCron(s!.cron), changed: changed("cron"), sub: bad("cron") ?? s!.cron,
+    chips: bad("cron") ? [{ label: "problem", tone: "bad" }] : undefined,
+    onEdit: () => edit({
+      kind: "menu", title: "Runs",
+      options: [...CRON_PRESETS.map((c) => ({ value: c.cron, label: c.label })), { value: "custom", label: "Custom cron…" }],
+      pick: (v) => (v === "custom"
+        ? { kind: "text", title: "Cron", help: "Five parts: minute, hour, day of month, month, day of week, in UTC. Like 0 9 * * 1.", value: s!.cron, set: async (t) => cronProblem(t) ?? patch({ cron: t.trim().split(/\s+/).join(" ") }) }
+        : patch({ cron: v })),
+    }),
+  });
+  const textRow = (field: "title" | "description", label: string, o: { multiline?: boolean; sub?: string } = {}): RowSpec => ({
+    key: field, label, value: s![field] || "not set", changed: changed(field),
     sub: bad(field) ?? o.sub, chips: bad(field) ? [{ label: "problem", tone: "bad" }] : undefined,
     onEdit: () => edit({ kind: "text", title: label, value: s![field], multiline: o.multiline, set: async (t) => (t || field === "description" ? patch({ [field]: t }) : "This cannot be empty.") }),
   });
@@ -154,8 +164,8 @@ export function ScheduleScreen() {
         <>
           <Group rows={[
             textRow("title", "name"),
-            textRow("cron", "cron", { sub: describeCron(s.cron) }),
-            pickRow("repo", "repo", repos.map((x) => x.path), (v) => repoLabel(v, repos)),
+            cronRow(),
+            pickRow("repo", "repo", repos.map((x) => x.path), (v) => repoChoice(v, repos)),
             pickRow("chain", "chain", chains, (v) => v),
             textRow("description", "description", { multiline: true }),
             { label: "filed paused", value: "always", sub: "A scheduled item waits for you to resume it; no agent starts work from a timer." },
@@ -165,7 +175,7 @@ export function ScheduleScreen() {
       )}
       {node}
       {sheet.is("remove") && s && (
-        <ConfirmSheet title={`Remove ${s.title || "this schedule"}?`} text="It stops filing items once you publish. Items it already filed are left as they are." error={error} confirm={{ label: "Remove schedule", danger: true, run: () => void remove() }} onClose={sheet.close} />
+        <ConfirmSheet title={`Remove ${s.title || "this schedule"}?`} text={REMOVE_SCHEDULE} error={error} confirm={{ label: "Remove schedule", danger: true, run: () => void remove() }} onClose={sheet.close} />
       )}
     </AreaScreen>
   );

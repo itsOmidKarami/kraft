@@ -45,9 +45,6 @@ beforeEach(() => {
   useStore.setState({ workItems: {}, connection: "open" } as never);
 });
 
-/** The pane starts on its rail (AreaIntake paneOpen:false). */
-const expand = async (name = "bd ready") => userEvent.click(await screen.findByRole("button", { name: `Expand ${name}` }));
-
 const edit = async (name: RegExp | string, text: string) => {
   await userEvent.click(screen.getByRole("button", { name }));
   const input = screen.getByRole("textbox");
@@ -59,7 +56,8 @@ describe("Auto-intake page", () => {
   it("says what the rule does in a sentence, On and Off", async () => {
     mount();
     expect(await screen.findByText(/Every 5 minutes, starts ready beads at P2 and below from every enabled repo\. Each runs to its first gate and waits for you there\./)).toBeInTheDocument();
-    expect(within(screen.getByRole("main")).getByRole("button", { pressed: true })).toHaveTextContent("On");
+    expect(screen.getByRole("region", { name: "Pickup" })).toHaveTextContent("On");
+    expect(screen.getByRole("switch", { name: "enabled" })).toBeChecked();
     document.body.innerHTML = "";
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({}, { ...INTAKE, enabled: false })));
     mount();
@@ -77,7 +75,7 @@ describe("Auto-intake page", () => {
     const recent = [{ id: 9, at: new Date(Date.now() - 2 * 60_000).toISOString(), ready: 0, started: [], skipped: [] }];
     vi.mocked(http.request).mockImplementation(((path: string) => (path.startsWith("/intake/checks") ? ok(recent) : ok({ repos: [] }))) as never);
     mount();
-    const status = () => within(screen.getByRole("main")).getByRole("button", { pressed: true }).querySelector(".ink-status")!;
+    const status = () => screen.getByRole("region", { name: "Pickup" }).querySelector(".ink-status")!;
     await waitFor(() => expect(status()).toHaveTextContent(/^On · next check in 3 min$/));
     document.body.innerHTML = "";
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }] }, INTAKE, true)));
@@ -91,7 +89,7 @@ describe("Auto-intake page", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(t0);
     vi.mocked(http.request).mockImplementation(((path: string) => (path.startsWith("/intake/checks") ? ok([{ id: 1, at: new Date(t0 - 60_000).toISOString(), ready: 0, started: [], skipped: [] }]) : ok({ repos: [] }))) as never);
     mount();
-    const status = () => within(screen.getByRole("main")).getByRole("button", { pressed: true }).querySelector(".ink-status")!;
+    const status = () => screen.getByRole("region", { name: "Pickup" }).querySelector(".ink-status")!;
     await waitFor(() => expect(status()).toHaveTextContent(/^On · next check in 4 min$/));
     clock.mockReturnValue(t0 + 3 * 60_000);
     act(() => onLiveFrame({ type: "intake_checked", payload: { id: 2, at: new Date(t0 + 3 * 60_000).toISOString(), ready: 0, started: [], skipped: [] } }));
@@ -140,19 +138,30 @@ describe("Auto-intake page", () => {
   it("edits the pickup rule: the interval in minutes becomes seconds, priority P0-P4 the ceiling", async () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
-    await expand();
     await edit(/^check every, minutes, 5 min/, "2");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_intake", patch: { interval_s: 120 } }));
     await userEvent.click(within(screen.getByRole("radiogroup", { name: "priority at or below" })).getByRole("radio", { name: "P4" }));
     expect(sent()).toContainEqual({ op: "set_intake", patch: { priority_ceiling: 4 } });
-    await userEvent.click(within(screen.getByRole("radiogroup", { name: "enabled" })).getByRole("radio", { name: "no" }));
+    await userEvent.click(screen.getByRole("switch", { name: "enabled" }));
     expect(sent()).toContainEqual({ op: "set_intake", patch: { enabled: false } });
+  });
+
+  it("takes only a connected repo for the pickup rule, and no repo for every enabled one", async () => {
+    mount();
+    await screen.findByRole("region", { name: "Recent checks" });
+    await userEvent.click(screen.getByRole("button", { name: /^repos, every enabled repo/ }));
+    await userEvent.type(screen.getByRole("combobox", { name: "repos" }), "/src/nowhere{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("“/src/nowhere” is not a repo. Pick one from the list.");
+    expect(d.postOps).not.toHaveBeenCalled();
+    const box = screen.getByRole("combobox", { name: "repos" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "/src/product{Enter}");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_intake", patch: { repos: ["/src/product"] } }));
   });
 
   it("refuses an interval under 30 seconds inline without sending it", async () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
-    await expand();
     await edit(/^check every, minutes, 5 min/, "0.25");
     expect(await screen.findByRole("alert")).toHaveTextContent("Checks cannot come more often than every 30 seconds.");
     expect(d.postOps).not.toHaveBeenCalled();
@@ -167,19 +176,39 @@ describe("Auto-intake page", () => {
     expect(await screen.findByRole("complementary", { name: "Scheduled item pane" })).toBeInTheDocument();
   });
 
-  it("edits a schedule by its index, in intake.yaml's schedules, and removes it then selects the pickup card", async () => {
+  it("edits a schedule by its index, in intake.yaml's schedules, and removes it only once confirmed", async () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: /Dependency check/ }));
     expect(screen.getByText("schedule · schedules: in intake.yaml")).toBeInTheDocument();
-    await edit(/^cron, 0 9 \* \* 1-5/, "0 8 * * *");
-    await waitFor(() => expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { cron: "0 8 * * *" } }));
+    await userEvent.selectOptions(screen.getByLabelText("runs"), "Every 15 minutes");
+    expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { cron: "*/15 * * * *" } });
     await userEvent.selectOptions(screen.getByLabelText("repo"), "/src/product");
     expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { repo: "/src/product" } });
     await userEvent.selectOptions(screen.getByLabelText("chain"), "docs_only");
     expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { chain: "docs_only" } });
     await userEvent.click(screen.getByRole("button", { name: "Remove schedule" }));
+    const confirm = await screen.findByRole("dialog", { name: "Remove Dependency check?" });
+    expect(sent()).not.toContainEqual({ op: "remove_schedule", index: 0 });
+    await userEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(d.postOps).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), [{ op: "remove_schedule", index: 0 }], expect.anything());
+    await userEvent.click(screen.getByRole("button", { name: "Remove schedule" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove schedule" }));
     expect(sent()).toContainEqual({ op: "remove_schedule", index: 0 });
-    await waitFor(() => expect(screen.getByRole("complementary", { name: "bd ready pane" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: /pane/ })).not.toBeInTheDocument());
+  });
+
+  it("writes a custom cron only if the scheduler would run it, and says why not in words", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /Dependency check/ }));
+    expect(screen.getByLabelText("runs")).toHaveValue("0 9 * * 1-5");
+    await userEvent.selectOptions(screen.getByLabelText("runs"), "Custom cron…");
+    await edit(/^cron, 0 9 \* \* 1-5/, "61 9 * * *");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The minute can be 0 to 59; 61 is outside that.");
+    expect(d.postOps).not.toHaveBeenCalled();
+    const box = screen.getByRole("textbox", { name: "cron" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "0 8 * * *{Enter}");
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { cron: "0 8 * * *" } }));
   });
 
   it("shows a schedule's problem on its row and on the field it is about", async () => {
@@ -204,18 +233,20 @@ describe("Auto-intake page", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }, { path: "priority_ceiling", kind: "change", summary: "2 → 3", file: "intake.yaml" }] }, INTAKE, true)));
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
-    await expand();
     const chips = screen.getAllByText("changed");
     expect(chips).toHaveLength(2);
   });
 });
 
-describe("Auto-intake page: the pane's first state", () => {
-  it("loads with the pane on its rail, and picking the rule opens it", async () => {
+describe("Auto-intake page: the pickup rule", () => {
+  it("sits in the status card with its fields, and a pane opens only for a schedule", async () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
-    expect(screen.getByRole("complementary", { name: "bd ready pane, collapsed" })).toBeInTheDocument();
-    await userEvent.click(within(screen.getByRole("main")).getByRole("button", { pressed: true }));
-    expect(screen.getByRole("complementary", { name: "bd ready pane" })).toBeInTheDocument();
+    const card = screen.getByRole("region", { name: "Pickup" });
+    expect(within(card).getByRole("switch", { name: "enabled" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: /^check every, minutes, 5 min/ })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: /pane/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Dependency check/ }));
+    expect(screen.getByRole("complementary", { name: "Dependency check pane" })).toBeInTheDocument();
   });
 });

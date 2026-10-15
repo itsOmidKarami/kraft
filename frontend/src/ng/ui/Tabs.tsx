@@ -4,7 +4,7 @@ import "./ui.css";
 /** A tab strip: the active tab is underlined, never filled (Decisions §9).
  *  Roving tabindex; ←/→, Home and End move and select. The caller renders
  *  the panel with `id={`${id}-panel`}` and `aria-labelledby` the tab. */
-export function Tabs<T extends string>({ label, tabs, value, onChange, id }: { label: string; tabs: { value: T; label: string }[]; value: T; onChange: (v: T) => void; id: string }) {
+export function Tabs<T extends string>({ label, tabs, value, onChange, id }: { label: string; tabs: { value: T; label: string; /** A dot after the label: an unpublished draft (a hollow neutral ring) or a problem (red), named for a screen reader. */ dot?: "draft" | "problem"; dotLabel?: string }[]; value: T; onChange: (v: T) => void; id: string }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(0, tabs.findIndex((t) => t.value === value));
   const onKey = (e: KeyboardEvent) => {
@@ -31,6 +31,7 @@ export function Tabs<T extends string>({ label, tabs, value, onChange, id }: { l
           onClick={() => onChange(t.value)}
         >
           {t.label}
+          {t.dot && <span className={`tab-dot is-${t.dot}`} role="img" aria-label={t.dotLabel ?? (t.dot === "draft" ? "unpublished draft" : "has a problem")} />}
         </button>
       ))}
     </div>

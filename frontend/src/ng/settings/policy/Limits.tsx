@@ -2,7 +2,8 @@ import { Inbox, Layers, Rows3, Server, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { capKey, KEYS } from "./keys";
 import { PolicyCell } from "./PolicyCell";
-import { problemAt, type Ctx } from "./ctx";
+import { SectionHead } from "./SectionHead";
+import { outerValue, problemAt, scopeUnset, type Ctx } from "./ctx";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, type Below } from "./types";
 import { show } from "./units";
 import { Fold } from "../../templates/panes/controls";
@@ -47,11 +48,8 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
   const scope = (level: string): ReactNode => {
     const probs = ctx.problems.filter((x) => x.level === level);
     const showBelow = Object.values(caps[level]).some((c) => Array.isArray(c.below));
-    const keys = Object.keys(caps[level]).flatMap((cap) => [capKey("default", level, cap).key, capKey("maximum", level, cap).key]);
     const outer = level === "work_item";
-    const unset = !probs.length && keys.every((k) => !changes.has(k) && !problemAt(ctx, k))
-      && Object.values(caps[level]).every((c) => c.default.value == null && c.maximum.value == null && !c.below?.length)
-      && (!outer || (outerValue(ctx) == null && !changes.has(KEYS.outer.key) && !problemAt(ctx, KEYS.outer.key)));
+    const unset = scopeUnset(ctx, level);
     const body = (
       <>
         <div className={`pol-grid${showBelow ? " has-below" : ""}`}>
@@ -94,11 +92,7 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
   };
   return (
     <>
-      <header className="pol-head">
-        <h2 className="pol-title">Limits</h2>
-        <p className="pol-intro">Time and spend caps per scope. Each scope sits inside the one it can&apos;t exceed. An unset maximum is no bound.</p>
-        {preview}
-      </header>
+      <SectionHead id="limits" action={preview}>Time and spend caps per scope. Each scope sits inside the one it can&apos;t exceed. An unset maximum is no bound.</SectionHead>
       {loose.map((x, i) => <p key={i} className="pol-note is-bad">! {x.message}</p>)}
       <Scope id="instance" name="instance" sub="every item on this install" count={0}>
         <div className="pol-one">
@@ -110,10 +104,4 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
       {levels.map(scope)}
     </>
   );
-}
-
-/** `budget.work_item_usd` as the draft holds it: the model's own value, not a derived one. */
-function outerValue(ctx: Ctx): number | null {
-  const m = ctx.draft.view!.result.model["policy.yaml"] as { budget?: { work_item_usd?: number | null } } | undefined;
-  return m?.budget?.work_item_usd ?? null;
 }

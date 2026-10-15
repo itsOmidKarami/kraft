@@ -27,6 +27,18 @@ describe("Policy limits (N.1)", () => {
     expect(within(screen.getByRole("region", { name: "nodes" })).getByRole("button", { name: /^running/ })).toHaveTextContent("max from work item");
   });
 
+  it("folds a scope that sets nothing to one line, and opens it on a tap", async () => {
+    const unsetSteps = { ...RESOLVED.limits.caps, steps: Object.fromEntries(Object.keys(RESOLVED.limits.caps.steps).map((k) => [k, { default: { value: null, source: null }, maximum: { value: null, source: null }, below: [] }])) };
+    open("limits", ans(policyView({}, resolved({ limits: { ...RESOLVED.limits, caps: unsetSteps } }))));
+    const fold = await screen.findByRole("button", { name: "steps 4 unset caps · show" });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "steps" })).toBeNull();
+    expect(screen.getByRole("region", { name: "nodes" })).toBeInTheDocument();
+    await userEvent.click(fold);
+    expect(screen.getByRole("region", { name: "steps" })).toBeInTheDocument();
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("says no bound for a null maximum, and does not draw 'set below policy'", async () => {
     open();
     const work = await screen.findByRole("region", { name: "work item" });
@@ -211,9 +223,12 @@ describe("Policy housekeeping (N.1)", () => {
     expect(within(row).getByText(/ended 24h ago or more/)).toBeInTheDocument();
   });
 
-  it("an unreadable policy says so and offers YAML", async () => {
+  it("an unreadable policy says so, and where to fix it: the phone's YAML is read-only", async () => {
     open("limits", ans(policyView({ problems: [problem({ message: "line 3: bad indent" })] }, null)));
-    expect(await screen.findByRole("alert")).toHaveTextContent("policy.yaml does not load: line 3: bad indent");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("policy.yaml does not load: line 3: bad indent");
+    expect(alert).toHaveTextContent("read-only. Fix policy.yaml on the desktop");
+    expect(alert).not.toHaveTextContent("Open YAML");
   });
 
   it("an unknown section goes to Limits", async () => {

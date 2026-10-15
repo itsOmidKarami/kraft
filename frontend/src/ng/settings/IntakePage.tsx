@@ -3,7 +3,9 @@ import { Plus } from "lucide-react";
 import { Inspector } from "../graph/Inspector";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
+import { Switch } from "../ui/Switch";
 import { AreaFrame } from "../templates/draft/AreaFrame";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import type { Change, Op, Problem } from "../templates/draft/types";
@@ -11,14 +13,14 @@ import { ValueCell } from "../templates/draft/ValueCell";
 import { Kv } from "../templates/panes/controls";
 import { subscribeLive } from "../live";
 import { checkText, hhmm, nextCheck } from "./intake/checks";
-import { describeCron } from "./intake/cron";
-import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule } from "./intake/types";
-import { pickup } from "./intake/pickup";
+import { CRON_PRESETS, cronProblem, describeCron } from "./intake/cron";
+import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule, scheduleProblemText } from "./intake/types";
+import { pickup, REMOVE_SCHEDULE } from "./intake/pickup";
+import { repoChoice, repoLabel, type NamedRepo } from "./intake/repos";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
 import "./intake/intake.css";
 
 const CHECKS_EVERY_MS = 30_000;
-type Sel = "pickup" | number;
 
 /** `/settings/auto-intake` (AreaIntake): the pickup rule and the schedules, one draft over `intake.yaml`. How many items run at once is Policy › Housekeeping's `max_concurrent`. */
 export function IntakePage() {
@@ -32,12 +34,13 @@ export function IntakePage() {
 function Editor({ draft }: { draft: ConfigDraft }) {
   const r = draft.view!.result;
   const data = intakeOf(r);
-  const [sel, setSel] = useState<Sel>("pickup");
+  const [sel, setSel] = useState<number | null>(null);
   const [paneOpen, setPaneOpen] = useState(false);
+  const [removing, setRemoving] = useState<Schedule | null>(null);
   const [checks, setChecks] = useState<Check[] | null>(null);
   // The clock "next check in N min" counts on, moved with each read of the checks.
   const [now, setNow] = useState(() => Date.now());
-  const [repos, setRepos] = useState<{ path: string; name?: string | null }[]>([]);
+  const [repos, setRepos] = useState<NamedRepo[]>([]);
   const [chains, setChains] = useState<string[]>([]);
 
   // A live `intake_checked` frame is the check, prepended; the refetch below is the fallback for a missed frame.
@@ -60,7 +63,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
     return () => { live = false; clearInterval(t); window.removeEventListener("focus", load); };
   }, []);
   useEffect(() => {
-    void request<{ repos: { path: string; name?: string | null }[] }>("/repos").then((a) => { if (a.status === 200) setRepos(a.body.repos ?? []); });
+    void request<{ repos: NamedRepo[] }>("/repos").then((a) => { if (a.status === 200) setRepos(a.body.repos ?? []); });
     void request<{ id: string }[]>("/templates/chains").then((a) => { if (a.status === 200 && Array.isArray(a.body)) setChains(a.body.map((c) => c.id)); });
   }, []);
 
@@ -76,10 +79,10 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   // The live poller runs the published interval: with that or on/off changed in the draft, its next check isn't the draft's to say.
   const unpublished = changes.has("intake.yaml|interval_s") || changes.has("intake.yaml|enabled");
   const next = data?.enabled && !unpublished ? nextCheck(checks?.[0]?.at, data.interval_s, now) : null;
-  const chosen = typeof sel === "number" ? schedules.find((s) => s.index === sel) : undefined;
+  const chosen = sel === null ? undefined : schedules.find((s) => s.index === sel);
   const onFix = (p: Problem) => {
-    setPaneOpen(true);
-    setSel(p.schedule !== undefined ? p.schedule : "pickup");
+    setSel(p.schedule ?? null);
+    if (p.schedule !== undefined) setPaneOpen(true);
   };
 
   const addSchedule = async () => {
@@ -93,14 +96,14 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   };
   const removeSchedule = async (index: number) => {
     const a = await draft.ops([{ op: "remove_schedule", index }]);
-    if (a.status === 200) setSel("pickup");
+    if (a.status === 200) setSel(null);
   };
 
   return (
     <AreaFrame draft={draft} area={area} pageKey="intake" title="Auto-intake" onFix={onFix}>
       {({ size, review, reserve }) => (
         <>
-          <div className="ink-body" style={{ right: reserve(paneOpen) }}>
+          <div className="ink-body" style={{ right: chosen || review ? reserve(paneOpen) : 0 }}>
             <div className="ink-page">
               {!data ? (
                 <div className="tpl-note" role="alert">
@@ -110,10 +113,17 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                 </div>
               ) : (
                 <>
-                  <button type="button" className={`ink-card${sel === "pickup" ? " is-sel" : ""}${data.enabled ? " is-on" : ""}`} aria-pressed={sel === "pickup"} onClick={() => { setSel("pickup"); setPaneOpen(true); }}>
-                    <span className="ink-status"><span className="ink-dot" aria-hidden /> {data.enabled ? `On${next ? ` · ${next}` : ""}` : "Off"}</span>
-                    <span className="ink-sentence">{pickup(data)}</span>
-                  </button>
+                  <section className={`ink-card${data.enabled ? " is-on" : ""}`} aria-label="Pickup">
+                    <div className="ink-status">
+                      <span className="ink-dot" aria-hidden />
+                      <span>{data.enabled ? `On${next ? ` · ${next}` : ""}` : "Off"}</span>
+                      {changes.has("intake.yaml|enabled") && <span className="ink-chip is-changed">changed</span>}
+                      <span className="ink-gap" />
+                      <Switch label="enabled" checked={data.enabled} onChange={(on) => void send(draft, { op: "set_intake", patch: { enabled: on } })} />
+                    </div>
+                    <p className="ink-sentence">{pickup(data)}</p>
+                    <PickupRows draft={draft} i={data} repos={repos} changes={changes} />
+                  </section>
 
                   <section aria-label="Recent checks">
                     <h2 className="ink-h2">Recent checks</h2>
@@ -140,7 +150,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                               <span className="ink-sch-line">{describeCron(s.cron)} · {repoLabel(s.repo, repos)} · {s.chain}</span>
                               <code className="ink-sch-cron">{s.cron}</code>
                             </button>
-                            {bad.map((p, i) => <p key={i} className="ink-err" role="alert">{p.message}</p>)}
+                            {bad.map((p, i) => <p key={i} className="ink-err" role="alert">{scheduleProblemText(p, s)}</p>)}
                           </li>
                         );
                       })}
@@ -152,23 +162,30 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               )}
             </div>
           </div>
-          {!review && data && (
+          {!review && data && chosen && (
             <Inspector
               id="intake-pane"
               open={paneOpen}
               size={size}
-              crumbs={[{ label: "Auto-intake", onClick: () => setSel("pickup") }]}
-              icon={chosen ? "clock" : "download"}
-              title={chosen ? chosen.title || "untitled" : "bd ready"}
-              sub={chosen ? "schedule · schedules: in intake.yaml" : "pickup rule · intake.yaml"}
+              crumbs={[{ label: "Auto-intake", onClick: () => setSel(null) }]}
+              icon="clock"
+              title={chosen.title || "untitled"}
+              sub="schedule · schedules: in intake.yaml"
               onCollapse={() => setPaneOpen(false)}
               onExpand={() => setPaneOpen(true)}
-              footer={chosen ? <><span className="bp-gap" /><Button variant="danger" onClick={() => void removeSchedule(chosen.index)}>Remove schedule</Button></> : undefined}
+              footer={<><span className="bp-gap" /><Button variant="danger" onClick={() => setRemoving(chosen)}>Remove schedule</Button></>}
             >
-              {chosen
-                ? <ScheduleRows draft={draft} s={chosen} repos={repos} chains={chains} changes={changes} problems={problemsOfSchedule(r, chosen.index)} />
-                : <PickupRows draft={draft} i={data!} repos={repos} changes={changes} />}
+              <ScheduleRows key={chosen.index} draft={draft} s={chosen} repos={repos} chains={chains} changes={changes} problems={problemsOfSchedule(r, chosen.index)} />
             </Inspector>
+          )}
+          {removing && (
+            <Dialog
+              title={`Remove ${removing.title || "this schedule"}?`}
+              onClose={() => setRemoving(null)}
+              footer={<><span className="bp-gap" /><Button onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={() => { void removeSchedule(removing.index); setRemoving(null); }}>Remove schedule</Button></>}
+            >
+              <p>{REMOVE_SCHEDULE}</p>
+            </Dialog>
           )}
         </>
       )}
@@ -176,14 +193,12 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   );
 }
 
-const repoLabel = (path: string, repos: { path: string; name?: string | null }[]) => repos.find((r) => r.path === path)?.name || path.split("/").filter(Boolean).pop() || path || "no repo";
-
 function Row({ k, children, note, changed }: { k: string; children: React.ReactNode; note?: string; changed?: boolean }) {
   return (
     <div className="ink-row">
       <span className="ink-k">{k}</span>
       <span className="ink-v">{children}</span>
-      <span className={`ink-chip${changed ? " is-changed" : ""}`}>{changed ? "changed" : "this file"}</span>
+      {changed && <span className="ink-chip is-changed">changed</span>}
       {note && <span className="ink-rownote">{note}</span>}
     </div>
   );
@@ -195,14 +210,11 @@ async function send(draft: ConfigDraft, op: Op): Promise<string | null> {
   return a.status === 200 ? null : detailOf(a.body);
 }
 
-function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: IntakeResolved; repos: { path: string; name?: string | null }[]; changes: Map<string, Change> }) {
+function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: IntakeResolved; repos: NamedRepo[]; changes: Map<string, Change> }) {
   const set = (patch: Record<string, unknown>) => send(draft, { op: "set_intake", patch });
   const changed = (file: string, key: string) => changes.has(`${file}|${key}`);
   return (
     <div>
-      <Row k="enabled" changed={changed("intake.yaml", "enabled")}>
-        <Segmented label="enabled" value={i.enabled ? "yes" : "no"} options={[{ value: "yes", label: "yes" }, { value: "no", label: "no" }]} onChange={(v) => void set({ enabled: v === "yes" })} />
-      </Row>
       <Row k="check every (min)" changed={changed("intake.yaml", "interval_s")}>
         <ValueCell label="check every, minutes" value={String(toMinutes(i.interval_s))} display={showMinutes(i.interval_s)} onCommit={(t) => { const v = intervalFromText(t); return "error" in v ? v.error : set({ interval_s: v.seconds }); }} />
       </Row>
@@ -210,28 +222,31 @@ function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: Intak
         <Segmented label="priority at or below" value={String(i.priority_ceiling)} options={PRIORITIES} onChange={(v) => void set({ priority_ceiling: Number(v) })} />
       </Row>
       <Row k="repos" changed={changed("intake.yaml", "repos")}>
-        <ValueCell label="repos" value={i.repos.join(", ")} display={i.repos.length ? i.repos.join(", ") : "every enabled repo"} muted={!i.repos.length} placeholder={repos.map((r) => r.path).join(", ") || "every enabled repo"} choices={repos.map((r) => ({ value: r.path, summary: r.name ?? undefined }))} multiple onCommit={(t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) })} />
+        <ValueCell label="repos" noun="repo" value={i.repos.join(", ")} display={i.repos.length ? i.repos.join(", ") : "every enabled repo"} muted={!i.repos.length} placeholder={repos.map((r) => r.path).join(", ") || "every enabled repo"} choices={repos.map((r) => ({ value: r.path, summary: r.name ?? undefined }))} closed multiple onCommit={(t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) })} />
       </Row>
     </div>
   );
 }
 
-function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: ConfigDraft; s: Schedule; repos: { path: string; name?: string | null }[]; chains: string[]; changes: Map<string, Change>; problems: Problem[] }) {
+function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: ConfigDraft; s: Schedule; repos: NamedRepo[]; chains: string[]; changes: Map<string, Change>; problems: Problem[] }) {
   const patch = (p: Record<string, unknown>) => send(draft, { op: "set_schedule", index: s.index, patch: p });
   const changed = (field: string) => changes.has(`intake.yaml|schedules.${s.index}.${field}`);
   const text = (field: keyof Schedule, label: string, k = label) => (
     <Row k={k} changed={changed(field)}>
       <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : "This cannot be empty.")} />
-      {problems.filter((p) => p.field === field).map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
+      {problems.filter((p) => p.field === field).map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
     </Row>
   );
   return (
     <div>
       {text("title", "name")}
-      {text("cron", "cron")}
+      <Row k="runs" changed={changed("cron")}>
+        <CronPicker cron={s.cron} onPick={(cron) => patch({ cron })} />
+        {problems.filter((p) => p.field === "cron").map((p, n) => <span key={n} className="ink-err" role="alert">{scheduleProblemText(p, s)}</span>)}
+      </Row>
       <Row k="repo" changed={changed("repo")}>
         <select className="ink-select" aria-label="repo" value={s.repo} onChange={(e) => void patch({ repo: e.target.value })}>
-          {[...new Set([s.repo, ...repos.map((r) => r.path)])].filter(Boolean).map((p) => <option key={p} value={p}>{repoLabel(p, repos)}</option>)}
+          {[...new Set([s.repo, ...repos.map((r) => r.path)])].filter(Boolean).map((p) => <option key={p} value={p}>{repoChoice(p, repos)}</option>)}
         </select>
         {problems.filter((p) => p.field === "repo").map((p, n) => <span key={n} className="ink-err" role="alert">{p.message}</span>)}
       </Row>
@@ -244,5 +259,30 @@ function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: C
       {text("description", "description")}
       <p className="ink-note">Auto-intake removes the typing, not the judgement: a started item passes no gate by itself.</p>
     </div>
+  );
+}
+
+const CUSTOM = "custom";
+
+/** A schedule's timing: a preset, or a cron of its own, with the sentence it reads as. A cron the scheduler would refuse is explained here and not saved. */
+function CronPicker({ cron, onPick }: { cron: string; onPick: (cron: string) => Promise<string | null> }) {
+  const preset = CRON_PRESETS.some((p) => p.cron === cron);
+  const [custom, setCustom] = useState(!preset);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (v: string) => {
+    if (v === CUSTOM) return setCustom(true);
+    setCustom(false);
+    setError(await onPick(v));
+  };
+  return (
+    <>
+      <select className="ink-select" aria-label="runs" value={custom ? CUSTOM : cron} onChange={(e) => void pick(e.target.value)}>
+        {CRON_PRESETS.map((p) => <option key={p.cron} value={p.cron}>{p.label}</option>)}
+        <option value={CUSTOM}>Custom cron…</option>
+      </select>
+      {custom && <ValueCell label="cron" value={cron} display={cron || "not set"} muted={!cron} onCommit={(t) => cronProblem(t) ?? onPick(t.trim().split(/\s+/).join(" "))} />}
+      {error && <span className="ink-err" role="alert">{error}</span>}
+      <span className="ink-says">{describeCron(cron)}</span>
+    </>
   );
 }

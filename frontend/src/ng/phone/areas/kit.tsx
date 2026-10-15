@@ -7,6 +7,9 @@ import { notListed, unlisted } from "../../ui/Combobox";
 import { ChoiceSheet, EditSheet, useSheet, type Listed, type Option } from "../nav/Sheet";
 import "./areas.css";
 
+/** What a phone says when an area's file does not load: its YAML view is read-only here, so the repair is elsewhere. */
+export const repairElsewhere = (file: string) => `The phone's YAML view is read-only. Fix ${file} on the desktop (Settings, YAML), or in the file on the machine running Kraft.`;
+
 /** One row of an area (the prototype's row): a label with a sub line, a value, and what a tap does. */
 export interface RowSpec {
   key?: string;

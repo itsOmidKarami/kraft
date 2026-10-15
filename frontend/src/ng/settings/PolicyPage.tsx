@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { Archive, Gauge, RefreshCw, Workflow } from "lucide-react";
+import { Workflow } from "lucide-react";
 import { request } from "../http";
 import { Button } from "../ui/Button";
-import { Menu } from "../ui/Menu";
+import { Tabs } from "../ui/Tabs";
 import { AreaFrame } from "../templates/draft/AreaFrame";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import type { Problem } from "../templates/draft/types";
@@ -18,11 +18,10 @@ import { limitLabel } from "./policy/keys";
 import { policyOf } from "./policy/types";
 import "./policy/policy.css";
 
-const ICON = { limits: <Gauge size={14} aria-hidden />, loops: <RefreshCw size={14} aria-hidden />, housekeeping: <Archive size={14} aria-hidden /> };
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 export const policyUrl = (s: Section) => `/settings/policy/${s}`;
 
-/** `/settings/policy[/:section]` (Decisions §12): one page of values that edit in place, the section picked in the crumb. */
+/** `/settings/policy[/:section]` (Decisions §12): one page of values that edit in place, the section picked on the tab strip. */
 export function PolicyPage() {
   const { section } = useParams();
   const draft = useConfigDraft("policy", "policy");
@@ -65,20 +64,10 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
     return out;
   }, [r.changes, r.problems]);
 
-  const menu = (
-    <>
-      <span className="tpl-crumb-sep" aria-hidden>›</span>
-      <Menu
-        label="Policy section"
-        triggerClass="pol-section"
-        trigger={<>{SECTIONS.find((s) => s.id === section)!.label} <span aria-hidden>▾</span></>}
-        items={SECTIONS.map((s) => {
-          const m = bySection[s.id];
-          return { label: s.label, sub: s.sub, icon: ICON[s.id], checked: s.id === section, dot: m.problem ? "problem" as const : m.draft ? "draft" as const : undefined, dotLabel: m.problem ? "has a problem" : "unpublished changes", onSelect: () => navigate(policyUrl(s.id)) };
-        })}
-      />
-    </>
-  );
+  const tabs = SECTIONS.map((s) => {
+    const m = bySection[s.id];
+    return { value: s.id, label: s.label, dot: m.problem ? "problem" as const : m.draft ? "draft" as const : undefined };
+  });
 
   const area = useMemo(() => ({
     crumb: "Policy",
@@ -110,13 +99,14 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
       area={area}
       pageKey="policy"
       title="Policy"
-      tail={menu}
       onFix={onFix}
     >
       {({ size, review, reserve }) => (
         <>
           <div className="pol-body" data-flash={flash ?? undefined} style={{ right: reserve(preview && section === "limits") }}>
             <div className="pol-page">
+              <Tabs label="Policy section" id="policy" tabs={tabs} value={section} onChange={(s) => navigate(policyUrl(s))} />
+              <div id="policy-panel" role="tabpanel" aria-labelledby={`policy-tab-${section}`} className="pol-panel">
               {!ctx ? (
                 <div className="tpl-note" role="alert">
                   <h1>policy.yaml does not load</h1>
@@ -124,6 +114,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
                   <p>Open YAML in the header to repair it.</p>
                 </div>
               ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={13} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
+              </div>
             </div>
           </div>
           {!review && preview && section === "limits" && ctx && <PreviewPane draft={draft} chains={chains} size={size} onClose={() => setPreview(false)} />}

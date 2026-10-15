@@ -35,6 +35,10 @@
 
 .tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); }
 .tab { margin-bottom: -1px; padding: 8px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; font-size: var(--fs-meta); color: var(--text-muted); cursor: pointer; }
+.tab { display: inline-flex; align-items: center; gap: 6px; }
+.tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.tab-dot.is-draft { box-sizing: border-box; border: 1.5px solid var(--mark-change-line); }
+.tab-dot.is-problem { background: var(--bad); }
 .tab:hover { color: var(--text-sub); }
 .tab[aria-selected="true"] { border-bottom-color: var(--text); color: var(--text); }
 
