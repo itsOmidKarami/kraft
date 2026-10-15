@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi, type Mock } from "vitest";
 import { ApiError } from "../../src/core/api";
-import { approvedMessage, approveGate, approveOrRead, consequenceQuestion, gateConsequence, isStaleRevision } from "../../src/core/approve";
+import { approvedMessage, approveGate, approveOrRead, gateConsequence, isStaleRevision } from "../../src/core/approve";
 import { ShownRenders } from "../../src/core/shown";
 
 const withDigest = { title: "t", content: "c", truncated: false, path: "p", digest: "d2" };
@@ -128,7 +128,3 @@ it.each<[string, ReturnType<typeof node>[], string, "merge" | "push" | null]>([
   ["no such gate", [node("merge", "exec")], "nope", null],
 ])("gateConsequence: %s", (_, nodes, gate, want) =>
   expect(gateConsequence({ chain_definition: { template_id: "t", nodes } } as never, gate)).toBe(want));
-
-it("consequenceQuestion names the item", () => {
-  expect(consequenceQuestion("Cache", "push")).toBe("Approve and push Cache?");
-});

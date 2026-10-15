@@ -107,7 +107,7 @@ export function registerGates(
       }
       if (!n) return api.approve(id, g, digest).then(() => true);
       const ok = await vscode.window.showWarningMessage(
-        `Approve ${g} and send ${n} draft comment${n === 1 ? "" : "s"} with it?${what ? ` This also ${what === "merge" ? "merges it into the target branch" : "pushes it"}.` : ""} No agent acts on comments sent with an approval.`,
+        `Approve ${gateWords(g)} on ${item?.title ?? id} and send ${n} draft comment${n === 1 ? "" : "s"} with it?${what ? ` This also ${what === "merge" ? "merges it into the target branch" : "pushes it"}.` : ""} No agent acts on comments sent with an approval.`,
         { modal: true },
         "Approve and Send",
       );
