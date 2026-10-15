@@ -175,7 +175,7 @@ describe("outcomeMessage", () => {
     ["queued on slots", true, { id: "K-1", status: "queued", slots: { busy: 2, limit: 2 } },
       "Filed K-1, queued: 2 of 2 slots are busy. It starts when one frees."],
     ["queued on storage", true, { id: "K-1", status: "queued", slots: { busy: 0, limit: 2, storage: { used_bytes: 2 * 1024 ** 3, limit_bytes: 2 * 1024 ** 3 } } },
-      "Filed K-1, queued: worktrees use 2G of the 2G storage limit. It starts when space frees."],
+      "Filed K-1, queued: 2 GB counted against the 2 GB limit. It starts when space frees."],
     ["an answer it does not know, said as it is", true, { id: "K-1", status: "someday" }, "Filed K-1: it is someday."],
   ])("%s", (_, start, c, want) => expect(outcomeMessage(start, c as Created)).toBe(want));
 });

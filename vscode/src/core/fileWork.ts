@@ -4,7 +4,7 @@
 
 import { basename } from "node:path";
 import { repoName } from "../../../frontend/src/format";
-import { humanSize } from "../../../frontend/src/sizes";
+import { countedAgainst } from "../../../frontend/src/ng/settings/storageWords";
 import { ApiError } from "./api";
 import type { Created, DryRun, NewWorkItem, Repo, TemplateSummary, WorkItem } from "./api";
 import { isLoopback } from "./connection";
@@ -181,7 +181,7 @@ export function outcomeMessage(autostart: boolean, c: Created): string {
   if (c.status === "active") return `Filed ${c.id} and started it.`;
   if (c.status === "queued") {
     const held = c.slots?.storage;
-    if (held) return `Filed ${c.id}, queued: worktrees use ${humanSize(held.used_bytes)} of the ${humanSize(held.limit_bytes)} storage limit. It starts when space frees.`;
+    if (held) return `Filed ${c.id}, queued: ${countedAgainst(held.used_bytes, held.limit_bytes)}. It starts when space frees.`;
     const busy = c.slots ? `${c.slots.busy} of ${c.slots.limit} slots are` : "every slot is";
     return `Filed ${c.id}, queued: ${busy} busy. It starts when one frees.`;
   }
