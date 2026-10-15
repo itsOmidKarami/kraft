@@ -77,6 +77,7 @@ const ALLOWED = [
   "templates/repos/fields", // the Repos rows: label, parse, patch, source
   "templates/repos/types", // reposOf, runningOf, problemsOf
   "templates/repos/evidence", // readiness: the list's can-run-work word, one source with the desktop
+  "templates/repos/path", // a repo path with the home directory as ~, one source with the desktop
   "templates/repos/RepoConfig", // setRepo and setEnabled: the preview-checked set_repo
   "templates/fields", // fieldMeta labels and routeOf: a task field goes by one name on both layouts
   "templates/choices", // the steering profiles and harnesses a typed list takes, as data
