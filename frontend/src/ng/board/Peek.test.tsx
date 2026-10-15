@@ -176,6 +176,12 @@ describe("Peek", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
   });
 
+  it("names the header's full-page button for what it does", async () => {
+    mount({ display_status: "running" });
+    fireEvent.click(await screen.findByRole("button", { name: /Full page/ }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
+  });
+
   it("archives a done item from its card, the footer repeating none of it", async () => {
     const calls = mount({ status: "completed", display_status: "done" });
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));

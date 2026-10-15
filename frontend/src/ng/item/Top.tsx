@@ -104,11 +104,11 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
     );
   return (
     <div className="item-brief">
-      {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{more ? brief : plainMarkdown(brief)}</p> : <p className="item-brief-text item-muted">No brief.</p>}
+      {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{more ? brief : plainMarkdown(brief)}</p> : null}
       <div className="item-brief-links">
         {(long || more) && <button type="button" className="item-link" aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</button>}
         {(long || more) && <span aria-hidden> · </span>}
-        <button type="button" className="item-link" onClick={() => setEditing(true)}>edit</button>
+        <button type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>
       </div>
     </div>
   );

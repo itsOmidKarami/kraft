@@ -90,6 +90,7 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
       onFocus={open}
+      focusAs={{ label: "Full page", tip: "Open the full item page" }}
       footer={<Footer cards={tab === "overview"} item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
