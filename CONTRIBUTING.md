@@ -191,7 +191,7 @@ the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
-| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_docs_added_in.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only, or changes no Python | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14, 1/3 … 3/3)` *(code)* | the unit tier (`-m "not e2e"`) in three shards on each supported Python, with `python -m kraft.intent` in the first; on 3.14 alone when the pull request changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
@@ -353,6 +353,24 @@ Page rules:
   It also fails a `](/page#heading)` link between pages that lands on no
   heading, or on an address the file forwards (write the target), so a
   moved heading cannot leave a dead link behind.
+- Mark what is new. A page, section or CLI verb that is new since the latest
+  release carries `_Added in next_` on its own line directly under its heading
+  (a new page: under its title, which covers its sections), or at the end of
+  its table cell (a row in "Verbs at a glance", a flag row). Write exactly
+  that, never a version: the release stamps it into `_Added in 2.1_`
+  ([RELEASING.md](RELEASING.md#docs-added-in-notes)), and a new major strips
+  every note. Never put it in heading text, which would leak into the table of
+  contents, search titles and the sidebar. On the site it is a chip ("Unreleased",
+  then "Added in 2.1"); in the Markdown, `llms-full.txt` and search it stays plain
+  words. `dev/check_docs_added_in.py` (the `lint` job) compares `docsite/content`
+  with the latest release tag and fails on a new page, heading or verb with no
+  note, on a note in the wrong place or naming a release that does not exist,
+  and warns on a `next` note on something the release already had. A heading
+  is not new if its page moved (`redirects.yml`), or if you say so under it:
+  `<!-- renamed from: Old heading -->` for an old heading under a new name
+  (`/page#Old heading` from another page, `/old/page` for a page split or
+  renamed), `<!-- not new: why -->` for new text about something that already
+  shipped. The comment does not render, and the release deletes it.
 - No comment in a shell block (`bash`, `sh`, `shell`, `zsh`, `console`): an
   interactive zsh, the macOS default, does not read `#` as one, so a
   pasted `cmd # note` fails with `command not found: #`. Put the remark in
@@ -407,6 +425,10 @@ The site publishes two versions: the latest stable release's pages at
 merges and become the default at the next stable release. There is nothing
 else to do. Link to `/kraft/next/` for a feature that hasn't shipped in a
 release yet.
+
+A section that is new since the last release says so with an "Added in"
+note, which the release turns into the version that shipped it (see
+[User-facing docs](#user-facing-docs) above).
 
 Both versions are built with `main`'s site code (`docsite/app`,
 `nuxt.config.ts`), so a theme or component fix reaches the release docs

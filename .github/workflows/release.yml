@@ -365,6 +365,15 @@ jobs:
           # Off main's tip, not the released commit, which may be behind it.
           git checkout --quiet -b "$BRANCH" origin/main
           python3 dev/stamp_plugin_versions.py "$VERSION"
+          # The docs' `_Added in next_` notes become this release's number
+          # (see RELEASING.md). A patch that ships a feature is the one case
+          # it refuses; that must not hold back the manifests or the changelog.
+          DOCS_NOTE=""
+          if ! python3 dev/stamp_docs_added_in.py "$VERSION" 2>"$RUNNER_TEMP/docs-notes.err"; then
+            cat "$RUNNER_TEMP/docs-notes.err"
+            echo "::warning::docs notes not stamped: $TAG is a patch release but pages carry _Added in next_"
+            DOCS_NOTE=" The docs' \`_Added in next_\` notes were NOT stamped: $TAG is a patch release, so a feature shipped under a patch label. Relabel, or take the notes off by hand."
+          fi
           # After the build, never before: a dirty tree would give the wheel a
           # setuptools-scm dev version and fail the smoke test.
           python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
@@ -380,7 +389,7 @@ jobs:
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "chore: stamp plugin manifests and changelog for $TAG" \
-            --body "Plugin manifest versions and the CHANGELOG.md section, written by the release workflow that just published $TAG." \
+            --body "Plugin manifest versions, the CHANGELOG.md section and the docs' Added in notes, written by the release workflow that just published $TAG.$DOCS_NOTE" \
             --label release::none
           gh pr merge "$BRANCH" --auto --squash
 

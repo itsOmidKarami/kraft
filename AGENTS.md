@@ -11,3 +11,8 @@ repository.
 A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker: it commits
 everything it changes before it exits, and leaves pushing, merging and the
 issue tracker to Kraft. The rules are in [CLAUDE.md](CLAUDE.md#kraft-workers).
+
+## Docs
+
+A new docs page, section or CLI verb carries `_Added in next_` under its
+heading, and never a version number: see [CLAUDE.md](CLAUDE.md#docs-mark-what-is-new).
