@@ -217,6 +217,19 @@ describe("StateCard", () => {
     expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveAccessibleDescription(/^Restarts open_draft/);
   });
 
+  // The pane's Retry (the one with the steer) leaves the stopped node to the card, so the card takes the steer.
+  it.each([["steerable", true, { path: "merge_request.open.open_draft", steer: "check the tokenizer" }], ["not steerable", false, { path: "merge_request.open.open_draft" }]])("a failed card's Retry on a %s item sends the steer typed in it, if it has the box", async (_n, steerable, body) => {
+    const calls = stubFetch(WRITES);
+    show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), steerable });
+    const card = screen.getByRole("region", { name: "Failed" });
+    const box = within(card).queryByLabelText("Steer for the retry");
+    expect(!!box).toBe(steerable);
+    if (box) await userEvent.type(box, "check the tokenizer");
+    await userEvent.click(within(card).getByRole("button", { name: "Retry from open_draft" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toMatchObject(body);
+  });
+
   it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {
     const files = [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];
     routed(<StateCard item={detail({ display_status: "failed", stop: stop("failed"), branch: "kraft/design-the-cache-w1", worktree_exists: true })} files={files} {...handlers()} />);

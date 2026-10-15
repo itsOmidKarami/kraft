@@ -43,9 +43,11 @@ const pathOf = (task?: string | null) => (task ? task.split(".").join(" › ") :
 export function StateCard({ item, files = null, ...h }: { item: ItemDetail; files?: DiffFile[] | null } & Handlers) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A failed card's Retry takes a steer, as the pane's Retry did before the card took that over.
+  const [steer, setSteer] = useState("");
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -85,12 +87,12 @@ type Run = (p: Promise<{ ok: true } | { ok: false; error: string }>) => Promise<
 
 /** The card's Retry: named by the path it sends, so a stop inside a fix loop
  *  reads "Retry from verification", not "from judge", a task it cannot name. */
-function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
+function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run, steer = "") {
   const task = item.stop?.task;
   const path = node ? actionPath(node, task) : null;
   const label = task ? `Retry from ${taskName(path ?? task)}` : "Retry";
   const target = task ? taskName(path ?? task) : (item.stop?.node ? nameOf(item.chain_definition.nodes, item.stop.node) : "the node");
-  return { label, target, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
+  return { label, target, primary: true, run: () => run(act.retry(item.id, { ...(path ? { path } : {}), ...(steer.trim() ? { steer: steer.trim() } : {}) })) };
 }
 
 /** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
@@ -101,7 +103,7 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
   return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
@@ -116,11 +118,16 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     // A stop that names no cause says why it failed in the agent's own words: the end of its log.
     const unexplained = !rows.length && !/ — /.test(stop.reason ?? "");
-    const retry = retryFrom(item, node, run);
+    const retry = retryFrom(item, node, run, h.steer);
     const retries = admits(item, "retry", true);
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: (structured ? headline(stop.reason) : stop.reason) ?? undefined, node: stop.node,
-      body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : undefined,
+      body: (
+        <>
+          {failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : null}
+          {retries && item.steerable !== false && <textarea aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={h.steer} onChange={(e) => h.setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => void retry.run(), !!h.steer.trim())} />}
+        </>
+      ),
       facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
       // What Retry does, in the card's words: the task it restarts. The branch and the spend are already facts above.
