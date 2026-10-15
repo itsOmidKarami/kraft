@@ -65,6 +65,7 @@
 /* Offline: the live parts dim, the text stays readable. */
 .board-row.is-off :is(.glyph, .ticks) { opacity: .5; }
 .board-check { width: 16px; height: 16px; margin: 0; accent-color: var(--text); cursor: pointer; }
+.board-check:disabled { opacity: .4; cursor: default; }
 .board-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .board-row-main { all: unset; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 5px; }
 .board-row-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }

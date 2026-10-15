@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import * as api from "../../../api";
@@ -32,7 +32,7 @@ export function Analytics() {
   const delta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   const chains = [...new Set(items.map(chainOf))].sort();
-  const scopeHref = boardHref({ repo, chain });
+  const scopeHref = boardHref({ repo });
   const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
   return (
@@ -67,7 +67,7 @@ export function Analytics() {
                         <Link key={g.gate} to={scopeHref} className="ph-stat-row ph-stat-link">
                           <span className="ph-stat-name ph-mono">{g.gate}</span>
                           <span className="ph-stat-meta">{g.n} {g.n === 1 ? "wait" : "waits"} · median {elapsed(g.median_ms)}{g.rejected ? ` · ${g.rejected} rejected` : ""}</span>
-                          <span className="ph-stat-val">{elapsed(g.total_ms)}</span>
+                          <span className="ph-stat-val">{elapsed(g.total_ms)}<ChevronRight size={14} aria-hidden="true" /></span>
                         </Link>
                       ))}
                     </div>
@@ -90,10 +90,10 @@ export function Analytics() {
                   {report.by_repo.length === 0 ? <p className="ph-note">Nothing here yet.</p> : (
                     <div className="ph-list">
                       {report.by_repo.map((r) => (
-                        <Link key={r.repo} to={boardHref({ repo: r.repo, chain })} className="ph-stat-row ph-stat-link">
+                        <Link key={r.repo} to={boardHref({ repo: r.repo })} className="ph-stat-row ph-stat-link">
                           <span className="ph-stat-name">{repoName(r.repo)}</span>
                           <span className="ph-stat-meta">{r.items} items · {r.done} done · avg repairs {r.cycles.toFixed(1)}</span>
-                          <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}</span>
+                          <span className="ph-stat-val">{usd(r.cost_usd, r.cost_complete)}<ChevronRight size={14} aria-hidden="true" /></span>
                         </Link>
                       ))}
                     </div>
@@ -105,7 +105,7 @@ export function Analytics() {
                       {report.stop_reasons.map((s) => (
                         <Link key={s.label} to={scopeHref} className="ph-stat-row ph-stat-link">
                           <span className="ph-stat-name">{s.label}</span>
-                          <span className="ph-stat-val">{s.n}</span>
+                          <span className="ph-stat-val">{s.n}<ChevronRight size={14} aria-hidden="true" /></span>
                         </Link>
                       ))}
                     </div>

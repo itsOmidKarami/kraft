@@ -5,6 +5,8 @@
 .ph-tile-sub { font-size: var(--fs-label); line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-stat-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; min-height: 44px; padding: 8px 14px; align-items: center; border-top: 1px solid var(--line); }
 .ph-stat-link { color: inherit; text-decoration: none; }
+.ph-stat-link .ph-stat-val { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.ph-stat-link .ph-stat-val svg { color: var(--text-muted); }
 .ph-stat-link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .ph-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .ph-stat-row:first-child { border-top: 0; }
