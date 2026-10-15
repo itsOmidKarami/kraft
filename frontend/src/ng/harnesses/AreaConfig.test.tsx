@@ -78,13 +78,14 @@ describe("area pane Config", () => {
     expect(within(select).getByRole("option", { name: "claude (Never)" })).toBeInTheDocument();
   });
 
-  it("shows claude when escalation_harness is unset, and a pick writes the other value unchanged", async () => {
+  it("reads an unset escalation harness as the item's, with the one it follows now, and a pick writes the other value unchanged", async () => {
     const server = serve(view(resolved({ escalation: { harness: null, grants: ["git-commit"] }, escalation_effective: { harness: "claude", set: false } })));
     renderPage();
     const pane = await openConfig();
     await userEvent.click(within(pane).getByRole("button", { name: /^runs on, .*\. Edit$/ }));
     const select = within(pane).getByRole("combobox", { name: "runs on" });
-    expect(select).toHaveValue("claude");
+    expect(select).toHaveValue("item");
+    expect(within(select).getByRole("option", { name: "item's harness (claude)" })).toBeInTheDocument();
     await userEvent.selectOptions(select, "item");
     await waitFor(() => expect(server.ops).toHaveLength(1));
     expect(server.ops[0]).toEqual([{ op: "set_escalation", harness: "item", grants: ["git-commit"] }]);
