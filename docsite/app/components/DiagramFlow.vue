@@ -51,7 +51,7 @@ const props = defineProps<{
 /* Alternatives sit side by side where there is room for two. */
 .diagram-flow__groups--parallel {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
   gap: 0.75rem;
 }
 </style>

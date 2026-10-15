@@ -16,8 +16,9 @@ const props = defineProps<{
 }>()
 
 // On a phone a wide part is shown at three quarters of its size, where the
-// text can be read, and scrolls sideways in the box the diagrams use
-// (.diagram-scroll, assets/css/prose.css). A part that fits needs no hint.
+// text can be read, and scrolls sideways in the .diagram-scroll box
+// (assets/css/prose.css), which the stable build's diagram images share. A
+// part that fits needs no hint.
 const phoneScale = 0.75
 const scrolls = computed(() => Number(props.crop.split(/\s+/)[2]) * phoneScale > 360)
 const style = computed(() => {

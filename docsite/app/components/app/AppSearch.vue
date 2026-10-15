@@ -42,10 +42,10 @@ const { data: files } = useLazyAsyncData('search_docs', async () => {
 // room for the guide.
 // Fuse is handed the page's path as one more, near-weightless key, because
 // that is the only way its sort function can see which page a hit is: the
-// path, then the title and the text, are the first values of its `item` (Nuxt
-// UI merges these options with defu, which puts our keys ahead of its own: a
-// Nuxt UI upgrade that changes that merge moves them, and every hit then
-// counts as a Reference hit or none).
+// path, the title and the text are values 0, 1 and 3 of its `item` (2 is the
+// description, which search items lack). Nuxt UI merges these options with
+// defu, which puts our keys ahead of its own: a Nuxt UI upgrade that changes
+// that merge moves them, and every hit then counts as a Reference hit or none.
 const REFERENCE_PENALTY = 0.55
 const FUSE_WEIGHT = 0.3
 const TITLE_BONUS = 0.2
@@ -58,7 +58,7 @@ type Hit = { score: number, idx: number, item: Record<number, { v: string }> }
 // The fraction of the query's words that appear in some text.
 const covers = (text: string, words: string[]) => words.filter(word => text.includes(word)).length / words.length
 const rank = (hit: Hit) => {
-  const [to, label = '', body = ''] = [0, 1, 2].map(i => String(hit.item[i]?.v ?? ''))
+  const [to, label = '', body = ''] = [0, 1, 3].map(i => String(hit.item[i]?.v ?? ''))
   const query = term.value.toLowerCase()
   const words = query.split(/\s+/).filter(Boolean)
   const verb = label.startsWith(VERB_TITLE)
