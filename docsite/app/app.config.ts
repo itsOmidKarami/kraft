@@ -90,9 +90,11 @@ export default defineAppConfig({
     },
     prose: {
       // Inline code is an inline-block, so one long path or flag is wider
-      // than a phone and the whole page scrolls sideways. Let it break.
+      // than a phone and the whole page scrolls sideways. Let it break. Its
+      // side padding is 4px, not Nuxt UI's 6px: beside a comma or a full stop
+      // the chip stood apart from it.
       code: {
-        base: 'max-w-full wrap-break-word',
+        base: 'max-w-full wrap-break-word px-1',
       },
       // Where a table does not fit its text column it scrolls inside its own
       // box, and scroll-hint (assets/css/prose.css) shows there is more to the

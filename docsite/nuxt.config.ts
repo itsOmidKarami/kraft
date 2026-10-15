@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
@@ -105,6 +106,21 @@ const breakableLinks = (links: TocLink[] = []) => links.forEach((link) => {
   breakableLinks(link.children)
 })
 
+// GitHub Pages serves /guides/ from guides/index.html and /guides from
+// guides.html, and a section's index page is written only as guides.html, so
+// the address with the slash was the 404 page. Each section folder gets a copy
+// of its index as index.html (the copy's asset URLs are absolute, so it loads
+// from the deeper address). Only a folder with no index.html of its own: a
+// page folder that already has one is left as built.
+function addSectionIndexes(dir: string) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('_') || entry.name === 'raw') continue
+    const folder = join(dir, entry.name)
+    if (existsSync(`${folder}.html`) && !existsSync(join(folder, 'index.html'))) copyFileSync(`${folder}.html`, join(folder, 'index.html'))
+    addSectionIndexes(folder)
+  }
+}
+
 export default defineNuxtConfig({
   extends: ['docus'],
   // Off until Nuxt ships @nuxt/devtools 4: devtools 3 default-imports
@@ -112,6 +128,9 @@ export default defineNuxtConfig({
   // default export, so loading the module fails `nuxt dev` and `generate`.
   devtools: { enabled: false },
   hooks: {
+    'nitro:init'(nitro) {
+      nitro.hooks.hook('prerender:done', () => addSectionIndexes(nitro.options.output.publicDir))
+    },
     'content:file:afterParse'({ content }) {
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },

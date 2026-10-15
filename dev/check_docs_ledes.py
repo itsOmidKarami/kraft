@@ -1,9 +1,14 @@
-"""Fail if a docsite page's first paragraph only restates its description.
+"""Fail if a docsite page's lede is wrong: a first paragraph that only
+restates its description, or a description with backticks in it.
 
 The page shows its front-matter `description` as a lede under the title, so an
 opening paragraph that says the same again spends the most valuable lines of
 the page twice, on a phone most of all. The paragraph should carry on from the
 description or not be there.
+
+A description is plain text, in the lede, the search result and the page's
+meta tags, none of which renders Markdown: a backtick in it shows as a
+backtick. Name the command or file without them.
 
 Mechanical only: it measures the share of the first sentence's content words (no
 stop words, plural `s` dropped) that the description already used. It cannot
@@ -74,11 +79,12 @@ def overlap(text: str) -> float | None:
 def check(pages: Iterable[Path]) -> list[str]:
     problems = []
     for page in pages:
-        score = overlap(page.read_text(encoding="utf-8"))
+        text = page.read_text(encoding="utf-8")
+        shown = page.resolve().relative_to(ROOT) if page.resolve().is_relative_to(ROOT) else page
+        if "`" in description(text):
+            problems.append(f"{shown}: description holds a backtick, which shows as one")
+        score = overlap(text)
         if score is not None and score >= THRESHOLD:
-            shown = (
-                page.resolve().relative_to(ROOT) if page.resolve().is_relative_to(ROOT) else page
-            )
             problems.append(f"{shown}: first paragraph repeats the description ({score:.2f})")
     return problems
 
@@ -94,9 +100,9 @@ def main(argv: list[str]) -> int:
         print(problem)
     if problems:
         print(
-            f"{len(problems)} page(s) open by repeating the description, which the page already"
-            " shows as its lede. Delete the paragraph, or carry on from where the description"
-            " stops.",
+            f"{len(problems)} finding(s). Delete the paragraph that repeats the description, which"
+            " the page already shows as its lede, or carry on from where the description stops."
+            " A description is plain text: take its backticks out.",
             file=sys.stderr,
         )
         return 1
