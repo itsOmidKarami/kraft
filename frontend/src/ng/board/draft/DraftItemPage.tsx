@@ -19,6 +19,7 @@ import { showToast } from "../../ui/Toast";
 import { Attach, CreateSplit, sayIfFiledPaused, type Created } from "../Composer";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
+import { coveredText } from "../../item/chainName";
 import "../../item/item.css";
 import { sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
@@ -200,7 +201,7 @@ export function DraftItemPage() {
           <button type="button" className="draft-bead-drop" {...tip(`Do not implement ${d.bead}`)} onClick={() => set({ bead: "" })}>×</button>
         </p>
       )}
-      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} onKeyDown={sendOnModEnter(() => create(true), ok, () => !d.title.trim() && titleRef.current?.focus())} />
+      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} onKeyDown={sendOnModEnter(() => create(false), ok, () => !d.title.trim() && titleRef.current?.focus())} />
       <div className="draft-chips">
         <span>Repo</span>
         <Menu
@@ -377,7 +378,7 @@ function NodeOverview({ node, full, covered, skippedByYou, onToggle }: { node: C
         <div><dt>kind</dt><dd>{node.kind === "gate" ? "gate · you decide" : `exec node${node.fix_loop ? " · fix loop" : ""}`}</dd></div>
         <div><dt>after</dt><dd>{full[at - 1]?.id ?? "—"}</dd></div>
         <div><dt>then</dt><dd>{full[at + 1]?.id ?? "—"}</dd></div>
-        <div><dt>on this item</dt><dd className={covered || skippedByYou ? "draft-amber" : undefined}>{covered ? `skipped · covered by the attached ${covered}` : skippedByYou ? "skipped by you" : "will run"}</dd></div>
+        <div><dt>on this item</dt><dd className={covered || skippedByYou ? "draft-amber" : undefined}>{covered ? `skipped · ${coveredText(covered)}` : skippedByYou ? "skipped by you" : "will run"}</dd></div>
       </dl>
       <p className="item-muted">{node.kind === "gate" ? "A gate stops the run until you decide. Skip it to let the chain pass without a person." : "Click the canvas to go back to the chain."}</p>
       {!covered && <div className="item-actions"><button type="button" className="btn btn-secondary" onClick={onToggle}>{skippedByYou ? "Run this node" : "Skip on this item"}</button></div>}

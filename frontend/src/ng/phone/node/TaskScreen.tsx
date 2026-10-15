@@ -1,3 +1,4 @@
+import { breakable } from "../ui/breakable";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -68,7 +69,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
       <div className="ph-content">
         <div className="ph-node-head">
           <p className="ph-crumb">{item.bead_id ?? item.id.slice(0, 8)} › {nodeId}{esc ? "" : ` › ${place.sel.step}`}</p>
-          <h1 className="ph-node-title">{name}</h1>
+          <h1 className="ph-node-title">{breakable(name)}</h1>
           <p className={`ph-node-sub${look.state === "failed" ? " ph-tone-bad" : look.running ? " ph-tone-info" : ""}`}>{state}</p>
         </div>
         <TabStrip label="Task" tabs={tabs} value={tab} onChange={(t) => setPlace({ tab: t === tabs[0].id ? undefined : t })} />

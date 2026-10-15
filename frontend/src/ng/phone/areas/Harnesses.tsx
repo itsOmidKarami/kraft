@@ -1,6 +1,6 @@
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { detailOf } from "../../http";
-import { ACCESS, ACCESS_WORD, TOOLS_EVERY, TOOLS_RESTRICT, problemsOfHarness, problemsOfProfile, resolvedOf, toolsWord, type Access, type HProblem, type Resolved } from "../../harnesses/model";
+import { ACCESS, ACCESS_WORD, defaultLabel, enabledHelp, executableWord, HARNESS_FIELD, TOOLS_EVERY, TOOLS_RESTRICT, problemsOfHarness, problemsOfProfile, resolvedOf, toolsWord, type Access, type HProblem, type Resolved } from "../../harnesses/model";
 import { entryOp } from "../../harnesses/ops";
 import { useProviders } from "../../harnesses/useProviders";
 import type { Op } from "../../templates/draft/types";
@@ -43,7 +43,7 @@ function HarnessesIndex() {
       {problems.length > 0 && <Group title="Problems" rows={problemRows(problems)} />}
       {r && (
         <>
-          <Group title="Harnesses" rows={r.harnesses.map((h): RowSpec => ({ key: h.id, label: h.id, mono: true, sub: `${h.provider ?? "?"}${h.executable_found ? "" : " · not found on this machine"}`, to: `/settings/harnesses/${encodeURIComponent(h.id)}`, chips: [{ label: ACCESS_WORD[h.state], tone: h.state === "never" ? "warn" : undefined }, ...(problemsOfHarness(r, problems, h.id).length ? [{ label: "problem", tone: "bad" as const }] : [])] }))} />
+          <Group title="Harnesses" rows={r.harnesses.map((h): RowSpec => ({ key: h.id, label: h.id, mono: true, sub: `${h.provider ?? "?"}${h.executable_found ? "" : ` · ${executableWord(false)}`}`, to: `/settings/harnesses/${encodeURIComponent(h.id)}`, chips: [{ label: ACCESS_WORD[h.state], tone: h.state === "never" ? "warn" : undefined }, ...(problemsOfHarness(r, problems, h.id).length ? [{ label: "problem", tone: "bad" as const }] : [])] }))} />
           <Group title="Profiles" rows={Object.entries(r.profiles).map(([name, p]): RowSpec => ({ key: name, label: name, mono: true, sub: Object.entries(p.providers).map(([prov, e]) => `${prov} ${e.model ?? "—"}`).join(" · "), to: `/settings/harnesses/profiles/${encodeURIComponent(name)}`, chips: problemsOfProfile(r, problems, name).length ? [{ label: "problem", tone: "bad" as const }] : undefined }))} />
           <Group title="Tasks" note="Each agent task and the harness it runs on. Change it in the chain." rows={tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: t.path, mono: true, sub: t.chain, value: `${t.harness}${t.profile ? ` · ${t.profile}` : ""}` }))} />
           <Group
@@ -80,13 +80,13 @@ export function HarnessView() {
           <Group
             rows={[
               { label: "access", value: ACCESS_WORD[h.state], changed: changedAt(draft, id), onEdit: () => edit({ kind: "choice", title: "Access", help: "Available: tasks and the maxima list it. Override: only the maxima list it. Never: neither.", value: h.state, options: ACCESS.map((a) => ({ value: a.value, label: a.label })), set: (v) => send(draft, { op: "set_access", harness: id, state: v as Access }) }) },
-              { label: "provider", value: h.provider ?? "not set", mono: true },
-              { label: "enabled", value: h.enabled ? "yes" : "no" },
-              { label: "executable", value: h.executable ?? "the provider's own command", sub: h.executable_found ? "found on this machine" : "not found on this machine", mono: true },
-              ...Object.entries(h.defaults).map(([k, v]): RowSpec => ({ key: k, label: k, value: v, mono: true })),
+              { label: HARNESS_FIELD.provider, value: h.provider ?? "not set", mono: true },
+              { label: HARNESS_FIELD.enabled, sub: enabledHelp(h.enabled), sw: h.enabled, changed: changedAt(draft, id), onSwitch: (enabled) => void send(draft, { op: "set_harness", id, patch: { enabled } }) },
+              { label: HARNESS_FIELD.executable, value: h.executable ?? "the provider's own command", sub: executableWord(h.executable_found), mono: true },
+              ...Object.entries(h.defaults).map(([k, v]): RowSpec => ({ key: k, label: defaultLabel(k), value: v, mono: true })),
             ]}
           />
-          <p className="ph-note">A harness's own fields are edited in YAML on a computer; the toggle above shows the file.</p>
+          <p className="ph-note">Access and enabled are edited here; a harness's other fields are edited in YAML on a computer.</p>
           <Group title={`Tasks · ${h.tasks.length}`} rows={h.tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: t.path, mono: true, sub: [t.chain, t.profile, t.fallback ? "fallback" : null].filter(Boolean).join(" · ") }))} />
         </>
       )}

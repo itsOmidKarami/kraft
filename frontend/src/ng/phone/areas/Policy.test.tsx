@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SOURCE } from "../../settings/policy/units";
 import { policyView, problem, RESOLVED } from "../../settings/policy/fixture";
 import type { PolicyResolved } from "../../settings/policy/types";
 import { PolicyScreen } from "./Policy";
@@ -100,8 +101,8 @@ describe("Policy loops (N.1)", () => {
   it("lists the live loops with where each number comes from, and the stuck settings", async () => {
     open("loops");
     expect(await screen.findByRole("button", { name: /^verification · default/ })).toHaveTextContent("2 · 60 min");
-    expect(screen.getByRole("button", { name: /^verification · default/ })).toHaveTextContent("loops:");
-    expect(screen.getByRole("button", { name: /^merge_request_feedback · default/ })).toHaveTextContent("default:");
+    expect(screen.getByRole("button", { name: /^verification · default/ })).toHaveTextContent(SOURCE.loops);
+    expect(screen.getByRole("button", { name: /^merge_request_feedback · default/ })).toHaveTextContent(SOURCE.default);
     expect(screen.getByRole("button", { name: /^escalations per item/ })).toHaveTextContent("3");
     expect(screen.getByRole("switch", { name: /auto-escalate/ })).toBeChecked();
   });

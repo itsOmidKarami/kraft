@@ -50,6 +50,12 @@ describe("the new work item screen (G)", () => {
     expect(screen.getByRole("button", { name: "Create paused" })).toBeEnabled();
   });
 
+  it("makes Create paused the primary button, with Create and start beside it", async () => {
+    mount();
+    expect(await screen.findByRole("button", { name: "Create paused" })).toHaveClass("ph-btn-primary");
+    expect(screen.getByRole("button", { name: "Create and start" })).not.toHaveClass("ph-btn-primary");
+  });
+
   it("Create paused and Create and start send the same body except autostart", async () => {
     const calls = mount({ "POST /work-items": [201, { id: "abcdef0123456789abcdef0123456789", bead_id: "kraft-a1c7" }] });
     await userEvent.type(title(), "Add retry budget");

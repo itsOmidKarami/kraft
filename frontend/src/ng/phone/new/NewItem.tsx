@@ -115,8 +115,8 @@ export function NewItem() {
       </div>
       {why.text && <p className={`ph-block-reason${touched ? "" : " ph-visually-hidden"}`} id={why.id}>{why.text}</p>}
       <div className="ph-actionbar">
-        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
+        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
       </div>
       {sheet.is("discard") && (
         <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />

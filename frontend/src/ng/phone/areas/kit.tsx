@@ -2,6 +2,7 @@ import { ChevronRight, Pencil, Plus, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { showToast } from "../../ui/Toast";
+import { breakable } from "../ui/breakable";
 import { notListed, unlisted } from "../../ui/Combobox";
 import { ChoiceSheet, EditSheet, useSheet, type Listed, type Option } from "../nav/Sheet";
 import "./areas.css";
@@ -42,7 +43,7 @@ function RowBody({ r }: { r: RowSpec }) {
       {r.lead}
       {Icon && <span className="ph-row-icon"><Icon size={15} aria-hidden="true" /></span>}
       <span className="ph-row-text">
-        <span className={`ph-row-label${r.mono ? " ph-mono" : ""}`}>{r.label}</span>
+        <span className={`ph-row-label${r.mono ? " ph-mono" : ""}`}>{r.mono ? breakable(r.label) : r.label}</span>
         {r.sub && <span className="ph-row-hint">{r.sub}</span>}
         {r.error && <span className="ph-row-error" role="alert">{r.error}</span>}
       </span>
@@ -50,7 +51,7 @@ function RowBody({ r }: { r: RowSpec }) {
       {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <span key={c.label} className={`ph-chipword${c.tone ? ` ph-tone-${c.tone}` : ""}`}>{c.label}</span>)}</span>}
       {r.value != null && r.value !== "" && (
         <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono ? " ph-mono" : ""}`}>
-          {r.value}
+          {r.mono ? breakable(r.value) : r.value}
           {r.changed && <span className="ph-visually-hidden"> (changed)</span>}
         </span>
       )}

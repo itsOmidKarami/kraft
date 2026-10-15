@@ -3,9 +3,7 @@ import { ValueCell } from "../../templates/draft/ValueCell";
 import { KEYS, SEVERITIES, SEVERITY_KEY, STUCK_KEY } from "./keys";
 import { PolicyCell, setValue, was } from "./PolicyCell";
 import { problemAt, type Ctx } from "./ctx";
-import { parse, raw, show } from "./units";
-
-const SOURCE: Record<string, string> = { loop: "the loop's own", node: "its node", chain: "its chain", defaults: "defaults:", maxima: "maxima:", loops: "loops:", default: "default:" };
+import { parse, raw, show, sourceWord } from "./units";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -64,11 +62,11 @@ export function Loops({ ctx }: { ctx: Ctx }) {
               <span className="pol-k" title={l.key}>{l.node} <span className="pol-chain">{l.chain}</span></span>
               <span className="pol-cell">
                 <ValueCell label={`${l.node} attempts`} value={raw("count", l.attempts.value)} display={show("count", l.attempts.value)} onCommit={(t) => setLoop(l.key, "max_attempts", t, "count")} />
-                <span className="pol-from">{SOURCE[l.attempts.source ?? ""] ?? l.attempts.source}</span>
+                <span className="pol-from">{sourceWord(l.attempts.source)}</span>
               </span>
               <span className="pol-cell">
                 <ValueCell label={`${l.node} wall clock`} value={raw("s-as-min", l.wall_clock_s.value)} display={show("s-as-min", l.wall_clock_s.value)} onCommit={(t) => setLoop(l.key, "wall_clock_s", t, "s-as-min")} />
-                <span className="pol-from">{SOURCE[l.wall_clock_s.source ?? ""] ?? l.wall_clock_s.source}</span>
+                <span className="pol-from">{sourceWord(l.wall_clock_s.source)}</span>
               </span>
               {entry(l.key)
                 ? <button type="button" className="pol-link" aria-label={`Remove the loops entry for ${l.node}`} onClick={() => void draft.ops([{ op: "remove_loop", key: l.key }])}>Remove entry</button>

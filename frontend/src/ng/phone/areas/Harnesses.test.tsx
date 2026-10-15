@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ESCALATION, NEVER, NO_ENTRY, resolved, STATUS, view as hview } from "../../harnesses/testkit";
+import { executableWord, HARNESS_FIELD } from "../../harnesses/model";
 import { resetProviders } from "../../harnesses/useProviders";
 import { HarnessesList, HarnessView, ProfileView } from "./Harnesses";
 import { mountAt, posts } from "./testkit";
@@ -19,7 +20,7 @@ describe("Harnesses list (M.1)", () => {
     const hs = await screen.findByRole("region", { name: "Harnesses" });
     expect(within(hs).getByRole("link", { name: /^claude-sandbox/ })).toHaveTextContent("Override");
     expect(within(hs).getByRole("link", { name: /^cursor/ })).toHaveTextContent("Never");
-    expect(within(hs).getByRole("link", { name: /^gemini/ })).toHaveTextContent("not found on this machine");
+    expect(within(hs).getByRole("link", { name: /^gemini/ })).toHaveTextContent(executableWord(false));
     const ps = screen.getByRole("region", { name: "Profiles" });
     expect(within(ps).getByRole("link", { name: /^strong/ })).toHaveTextContent("claude sonnet · codex gpt-5.6-terra");
     const ts = screen.getByRole("region", { name: "Tasks" });
@@ -96,9 +97,18 @@ describe("a harness (M.1, R65)", () => {
     await userEvent.click(within(sheet).getByRole("radio", { name: "Never" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
     expect(posts(calls)[0].body).toEqual({ ops: [{ op: "set_access", harness: "claude", state: "never" }] });
-    expect(screen.getByText("permission_mode")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^permission_mode|^provider|^executable|^enabled/ })).toBeNull();
+    expect(screen.getByText(HARNESS_FIELD.permission_mode)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^permission mode|^provider|^executable/ })).toBeNull();
     expect(screen.getByText(/edited in YAML on a computer/)).toBeInTheDocument();
+  });
+
+  it("has an enabled switch, sent as the desktop sends it", async () => {
+    const { calls } = open("claude");
+    const row = await screen.findByRole("switch", { name: new RegExp(`^${HARNESS_FIELD.enabled}`) });
+    expect(row).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(row);
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toEqual({ ops: [{ op: "set_harness", id: "claude", patch: { enabled: false } }] });
   });
 
   it("names the problems about it and its tasks", async () => {

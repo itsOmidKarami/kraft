@@ -1,3 +1,4 @@
+import { breakable } from "./breakable";
 import type { ReactNode } from "react";
 import "./ui.css";
 
@@ -30,7 +31,7 @@ export function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (
     <dl className="ph-facts">
       {rows.map(([k, v]) => (
-        <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>
+        <div key={k} className="ph-fact"><dt>{k}</dt><dd>{typeof v === "string" ? breakable(v) : v}</dd></div>
       ))}
     </dl>
   );
