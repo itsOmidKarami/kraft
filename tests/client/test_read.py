@@ -1,6 +1,6 @@
 """client.py against the real app, over ASGI — no server, no MCP client.
 
-A test that needs the app takes the `wired` fixture (`tests/client/conftest.py`)
+A test that needs the app takes the `wired` fixture (`tests/conftest.py`)
 and hands its whole scenario, one `async def`, to `support.api.run_with_app`.
 `httpx.ASGITransport` does not run the app's lifespan the way `TestClient`
 does, so `run_with_app` enters it, and runs the scenario in the same event

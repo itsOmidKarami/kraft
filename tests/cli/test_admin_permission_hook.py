@@ -74,7 +74,7 @@ def test_the_hook_never_imports_the_server(tmp_path):
     assert done.returncode == 0, done.stderr
     imported = {line.rsplit("|", 1)[-1].strip() for line in done.stderr.splitlines()}
     assert "kraft.permission_hooks" in imported
-    assert not {m for m in imported if m.split(".")[0] in ("fastapi", "starlette")}
+    assert not {m for m in imported if m.split(".")[0] in ("fastapi", "starlette", "textual")}
     assert not {m for m in imported if m.startswith("kraft.api")}
 
 
