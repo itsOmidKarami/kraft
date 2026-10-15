@@ -21,10 +21,6 @@ export const isOneLine = (r: LineRange) => !isMixed(r) && r.start === r.end;
 /** A line as the diff marks it: `−4` on the old side, `+5` on the new. */
 export const lineRef = (side: Side, line: number) => `${side === "old" ? "−" : "+"}${line}`;
 
-/** "Line +5", "Lines +5 to +7", "Lines −2 to +2": where a line comment sits, as its composer and its thread name it. */
-export const rangeName = (r: LineRange) =>
-  isOneLine(r) ? `Line ${lineRef(r.side, r.start)}` : `Lines ${lineRef(startSideOf(r), r.start)} to ${lineRef(r.side, r.end)}`;
-
 const capital = (s: string) => s[0].toUpperCase() + s.slice(1);
 /** Where a comment is going, in the words its composer header and the + button's tooltip use: "Line 5", "Lines 2–10",
  *  "Old lines 2–10" on the old side, and across sides "Old 5 – new 6". */
@@ -33,6 +29,9 @@ export function rangeLabel(r: LineRange): string {
   const where = r.start === r.end ? `line ${r.start}` : `lines ${r.start}–${r.end}`;
   return capital(r.side === "old" ? `old ${where}` : where);
 }
+
+/** Where a line comment sits, as its composer and its thread name it: the words of the + button's tooltip, so "−2" is never read as a negative number. */
+export const rangeName = rangeLabel;
 
 /** A thread's range, or null on a file or the whole item. */
 export const threadRange = (t: ReviewThread): LineRange | null =>

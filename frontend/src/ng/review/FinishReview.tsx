@@ -8,7 +8,7 @@ import { useReason } from "../ui/Reason";
 import { ADD_TO_SUBMIT } from "../ui/reasons";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
-import { approveBlock, barText, drafts, outcomes } from "./finish";
+import { REQUEST_CHANGES, approveBlock, barText, drafts, outcomes, rejectTo } from "./finish";
 import { rangeName, threadRange } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
@@ -84,18 +84,12 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
       {bar.agent && <><span aria-hidden="true" className="rv-muted">·</span><span className="rv-muted">{bar.agent}</span></>}
       {error && <span className="rv-error" role="alert">{error}</span>}
       <span className="rv-spacer" />
-      {bar.published ? (
-        <>
-          <Button onClick={() => onFinish("request_changes")}>Request changes</Button>
-          {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
-              them: it opens Finish your review on Approve instead, which lists them first. */}
-          {why.note}
-          <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} {...why.attrs} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
-          {bar.pending > 0 && <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>}
-        </>
-      ) : (
-        <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>
-      )}
+      <Button onClick={() => onFinish("request_changes")}>{REQUEST_CHANGES}</Button>
+      {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
+          them: it opens Finish your review on Approve instead, which lists them first. */}
+      {why.note}
+      <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} {...why.attrs} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
+      {bar.pending > 0 && <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>}
     </div>
   );
 }
@@ -105,7 +99,9 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const atGate = !!gate && item.pending_gate === gate;
   const fix = useFixTarget(item, atGate, true);
   const rows = outcomes(item, gate, threads, fix);
-  const firstOpen = rows.find((r) => !r.disabled)?.key ?? "comment";
+  // With no threads there is nothing to send back or comment on: the one thing left to do is approve.
+  const approveFirst = !threads.length && !rows.find((r) => r.key === "approve")?.disabled;
+  const firstOpen = approveFirst ? "approve" : rows.find((r) => !r.disabled)?.key ?? "comment";
   const [picked, setPicked] = useState<ReviewOutcome | null>(initial ?? null);
   const outcome = picked && !rows.find((r) => r.key === picked)?.disabled ? picked : firstOpen;
   const [note, setNote] = useState("");
@@ -115,7 +111,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const canSend = outcome === "approve" || toSend.length > 0 || !!note.trim();
   const noSend = useReason(canSend ? null : ADD_TO_SUBMIT);
   // At the gate, Request changes is a rejection (the review route calls reject_gate): the dialog says so, and where it goes (GR-11).
-  const rejectTo = atGate && outcome === "request_changes" ? fix?.node ?? null : null;
+  const rejectNode = atGate && outcome === "request_changes" ? fix?.node ?? null : null;
   const go = async () => {
     setBusy(true);
     const e = await submit(outcome, note);
@@ -132,7 +128,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
         <>
           <Button onClick={onClose}>Keep reviewing</Button>
           {noSend.note}
-          <Button variant="primary" disabled={!canSend || busy} {...noSend.attrs} onClick={go}>{rejectTo ? `Reject to ${rejectTo}` : "Submit review"}</Button>
+          <Button variant="primary" disabled={!canSend || busy} {...noSend.attrs} onClick={go}>{rejectNode ? rejectTo(rejectNode) : "Submit review"}</Button>
         </>
       }
     >
@@ -161,7 +157,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
             </label>
           ))}
         </fieldset>
-        {rejectTo && <p className="rv-muted">Reject <code>{gate}</code> · goes back to <code>{rejectTo}</code></p>}
+        {rejectNode && <p className="rv-muted">Reject <code>{gate}</code> · goes back to <code>{rejectNode}</code></p>}
         {error && <p className="rv-error" role="alert">{error}</p>}
       </div>
     </Dialog>

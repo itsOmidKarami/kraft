@@ -1,3 +1,4 @@
+import { REQUEST_CHANGES, rejectTo } from "../../review/finish";
 import { useEffect, useState } from "react";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -44,7 +45,7 @@ interface Spec {
   title: string;
   help: (item: ItemDetail) => string;
   placeholder: string;
-  label: string;
+  label: string | ((item: ItemDetail) => string);
   danger?: boolean;
   target?: (item: ItemDetail) => string | null;
 }
@@ -60,11 +61,11 @@ const SPEC: Record<ComposeKind, Spec> = {
     target: (i) => (nodeOf(i) ? `goes to ${nodeOf(i)} · added to that agent's next launch` : null),
   },
   reject: {
-    title: "Reject",
+    title: REQUEST_CHANGES,
     help: (i) => `The item goes back to ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"} with your note as the first thing the agent reads.`,
     placeholder: "What needs to change?",
-    label: "Reject with note",
-    target: (i) => `Reject target: ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}`,
+    label: (i) => { const to = rejectTarget(i.chain_definition.nodes, gateOf(i)); return to ? rejectTo(to) : REQUEST_CHANGES; },
+    target: (i) => `Goes back to: ${rejectTarget(i.chain_definition.nodes, gateOf(i)) ?? "the previous node"}`,
   },
   answer: {
     title: "Answer",
@@ -125,7 +126,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     let ok = "";
     switch (kind) {
       case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeOf(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
-      case "reject": r = await act.reject(item.id, gateOf(item), t); ok = "Rejected."; break;
+      case "reject": r = await act.reject(item.id, gateOf(item), t); ok = "Changes requested."; break;
       case "answer": r = await act.resume(item.id, t); ok = "Sent. The item is running again."; break;
       case "escalate": r = await act.escalate(item.id, t, flag); ok = "Escalated. A new thread started."; break;
       case "cancel": r = await act.cancel(item.id, t, flag); ok = "Item cancelled."; break;
@@ -168,7 +169,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy || !text.trim()} onClick={send}>{spec.label}</Button>
+        <Button className="ph-btn ph-btn-primary" variant={spec.danger ? "danger" : "primary"} disabled={busy || !text.trim()} onClick={send}>{typeof spec.label === "function" ? spec.label(item) : spec.label}</Button>
       </div>
     </>
   );

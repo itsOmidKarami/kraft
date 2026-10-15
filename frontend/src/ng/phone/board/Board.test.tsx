@@ -197,7 +197,7 @@ describe("a card's inline actions (B.4)", () => {
     const calls = stubFetch();
     mount();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reject…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request changes…" })).toBeNull();
     const review = await screen.findByRole("button", { name: "Review to approve" });
     // Outlined, as on the desktop row: the filled button is for retry and resume.
     expect(review).toHaveClass("btn-secondary");

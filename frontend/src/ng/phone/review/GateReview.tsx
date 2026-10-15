@@ -7,7 +7,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { approveBlock, drafts, gateConsequence } from "../../review/finish";
+import { REQUEST_CHANGES, approveBlock, drafts, gateConsequence, rejectTo } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -28,6 +28,13 @@ function autoVerdict(events: KraftEvent[], gate: string) {
   if (!e) return null;
   const text = String(e.payload.note ?? e.payload.reason ?? e.payload.summary ?? "").trim();
   return { approve: e.type === "gate_approved", text };
+}
+
+/** What became of a gate the item no longer waits at, from its own event. */
+function decided(events: KraftEvent[], gate: string | null) {
+  const e = gate ? [...events].reverse().find((x) => (x.type === "gate_approved" || x.type === "gate_rejected") && (x.payload.gate ?? x.node_id) === gate) : null;
+  if (!e) return "This item is not waiting at this gate.";
+  return `${e.type === "gate_approved" ? "Approved" : "Changes requested"}${e.payload.by === "agent" ? " by the agent reviewer" : ""}.`;
 }
 
 /** `/work-items/:id/review` (W17 brief F): a gate's document and the files that changed, read-only, with Request changes and Approve. */
@@ -78,6 +85,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const verdict = gate ? autoVerdict(events, gate) : null;
   const block = approveBlock(item, gate, threads);
   const blockId = useId();
+  const waiting = !!gate && item.pending_gate === gate;
   const next = gateConsequence(item, gate);
   // At the waiting gate the server's `fix_target` names where a rejection goes, and its null that there is
   // none (a legacy row, where the reject route answers 409): only a server that sends no `fix_target` gets
@@ -89,6 +97,8 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   useEffect(() => setOpenFile(place.file), [place.file]);
 
   if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
+  // Comments are written on the desktop; this screen reads the change and decides the gate.
+  const readOnly = "Read-only here: add comments on the desktop.";
 
   // The threads and pending counts show beside the document's path too: every shipped gate has one (R10b-03).
   const counts = [open ? `${open} open ${open === 1 ? "thread" : "threads"}` : null, pending ? `${pending} pending` : null];
@@ -117,6 +127,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>
           <p className="ph-review-sub">{sub}</p>
           {next && <p className="ph-review-next">{next}</p>}
+          <p className="ph-review-next">{readOnly}</p>
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">
@@ -173,11 +184,17 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         )}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
-      {block && <p className="ph-block-reason" id={blockId} role="status">{block}</p>}
-      <ActionBar>
-        {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>}
-        <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
-      </ActionBar>
+      {waiting ? (
+        <>
+          {block && <p className="ph-block-reason" id={blockId} role="status">{block}</p>}
+          <ActionBar>
+            {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>{REQUEST_CHANGES}</Button>}
+            <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
+          </ActionBar>
+        </>
+      ) : (
+        <p className="ph-block-reason" role="status">{decided(events, gate)}</p>
+      )}
       {sheet.is("approve-drafts") && (
         <ConfirmSheet
           title={`Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?`}
@@ -198,7 +215,7 @@ function ThreadNote({ thread }: { thread: ReviewThread }) {
   const first = thread.comments[0];
   const agent = first && first.author !== "you";
   const range = threadRange(thread);
-  const where = range ? rangeName(range).replace(/^L/, "l") : "";
+  const where = range ? rangeName(range).replace(/^./, (c) => c.toLowerCase()) : "";
   const status = thread.draft ? "pending" : thread.state === "resolved" ? "resolved" : "";
   const quote = range && thread.quote ? thread.quote.split("\n") : [];
   return (
@@ -222,6 +239,7 @@ function ThreadNote({ thread }: { thread: ReviewThread }) {
 /** Request changes: a note, the target, one primary (the same review the desktop's Finish review sends). */
 function ReviewComposer({ target, submit }: { target: string | null; submit: ReturnType<typeof useSubmit> }) {
   const back = useBack();
+  const sheet = useSheet();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -235,8 +253,8 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
   return (
     <>
       <header className="ph-composer-head">
-        <button type="button" className="ph-back" onClick={back.go}>Cancel</button>
-        <h1 className="ph-composer-title">Request changes</h1>
+        <button type="button" className="ph-back" onClick={() => (text.trim() ? sheet.open("discard") : back.go())}>Cancel</button>
+        <h1 className="ph-composer-title">{REQUEST_CHANGES}</h1>
         <span className="ph-composer-pad" />
       </header>
       <div className="ph-content">
@@ -245,8 +263,9 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
         {target && <p className="ph-target">Goes back to: {target}</p>}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
+      {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
       <div className="ph-actionbar">
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>Request changes</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !text.trim()} onClick={send}>{target ? rejectTo(target) : REQUEST_CHANGES}</Button>
       </div>
     </>
   );

@@ -37,7 +37,7 @@ test("the board, an item at a gate, its reject composer and a real diff fit a ph
   expect(await fit(page)).toEqual({ overflowX: 0, small: [] });
   await page.screenshot({ path: "e2e-shots/phone-02-item-gate.png", fullPage: true });
 
-  await page.getByRole("button", { name: "Reject…" }).click();
+  await page.getByRole("button", { name: "Request changes…" }).click();
   const note = page.getByRole("textbox", { name: "Your note" });
   await expect(note).toBeVisible();
   expect(await note.evaluate((e) => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16);

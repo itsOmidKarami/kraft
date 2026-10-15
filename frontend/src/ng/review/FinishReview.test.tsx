@@ -69,7 +69,7 @@ const Where = () => {
 };
 const routed = (ui: ReactNode) => render(<MemoryRouter initialEntries={["/work-items/w1/review"]}><Routes><Route path="*" element={<>{ui}<Where /></>} /></Routes></MemoryRouter>);
 
-function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial, digest }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes"; digest?: string }) {
+function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial, digest }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes" | "approve"; digest?: string }) {
   const submit = useSubmit(it, gate, threads, reload, digest);
   return <FinishDialog item={it} gate={gate} threads={threads} initial={initial} submit={submit} onClose={() => {}} />;
 }
@@ -92,7 +92,7 @@ describe("FinishDialog", () => {
 
   it("submits on ⌘↵ from the overall note, and not with nothing to send", async () => {
     const request = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
-    routed(<Finish threads={[]} />);
+    routed(<Finish threads={[]} initial="request_changes" />);
     const note = screen.getByRole("textbox", { name: "Overall note" });
     await act(async () => fireEvent.keyDown(note, { key: "Enter", metaKey: true }));
     expect(request).not.toHaveBeenCalled();
@@ -127,8 +127,12 @@ describe("FinishDialog", () => {
     expect(where).toBe("/work-items/w1/review");
   });
 
-  it("will not send request changes or a comment with nothing to send", () => {
-    routed(<Finish threads={[]} />);
+  it("with no threads it opens on Approve; asked for Request changes it will not send with nothing to send", () => {
+    const { unmount } = routed(<Finish threads={[]} />);
+    expect(screen.getByRole("radio", { name: /Approve/ })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
+    unmount();
+    routed(<Finish threads={[]} initial="request_changes" />);
     expect(screen.getByText("No threads yet. Add a comment on a line or a file first.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject to implementation" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject to implementation" })).toHaveAccessibleDescription("Add a comment or a note first.");
@@ -140,7 +144,6 @@ describe("FinishDialog", () => {
   it("carries a chain revision's digest on Approve only", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
     const { unmount } = routed(<Finish threads={[]} digest="d1" />);
-    fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
     expect(body()).toEqual({ outcome: "approve", digest: "d1" });
     unmount();
@@ -151,7 +154,7 @@ describe("FinishDialog", () => {
 
   it("names each thread's lines as its composer does: the whole range, across sides too", () => {
     routed(<Finish threads={[th({ start_line: 3, end_line: 5 }), th({ id: "t2", start_side: "old", start_line: 2, end_line: 2, comments: [c({ id: "c2" })] }), th({ id: "t3", side: null, start_line: null, end_line: null, comments: [c({ id: "c3" })] })]} />);
-    expect([...screen.getByRole("list", { name: "To send" }).querySelectorAll(".rv-mono")].map((e) => e.textContent)).toEqual(["a.py · lines +3 to +5", "a.py · lines −2 to +2", "a.py"]);
+    expect([...screen.getByRole("list", { name: "To send" }).querySelectorAll(".rv-mono")].map((e) => e.textContent)).toEqual(["a.py · lines 3–5", "a.py · old 2 – new 2", "a.py"]);
   });
 
   it("names a thread on no file the whole change, as the page heads it, not \"item\" (R10b-06)", () => {
@@ -210,6 +213,18 @@ describe("BottomBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(onFinish).toHaveBeenLastCalledWith("approve");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("with no threads at a gate: Request changes and a primary Approve, which approves", async () => {
+    vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
+    const onFinish = bar([]);
+    expect(screen.getByText("No comments yet · Ready to approve")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Finish review" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    await waitFor(() => expect(where).toBe("/work-items/w1"));
+    expect(body()).toEqual({ outcome: "approve" });
+    expect(onFinish).not.toHaveBeenCalled();
   });
 
   it("approves from the bar when it can", async () => {

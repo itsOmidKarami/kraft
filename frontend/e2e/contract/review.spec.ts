@@ -130,11 +130,11 @@ const ROWS: Row[] = [
       await num("new", 2).click(); await num("new", 7).click({ modifiers: ["Shift"] }); await num("new", 7).hover(); await pause(p, 200);
       await p.locator(".rv-plus:visible").first().click();
       const box = p.getByRole("group", { name: /^Comment:/ }).first();
-      await expect(box).toHaveAttribute("aria-label", "Comment: Lines +2 to +7");
+      await expect(box).toHaveAttribute("aria-label", "Comment: Lines 2–7");
       await p.getByRole("textbox", { name: "Comment" }).first().fill("kept");
       const g = (await p.locator('[data-tip="Drag to change the last line"]').first().boundingBox())!, t = (await num("new", 8).boundingBox())!;
       await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await p.mouse.down(); await p.mouse.move(t.x + 4, t.y + t.height / 2, { steps: 6 }); await p.mouse.up(); await pause(p, 300);
-      await expect(box).toHaveAttribute("aria-label", "Comment: Lines +2 to +8");
+      await expect(box).toHaveAttribute("aria-label", "Comment: Lines 2–8");
       await expect(p.getByRole("textbox", { name: "Comment" }).first()).toHaveValue("kept");
       await expect(p.getByRole("button", { name: /edit (the )?(start|lines|range)/i })).toHaveCount(0);
     },
