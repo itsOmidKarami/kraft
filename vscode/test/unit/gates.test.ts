@@ -32,7 +32,7 @@ function setup({ threads = [] as ReviewThread[], refusal = () => null as string 
   const preview = { target: () => target, opening: () => {} };
   const scope = { onChange: () => () => {}, showAll: false };
   const gates = registerGates({ subscriptions: [] } as never, store, api as never, refusal, () => true, scope, cache, async () => true, preview as never);
-  if (!unread) gates.shown.record(atGate.id, GATE, "d1");
+  if (!unread) gates.shown.record(at.id, at.pending_gate!, "d1");
   return { handlers, api, store, changes };
 }
 
@@ -60,6 +60,34 @@ describe("kraft.approve", () => {
     ask.mockResolvedValue(answer as never);
     await handlers.get("kraft.approve")!("G-1", GATE);
     expect({ approve: api.approve.mock.calls, submitReview: api.submitReview.mock.calls, refused: pick.mock.calls.length > 0 }).toEqual(want);
+  });
+
+  const final = stopped("gate", {
+    id: "G-1", title: "Design the caching layer", pending_gate: "final_review", actions: ["approve", "reject"],
+    chain_definition: { template_id: "t", nodes: [
+      { id: "final_review", kind: "gate", tasks: [], gate_after: "final_review" },
+      { id: "merge", kind: "exec", tasks: ["merge/merge"], gate_after: null },
+    ] },
+  });
+  // A gate whose approval merges asks first, naming the item; an ordinary one is one click and says what it did.
+  const pushing = { ...final, chain_definition: { template_id: "t", nodes: [
+    { id: "final_review", kind: "gate", tasks: [], gate_after: "final_review" },
+    { id: "publish", kind: "exec", tasks: ["publish/push"], gate_after: null },
+  ] } } as typeof final;
+  it.each<[string, typeof atGate, string | undefined, number, string[], string[], ReviewThread[]?]>([
+    ["a merging gate asks, Cancel sends nothing", final, undefined, 0, ["Approve and merge Design the caching layer into the target branch?"], []],
+    ["a merging gate asks, Approve sends and says so", final, "Approve", 1, ["Approve and merge Design the caching layer into the target branch?"], ["Approved: Design the caching layer · approve final review"]],
+    ["a pushing gate asks in its own words", pushing, "Approve", 1, ["Approve and push Design the caching layer?"], ["Approved: Design the caching layer · approve final review"]],
+    ["drafts waiting: the send question names the item, the gate in the board's words and the merge", final, "Approve and Send", 1,
+      ["Approve final review on Design the caching layer and send 1 draft comment with it? This also merges it into the target branch. No agent acts on comments sent with an approval."], ["Approved: Design the caching layer · approve final review"], [draft]],
+    ["an ordinary gate: no question, one toast", atGate, undefined, 1, [], ["Approved: Cache layer · approve spec"]],
+  ])("%s", async (_, at, answer, sent, asked, toasts, threads = []) => {
+    const { handlers, api } = setup({ at, threads });
+    const { ask } = spies();
+    ask.mockResolvedValue(answer as never);
+    const info = vi.spyOn(vscode.window, "showInformationMessage");
+    await handlers.get("kraft.approve")!("G-1", at.pending_gate);
+    expect([api.approve.mock.calls.length + api.submitReview.mock.calls.length, ask.mock.calls.map((c) => c[0]), info.mock.calls.map((c) => c[0])]).toEqual([sent, asked, toasts]);
   });
 
   it("from an older render's preview, opens the latest instead of approving", async () => {

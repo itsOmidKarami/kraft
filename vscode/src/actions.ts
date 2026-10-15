@@ -23,7 +23,15 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
   try {
     switch (action) {
       case "pause": await api.pause(item.id); break;
-      case "archive": await api.archive(item.id); break;
+      case "archive": {
+        // Archiving deletes the worktree, as the bulk one says; with none on disk there is nothing to lose.
+        if (item.worktree_exists) {
+          const ok = await vscode.window.showWarningMessage(`Archive ${item.title}? Its worktree is deleted.`, { modal: true }, "Archive");
+          if (ok !== "Archive") return;
+        }
+        await api.archive(item.id);
+        break;
+      }
       case "unblock": await api.unblock(item.id); break;
       case "restore": await api.restore(item.id); break;
       case "resume":

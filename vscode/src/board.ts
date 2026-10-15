@@ -11,7 +11,7 @@ import { mutating } from "./core/guard";
 import type { PickVerb } from "./core/picks";
 import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
-import { ALREADY_STARTING, alreadyRunning, oneAtATime, startFailure, startInvocation, type StartError } from "./core/start";
+import { ALREADY_STARTING, alreadyRunning, INSTALL_URL, oneAtATime, startButtons, startFailure, startInvocation, type StartError } from "./core/start";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
 import { log } from "./log";
@@ -342,10 +342,10 @@ async function startKraft(file: string, args: string[], store: Store): Promise<v
       void vscode.window.showInformationMessage(startFailure(err, file));
       return store.retryNow();
     }
-    const settings = err.code === "ENOENT" ? ["Open Settings"] : [];
     // Not awaited: an open toast must not hold the progress notification or the next start.
-    void vscode.window.showErrorMessage(startFailure(err, file), ...settings).then((pick) => {
-      if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "kraft.path");
+    void vscode.window.showErrorMessage(startFailure(err, file), ...startButtons(err)).then((pick) => {
+      if (pick === "Get Kraft") void vscode.env.openExternal(vscode.Uri.parse(INSTALL_URL));
+      else if (pick) void vscode.commands.executeCommand("workbench.action.openSettings", "kraft.path");
     });
   }
 }
