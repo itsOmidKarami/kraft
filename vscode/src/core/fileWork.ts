@@ -277,8 +277,8 @@ export function remoteEscape(err: unknown, sentCwd: boolean, repo: string): stri
 /** Why Abandon, offered when the item was filed, no longer applies (D24):
  *  read again when it is clicked, from the server's own `actions` when the
  *  board has them. Undefined means ask, and let the server answer. */
-export function abandonRefusal(id: string, item: Pick<WorkItem, "status" | "display_status" | "actions"> | undefined): string | undefined {
+export function abandonRefusal(name: string, item: Pick<WorkItem, "status" | "display_status" | "actions"> | undefined): string | undefined {
   if (!item) return undefined;
   const open = item.actions ? item.actions.includes("abandon") : item.status !== "active";
-  return open ? undefined : `${id} can no longer be abandoned: it is ${item.display_status ?? item.status}. Open it to see what it allows now.`;
+  return open ? undefined : `${name} can no longer be abandoned: it is ${item.display_status ?? item.status}. Open it to see what it allows now.`;
 }

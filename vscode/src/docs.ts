@@ -49,7 +49,7 @@ export function registerDocs(context: vscode.ExtensionContext, store: Store, api
       if (!item) return;
       const url = (store.item(item.id) ?? item).mr_ref?.url;
       // The row token already asked; the row may be older than the store.
-      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(`${item.id} has no merge request to open.`);
+      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(`${item.title} has no merge request to open.`);
       await vscode.env.openExternal(vscode.Uri.parse(url, true));
     }),
     vscode.commands.registerCommand("kraft.openSpec", attachment("spec")),

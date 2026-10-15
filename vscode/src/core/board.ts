@@ -198,6 +198,9 @@ export function nextTick(items: Pick<WorkItem, "display_status" | "stop" | "retr
   return next;
 }
 
+/** What a message calls an item: its title, or its id before the board has read it. */
+export const nameOf = (store: { item(id: string): WorkItem | undefined }, id: string): string => store.item(id)?.title ?? id;
+
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 
@@ -216,5 +219,5 @@ export function tooltipOf(item: WorkItem, detail?: Pick<WorkItemDetail, "budget_
 /** The Resume/Retry input box's prompt: a question stop shows the question, so the steer answers it. */
 export function steerPrompt(item: WorkItem): string {
   const reason = item.stop?.kind === "question" ? item.stop.reason : null;
-  return reason ? `${item.id} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.id} (optional)`;
+  return reason ? `${item.title} asks: ${questionText(reason)} Your answer steers it (optional)` : `Steer for ${item.title} (optional)`;
 }

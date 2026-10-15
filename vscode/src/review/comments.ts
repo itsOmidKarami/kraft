@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { reportError } from "../actions";
 import type { Api, ReviewComment, ReviewThread, ThreadLabel, WorkItem } from "../core/api";
+import { nameOf } from "../core/board";
 import { mutating } from "../core/guard";
 import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review";
 import type { Store } from "../core/store";
@@ -134,7 +135,7 @@ export function registerComments(
     const off = threads.filter((t) => places.get(t.id)?.kind !== "file").length;
     if (off && !noticed.has(id)) {
       noticed.add(id);
-      const msg = `${off} review thread${off === 1 ? "" : "s"} on ${id} ${off === 1 ? "is" : "are"} not on a file in this review.`;
+      const msg = `${off} review thread${off === 1 ? "" : "s"} on ${nameOf(store, id)} ${off === 1 ? "is" : "are"} not on a file in this review.`;
       void vscode.window.showInformationMessage(msg, "Show").then((pick) => { if (pick === "Show") void showOthers(id); });
     }
   };

@@ -98,6 +98,40 @@ describe("kraft.approve", () => {
   });
 });
 
+// A toast names the item by its title, and the gate in the board's words.
+describe("the toasts that stop an action", () => {
+  it("an older render's preview: reads first, naming the title", async () => {
+    const { handlers } = setup({ target: { id: "G-1", basename: "an older render (G-1).md" } });
+    const info = vi.spyOn(vscode.window, "showInformationMessage");
+    await handlers.get("kraft.approve")!({ scheme: "webview-panel", path: "/x" });
+    expect(info.mock.calls.map((c) => c[0])).toEqual(["Read the spec on Cache layer first: the document is open."]);
+  });
+
+  it.each(["kraft.approve", "kraft.reject"])("%s with no gate open: says so, naming the title", async (command) => {
+    const { handlers, api } = setup({ at: item({ id: "G-1", title: "Cache layer", display_status: "running" }) });
+    const info = vi.spyOn(vscode.window, "showInformationMessage");
+    await handlers.get(command)!("G-1");
+    expect([info.mock.calls.map((c) => c[0]), api.approve.mock.calls, api.reject.mock.calls]).toEqual([["Cache layer is not waiting at a gate."], [], []]);
+  });
+});
+
+// The Markdown extension registers its commands only once it activates, so the preview is asked
+// for directly and the plain editor is the fallback, not a getCommands check that a fresh window fails.
+describe("showing a gate's document", () => {
+  it.each([
+    ["the preview opens: no plain editor", false, 0],
+    ["the Markdown extension is disabled: the plain editor", true, 1],
+  ])("%s", async (_, missing, plain) => {
+    const { handlers } = setup({ unread: true });
+    const exec = vi.spyOn(vscode.commands, "executeCommand").mockImplementation((async (command: string) => {
+      if (command === "markdown.showPreview" && missing) throw new Error("command 'markdown.showPreview' not found");
+    }) as never);
+    const text = vi.spyOn(vscode.window, "showTextDocument");
+    await handlers.get("kraft.approve")!("G-1", GATE);
+    expect([exec.mock.calls.map((c) => c[0]), text.mock.calls.length]).toEqual([["markdown.showPreview"], plain]);
+  });
+});
+
 describe("a failed re-read after the action went through", () => {
   it.each([
     ["approve", (h: Map<string, (...a: unknown[]) => unknown>) => h.get("kraft.approve")!("G-1", GATE), "approve"],

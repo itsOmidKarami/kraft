@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, nameOf, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -293,7 +293,7 @@ export function registerBoard(
         return reportError(e, store, id);
       }
       const target = worktreeTarget(store.detail(id));
-      if (!target) return void vscode.window.showInformationMessage(`${id} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
+      if (!target) return void vscode.window.showInformationMessage(`${nameOf(store, id)} has no worktree on disk: it was reclaimed, or the item has not run yet.`);
       await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true });
     }),
     vscode.commands.registerCommand("kraft.openInWebUi", async (node?: { item?: WorkItem }) => {
