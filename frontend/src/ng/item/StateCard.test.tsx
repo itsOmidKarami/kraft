@@ -209,12 +209,25 @@ describe("StateCard", () => {
     });
   });
 
-  it("Retry says what it restarts, on which branch, and what the item has cost", () => {
+  it("Retry says what it restarts and that the branch is kept", () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), branch: "kraft/design-the-cache-w1", budget_cap: { cap_usd: 10, source: "item", spent_usd: 0.04 } });
     const card = screen.getByRole("region", { name: "Failed" });
-    expect(card).toHaveTextContent("Restarts open_draft on the kept branch kraft/design-the-cache-w1 · $0.040 of $10.00 spent");
+    expect(card).toHaveTextContent(/Restarts open_draft on the kept branch$/);
     expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveAccessibleDescription(/^Restarts open_draft/);
+  });
+
+  // The pane's Retry (the one with the steer) leaves the stopped node to the card, so the card takes the steer.
+  it.each([["steerable", true, { path: "merge_request.open.open_draft", steer: "check the tokenizer" }], ["not steerable", false, { path: "merge_request.open.open_draft" }]])("a failed card's Retry on a %s item sends the steer typed in it, if it has the box", async (_n, steerable, body) => {
+    const calls = stubFetch(WRITES);
+    show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), steerable });
+    const card = screen.getByRole("region", { name: "Failed" });
+    const box = within(card).queryByLabelText("Steer for the retry");
+    expect(!!box).toBe(steerable);
+    if (box) await userEvent.type(box, "check the tokenizer");
+    await userEvent.click(within(card).getByRole("button", { name: "Retry from open_draft" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toMatchObject(body);
   });
 
   it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {

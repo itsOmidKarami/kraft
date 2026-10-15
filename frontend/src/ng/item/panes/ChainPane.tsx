@@ -243,6 +243,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
 
       {fresh && <ItemAgentRows item={item} reload={reload} />}
 
+      {d?.seams.length ? <p className="item-muted ip-gap" data-testid="add-node-hint">To add a node or gate, use the + on a connector between two nodes in the chain.</p> : null}
       <h3 className="ip-h">Changed for this item</h3>
       {!ownCap && !ownPolicy.length && !overrides.length && !draftRows.length && !agent.length && !pending.length ? (
         <p className="item-muted">Nothing changed. This item runs the chain and policy as frozen.</p>
