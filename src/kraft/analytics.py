@@ -250,20 +250,50 @@ def _unplanned_touches(item_events: list[sqlite3.Row]) -> int:
     return touches
 
 
-def _human_wait_ms(events: list[sqlite3.Row]) -> int:
-    """Sum of the stopped-on-a-human spans in one item's event stream."""
-    total = 0
+def _wait_spans(events: list[sqlite3.Row]) -> list[tuple[str | None, int]]:
+    """The stopped-on-a-human spans in one item's event stream, each as
+    (gate it waited at, or None for a stop that was no gate, milliseconds)."""
+    spans: list[tuple[str | None, int]] = []
     blocked_at: datetime | None = None
+    gate: str | None = None
     for e in events:
         if e["type"] in _BLOCKS:
             # a second block while already blocked keeps the earlier start
-            blocked_at = blocked_at or _parse(e["created_at"])
+            if blocked_at is None:
+                blocked_at = _parse(e["created_at"])
+                gate = (
+                    json.loads(e["payload"]).get("gate", "unknown")
+                    if e["type"] == GateEvent.REQUESTED
+                    else None
+                )
         elif e["type"] in _UNBLOCKS and blocked_at is not None:
             end = _parse(e["created_at"])
             if end is not None:
-                total += max(0, int((end - blocked_at).total_seconds() * 1000))
+                spans.append((gate, max(0, int((end - blocked_at).total_seconds() * 1000))))
             blocked_at = None
-    return total
+    return spans
+
+
+def _human_wait_ms(events: list[sqlite3.Row]) -> int:
+    """Sum of the stopped-on-a-human spans in one item's event stream."""
+    return sum(ms for _, ms in _wait_spans(events))
+
+
+def _gate_waits(per_item: dict[str, list[sqlite3.Row]]) -> list[dict]:
+    """How long items waited at each gate, longest total first: the chain's
+    own checkpoints, so a stall reads as a place in the chain."""
+    by_gate: dict[str, list[int]] = {}
+    for rows in per_item.values():
+        for gate, ms in _wait_spans(rows):
+            if gate is not None:
+                by_gate.setdefault(gate, []).append(ms)
+    return sorted(
+        (
+            {"gate": g, "n": len(v), "median_ms": int(statistics.median(v)), "total_ms": sum(v)}
+            for g, v in by_gate.items()
+        ),
+        key=lambda x: -x["total_ms"],
+    )
 
 
 def compute(
@@ -348,6 +378,7 @@ def compute(
             "by_node": [],
             "by_repo": [],
             "rejected_gates_by_gate": [],
+            "gate_waits": [],
             "stop_reasons": [],
         }
 
@@ -592,5 +623,6 @@ def compute(
         "by_node": sorted(by_node.values(), key=lambda n: n["cost_usd"], reverse=True),
         "by_repo": sorted(by_repo.values(), key=lambda r: r["items"], reverse=True),
         "rejected_gates_by_gate": rejected_gates_by_gate,
+        "gate_waits": _gate_waits(per_item),
         "stop_reasons": stop_reasons,
     }

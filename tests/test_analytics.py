@@ -197,6 +197,19 @@ def test_human_wait_is_counted_apart_from_wall_time(conn):
     assert t["wall_ms"] < t["human_wait_ms"]  # the reviewer, not the agents
 
 
+def test_gate_waits_name_the_gate_each_stop_waited_at(conn):
+    # w1: gate_requested -2d, approved -1.5d. The needs_human stops are no gate.
+    a = analytics.compute(conn, range_="7d", now=NOW)
+    assert a["gate_waits"] == [
+        {
+            "gate": "human_review_approval",
+            "n": 1,
+            "median_ms": 12 * 3600 * 1000,
+            "total_ms": 12 * 3600 * 1000,
+        }
+    ]
+
+
 def test_by_node_ranks_by_cost_and_averages_its_runs(conn):
     nodes = analytics.compute(conn, range_="7d", now=NOW)["by_node"]
     assert [n["node"] for n in nodes] == ["verify", "merge"]
@@ -251,6 +264,7 @@ def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
             "by_node",
             "by_repo",
             "rejected_gates_by_gate",
+            "gate_waits",
             "stop_reasons",
         }
         assert body["totals"]["work_items"] == 0
