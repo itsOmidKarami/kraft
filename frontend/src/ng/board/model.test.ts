@@ -41,10 +41,10 @@ describe("groupOf", () => {
 });
 
 describe("groupsOf", () => {
-  it("always draws the four status groups, each with its empty line", () => {
+  it("always draws the four status groups, empty ones with a hint only under a filter", () => {
     const g = groupsOf([], view());
     expect(g.map((x) => x.label)).toEqual(["Needs you", "Running", "Not started", "Done"]);
-    expect(g[0].empty).toBe("nothing is waiting on you");
+    expect(g.map((x) => x.empty)).toEqual(["", "", "", ""]);
     expect(groupsOf([], view({ filter: { q: "zzz", repo: "", chain: "" } }))[1].empty).toBe("nothing here for this filter");
   });
 

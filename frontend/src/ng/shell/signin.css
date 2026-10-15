@@ -9,5 +9,5 @@
 .ng-signin-stay { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12.5px; }
 .ng-signin .field-error { display: inline-flex; align-items: center; gap: 4px; }
 .ng-signin-card .btn { justify-content: center; min-height: 32px; }
-.ng-signin-foot { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+.ng-signin-foot { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); }
 .ng-signin-sr { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); white-space: nowrap; }

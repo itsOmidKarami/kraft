@@ -36,6 +36,21 @@ describe("Row", () => {
     expect(onAction).toHaveBeenCalledWith(item, expect.objectContaining({ kind: "peek" }));
   });
 
+  it.each<[string, DisplayStatus, Partial<WorkItem>, string | null]>([
+    ["failed", "failed", {}, "is-failed"],
+    ["paused", "paused", { current_node_id: "build" }, "is-paused"],
+    ["gate", "needs_you", { stop: { kind: "gate", node: "spec_approval", reason: null, resume_at: null } as WorkItem["stop"] }, "is-gate"],
+    ["question", "needs_you", { stop: { kind: "question", node: "build", reason: "which db?", resume_at: null } as WorkItem["stop"] }, "is-question"],
+    ["running", "running", {}, null],
+  ])("tells a %s stop by an icon, not only by colour", (_n, status, over, cls) => {
+    const { main } = mount(status, over);
+    const tail = main.querySelector(".board-meta-tail")!;
+    if (cls) {
+      expect(tail).toHaveClass(cls);
+      expect(tail.querySelector("svg.board-cue")).not.toBeNull();
+    } else expect(tail.querySelector("svg")).toBeNull();
+  });
+
   it.each(["running", "done"] as const)("has no action when %s", (s) => {
     mount(s);
     expect(screen.getAllByRole("button")).toHaveLength(1);

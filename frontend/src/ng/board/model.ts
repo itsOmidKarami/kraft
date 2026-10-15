@@ -8,11 +8,11 @@ export type GroupKey = "needs" | "running" | "not_started" | "done";
 export type GroupBy = "status" | "repo" | "chain";
 export type SortBy = "attention" | "updated" | "created" | "title";
 
-export const STATUS_GROUPS: { key: GroupKey; label: string; empty: string }[] = [
-  { key: "needs", label: "Needs you", empty: "nothing is waiting on you" },
-  { key: "running", label: "Running", empty: "nothing here" },
-  { key: "not_started", label: "Not started", empty: "nothing here" },
-  { key: "done", label: "Done", empty: "nothing here" },
+export const STATUS_GROUPS: { key: GroupKey; label: string }[] = [
+  { key: "needs", label: "Needs you" },
+  { key: "running", label: "Running" },
+  { key: "not_started", label: "Not started" },
+  { key: "done", label: "Done" },
 ];
 
 /** The board group of an item. A paused item with no current node was
@@ -88,13 +88,14 @@ export interface BoardView {
 export function groupsOf(items: WorkItem[], v: BoardView): Group[] {
   const filtered = !!(v.filter.q.trim() || v.filter.repo || v.filter.chain);
   const shown = items.filter((i) => i.display_status !== "archived" && matches(i, v.filter)).sort(sorter(v.sort));
-  const emptyLine = (e: string) => (filtered ? "nothing here for this filter" : e);
+  // An empty group is its head line alone; only a filter earns it a hint.
+  const emptyLine = filtered ? "nothing here for this filter" : "";
   if (v.group === "status")
-    return STATUS_GROUPS.map(({ key, label, empty }) => {
+    return STATUS_GROUPS.map(({ key, label }) => {
       const all = shown.filter((i) => groupOf(i) === key);
       const done = key === "done";
       const rows = done && v.doneCap != null ? newest(all, v.doneCap) : all;
-      return { key, label, rows, total: all.length, empty: emptyLine(empty), done };
+      return { key, label, rows, total: all.length, empty: emptyLine, done };
     });
   const needs = shown.filter((i) => groupOf(i) === "needs");
   const rest = shown.filter((i) => groupOf(i) !== "needs");

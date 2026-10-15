@@ -5,7 +5,7 @@
 .hn-crumb { flex: none; font-size: 12px; color: var(--text-muted); }
 .hn-crumb.is-current { color: var(--text); font: 12px ui-monospace, Menlo, monospace; }
 .hn-draft { flex: none; margin-left: 4px; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
-.hn-published { flex: none; margin-left: 4px; font-size: 11px; color: var(--text-muted); }
+.hn-published { flex: none; margin-left: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-problems-badge { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
 .hn-problems-badge:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
 .hn-problems-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -15,13 +15,13 @@
 .hn-search { margin: 10px 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
 .hn-search:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .hn-list-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 6px 12px; display: flex; flex-direction: column; gap: 1px; }
-.hn-head { margin: 12px 6px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.hn-head { margin: 12px 6px 4px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .hn-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .hn-row:hover { background: var(--line); }
 .hn-row.is-sel { background: var(--surface-2); }
 .hn-row:focus-visible, .hn-glyph:focus-visible, .hn-lane-head:focus-visible, .hn-link:focus-visible, .hn-problem:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .hn-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hn-row-meta { flex: none; font-size: 11px; color: var(--text-muted); }
+.hn-row-meta { flex: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-row-meta[data-access="available"] { color: var(--ok); }
 .hn-row-meta[data-access="override"] { color: var(--warn); }
 .hn-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
@@ -31,7 +31,7 @@
 /* The canvas and its lanes: 520px each, the canvas scrolls. */
 .hn-stage { position: relative; flex: 1; min-width: 0; }
 .hn-canvas { position: absolute; inset: 0; overflow: auto; box-sizing: border-box; padding: 14px 20px 30px 20px; display: flex; flex-direction: column; gap: 12px; }
-.hn-pill { flex: none; align-self: flex-start; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-muted); }
+.hn-pill { flex: none; align-self: flex-start; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-lane { flex: none; width: 520px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer; }
 .hn-lane.is-sel { border-color: var(--text); }
 .hn-lane.is-red { border-color: var(--bad); background: color-mix(in oklab, var(--bad) 6%, var(--surface)); }
@@ -43,28 +43,28 @@
 .hn-lane-title { font-weight: 500; }
 .hn-lane-arrow { color: var(--text-muted); }
 .hn-lane-model { font: 12px ui-monospace, Menlo, monospace; color: var(--text-sub); }
-.hn-lane-chip { padding: 0 6px; border-radius: 4px; background: var(--surface-2); font-size: 10.5px; color: var(--text-sub); }
-.hn-lane-tag { padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); font-size: 10.5px; color: var(--text-sub); }
+.hn-lane-chip { padding: 0 6px; border-radius: 4px; background: var(--surface-2); font-size: var(--fs-label); color: var(--text-sub); }
+.hn-lane-tag { padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); font-size: var(--fs-label); color: var(--text-sub); }
 .hn-lane-tag[data-access="available"] { color: var(--ok); }
 .hn-lane-tag[data-access="override"] { color: var(--warn); }
 .hn-lane-gap { flex: 1; }
-.hn-lane-right { flex: none; font-size: 11px; color: var(--text-muted); }
+.hn-lane-right { flex: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-lane.is-red .hn-lane-icon { color: var(--bad); }
 .hn-glyphs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px; }
 .hn-glyph { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 78px; padding: 2px; border-radius: 8px; color: var(--text-sub); text-decoration: none; }
 .hn-glyph:hover { background: var(--line); }
-.hn-glyph-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
+.hn-glyph-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-label); }
 .hn-glyph.is-bad .hn-glyph-name { color: var(--bad); }
-.hn-more { align-self: center; font-size: 11px; color: var(--text-muted); }
-.hn-lane-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+.hn-more { align-self: center; font-size: var(--fs-meta); color: var(--text-muted); }
+.hn-lane-note { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); }
 .hn-lane-note.is-bad { color: var(--bad); }
 
 /* Pane bodies */
 .hn-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 /* A choice with many options wraps inside the pane, as on Repos: on one line it ran 127px past a 379px inspector. */
 .hn-field .segmented { flex-wrap: wrap; max-width: 100%; box-sizing: border-box; }
-.hn-field-label { font-size: 11.5px; color: var(--text-muted); }
-.hn-field-help { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.hn-field-label { font-size: var(--fs-meta); color: var(--text-muted); }
+.hn-field-help { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .hn-field-help.is-changed { color: var(--warn); }
 .hn-switch-row { display: flex; align-items: center; gap: 8px; }
 .hn-input { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
@@ -73,7 +73,7 @@
 .hn-chip { padding: 0 6px; border-radius: 4px; background: var(--surface-2); font: 10.5px inherit; color: var(--text-sub); }
 .hn-chip.is-bad { color: var(--bad); }
 .hn-link { padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
-.hn-error { margin: 6px 0; font-size: 11.5px; color: var(--bad); }
+.hn-error { margin: 6px 0; font-size: var(--fs-meta); color: var(--bad); }
 .hn-toast { position: absolute; z-index: 8; left: 260px; top: 6px; margin: 0; }
 .hn-problems-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .hn-problem { display: flex; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: color-mix(in oklab, var(--bad) 8%, transparent); color: var(--text); font: inherit; font-size: 12px; line-height: 1.45; text-align: left; cursor: pointer; }
@@ -82,7 +82,7 @@
 .hn-used { display: block; padding: 3px 4px; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); text-decoration: none; overflow-wrap: anywhere; }
 .hn-used:hover { color: var(--text); text-decoration: underline; }
 .hn-form { display: flex; align-items: center; gap: 8px; width: 100%; }
-.hn-broken { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--bad); border-radius: 6px; font-size: 11.5px; color: var(--text); }
+.hn-broken { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--bad); border-radius: 6px; font-size: var(--fs-meta); color: var(--text); }
 .hn-broken ul { margin: 6px 0 0; padding-left: 16px; font: 11px ui-monospace, Menlo, monospace; }
 .hn-add-entry { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 
