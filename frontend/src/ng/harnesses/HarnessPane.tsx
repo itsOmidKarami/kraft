@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
 import { useState } from "react";
 import { ModelField } from "./fields";
-import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, entryUsers, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
+import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, entryUsers, usedBy, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
 
@@ -40,7 +40,7 @@ export function EntryEditor({ draft, profile, provider, entry, status, changed, 
   return (
     <>
       <ModelField label="model" value={entry.model ?? ""} suggestions={status?.models} changed={changed} onCommit={(model) => void run(entryOp(profile, provider, { ...entry, model }))} />
-      <p className="hn-field-help hn-used-by">Used by {used} {used === 1 ? "task" : "tasks"}.</p>
+      <p className="hn-field-help hn-used-by">{usedBy(used)}</p>
       {efforts.length > 0 ? (
         <div className="hn-field">
           <span className="hn-field-label" id={`eff-${profile}-${provider}`}>effort</span>

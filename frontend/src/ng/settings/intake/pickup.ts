@@ -10,7 +10,7 @@ export const INTAKE_SUB = "Starts unblocked issues from your bd tracker on a tim
 /** What a pickup sentence says (AreaIntake's `pickupSentence`). */
 export function pickup(i: IntakeResolved): string {
   return i.enabled
-    ? `Every ${plural(toMinutes(i.interval_s), "minute")}, starts the open issues in your bd tracker that nothing blocks, at P${i.priority_ceiling} and below, from ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}. Each runs to its first gate and waits for you there.`
+    ? `Every ${plural(toMinutes(i.interval_s), "minute")}, starts the open issues in your bd tracker that nothing blocks, at P${i.priority_ceiling} and below, from ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}. Each runs to its first gate and waits for you there. It skips epics and issues that already have a work item.`
     : "Nothing is picked up automatically. Open issues in your bd tracker stay there until someone files them.";
 }
 

@@ -43,6 +43,7 @@ const ALLOWED = [
   "board/bulk",
   "board/prefs",
   "board/draft/draftBody",
+  "board/newWords", // what the new-item composer says, on both layouts
   "review/useReview",
   "review/url",
   "review/finish",

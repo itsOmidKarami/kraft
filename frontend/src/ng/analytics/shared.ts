@@ -10,6 +10,9 @@ export const RANGES = [
 ];
 export const DEFAULT_RANGE = "8w";
 
+/** The line that says which items every figure covers, the range spelt as the picker spells it. */
+export const scopeLine = (rangeLabel: string) => `Items created in the last ${rangeLabel}`;
+
 /** What both layouts say, in place of every figure, when the range holds no completed item and no node ran. */
 export const EMPTY_RANGE = "Nothing has completed in this range yet.";
 

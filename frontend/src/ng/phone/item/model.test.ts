@@ -139,7 +139,7 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
       .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
-    expect(cardOf(mk("paused"))).toMatchObject({ title: "Paused", where: "at verification" });
+    expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
     expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged", text: undefined });
     expect(cardOf(mk("done"))).toMatchObject({ text: "The chain finished. No merge request was opened." });
@@ -202,7 +202,7 @@ describe("nodeSub: a chain row's words", () => {
     expect(nodeSub(graph(mk("running")).find((n) => n.id === "verification")!).text).toMatch(/^running/);
     expect(nodeSub(graph(mk("failed", stop("failed"))).find((n) => n.id === "verification")!)).toEqual({ text: "failed", tone: "bad" });
     expect(nodeSub(graph(mk("needs_you", stop("cap"))).find((n) => n.id === "verification")!)).toEqual({ text: "stopped at the cap", tone: "bad" });
-    expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "warn" });
+    expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "muted" });
     // R11b-04: a waiting node says what it waits on, not "running".
     expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting on CI/);
     expect(nodeSub(graph(mk("waiting", stop("rate_limit"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting · rate limit/);

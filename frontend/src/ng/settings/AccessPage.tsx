@@ -8,7 +8,7 @@ import { SELF_RESTART, afterRestart, bindHost, useApply } from "../apply/store";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
-import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "./accessWords";
+import { ACCESS_LEDE, EMPTY_HOSTS, REACHES, hostSuggestion } from "./accessWords";
 import { SAVED } from "./savedWords";
 import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
@@ -204,12 +204,9 @@ export function AccessPage() {
         <section aria-labelledby="set-reach">
           <h2 id="set-reach" className="adr-sr">Reach</h2>
           <div ref={reach} className="set-modes is-cards" role="radiogroup" aria-label="Reach">
-            {[
-              { bind: LOOPBACK, icon: <Laptop size={15} />, title: "This machine only", note: "No password. Only loopback names are accepted." },
-              { bind: "0.0.0.0", icon: <Wifi size={15} />, title: "Local network", note: "Password required. For the phone view." },
-            ].map((m) => (
+            {REACHES.map((m) => (
               <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => pickBind(m.bind)}>
-                <span className="set-mode-icon" aria-hidden>{m.icon}</span>
+                <span className="set-mode-icon" aria-hidden>{m.bind === LOOPBACK ? <Laptop size={15} /> : <Wifi size={15} />}</span>
                 <span className="set-mode-text">
                   <span className="set-mode-title">{m.title}</span>
                   <span className="set-mode-addr">{m.bind}:{back.port}</span>

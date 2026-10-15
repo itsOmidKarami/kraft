@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ESCALATION, NEVER, NO_ENTRY, resolved, STATUS, view as hview } from "../../harnesses/testkit";
-import { executableWord, HARNESS_FIELD } from "../../harnesses/model";
+import { executableWord, HARNESS_FIELD, taskTile, usedBy } from "../../harnesses/model";
 import { resetProviders } from "../../harnesses/useProviders";
 import { HarnessesList, HarnessView, ProfileView } from "./Harnesses";
 import { mountAt, posts } from "./testkit";
@@ -25,7 +25,8 @@ describe("Harnesses list (M.1)", () => {
     const ps = screen.getByRole("region", { name: "Profiles" });
     expect(within(ps).getByRole("link", { name: /^strong/ })).toHaveTextContent("claude sonnet · codex gpt-5.6-terra");
     const ts = screen.getByRole("region", { name: "Tasks" });
-    expect(within(ts).getByText("implement.main.implementer")).toBeInTheDocument();
+    expect(within(ts).getByText(taskTile({ path: "implement.main.implementer" }))).toBeInTheDocument();
+    expect(within(ts).queryByText("implement.main.implementer")).toBeNull();
     expect(within(ts).getAllByText("claude · strong").length).toBeGreaterThan(0);
     const ds = screen.getByRole("region", { name: "Defaults" });
     expect(within(ds).getByRole("button", { name: /escalation runs on/ })).toHaveTextContent("claude");
@@ -131,6 +132,7 @@ describe("a profile (M.1)", () => {
   it("edits a provider entry's model and effort with the one set_profile patch", async () => {
     const { calls } = open("strong");
     const claude = await screen.findByRole("region", { name: "claude" });
+    expect(within(claude).getByRole("button", { name: /^model/ })).toHaveTextContent(usedBy(2));
     await userEvent.click(within(claude).getByRole("button", { name: /^model/ }));
     const box = screen.getByLabelText("claude model", { selector: "input" });
     await userEvent.clear(box);

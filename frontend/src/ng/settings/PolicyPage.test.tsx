@@ -92,7 +92,7 @@ describe("Policy page: Limits", () => {
 
   it("names the dollar cap that binds, from the server's answer", async () => {
     mount();
-    expect(await screen.findByText(/the lower one wins: budget.work_item_usd \$10/)).toBeInTheDocument();
+    expect(await screen.findByText(/the lower one wins: outer ceiling \$10/)).toBeInTheDocument();
   });
 
   it("refuses a value that is not a number without sending it", async () => {

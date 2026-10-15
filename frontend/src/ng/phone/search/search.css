@@ -5,3 +5,5 @@
 .ph-search-head { margin: 0; padding: 8px 2px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
 .ph-search-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 2px; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; color: inherit; cursor: pointer; }
 .ph-search-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-sub); }
+.ph-row-hint.ph-search-hot { color: var(--warn); }
+.ph-row-hint.ph-search-hot.ph-is-failed { color: var(--bad); }

@@ -12,3 +12,9 @@ export const EMPTY_HOSTS = "An empty list refuses every other device (403). This
 /** The first of this machine's LAN names the server offers that is not on the list yet, or null. */
 export const hostSuggestion = (access: Pick<Access, "allowed_hosts" | "lan_hosts">): string | null =>
   (access.lan_hosts ?? []).find((h) => !access.allowed_hosts.includes(h)) ?? null;
+
+/** The two reaches Settings › Access offers on both layouts: a bind address, its name, and what it means. */
+export const REACHES = [
+  { bind: "127.0.0.1", title: "This machine only", note: "No password. Only loopback names are accepted." },
+  { bind: "0.0.0.0", title: "Local network", note: "Password required. For the phone view." },
+] as const;

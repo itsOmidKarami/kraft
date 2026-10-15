@@ -4,6 +4,7 @@ import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Repo, SearchResult, TemplateSummary } from "../../../types";
+import { FILED_PAUSED, KEEP_EDITING } from "../../board/newWords";
 import { chainsForRepo } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
@@ -112,14 +113,15 @@ export function NewItem() {
         </label>
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>
         {error && !sheet.openId && <p className="ph-error" role="alert">{error}</p>}
+        <p className="ph-note">{FILED_PAUSED}</p>
       </div>
       {why.text && <p className={`ph-block-reason${touched ? "" : " ph-visually-hidden"}`} id={why.id}>{why.text}</p>}
       <div className="ph-actionbar">
-        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
         <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
+        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
       </div>
       {sheet.is("discard") && (
-        <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
+        <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." cancel={KEEP_EDITING} confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
       )}
       {sheet.is("attach") && (
         <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />

@@ -1,3 +1,4 @@
+import { BookOpen, Copy, ExternalLink, LifeBuoy, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../../../api";
 import { ago } from "../../../format";
@@ -78,9 +79,9 @@ export function AboutScreen() {
       <Group
         title="Version"
         rows={[
-          { label: "installed", value: installed || "…", mono: true, chips: update ? [{ label: update.channel }] : undefined },
+          { label: "installed", value: installed || "…", figure: true, chips: update ? [{ label: update.channel }] : undefined },
           { label: "update", value: verdict.text, chips: [{ label: verdict.tone === "ok" ? "ok" : verdict.tone === "warn" ? "available" : "unknown", tone: verdict.tone === "ok" ? "ok" : verdict.tone === "warn" ? "warn" : undefined }] },
-          { label: "Check now", disabled: checking, sub: checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet", onClick: () => void load(true, channel) },
+          { label: "Check now", icon: RefreshCw, disabled: checking, sub: checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet", onClick: () => void load(true, channel) },
           { label: "channel", value: channel ?? "stable", sub: "Which release feed Check now asks. The installed channel is the default.", onEdit: () => edit({ kind: "choice", title: "Channel", value: channel ?? "stable", options: CHANNELS, set: async (c) => { setChannel(c); await load(false, c); return null; } }) },
         ]}
       />
@@ -89,18 +90,18 @@ export function AboutScreen() {
         <p className="ph-note">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
         <code className="ph-command" tabIndex={0}>{command}</code>
       </section>
-      <Group rows={[{ label: "Copy the command", onClick: () => void copy(command, "Copied the command") }, { label: "Release notes", sub: "Opens GitHub", onClick: () => window.open(RELEASES, "_blank", "noopener,noreferrer") }]} />
+      <Group rows={[{ label: "Copy the command", icon: Copy, onClick: () => void copy(command, "Copied the command") }, { label: "Release notes", icon: ExternalLink, sub: "Opens GitHub", onClick: () => window.open(RELEASES, "_blank", "noopener,noreferrer") }]} />
       <Group
         title="This instance"
         rows={[
           { label: "health", value: health ? (health.status === "ok" ? "ok" : `degraded · ${problems}`) : "…", sub: health?.status === "ok" ? "all chains and policy valid" : held ? "Worktrees are over the storage limit: starts are held." : invalid ? "Open the Chains and Policy screens for the details." : undefined },
-          { label: "address", value: address || "…", mono: true },
-          { label: "Copy diagnostics", onClick: () => void copy(diagnostics, "Copied the diagnostics") },
+          { label: "address", value: address || "…", figure: true },
+          { label: "Copy diagnostics", icon: Copy, onClick: () => void copy(diagnostics, "Copied the diagnostics") },
         ]}
       />
       <Group rows={[
-        { label: "Documentation", onClick: () => window.open(DOCS, "_blank", "noopener,noreferrer") } as RowSpec,
-        { label: "Status and support", sub: "macOS and Linux. Only the latest release gets fixes.", onClick: () => window.open(SUPPORT, "_blank", "noopener,noreferrer") } as RowSpec,
+        { label: "Documentation", icon: BookOpen, onClick: () => window.open(DOCS, "_blank", "noopener,noreferrer") } as RowSpec,
+        { label: "Status and support", icon: LifeBuoy, sub: "macOS and Linux. Only the latest release gets fixes.", onClick: () => window.open(SUPPORT, "_blank", "noopener,noreferrer") } as RowSpec,
       ]} />
       {node}
     </AreaScreen>
