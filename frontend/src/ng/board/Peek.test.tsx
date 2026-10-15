@@ -50,7 +50,7 @@ describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
-    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review and decide" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
 

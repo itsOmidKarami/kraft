@@ -128,7 +128,7 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
   // The item page's header drops the main button these name, because its banner or card carries it (ItemHeader's bodyActs).
   const stopOf = (kind: StopKind, more: object = {}) => ({ kind, node: "n", resume_at: null, reason: null, ...more }) as WorkItemStop;
   it.each<[string, Partial<ItemDetail>, boolean]>([
-    ["a gate: the banner's Review changes", { display_status: "needs_you", stop: stopOf("gate") }, true],
+    ["a gate: the banner's Review and decide", { display_status: "needs_you", stop: stopOf("gate") }, true],
     ["conflicts: the card's Review the conflicts", { display_status: "needs_you", stop: stopOf("conflict") }, true],
     ["a question with its text: the question card", { display_status: "needs_you", stop: stopOf("question"), needs_context_question: "Which?" }, true],
     ["a question with no text: the other-stop card has Retry, not Answer", { display_status: "needs_you", stop: stopOf("question") }, false],

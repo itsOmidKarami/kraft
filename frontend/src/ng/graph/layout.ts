@@ -16,6 +16,9 @@ export type ChainArc =
   | { kind: "reject"; from: string; to: string };
 export type Seam = { at: number; open?: boolean; always?: boolean; title?: string };
 
+/** The start mark: its centre and radius, so a camera can keep its left edge in view. */
+export const START = { cx: 36, h: 9 };
+
 type Pt = { cx: number; h: number; node?: ChainNode };
 
 /** Columns left to right: exec 138 wide, gate 96, each node at its column's
@@ -31,7 +34,7 @@ export function layout(nodes: ChainNode[]) {
   const W = x + L.PAD;
   // Half-widths the edges stop short of: a box's half, a diamond's half-diagonal, the marks' radii.
   const half = (n: ChainNode) => (n.kind === "gate" ? L.GATE * 0.72 : L.BOX / 2);
-  const pts: Pt[] = [{ cx: 36, h: 9 }, ...items.map((i) => ({ cx: i.cx, h: half(i.node), node: i.node })), { cx: W - 36, h: 8 }];
+  const pts: Pt[] = [{ cx: START.cx, h: START.h }, ...items.map((i) => ({ cx: i.cx, h: half(i.node), node: i.node })), { cx: W - 36, h: 8 }];
   const edges = pts.slice(1).map((b, i) => {
     const a = pts[i];
     const x1 = a.cx + a.h + 5, x2 = b.cx - b.h - 5;
