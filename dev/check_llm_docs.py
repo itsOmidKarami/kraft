@@ -1,6 +1,6 @@
 """Fail if the docs the site hands to LLMs carry links that resolve nowhere.
 
-`dev/build_docs_site.sh` builds two channels, and each has two copies of its
+`dev/build_docs_site.sh` builds a version of the docs per folder, and each has two copies of its
 pages meant for a model rather than a browser: `raw/<page>.md` (the target of
 llms.txt, "Copy page" and "Open in Claude/ChatGPT") and `llms-full.txt`. The
 lychee step in docs.yml reads neither, and both once shipped hundreds of dead
@@ -11,8 +11,8 @@ notices when it stops.
 
     uv run python dev/check_llm_docs.py SITE_DIR      # build_docs_site.sh's OUT_DIR
 
-Checks SITE_DIR as the stable channel and SITE_DIR/next as main's when it is
-there. Exits 1 on any finding.
+Checks SITE_DIR as the latest release and each of SITE_DIR/next and SITE_DIR/vN
+(an older major's) that is there. Exits 1 on any finding.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def landing_anchors(text: str, base: str, allowed: set[str]) -> list[str]:
 
 
 def check_channel(root: Path, base: str) -> list[str]:
-    """Findings for one built channel: `root` is its output directory, `base` its URL."""
+    """Findings for one built version: `root` is its output directory, `base` its URL."""
     problems = []
     raw = root / "raw"
     pages = sorted(raw.rglob("*.md")) if raw.is_dir() else []
@@ -92,9 +92,11 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     site = Path(argv[1])
-    channels = [(site, ORIGIN)]
-    if (site / "next").is_dir():
-        channels.append((site / "next", f"{ORIGIN}/next"))
+    channels = [(site, ORIGIN)] + [
+        (version, f"{ORIGIN}/{version.name}")
+        for version in sorted(site.iterdir())
+        if version.is_dir() and re.fullmatch(r"next|v\d+", version.name)
+    ]
     problems = [p for root, base in channels for p in check_channel(root, base)]
     for problem in problems:
         print(problem)

@@ -396,12 +396,14 @@ docs:
     cd docsite && [ -d node_modules ] || npm ci
     cd docsite && npm run dev
 
-# Build the published site (latest release at /kraft/, main at /kraft/next/)
-# and serve it at http://localhost:8000/kraft/
-[doc("Build both docs versions and serve them at http://localhost:8000/kraft/")]
+# Build the published site (latest release at /, older majors at /vN/, main at
+# /next/) and serve it at http://localhost:8000/. python's server lists a page's
+# folder and 404s the page itself (/next/guides/x is guides/x.html), so the
+# deep pages need a server that maps /a/b to a/b.html, as GitHub Pages does.
+[doc("Build every docs version and serve them at http://localhost:8000/")]
 docs-site:
     cd docsite && [ -d node_modules ] || npm ci
     rm -rf docsite/dist-site
-    dev/build_docs_site.sh docsite/dist-site/kraft
-    python3 dev/check_llm_docs.py docsite/dist-site/kraft
+    dev/build_docs_site.sh docsite/dist-site
+    python3 dev/check_llm_docs.py docsite/dist-site
     python3 -m http.server 8000 -d docsite/dist-site

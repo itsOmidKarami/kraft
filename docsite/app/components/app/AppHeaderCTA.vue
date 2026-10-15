@@ -1,32 +1,67 @@
-<!-- Overrides Docus's empty header slot with the version switch: a bordered
-     two-part pill, the docs you are on (a filled label) beside the other one
-     (a link), so it reads as a control and says what it does. Plain <a>, not
-     NuxtLink: the other version is a separate build under another base.
-     It keeps the current page; one missing from the other build gets the
-     site's 404 page, which useDocsChannel reads as the channel in its URL.
-     The link's padding makes a 24px tap target on a phone. Text is the
-     default color, not muted: muted on the elevated surface is 4.35:1. -->
+<!-- Overrides Docus's empty header slot with the version menu: a bordered pill
+     that names the docs you are on and opens a menu of the others. Items are
+     plain links (UDropdownMenu `external` renders an <a>, not NuxtLink): the
+     other versions are separate builds under other bases. A link keeps the
+     current page; one missing from the other build gets the site's 404 page,
+     so a click first asks for the page with a HEAD request and goes to that
+     version's home when it is not there. Without JavaScript the link goes to
+     the 404 page, which offers every version. The pill is amber on /next/, as
+     it was before there were more than two versions.
+     The trigger is 24px tall on a phone (text-xs, py-1). Text is the default
+     color, not muted: muted on the elevated surface is 4.35:1. -->
 <script setup lang="ts">
-const docs = useRuntimeConfig().public.docs
-const at = useDocsChannel()
-const stable = computed(() => docs.stableVersion || 'release')
-const link = 'px-2 py-1 text-default hover:bg-elevated hover:text-highlighted'
+import type { DropdownMenuItem } from '@nuxt/ui'
+
+const at = useDocsVersion()
+
+// One listener for every link of the menu, which is rendered in a portal
+// outside this component. Reka's own select event does not carry the click, and
+// cancelling the click is what keeps the browser from following the link before
+// the probe is back. A middle or modified click is the reader opening a tab,
+// which the browser's own handling covers.
+async function open(event: MouseEvent) {
+  const link = (event.target as Element).closest('a[data-home]')
+  if (!link || event.button || event.metaKey || event.ctrlKey || event.shiftKey || link.getAttribute('aria-current')) return
+  event.preventDefault()
+  const href = link.getAttribute('href')!
+  const found = await fetch(href, { method: 'HEAD' }).then(r => r.status !== 404, () => true)
+  location.assign(found ? href : link.getAttribute('data-home')!)
+}
+onMounted(() => document.addEventListener('click', open))
+onBeforeUnmount(() => document.removeEventListener('click', open))
+
+const items = computed<DropdownMenuItem[]>(() => at.value.versions.map((v) => {
+  const href = at.value.samePage(v.base)
+  const here = v.id === at.value.current?.id
+  return {
+    'label': v.label,
+    'to': href,
+    'external': true,
+    'active': here,
+    'aria-current': here ? 'true' : undefined,
+    'data-home': v.base,
+  }
+}))
 </script>
 
 <template>
-  <div
-    v-if="at.channel"
-    role="group"
-    aria-label="Docs version"
-    class="flex items-center overflow-hidden rounded-md border border-default text-xs font-medium"
+  <UDropdownMenu
+    v-if="at.current"
+    :items="items"
+    :content="{ align: 'end' }"
+    :ui="{ content: 'min-w-36' }"
   >
-    <template v-if="at.channel === 'stable'">
-      <span aria-current="true" class="bg-elevated px-2 py-1 text-highlighted">{{ stable }}</span>
-      <a :href="at.samePage(docs.nextBase)" aria-label="Switch to the docs for unreleased main" :class="link">next</a>
-    </template>
-    <template v-else>
-      <span aria-current="true" class="bg-warning-100 px-2 py-1 text-warning-900 dark:bg-warning-950 dark:text-warning-200">next</span>
-      <a :href="at.samePage(docs.stableBase)" :aria-label="`Switch to the ${stable} docs`" :class="link">{{ stable }}</a>
-    </template>
-  </div>
+    <UButton
+      color="neutral"
+      variant="outline"
+      size="xs"
+      trailing-icon="i-lucide-chevron-down"
+      :aria-label="`Docs version: ${at.current.label}. Change version`"
+      :class="at.current.id === 'next' ? 'bg-warning-100 text-warning-900 dark:bg-warning-950 dark:text-warning-200 hover:bg-warning-100 dark:hover:bg-warning-950' : 'bg-elevated text-highlighted'"
+    >
+      <!-- "(latest)" waits for room: with it the pill pushed a 320px header
+           past the edge. -->
+      {{ at.current.label.replace(' (latest)', '') }}<span v-if="at.current.id === 'latest'" class="hidden sm:inline">&nbsp;(latest)</span>
+    </UButton>
+  </UDropdownMenu>
 </template>

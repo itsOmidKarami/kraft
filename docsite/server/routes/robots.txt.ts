@@ -1,17 +1,18 @@
 // This build's robots.txt. A crawler reads robots.txt only at the domain root,
-// so the stable build's is the one that steers; the /next/ build's copy
-// steers nothing, but it should still not contradict the pages. The /next/ build
-// keeps its pages out of search with a noindex tag on each, so its robots.txt
-// allows crawling (a crawler that may not fetch a page never sees the tag) and
-// names no sitemap. Every other build points at its own.
+// so the latest build's is the one that steers; a frozen major's and the /next/
+// build's copies steer nothing, but they should still not contradict the pages.
+// Those builds keep their pages out of search with a noindex tag on each, so
+// their robots.txt allows crawling (a crawler that may not fetch a page never
+// sees the tag) and names no sitemap. Every other build points at its own.
 export default defineEventHandler((event) => {
   const config = useRuntimeConfig(event)
-  const next = config.public.docs.channel === 'next'
+  const { version } = config.public.docs
+  const frozen = version !== '' && version !== 'latest'
   setHeader(event, 'content-type', 'text/plain; charset=utf-8')
   return [
     'User-agent: *',
     'Allow: /',
-    ...(next ? [] : ['', `Sitemap: ${config.sitemapBase}/sitemap.xml`]),
+    ...(frozen ? [] : ['', `Sitemap: ${config.sitemapBase}/sitemap.xml`]),
     '',
   ].join('\n')
 })

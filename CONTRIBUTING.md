@@ -205,7 +205,7 @@ the full suite.
 | `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/e2e/contract/`) | `just ui-contract` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
-| `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
+| `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages, each older major's and `main`'s, all with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
 | `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
@@ -416,25 +416,45 @@ link that does not answer. Nothing catches "this paragraph no longer describes t
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
 
-### Two versions of the docs
+### Versions of the docs
 
-The site publishes two versions: the latest stable release's pages at
-[`/kraft/`](https://kraft-sdlc.dev/), and `main`'s at
-[`/kraft/next/`](https://kraft-sdlc.dev/next/). Write docs on
-`main`, in the same pull request as the code. They appear at `/next/` when it
-merges and become the default at the next stable release. There is nothing
-else to do. Link to `/kraft/next/` for a feature that hasn't shipped in a
-release yet.
+The site publishes three kinds of version: the latest stable release's pages at
+[`/`](https://kraft-sdlc.dev/), each older major frozen at `/vN/` (today `/v1/`,
+from the last `v1` release), and `main`'s
+at [`/next/`](https://kraft-sdlc.dev/next/). Write docs on `main`, in the same
+pull request as the code. They appear at `/next/` when it merges and become the
+default at the next stable release. There is nothing else to do. Link to
+`/next/` for a feature that hasn't shipped in a release yet.
 
 A section that is new since the last release says so with an "Added in"
 note, which the release turns into the version that shipped it (see
 [User-facing docs](#user-facing-docs) above).
 
-Both versions are built with `main`'s site code (`docsite/app`,
+`dev/docs_versions.py` picks the tags from the repo's tags, so nothing is
+configured: `/` is the highest `vX.Y.Z` tag, and each lower major with a
+`docsite/content` is built from its own highest such tag. When `v3.0.0` ships,
+`2.x` becomes `/v2/` with no code change. Only `/` is indexed; `/vN/` and
+`/next/` carry a `noindex` tag and stay out of the sitemap.
+
+Every version is built with `main`'s site code (`docsite/app`,
 `nuxt.config.ts`), so a theme or component fix reaches the release docs
 without a release, while their text stays what the release shipped. The flip
 side is that a docs-only fix to a released page, such as a typo, waits for the
-next release too.
+next release too. A frozen major keeps the words of the components that hold
+them: `dev/build_docs_site.sh` builds it with its own tag's `StageStrip.vue`,
+so the landing page still names the stages the way that release did. If a
+page of a frozen major ever shows text from a newer component, add the
+component to that list.
+
+If a frozen major stops building with `main`'s components, build it with its
+own tag's site code instead:
+`KRAFT_DOCS_OWN_SITE="v1" dev/build_docs_site.sh OUT_DIR` runs an `npm ci` of
+that tag's lockfile and its own `nuxt generate`. The limits: it has the old
+look and no version menu or banner (the tag's config knows nothing of them), a
+tag that hard-codes its origin (`v1.4.0` does: `itsomidkarami.github.io`) puts
+that origin in its canonical, `og:url` and sitemap URLs, and its pages are made
+`noindex` by a tag added after the build. Verify it with
+`KRAFT_DOCS_OWN_SITE=v1 just docs-site` before relying on it.
 
 ## The model price table
 
