@@ -82,6 +82,9 @@ export function stopCueOf(i: Pick<Row, "display_status" | "stop">): StopCue {
   }
 }
 
+/** A row's action button: a gate is decided in its review, so it stays outlined; retry, resume and the rest are the filled one. */
+export const actionVariant = (a: Pick<RowAction, "kind">): "primary" | "secondary" => (a.kind === "gate" ? "secondary" : "primary");
+
 export type RowAction =
   | { label: string; kind: "gate"; gate: string }
   | { label: string; kind: "peek"; tab: "overview" | "config"; budget?: boolean }

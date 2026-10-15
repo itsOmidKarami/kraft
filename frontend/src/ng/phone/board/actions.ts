@@ -1,19 +1,26 @@
 import type { WorkItem } from "../../../types";
-import { admittedRowAction } from "../../board/rowText";
+import { actionVariant, admittedRowAction } from "../../board/rowText";
 
 /** What a card's buttons are (W17 brief B.4): the button the prototype draws,
  *  chosen from the same `admittedRowAction` the desktop row uses, so the two cannot
  *  disagree about which items have a button. */
-export type CardButton =
+type Spec =
   | { kind: "review"; label: string; gate: string }
   | { kind: "answer"; label: string }
   | { kind: "open"; label: string }
   | { kind: "raise"; label: string }
   | { kind: "resume"; label: string };
+export type CardButton = Spec & { variant: "primary" | "secondary" };
 
+/** The buttons, each filled or outlined as the desktop row's one action is (`actionVariant`). */
 export function cardButtons(item: WorkItem): CardButton[] {
   const a = admittedRowAction(item);
   if (!a) return [];
+  const variant = actionVariant(a);
+  return cardButtonsFor(item, a).map((b) => ({ ...b, variant }));
+}
+
+function cardButtonsFor(item: WorkItem, a: NonNullable<ReturnType<typeof admittedRowAction>>): Spec[] {
   // A gate is decided inside its review, as on the desktop row; the card only opens it.
   if (a.kind === "gate") return [{ kind: "review", label: a.label, gate: a.gate }];
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];

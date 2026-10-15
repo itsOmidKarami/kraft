@@ -225,6 +225,9 @@ describe("a card's inline actions (B.4)", () => {
     expect(card("b2").getByRole("button", { name: "Raise budget" })).toBeInTheDocument();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
+    // Filled or outlined as the desktop row draws the same action: only a gate is outlined.
+    const filled = (id: string, name: string) => card(id).getByRole("button", { name }).classList.contains("btn-primary");
+    expect([filled("c1", "Raise cap"), filled("b2", "Raise budget"), filled("q3", "Answer…"), filled("f4", "Retry…"), filled("p5", "Resume")]).toEqual([true, true, true, true, true]);
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 

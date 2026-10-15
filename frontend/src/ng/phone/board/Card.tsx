@@ -47,7 +47,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
       {buttons.length > 0 && (
         <div className="ph-card-actions">
           {buttons.map((b) => (
-            <Button key={b.kind} className="ph-btn ph-card-btn" variant="secondary" disabled={offline || busy} onClick={() => onButton(b)}>
+            <Button key={b.kind} className={`ph-btn ph-card-btn${b.variant === "primary" ? " ph-btn-primary" : ""}`} variant={b.variant} disabled={offline || busy} onClick={() => onButton(b)}>
               {b.label}
             </Button>
           ))}
