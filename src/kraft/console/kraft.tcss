@@ -54,6 +54,12 @@ Screen.-tiny > * {
     display: none;
 }
 
+/* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
+Screen.-tiny #down,
+Screen.-tiny #narrow-keys {
+    display: none;
+}
+
 Screen.-tiny #tiny {
     display: block;
 }

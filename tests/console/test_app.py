@@ -208,21 +208,31 @@ def test_question_mark_opens_and_closes_every_key(console):
 
 
 @pytest.mark.parametrize(
-    ("size", "tiny", "narrow"),
+    ("size", "no_server", "shown"),
     [
-        ((59, 24), True, True),
-        ((80, 15), True, False),
-        ((60, 16), False, True),
-        ((79, 24), False, True),
-        ((80, 24), False, False),
+        # (the tiny message, the narrow `? keys`, the no-server message)
+        ((59, 24), False, (True, False, False)),
+        ((80, 15), False, (True, False, False)),
+        ((60, 16), False, (False, True, False)),
+        ((79, 24), False, (False, True, False)),
+        ((80, 24), False, (False, False, False)),
+        ((59, 24), True, (True, False, False)),
+        ((79, 24), True, (False, True, True)),
     ],
-    ids=["59-wide", "15-high", "60x16", "79-wide", "80x24"],
+    ids=["59-wide", "15-high", "60x16", "79-wide", "80x24", "59-wide-no-server", "79-no-server"],
 )
 def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
-    console, size, tiny, narrow
+    console, monkeypatch, size, no_server, shown
 ):
-    """Under 60x16 nothing fits, so the frame says so instead of drawing it
-    clipped; under 80 columns the footer keeps only `? keys`."""
+    """Under 60x16 nothing else is drawn, whatever state the link is in, so
+    the frame says so instead of drawing it clipped; under 80 columns the
+    footer keeps only `? keys`."""
+    if no_server:
+
+        async def board_rows(**kwargs):
+            raise client.transport._unreachable()
+
+        monkeypatch.setattr(client, "board_rows", board_rows)
 
     async def scenario(app, pilot):
         await pilot.resize_terminal(*size)
@@ -230,9 +240,10 @@ def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
         return (
             app.query_one("#tiny").display and app.query_one("#tiny").region.area > 0,
             app.query_one("#narrow-keys").display and not app.query_one(Footer).display,
+            app.query_one("#down").display,
         )
 
-    assert console.run(scenario) == (tiny, narrow)
+    assert console.run(scenario) == shown
 
 
 def test_the_palette_switches_kraft_looks_not_textuals(console):
@@ -282,12 +293,15 @@ def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, tt
         monkeypatch.setenv(name, value)
     monkeypatch.setattr("sys.stdin.isatty", lambda: ttys[0], raising=False)
     monkeypatch.setattr("sys.stdout.isatty", lambda: ttys[1], raising=False)
-    if health is not None:
+    asked = []
 
-        async def refuse():
+    async def refuse():
+        asked.append(1)
+        if health is not None:
             raise health
+        return {}
 
-        monkeypatch.setattr(client, "health", refuse)
+    monkeypatch.setattr(client, "health", refuse)
     if said is None:
         cli.main(["console"])
         assert len(opened) == 1
@@ -297,3 +311,5 @@ def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, tt
     assert caught.value.code == 1
     assert said in capsys.readouterr().err
     assert opened == []
+    # A worker or a pipe is refused before any call to the server.
+    assert bool(asked) == (health is not None)

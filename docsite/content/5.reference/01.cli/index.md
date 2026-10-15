@@ -121,6 +121,7 @@ These verbs do not print the payload:
 
 | Verb | Use instead |
 |---|---|
+| `console` | None; it opens a terminal UI. |
 | `view watch` | `kraft view events --json` (`watch` redraws a board rather than returning a value) |
 | `repo path` | `kraft view show --json` (`path` prints one plain line meant for `cd`) |
 | `admin start`, `stop`, `restart`, `update` | None; these print status lines. |
