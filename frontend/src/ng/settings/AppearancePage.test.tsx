@@ -198,7 +198,7 @@ describe("ng AppearancePage", () => {
   });
 
   it("folds each code and board section shut, saying what it is set to", async () => {
-    setup({ editor: "zed", board: { open_in: "full" } });
+    setup({ editor: "zed", board: { group_by: "status", show_done: 5, open_in: "full" } });
     await screen.findByRole("radiogroup", { name: "Mode" });
     const folds = [...document.querySelectorAll<HTMLDetailsElement>("details.set-fold")];
     expect(folds.map((d) => d.open)).toEqual([false, false, false, false]);

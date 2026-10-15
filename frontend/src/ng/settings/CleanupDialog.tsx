@@ -62,7 +62,7 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
     // An id the server left out of its answer was not archived either.
     const archived = new Set("results" in out ? out.results.filter((r) => r.ok).map((r) => r.id) : []);
     const why = new Map("results" in out ? out.results.map((r) => [r.id, r.error]) : []);
-    const bad = take.filter((i) => !archived.has(i.id)).map((i) => ({ id: i.id, title: i.title, error: ("error" in out ? out.error : why.get(i.id)) ?? "not archived" }));
+    const bad = take.filter((i) => !archived.has(i.id)).map((i) => ({ id: i.id, title: i.title, error: ("error" in out ? out.error : why.get(i.id)) ?? "not cleaned up" }));
     if (!bad.length) return onClose();
     setFailed(bad);
   };
@@ -101,7 +101,7 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
             {skipped.map((i) => (
               <li key={i.id} className="set-st-li">
                 <span className="set-st-li-title">{i.title}</span>
-                <span className="set-hint">Skipped: {i.refusal ?? "not archivable"}</span>
+                <span className="set-hint">Skipped: {i.refusal ?? "cannot be cleaned up"}</span>
               </li>
             ))}
           </ul>
@@ -110,7 +110,7 @@ export function CleanupDialog({ ids, usage, onClose, onDone }: { ids: string[]; 
       )}
       {failed && (
         <>
-          <p className="set-error" role="alert">{take.length - failed.length} of {take.length} archived. These were not:</p>
+          <p className="set-error" role="alert">{take.length - failed.length} of {take.length} cleaned up. These were not:</p>
           <ul className="set-st-list">
             {failed.map((f) => <li key={f.id} className="set-st-li">{f.title}: {f.error}</li>)}
           </ul>

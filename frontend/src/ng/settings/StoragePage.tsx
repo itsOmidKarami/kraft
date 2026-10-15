@@ -122,7 +122,7 @@ export function StoragePage() {
         )}
 
         {data && (
-          <Block id="set-st-worktrees" title="Worktrees" card aside={plural(data.items.length, "item")}>
+          <Block id="set-st-worktrees" title="Worktrees" aside={plural(data.items.length, "item")}>
             <div className="set-st-body">
               <div className="set-st-actions">
                 <Button disabled={!checked.size} onClick={() => setCleaning([...checked])}>{CLEAN_SELECTED}</Button>
@@ -146,7 +146,7 @@ export function StoragePage() {
                 <tbody>
                   {data.items.map((i) => (
                     <tr key={i.id}>
-                      <td>{i.reclaimable && <input type="checkbox" className="board-check" checked={checked.has(i.id)} onChange={() => toggle(i.id)} aria-label={`Select ${i.title}`} />}</td>
+                      <td><input type="checkbox" className="board-check" checked={checked.has(i.id)} disabled={!i.reclaimable} onChange={() => toggle(i.id)} aria-label={i.reclaimable ? `Select ${i.title}` : `${i.title}, cannot be cleaned up yet`} /></td>
                       <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
                       <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> {CLEANABLE}</span>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>

@@ -17,7 +17,7 @@
 .set-st-li { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-label); }
 .set-st-li-title { font-weight: 500; }
 .set-st-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
-.set-st-table th { padding: 4px 8px; text-align: left; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-st-table th { padding: 4px 8px; text-align: left; font-size: var(--fs-label); font-weight: 400; color: var(--text-muted); }
 .set-st-table td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
 .set-st-table .is-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 .set-st-table tr.is-orphan td { color: var(--text-muted); }
