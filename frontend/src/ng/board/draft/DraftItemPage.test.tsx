@@ -95,12 +95,14 @@ describe("DraftItemPage", () => {
     expect(creates(calls).at(-1)?.body).toMatchObject({ title: "Cache it", description: "By hash.", autostart: false });
   });
 
-  it("opens its chain readable, as the Chains editor does: no smaller than 80% (W10's editor fit)", async () => {
+  it("folds the stages it has not reached to pills and opens at no less than 65%, so a long chain shows whole and readable", async () => {
     stub();
     mount({ draft: { title: "Cache it", brief: "", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });
     await settle();
     // jsdom has no layout, so a plain fit would floor at 30%.
-    expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.8)");
+    expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.65)");
+    expect(screen.getByRole("button", { name: /^final review stage, 2 nodes/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^implementation,/ })).toBeNull();
   });
 
   it("asks for a title before it can create", async () => {
@@ -120,6 +122,7 @@ describe("DraftItemPage", () => {
     expect(screen.queryByRole("button", { name: "Skip on this item" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
     expect(screen.getByRole("switch", { name: "Skip on this item" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /^final review stage/ }));
     fireEvent.click(screen.getByRole("button", { name: /^final_review,/ }));
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
     fireEvent.click(screen.getByRole("button", { name: "Skip on this item" }));

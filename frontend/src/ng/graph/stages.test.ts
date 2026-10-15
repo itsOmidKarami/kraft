@@ -40,6 +40,10 @@ describe("stages", () => {
     expect(show(foldStages(chain(9), new Set(), "merge"))).toMatch(/ final_review mark_ready external_approval merge post_merge_ci$/);
   });
 
+  it("keeps no stage past the current one open when asked (a draft's row)", () => {
+    expect(show(foldStages(chain(-1), new Set(), undefined, 0))).toBe("spec spec_approval [plan · 2] [chain revision · 2] [local review · 4] [final review · 5] [post merge ci · 4]");
+  });
+
   it("names a pill by its gate, its size and whether it passed", () => {
     const [passed] = foldStages(chain(9), new Set()) as Fold[];
     expect(foldName(passed)).toBe("spec stage, 2 nodes, passed: expand");

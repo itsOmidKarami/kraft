@@ -7,7 +7,7 @@ import type { ChainNode, Repo, TemplateSummary, Workspace } from "../../../types
 import { chainsForRepo } from "../../library/types";
 import { Inspector } from "../../graph/Inspector";
 import type { ChainNode as GraphNode } from "../../graph/layout";
-import { EDITOR_FIT } from "../../graph/camera";
+import { EDITOR_FIT, type FitRule } from "../../graph/camera";
 import { StageGraph } from "../../graph/StageGraph";
 import { useResizable, useWidth } from "../../graph/useResizable";
 import { detailOf, jsonBody, request } from "../../http";
@@ -24,6 +24,8 @@ import "../../item/item.css";
 import { sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
 
+/** The editor's fit with a lower floor: a folded chain is short enough to open whole at about 65%. */
+const DRAFT_FIT: FitRule = { ...EDITOR_FIT, floor: 0.65 };
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
 type Tab = "overview" | "config" | "yaml";
@@ -252,8 +254,10 @@ export function DraftItemPage() {
           nodes={nodes}
           selected={sel ?? undefined}
           reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
-          // Opens readable, as the Chains editor does (W10 Decided 17), not at a 30% plain fit.
-          fit={EDITOR_FIT}
+          // Folded to stage pills as on the item page (a click opens one in place), so the whole chain opens in view.
+          fit={DRAFT_FIT}
+          fold
+          foldAhead={0}
           onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
           onOpen={(id) => { setSel(id); setPaneOpen(true); }}
           onEscape={() => setSel(null)}

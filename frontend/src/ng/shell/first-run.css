@@ -1,25 +1,27 @@
-/* BD-2: a centred hero (the three steps as a diagram, the agent-session route),
-   then the setup panel for the step you are on. */
-.ng-firstrun { max-width: 900px; margin: 0 auto; padding: 40px 24px 28px; }
+/* BD-2: a compact hero (the three steps as a diagram), the setup panel for the step you are on,
+   then the agent-session route. */
+.ng-firstrun { max-width: 900px; margin: 0 auto; padding: 24px 24px 28px; }
 .ng-firstrun h1 { margin: 0 0 8px; font-size: var(--fs-h1); font-weight: 600; }
 .ng-firstrun h2 { margin: 0; font-size: var(--fs-body); font-weight: 600; }
 .ng-firstrun h3 { margin: 0 0 4px; font-size: var(--fs-label); font-weight: 600; color: var(--text-sub); }
 .ng-firstrun p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
 .ng-firstrun code { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
-.fr-hero { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
+.fr-hero { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 18px; }
 .fr-lead { max-width: 480px; }
-.fr-steps { display: flex; justify-content: center; margin: 26px 0 22px; padding: 0; list-style: none; font-size: var(--fs-meta); color: var(--text-muted); }
+.fr-steps { display: flex; justify-content: center; margin: 16px 0 0; padding: 0; list-style: none; font-size: var(--fs-meta); color: var(--text-muted); }
 .fr-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 150px; }
 .fr-steps li + li::before { content: ""; position: absolute; top: 22px; right: calc(50% + 32px); width: calc(100% - 64px); border-top: 1px dashed var(--border); }
 .fr-steps .fr-step-on { color: var(--text); font-weight: 500; }
 .fr-step-name { margin-top: 6px; }
 .fr-step-sub { font-size: var(--fs-meta); font-weight: 400; color: var(--text-muted); }
-.fr-circle { display: inline-grid; place-items: center; flex: none; box-sizing: border-box; width: 44px; height: 44px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-sub); font: 600 var(--fs-label)/1 inherit; }
+.fr-circle { display: inline-grid; place-items: center; place-content: center; flex: none; box-sizing: border-box; width: 44px; height: 44px; padding: 0; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-sub); font: 600 var(--fs-label)/1 inherit; }
 .fr-done { background: var(--text); border-color: var(--text); color: var(--bg); }
 .fr-current { border: 2px solid var(--focus); color: var(--text); }
 .fr-todo { border-style: dashed; color: var(--text-muted); }
+.fr-circle svg { display: block; }
 button.fr-circle { cursor: pointer; }
 button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.fr-route { display: flex; flex-direction: column; align-items: center; text-align: center; margin-top: 22px; }
 .fr-agent { display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 8px; }
 .fr-agent code { padding: 2px 6px; border-radius: 4px; background: var(--surface-2); }
 .fr-agent .btn { display: inline-flex; align-items: center; gap: 4px; }
@@ -49,6 +51,11 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .fr-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--fs-meta); }
 .fr-facts dt { color: var(--text-sub); }
 .fr-facts dd { margin: 0; }
+.fr-tasks { align-self: stretch; display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 0; list-style: none; counter-reset: fr-tasks; }
+.fr-tasks li { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; counter-increment: fr-tasks; }
+.fr-tasks li + li { padding-top: 16px; border-top: 1px solid var(--line); }
+.fr-tasks h3 { margin: 0; font-size: var(--fs-meta); color: var(--text); }
+.fr-tasks h3::before { content: counter(fr-tasks) ". "; color: var(--text-muted); }
 .fr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .fr-ok { font-size: var(--fs-label); color: var(--ok); }
 .fr-why { flex: 1 1 220px; font-size: var(--fs-label); line-height: 1.45; color: var(--warn); }
