@@ -7,6 +7,8 @@ import type { Repo, SearchResult, TemplateSummary } from "../../../types";
 import { chainsForRepo } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
+import { useReason } from "../../ui/Reason";
+import { ADD_TITLE } from "../../ui/reasons";
 import { showToast } from "../../ui/Toast";
 import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { useBack } from "../nav/trail";
@@ -27,6 +29,7 @@ export function NewItem() {
   const [hits, setHits] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const why = useReason(d.title.trim() ? null : ADD_TITLE);
   const set = (p: Partial<NewDraft>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
 
@@ -108,9 +111,10 @@ export function NewItem() {
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>
         {error && !sheet.openId && <p className="ph-error" role="alert">{error}</p>}
       </div>
+      {why.text && <p className="ph-block-reason" id={why.id} role="status">{why.text}</p>}
       <div className="ph-actionbar">
-        <Button className="ph-btn" disabled={busy || !d.title.trim()} onClick={() => create(false)}>Create paused</Button>
-        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} onClick={() => create(true)}>Create and start</Button>
+        <Button className="ph-btn" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(false)}>Create paused</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy || !d.title.trim()} {...why.attrs} onClick={() => create(true)}>Create and start</Button>
       </div>
       {sheet.is("discard") && (
         <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />

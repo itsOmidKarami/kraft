@@ -131,6 +131,7 @@ describe("FinishDialog", () => {
     routed(<Finish threads={[]} />);
     expect(screen.getByText("No threads yet. Add a comment on a line or a file first.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject to implementation" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject to implementation" })).toHaveAccessibleDescription("Add a comment or a note first.");
     fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
     expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
     expect(screen.queryByText(/goes back to/)).toBeNull();
@@ -194,6 +195,7 @@ describe("BottomBar", () => {
     expect(screen.getByText("1 of 2 resolved")).toBeInTheDocument();
     expect(screen.getByText("Approve unlocks when must-fix threads are resolved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveAccessibleDescription(/must-fix/);
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(onFinish).toHaveBeenCalledWith("request_changes");
   });

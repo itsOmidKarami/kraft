@@ -138,7 +138,13 @@ describe("Composer", () => {
     mount();
     await settle();
     expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create paused" })).toHaveAccessibleDescription("Add a title to create it.");
+    // ⌘↵ on an empty title does not create; it lands on the title, whose reason is already on screen.
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Enter", metaKey: true });
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
+    expect(screen.getByRole("button", { name: "Create paused" })).not.toHaveAccessibleDescription();
     fireEvent.keyDown(screen.getByRole("button", { name: "More ways to create" }), { key: "ArrowDown" });
     expect(screen.getByRole("menuitem", { name: "Create and start" })).toBeInTheDocument();
   });

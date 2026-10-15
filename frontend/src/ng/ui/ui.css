@@ -123,3 +123,7 @@ body:has(.dv-drawer) .toasts { top: auto; bottom: 16px; }
 .tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px color-mix(in oklab, var(--side) 50%, transparent); }
 
 .no-match-clear { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-decoration: underline; cursor: pointer; }
+
+/* Why a control is disabled (useReason): plain text next to it, so touch and screen readers get it too. */
+.reason { min-width: 0; font-size: var(--fs-meta); line-height: 1.4; color: var(--text-muted); text-align: right; }
+.reason + .btn { flex: none; white-space: nowrap; }

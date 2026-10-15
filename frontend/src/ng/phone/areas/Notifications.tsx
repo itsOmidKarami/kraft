@@ -4,6 +4,7 @@ import * as api from "../../../api";
 import { isEnabled, NOTIFY_EVENTS, notificationText, requestPermission, setEnabled as setBrowserEnabled } from "../../../browserNotify";
 import { ago } from "../../../format";
 import type { Notify } from "../../../types";
+import { WEBHOOK_OFF } from "../../ui/reasons";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { TabStrip } from "../ui/Rows";
@@ -142,7 +143,7 @@ function Webhook({ notify, setNotify, tab }: { notify: Notify; setNotify: (n: No
       />
       <Group
         title="Test"
-        rows={[{ label: "Send a test", onClick: () => void sendTest(), disabled: testing || !canTest, sub: canTest ? lastSend(notify) : "Turn on the webhook and set a URL first.", ...mark("test") }]}
+        rows={[{ label: "Send a test", onClick: () => void sendTest(), disabled: testing || !canTest, sub: canTest ? lastSend(notify) : WEBHOOK_OFF(notify.url_set), ...mark("test") }]}
       />
       {node}
       {sheet.is("clear") && (

@@ -9,6 +9,8 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { HeaderActions } from "../shell/HeaderActions";
 import { Head, Kv, Note } from "../templates/panes/controls";
 import { Button } from "../ui/Button";
+import { useReason } from "../ui/Reason";
+import { WEBHOOK_OFF } from "../ui/reasons";
 import { Dialog } from "../ui/Dialog";
 import { Switch } from "../ui/Switch";
 import { showToast } from "../ui/Toast";
@@ -27,6 +29,15 @@ const PERMISSION_TEXT: Record<Permission, string> = {
   unsupported: "This browser has no notifications.",
 };
 const PERMISSION_SHORT: Record<Permission, string> = { granted: "allowed", default: "not asked yet", denied: "blocked", unsupported: "not supported" };
+
+const BROWSER_WHY: Record<Permission, string> = { granted: "", default: "Allow notifications first.", denied: "Allow it in the browser's site settings first.", unsupported: "Not supported in this browser." };
+
+/** Send a test: with the reason beside it while it cannot send. On a card the reason sits above the button. */
+function TestButton({ card, busy, why, onClick }: { card?: string; busy?: boolean; why: string | null; onClick: () => void }) {
+  const r = useReason(why);
+  const button = <Button className={card ? "nt-test" : undefined} aria-label={card ? `Send a test, ${card}` : undefined} disabled={busy || !!why} {...r.attrs} onClick={onClick}><Send size={12} aria-hidden /> Send a test</Button>;
+  return card ? <span className="nt-test-box">{r.note}{button}</span> : <>{button}{r.note}</>;
+}
 
 type Channel = "webhook" | "browser";
 type Tab = "overview" | "config" | "yaml";
@@ -105,6 +116,8 @@ export function NotifyPage() {
 
   const webhookActive = notify.enabled && notify.url_set;
   const browserActive = browserOn && permission === "granted";
+  const webhookWhy = webhookActive ? null : WEBHOOK_OFF(notify.url_set);
+  const browserWhy = browserActive ? null : !browserOn && permission === "granted" ? "Turn on alerts on this device first." : BROWSER_WHY[permission];
   const test = notify.last_test;
   const lastTest = test
     ? test.error
@@ -151,18 +164,18 @@ export function NotifyPage() {
     ...notify.events.map((e) => `  - ${e}`),
   ].join("\n");
 
-  const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; canTest: boolean; test: () => void }[] = [
+  const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; why: string | null; test: () => void }[] = [
     {
       id: "webhook", icon: <Webhook size={15} />, name: "Webhook", active: webhookActive, events: notify.events,
       sub: notify.url_set ? `URL stored · links to ${link || "no address"}` : "No URL set",
       extra: notify.url_set ? (test ? (test.error ? `last attempt ${ago(test.at)} failed` : `last sent ${ago(test.at)} · ${test.status} OK`) : "never sent") : "nothing can be sent",
-      extraBad: !notify.url_set || !!test?.error, testing, canTest: webhookActive, test: () => void sendTest(),
+      extraBad: !notify.url_set || !!test?.error, testing, why: webhookWhy, test: () => void sendTest(),
     },
     {
       id: "browser", icon: <Monitor size={15} />, name: "This browser", active: browserActive, events: browserEvents,
       sub: permission === "granted" ? "Alerts while this tab is in the background. This device only." : `${PERMISSION_TEXT[permission]} This device only.`,
       extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : "") : PERMISSION_SHORT[permission],
-      extraBad: permission === "denied" || !!browserTest?.error, testing: false, canTest: browserActive, test: testBrowser,
+      extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, test: testBrowser,
     },
   ];
 
@@ -250,8 +263,8 @@ export function NotifyPage() {
       {problem("save")}
       <Head>Test</Head>
       <div className="nt-line">
-        <Button disabled={testing || !webhookActive} onClick={() => void sendTest()}><Send size={12} aria-hidden /> Send a test</Button>
-        <span className="set-hint">{webhookActive ? lastTest : notify.url_set ? "set the channel active first" : "set a webhook URL first"}</span>
+        <TestButton busy={testing} why={webhookWhy} onClick={() => void sendTest()} />
+        {webhookActive && <span className="set-hint">{lastTest}</span>}
       </div>
       {problem("test")}
       {notify.url_set && (
@@ -277,8 +290,8 @@ export function NotifyPage() {
       <Note>Independent of the webhook. Kept in this browser, so it saves at once and has no Save button.</Note>
       <Head>Test</Head>
       <div className="nt-line">
-        <Button disabled={!browserActive} onClick={testBrowser}><Send size={12} aria-hidden /> Send a test</Button>
-        <span className="set-hint">{browserTestLine}</span>
+        <TestButton why={browserWhy} onClick={testBrowser} />
+        {!browserWhy && <span className="set-hint">{browserTestLine}</span>}
       </div>
     </>
   );
@@ -318,7 +331,7 @@ export function NotifyPage() {
                     {c.extra && <span className={`nt-extra${c.extraBad ? " is-bad" : ""}`}>{c.extra}</span>}
                   </span>
                 </button>
-                <Button className="nt-test" aria-label={`Send a test, ${c.name}`} disabled={c.testing || !c.canTest} onClick={c.test}><Send size={12} aria-hidden /> Send a test</Button>
+                <TestButton card={c.name} busy={c.testing} why={c.why} onClick={c.test} />
               </div>
             ))}
           </div>

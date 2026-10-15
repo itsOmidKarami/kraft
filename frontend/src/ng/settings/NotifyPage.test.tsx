@@ -85,6 +85,8 @@ describe("ng NotifyPage", () => {
     expect(webhook.getByText("inactive")).toBeInTheDocument();
     expect(webhook.getByText("nothing can be sent")).toBeInTheDocument();
     expect(webhook.getByRole("button", { name: /Send a test/ })).toBeDisabled();
+    expect(webhook.getByRole("button", { name: /Send a test/ })).toHaveAccessibleDescription("Set a webhook URL first.");
+    expect(webhook.getByText("Set a webhook URL first.")).toBeVisible();
   });
 
   it("says Inactive in the pane too, when the switch is on but the channel cannot send", async () => {

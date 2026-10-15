@@ -180,6 +180,7 @@
 .composer-run { font-size: var(--fs-meta); color: var(--text-sub); }
 .composer-ticks { width: 150px; }
 .composer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 0 0 42px; border-top: 1px solid var(--line); }
+.composer-note .reason { text-align: left; font-size: inherit; }
 .composer-note, .composer-ask { flex: 1; font-size: var(--fs-meta); color: var(--text-muted); }
 .composer-ask { font-size: var(--fs-label); color: var(--text-sub); }
 .composer-split { display: inline-flex; }

@@ -30,6 +30,7 @@ describe("Library: Review & publish", () => {
     mount();
     await screen.findByRole("listbox", { name: "Library components" });
     expect(screen.getByRole("button", { name: /Review & publish/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review & publish/ })).toHaveAccessibleDescription("Nothing to publish: no draft.");
   });
 
   it("lists the changes with the chains each reaches, and who the draft affects", async () => {

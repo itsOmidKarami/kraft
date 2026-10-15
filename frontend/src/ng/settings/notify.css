@@ -38,3 +38,4 @@
   .nt-card { flex-wrap: wrap; }
   .nt-card-main { flex-basis: 100%; }
 }
+.nt-test-box { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 40%; }

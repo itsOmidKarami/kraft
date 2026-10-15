@@ -19,6 +19,8 @@ import { Dialog } from "../ui/Dialog";
 import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
+import { useReason } from "../ui/Reason";
+import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
 import { addonRepo } from "../library/types";
@@ -201,6 +203,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     loadPublished();
   };
   const yamlErr = r.yaml_error;
+  const noDraft = useReason(view.draft ? null : NOTHING_TO_PUBLISH);
   const toggleYaml = () => {
     // A syntax error keeps you here until it is fixed or reverted (Decisions §9 YAML): the button is disabled.
     if (surface === "yaml") return setSurface("canvas");
@@ -335,7 +338,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
-          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
+          : <>{noDraft.note}<Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} {...noDraft.attrs} onClick={review ? endReview : startReview}>Review &amp; publish</Button></>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

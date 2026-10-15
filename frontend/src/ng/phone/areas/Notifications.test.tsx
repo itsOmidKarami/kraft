@@ -136,7 +136,7 @@ describe("Webhook channel (O.2)", () => {
     channel("webhook", "?tab=config");
     const row = await screen.findByRole("button", { name: /^Send a test/ });
     expect(row).toBeDisabled();
-    expect(row).toHaveTextContent("Turn on the webhook and set a URL first.");
+    expect(row).toHaveTextContent("Set a webhook URL first.");
   });
 
   it("YAML shows the effective values and never the URL", async () => {

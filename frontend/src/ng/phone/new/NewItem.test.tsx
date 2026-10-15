@@ -40,6 +40,7 @@ describe("the new work item screen (G)", () => {
     mount();
     expect(await screen.findByRole("button", { name: "Create paused" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create and start" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create paused" })).toHaveAccessibleDescription("Add a title to create it.");
     await userEvent.type(title(), "Add retry budget");
     expect(screen.getByRole("button", { name: "Create paused" })).toBeEnabled();
   });
