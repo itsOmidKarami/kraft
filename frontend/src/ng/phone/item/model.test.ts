@@ -109,6 +109,19 @@ describe("cardOf: a gate's message (PH-14)", () => {
   });
 });
 
+describe("cardOf: a node reads as its name, not its id", () => {
+  const node = "merge_request";
+  it.each([
+    ["failed", mk("failed", stop("failed", { node, reason: "exit 1" })), "merge request"],
+    ["cap", mk("needs_you", stop("cap", { node, reason: "Running time hit its 8h cap" })), "at merge request"],
+    ["question", mk("needs_you", stop("question", { node }), { needs_context_question: "Allow it?" }), "asked by the agent · on merge request"],
+    ["paused", mk("paused", null, { current_node_id: node }), "at merge request"],
+    ["escalated", mk("escalated", null, { current_node_id: node }), "at merge request"],
+  ])("on the %s card", (_, item, where) => {
+    expect(cardOf(item)?.where).toContain(where);
+  });
+});
+
 describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
   it("has none for a plain running item and one for each stop", () => {
     expect(cardOf(mk("running"))).toBeNull();

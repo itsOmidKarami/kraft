@@ -16,7 +16,7 @@ export type NgScenario = (typeof NG_SCENARIOS)[number];
 /** T0 + 130 minutes, as a literal: this module loads before fixtures.ts finishes (they import each other). */
 export const NG_NOW = "2026-09-13T10:10:00.000Z";
 
-type Node = { id: string; kind: "exec" | "gate"; tasks: string[]; steps: string[][]; gate_after: null; fix_loop?: string; reject_to?: string | null; rebase_bounce_to?: string | null; on_failure?: string[] | null; auto_escalate?: boolean };
+type Node = { id: string; kind: "exec" | "gate"; tasks: string[]; steps: string[][]; gate_after: null; fix_loop?: string; reject_to?: string | null; rebase_bounce_to?: string | null; on_failure?: string[] | null; auto_escalate?: boolean; artifact?: string };
 const exec = (id: string, steps: Record<string, string[]>, more: Partial<Node> = {}): Node => {
   const s = Object.entries(steps).map(([step, tasks]) => tasks.map((task) => `${id}.${step}.${task}`));
   return { id, kind: "exec", tasks: s.flat(), steps: s, gate_after: null, ...more };
@@ -25,19 +25,19 @@ const gate = (id: string, more: Partial<Node> = {}): Node => ({ id, kind: "gate"
 
 export const NG_NODES: Node[] = [
   exec("spec", { write: ["spec"] }),
-  gate("spec_approval", { reject_to: "spec" }),
+  gate("spec_approval", { artifact: "spec", reject_to: "spec" }),
   exec("plan", { write: ["plan"] }),
-  gate("plan_approval", { reject_to: "plan" }),
+  gate("plan_approval", { artifact: "plan", reject_to: "plan" }),
   exec("chain_revision", { revise: ["chain_revision"] }),
-  gate("chain_revision_approval", { auto_escalate: true }),
+  gate("chain_revision_approval", { artifact: "chain_revision", auto_escalate: true }),
   exec("implementation", { build: ["implement"] }),
   exec("verification", { test: ["unit_tests"], checks: ["lint", "typecheck", "security_scan"], review: ["code_review", "automated_review"] }, { fix_loop: "verification_fix_loop", on_failure: ["verification.repair.repair_pass"] }),
   exec("work_brief", { write: ["work_brief"] }),
-  gate("local_review", { reject_to: "implementation" }),
+  gate("local_review", { artifact: "work_brief", reject_to: "implementation" }),
   exec("merge_request", { rebase: ["rebase"], open: ["open_draft"] }, { rebase_bounce_to: "verification" }),
   exec("mr_checks", { ci: ["mr_checks"] }),
   exec("summary", { write: ["summary"] }),
-  gate("final_review", { reject_to: "implementation" }),
+  gate("final_review", { artifact: "review_brief", reject_to: "implementation" }),
   exec("release", { ship: ["release"] }),
 ];
 

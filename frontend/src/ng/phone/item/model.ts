@@ -69,7 +69,7 @@ const budgetSpent = (item: ItemDetail): [string, string][] => {
 export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: number | null = null): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
-  const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
+  const where = stop ? [pathOf(stop.task) || (stop.node && nameOf(item.chain_definition.nodes, stop.node)), stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   switch (item.display_status) {
     case "failed": {
       if (!stop) return null;
@@ -104,10 +104,10 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
           text: offersRaise(item) ? "Raising the budget resumes the item at once." : budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE,
           facts: budgetSpent(item),
         };
-        case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
+        case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${nameOf(item.chain_definition.nodes, stop.node)}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
         case "question": {
           const q = item.needs_context_question;
-          return { tone: "warn", icon: "message-square", title: "Needs you", where: `asked by ${stop.task ? taskName(stop.task) : "the agent"}${conversation(item)}${stop.node ? ` · on ${stop.node}` : ""}`, text: q ? `“${q}”` : (stop.reason ?? undefined), facts: [] };
+          return { tone: "warn", icon: "message-square", title: "Needs you", where: `asked by ${stop.task ? taskName(stop.task) : "the agent"}${conversation(item)}${stop.node ? ` · on ${nameOf(item.chain_definition.nodes, stop.node)}` : ""}`, text: q ? `“${q}”` : (stop.reason ?? undefined), facts: [] };
         }
         case "conflict": {
           const unresolved = list(facts.unresolved);
@@ -120,7 +120,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
           const by = str(closed?.payload.by);
           return {
             tone: "warn", title: `MR !${ref} was closed on the forge`,
-            where: [stop.node, closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
+            where: [stop.node && nameOf(item.chain_definition.nodes, stop.node), closed ? `closed ${by ? `by ${by} ` : ""}${ago(closed.created_at)}, not merged` : "not merged"].filter(Boolean).join(" · "),
             text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.", facts: [],
           };
         }
@@ -136,13 +136,13 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         facts: deps.map((d) => [d.status.replace("_", " "), d.title, d.id]),
       };
     }
-    case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${item.current_node_id}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
-    case "paused": return item.current_node_id ? { tone: "warn", title: "Paused", where: `at ${item.current_node_id}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
+    case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
+    case "paused": return item.current_node_id ? { tone: "warn", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
     case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: doneText(item), facts: spent(item) };
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
       const at = str(ev?.payload.node_id) ?? item.current_node_id;
-      return { tone: "muted", title: "Cancelled", where: at ? `at ${at}` : undefined, text: "The run stopped. Everything it produced is kept.", facts: [["reason", str(ev?.payload.reason) || "no reason given"], ...spent(item)] };
+      return { tone: "muted", title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, text: "The run stopped. Everything it produced is kept.", facts: [["reason", str(ev?.payload.reason) || "no reason given"], ...spent(item)] };
     }
     case "archived": return { tone: "muted", title: "Archived", text: "Restore it to bring it back to the board.", facts: [] };
     default: return null;

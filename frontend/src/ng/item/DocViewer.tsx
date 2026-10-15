@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { nameOf } from "../board/rowText";
 import { Search } from "lucide-react";
 import { createPortal } from "react-dom";
 import { copyablePath, docBody } from "../../format";
@@ -57,7 +58,7 @@ function paint(all: Range[], current: Range | undefined) {
 }
 
 /** Where in the chain a document was written: node › task › attempt. */
-export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
+export const docBy = (d: WorkItemDocument | undefined, nodes: Parameters<typeof nameOf>[0]) => (d ? [d.node_id && nameOf(nodes, d.node_id), d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
 
 /** A document in a drawer over the page's right side (prototype lines 278–283,
  *  GAP §2 #9): an indexed document or a gate's artifact opens in an editor and
