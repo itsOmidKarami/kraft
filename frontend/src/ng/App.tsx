@@ -13,6 +13,7 @@ import { ItemPage } from "./item/ItemPage";
 import { AboutPage } from "./settings/AboutPage";
 import { AccessPage } from "./settings/AccessPage";
 import { AppearancePage } from "./settings/AppearancePage";
+import { MovedAnchors } from "./settings/MovedAnchors";
 import { BoardCodePage } from "./settings/BoardCodePage";
 import { NotifyPage } from "./settings/NotifyPage";
 import { ReviewPage } from "./review/ReviewPage";
@@ -41,7 +42,7 @@ const Gallery = DEV_PAGES ? lazy(() => import("./graph/Gallery").then((m) => ({ 
 const TokenSheet = DEV_PAGES ? lazy(() => import("./theme/TokenSheet").then((m) => ({ default: m.TokenSheet }))) : null;
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/board-and-code": <BoardCodePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/storage": <StoragePage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/settings/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/settings/harnesses": <HarnessesPage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <MovedAnchors><AppearancePage /></MovedAnchors>, "/settings/board-and-code": <BoardCodePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/storage": <StoragePage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/settings/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/settings/harnesses": <HarnessesPage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);

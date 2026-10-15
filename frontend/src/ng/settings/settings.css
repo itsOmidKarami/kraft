@@ -29,7 +29,6 @@
 .set-section { padding: 14px 0 18px; border-top: 1px solid var(--line); }
 .set-section:first-of-type { margin-top: 16px; }
 .set-section > h2 { margin: 0 0 8px; }
-.set-h3 { margin: 0 0 8px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-sub { margin: 12px 0 6px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-hint { display: block; margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .set-cards { display: flex; flex-wrap: wrap; gap: 8px; }

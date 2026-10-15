@@ -10,6 +10,7 @@ import { StorageScreen } from "./areas/Storage";
 import { AboutScreen } from "./areas/About";
 import { AccessScreen } from "./areas/Access";
 import { AppearanceScreen } from "./areas/Appearance";
+import { MovedAnchors } from "../settings/MovedAnchors";
 import { BoardCodeScreen } from "./areas/BoardCode";
 import { IntakeScreen, ScheduleScreen } from "./areas/Intake";
 import { NotificationChannel, NotificationsList } from "./areas/Notifications";
@@ -84,7 +85,7 @@ export function PhoneApp() {
           <Route path="/settings/notifications" element={<NotificationsList />} />
           <Route path="/settings/notifications/:channel" element={<NotificationChannel />} />
           <Route path="/settings/access" element={<AccessScreen />} />
-          <Route path="/settings/appearance" element={<AppearanceScreen />} />
+          <Route path="/settings/appearance" element={<MovedAnchors><AppearanceScreen /></MovedAnchors>} />
           <Route path="/settings/board-and-code" element={<BoardCodeScreen />} />
           <Route path="/settings/about" element={<AboutScreen />} />
           <Route path="/settings/storage" element={<StorageScreen />} />
