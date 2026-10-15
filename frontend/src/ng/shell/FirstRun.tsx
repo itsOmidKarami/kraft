@@ -97,7 +97,7 @@ function probeRows(p: RepoProbe): [string, string][] {
     ...also(p, "setup", "Also found for setup"),
     ...(p.stopped ?? []).map((s) => ["No tests", stopLine(s)] as [string, string]),
     ...(p.missing_setup?.length
-      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is ticked, in Settings › Repos"] as [string, string]]
+      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is turned on, in Settings › Repos"] as [string, string]]
       : []),
     ...(missingLine(p.missing_tools) ? [["Not installed", missingLine(p.missing_tools)!] as [string, string]] : []),
     ...(readFrom(p.read_from) ? [["Read from", readFrom(p.read_from)!] as [string, string]] : []),
@@ -311,7 +311,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
               {added && disabled && <p>No test command: connected disabled. In <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>, set its test command and Enable it, then publish.</p>}
               {added && noSetup && (nested.length
                 ? <p>No setup command: {nested.join(", ")} {nested.length > 1 ? "have" : "has"} tests and nothing found prepares {nested.length > 1 ? "them" : "it"}. Its first work item stops before it starts until you set a setup command that does, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>
-                : <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>)}
+                : <p>No setup command found: its first work item stops before it starts until you set one, or turn on No setup needed, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>)}
             </>
           )}
           {step === 2 && (

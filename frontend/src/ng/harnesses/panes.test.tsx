@@ -72,7 +72,7 @@ describe("harness pane", () => {
     await userEvent.clear(model);
     expect(within(screen.getByRole("listbox", { name: "default model" })).getAllByRole("option").map((o) => o.textContent)).toEqual(["sonnet", "opus", "haiku"]);
     await userEvent.type(model, "hai");
-    await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
     await waitFor(() => expect(server.ops).toHaveLength(1));
     const again = await open(p, "default model", "combobox");
     await userEvent.clear(again);

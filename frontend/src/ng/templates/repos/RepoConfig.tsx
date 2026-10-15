@@ -124,9 +124,9 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
           <ValueCell label={f.label} value={f.show(v)} display={shown || f.fallback || "not set"} muted={!shown} bad={!!problem} changed={changed} placeholder={f.placeholder} choices={choices} closed multiple noun={f.choices === "steering" ? "steering profile" : "harness"} onCommit={commit} />
         )}
         {f.none && (
-          <span className="rp-none">
+          <label className="rp-none">
             <Switch checked={v === ""} label={f.none} onChange={(on) => void send(on ? "" : null).then(setNoneRefused)} /> {f.none}
-          </span>
+          </label>
         )}
         {(problem || (f.choice && refused) || noneRefused) && <span className="adr-err" role="alert">{(f.choice && refused) || noneRefused || problem!.message}</span>}
       </span>

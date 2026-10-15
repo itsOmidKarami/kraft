@@ -340,7 +340,7 @@ describe("FirstRun", () => {
     mount();
     await probeAndAdd(user);
     await user.click(stepButton(1)!);
-    expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or tick No setup needed/)).toBeInTheDocument();
+    expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or turn on No setup needed/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
   });
 

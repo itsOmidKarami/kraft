@@ -169,7 +169,7 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       {error && <p className="hn-error" role="alert">{error}</p>}
 
       <Head>Harness</Head>
-      <HarnessFields draft={c.draft} h={h} status={status} changed={c.changes.has(`harnesses.${h.id}`)} onYaml={onYaml} />
+      <HarnessFields key={h.id} draft={c.draft} h={h} status={status} changed={c.changes.has(`harnesses.${h.id}`)} onYaml={onYaml} />
 
       <Head>Provider accepts</Head>
       <Note>effort: {status?.efforts.length ? status.efforts.join(", ") : "none"}</Note>

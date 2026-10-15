@@ -114,10 +114,10 @@ export function SelectRow({ label, value, options, onPick, sub, bad, check, plai
       <div className="tpl-pf-line">
         <ValueMenu label={label} value={value} options={options} onPick={onPick} bad={bad} plain={plain} />
         {check && (
-          <span className="tpl-pf-check">
+          <label className="tpl-pf-check">
             <Switch checked={check.on} onChange={check.onToggle} label={check.label} />
             {check.label}
-          </span>
+          </label>
         )}
       </div>
       {sub && <p className={`tpl-pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
