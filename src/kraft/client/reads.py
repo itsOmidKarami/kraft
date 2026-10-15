@@ -392,7 +392,7 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
     /ws/events auth fix, because a CLI has no session cookie to offer.
     """
     from websockets.asyncio.client import connect
-    from websockets.exceptions import ConnectionClosed, InvalidHandshake
+    from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
     url = transport.base_url().replace("http://", "ws://", 1) + transport._api(
         f"/ws/events?after_seq={after_seq}"
@@ -404,6 +404,18 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
         async with connect(url, additional_headers=headers) as socket:
             async for message in socket:
                 yield json.loads(message)
+    except InvalidStatus as exc:
+        # The server refuses a bad or missing token by closing the handshake,
+        # which reaches here as 403. That is a refusal, not a server gone: the
+        # console must name the token, not say there is no server.
+        status = exc.response.status_code
+        if status not in (401, 403):
+            raise transport._unreachable() from exc
+        raise transport.ClientError(
+            f"kraft {status}: the server refused this machine's token for the event stream",
+            kind=transport.Failure.UNAUTHORIZED,
+            status=status,
+        ) from exc
     except (OSError, InvalidHandshake) as exc:
         raise transport._unreachable() from exc
     except ConnectionClosed as exc:

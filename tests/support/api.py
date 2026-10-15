@@ -384,8 +384,8 @@ async def await_gate(wid: str, timeout: float = 30) -> str:
 def run_with_app(api, scenario):
     """Run the coroutine `scenario()` with `api.app`'s lifespan entered, in one
     event loop: the Database the lifespan opens is bound to the loop that
-    opened it. For the client tests' `wired` fixture (`tests/client/conftest.py`),
-    whose ASGI transport does not run the lifespan itself."""
+    opened it. For the `wired` fixture (`tests/conftest.py`), whose ASGI
+    transport does not run the lifespan itself."""
 
     async def wrapper():
         async with api.app.router.lifespan_context(api.app):

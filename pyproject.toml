@@ -68,6 +68,9 @@ dependencies = [
     # the extensions VERIFY_X509_STRICT needs, not a shell-out to openssl.
     "cryptography>=42",
     "ruamel-yaml>=0.18",
+    # `kraft console`, the terminal UI. Only that verb imports it
+    # (`cli._console`), so no other verb pays for loading it.
+    "textual>=8.2,<9",
 ]
 
 [project.optional-dependencies]
@@ -107,10 +110,10 @@ where = ["src"]
 
 # Built SPA and default config, copied in by `just install`. Absent from a plain
 # checkout, so a build that skips that recipe ships an API with no UI. Beside
-# them, files checked in: skills, harnesses, prices, the icon names and the sandbox's `kraft`
-# shim (mode 0755 in git, which the wheel keeps).
+# them, files checked in: skills, harnesses, prices, the icon names, the sandbox's `kraft`
+# shim (mode 0755 in git, which the wheel keeps) and the console's stylesheet.
 [tool.setuptools.package-data]
-kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*", "prices.json", "detectors.yaml", "templates/lucide_icons.txt", "worker/bin/kraft"]
+kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*", "prices.json", "detectors.yaml", "templates/lucide_icons.txt", "worker/bin/kraft", "console/*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins/kraft-lite/tests"]
