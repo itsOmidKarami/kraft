@@ -87,6 +87,22 @@ describe("ng NotifyPage", () => {
     expect(webhook.getByRole("button", { name: /Send a test/ })).toBeDisabled();
   });
 
+  it("says Inactive in the pane too, when the switch is on but the channel cannot send", async () => {
+    stubNotification("default");
+    setup({ url_set: false, last_test: null });
+    await open("This browser");
+    const browser = screen.getByRole("complementary", { name: "This browser pane" });
+    await userEvent.click(within(browser).getByRole("switch", { name: "Alerts on this device" }));
+    expect(within(browser).getByRole("switch", { name: "Alerts on this device" })).toBeChecked();
+    expect(within(browser).getByText("Inactive")).toBeInTheDocument();
+    expect(within(browser).queryByText("Active")).toBeNull();
+    await userEvent.click(within(browser).getByRole("button", { name: "Notifications" }));
+    await open("Webhook");
+    const webhook = screen.getByRole("complementary", { name: "Webhook pane" });
+    expect(within(webhook).getByRole("switch", { name: "Webhook notifications" })).toBeChecked();
+    expect(within(webhook).getByText("Inactive")).toBeInTheDocument();
+  });
+
   it("opens a card in the pane on Config, and the floor on Overview", async () => {
     stubNotification("default");
     setup();
