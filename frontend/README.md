@@ -261,7 +261,18 @@ command without `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766` in front acts on your own
 Kraft, in `~/.kraft`: run these from the repository root, and type the two
 variables on each one.**
 
-1. Start a clean, seeded instance. No comment sits in these blocks: an
+1. Start a clean, seeded instance. The footer under the sidebar prints the
+   installed version, and a clone without tags builds `0.1.devN`, which also
+   brings an "update" badge. Pin the version a release screenshot shows before
+   anything else (`SETUPTOOLS_SCM_PRETEND_VERSION` is read when the package is
+   built, so it has to reinstall it), and look at the footer in the first
+   picture:
+
+   ```bash
+   SETUPTOOLS_SCM_PRETEND_VERSION=2.0.0 uv sync --reinstall-package kraft-sdlc
+   ```
+
+   Then the instance. No comment sits in these blocks: an
    interactive zsh does not read `#` as one. In one terminal, the backend on
    :8766, serving `frontend/dist`:
 
@@ -296,9 +307,9 @@ variables on each one.**
 3. Give the gate something to show. The seeded item's spec is the fake agent's:
    its front matter says `title: fake spec` (that becomes the heading) and its
    body `fake spec body`. Replace both with something real in
-   `.dev/run/worktrees/<id>/.engineering/specs/<id>.md` and commit the change
-   with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
-   `add -A`, which would also stage the agent's `.engineering/sessions/` file.
+   `.dev/run/items/<id>/docs/spec.md`, where Kraft keeps an item's documents
+   outside the repository; nothing is committed, and the review page reads the
+   file as it is. Keep the front matter and change only the `title:` and the body.
    The item's id is in its address on the board. For `item`, which lists an
    open thread, add one:
    `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment <id> --body "why is this here?"`
