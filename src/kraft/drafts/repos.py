@@ -177,6 +177,8 @@ def _view(st, entry: RepoEntry, instance) -> tuple[dict, list[dict]]:
 
 def _path_problem(entry: RepoEntry) -> dict | None:
     p = Path(entry.path).expanduser()
+    if not p.exists():
+        return _problem(entry.path, "path", f"No folder at {entry.path}")
     if not p.is_dir():
         return _problem(entry.path, "path", f"{entry.path} is not a directory")
     if config_mod.normalized_repo_root(p) is None:

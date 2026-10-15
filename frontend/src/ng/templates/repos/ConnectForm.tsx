@@ -125,7 +125,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
         {/* While the repo has no commit, Check again is the form's submit, so Enter in the
             field re-probes: a disabled default button blocks implicit submission (review L2). */}
         {noCommit && <Button ref={again} type="submit" disabled={busy}>Check again</Button>}
-        <Button ref={submit} type={noCommit ? "button" : "submit"} disabled={busy || !path.trim() || noCommit || (!!gains && !Object.keys(gains).length)} aria-describedby={noCommit ? "rp-connect-why" : undefined}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
+        <Button ref={submit} variant="primary" type={noCommit ? "button" : "submit"} disabled={busy || !path.trim() || noCommit || (!!gains && !Object.keys(gains).length)} aria-describedby={noCommit ? "rp-connect-why" : undefined}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
       </div>
       {noCommit && <p id="rp-connect-why" className="rp-err" role="status">{NO_COMMIT_WHY}</p>}
       {error && <p className="rp-err" role="alert">{error}</p>}

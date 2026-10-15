@@ -120,7 +120,7 @@ def test_add_repo_of_a_path_that_is_not_a_git_repo_is_a_problem(client, tmp_path
     body = resolved(client, {"op": "add_repo", "path": str(plain)})
     assert any("not a git repository" in m for m in messages(body))
     body = resolved(client, {"op": "add_repo", "path": str(tmp_path / "missing")})
-    assert any("not a directory" in m for m in messages(body))
+    assert any("No folder at" in m for m in messages(body))
 
 
 def test_add_repo_of_a_repo_with_no_commit_is_refused(client, tmp_path):

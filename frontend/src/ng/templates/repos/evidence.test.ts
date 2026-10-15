@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeCandidate } from "../../../types/settings";
-import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, testsCell, testsLine, testsTitle, withSource } from "./evidence";
+import { chosenSource, missingLine, others, readFrom, setupLine, readiness, stopLine, testsCell, testsLine, testsTitle, withSource } from "./evidence";
 
 const c = (over: Partial<ProbeCandidate>): ProbeCandidate => ({
   dir: "", role: "test", command: "just test", tier: "runner", source: "justfile recipe `test`", marker: "justfile",
@@ -93,5 +93,17 @@ describe("probe evidence", () => {
     expect(others(undefined, "test")).toBeNull();
     expect(withSource("pytest", null)).toBe("pytest");
     expect(withSource("pytest", "pytest.ini")).toBe("pytest — from pytest.ini");
+  });
+});
+
+describe("readiness", () => {
+  it.each([
+    ["setup undeclared", { test_command: "make test" }, "No setup", false],
+    ["tests unset", { setup_command: "uv sync" }, "No tests set", false],
+    ["both declared", { setup_command: "uv sync", test_command: "make test" }, "Ready", true],
+    ["no setup needed and no tests", { setup_command: "", test_command: "" }, "Ready", true],
+    ["scopes stand for tests", { setup_command: "uv sync", test_scopes: [{ paths: ["web"], command: "npm test" }] }, "Ready", true],
+  ])("%s", (_, entry, word, ok) => {
+    expect(readiness(entry)).toMatchObject({ word, ok });
   });
 });

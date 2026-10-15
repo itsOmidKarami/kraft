@@ -51,7 +51,7 @@ beforeEach(() => {
 const row = (name: string) => screen.getByRole("option", { name: new RegExp(`^${name},`) });
 
 describe("Repos page: the table", () => {
-  it("lists the repos with chain, steering, tests and state, the open count and the detected ones", async () => {
+  it("lists the repos with chain, whether each can run work, tests and state, the open count and the detected ones", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/platform", kind: "change", summary: "policy", fields: ["policy"] }, { path: "/src/docs-site", kind: "add", summary: "" }] }, true)));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
@@ -66,9 +66,14 @@ describe("Repos page: the table", () => {
     expect(row("docs-site").querySelector(".rp-mark.is-add")).not.toBeNull();
     expect(row("product_root").querySelector(".rp-mark")).toBeNull();
     // A cell cut to one line carries the whole text in its title and is on the ellipsis allowlist.
-    const steer = within(row("product_root")).getByText("project-standards");
-    expect(steer).toHaveAttribute("title", "project-standards");
-    expect(steer).toHaveAttribute("data-allow-ellipsis");
+    const tests = within(row("product_root")).getByText("make test");
+    expect(tests).toHaveAttribute("title", "make test");
+    expect(tests).toHaveAttribute("data-allow-ellipsis");
+    // A repo with no setup command does not read as healthy: its fixture declares none.
+    const ready = within(row("product_root")).getByText("No setup");
+    expect(ready).toHaveClass("is-no");
+    expect(ready).toHaveAttribute("title", expect.stringContaining("first work item stops"));
+    expect(screen.queryByText("Steering")).toBeNull();
     expect(screen.getByRole("region", { name: "Detected, not connected" })).toHaveTextContent("plugins");
     expect(screen.getByText("DRAFT · 2 CHANGES")).toBeInTheDocument();
   });

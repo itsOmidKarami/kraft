@@ -279,6 +279,11 @@ def test_an_entrys_sandbox_is_whichever_key_set_it(tmp_path, entry, expected):
 # ── probe_repo ──
 
 
+def test_probe_of_a_missing_folder_names_the_path(tmp_path):
+    with pytest.raises(config.ConfigError, match=r"^No folder at .*missing$"):
+        config.probe_repo(tmp_path / "missing")
+
+
 @pytest.mark.parametrize(
     ("origin", "forge", "project"),
     [

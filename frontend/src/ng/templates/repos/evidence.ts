@@ -114,3 +114,13 @@ export function testsTitle(e: Tested): string | undefined {
   const cmd = typeof e.test_command === "string" ? e.test_command : undefined;
   return lines.length ? lines.join("\n") : cmd;
 }
+
+/** Whether a repo can run work, from what its entry decides: a setup command
+ *  none declared stops the first item, and so do tests left unset. Kraft keeps
+ *  no verify result per repo, so "Ready" says it is configured, not that it passed. */
+export function readiness(e: Tested & { setup_command?: unknown }): { word: "Ready" | "No setup" | "No tests set"; ok: boolean; why: string } {
+  const scopes = Array.isArray(e.test_scopes) ? e.test_scopes.length : 0;
+  if (e.setup_command == null) return { word: "No setup", ok: false, why: "No setup command is declared: the first work item stops until one is set, or No setup needed is ticked." };
+  if (e.test_command == null && !scopes) return { word: "No tests set", ok: false, why: "No test command is set: items stop at verify until one is set, or No tests is ticked." };
+  return { word: "Ready", ok: true, why: "Setup and tests are set. Kraft has not run them here yet." };
+}

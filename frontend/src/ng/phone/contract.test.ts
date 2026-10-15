@@ -74,7 +74,8 @@ const ALLOWED = [
   "harnesses/useProviders", // the providers' accepted efforts and models
   "templates/repos/fields", // the Repos rows: label, parse, patch, source
   "templates/repos/types", // reposOf, runningOf, problemsOf
-  "templates/repos/RepoConfig", // setRepo only: the preview-checked set_repo
+  "templates/repos/evidence", // readiness: the list's can-run-work word, one source with the desktop
+  "templates/repos/RepoConfig", // setRepo and setEnabled: the preview-checked set_repo
   "templates/fields", // fieldMeta labels and routeOf: a task field goes by one name on both layouts
   "templates/choices", // the steering profiles and harnesses a typed list takes, as data
   "templates/useLibrary", // the published library's components, read once

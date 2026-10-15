@@ -9,9 +9,19 @@ import { useHarnessOptions } from "../panes/useHarnessOptions";
 import { useLibrary } from "../useLibrary";
 import { FIELDS, forgeOptions, GROUPS, YAML_ONLY, patchFor, sourceOf, valueOf, type RepoField } from "./fields";
 import { Fold, Head } from "../panes/controls";
-import { problemsOf, type RepoView } from "./types";
+import { problemsOf, repoName, type RepoView } from "./types";
+import { showToast } from "../../ui/Toast";
 
 const key = (p: Problem) => `${p.repo}|${p.field}|${p.message}`;
+
+/** Enables or disables a repo in the draft and says so with an Undo, on desktop's button and
+ *  the phone's switch alike: the draft is unpublished, so undoing is the way back. */
+export async function setEnabled(draft: ConfigDraft, repo: RepoView, on: boolean): Promise<string | null> {
+  const err = await setRepo(draft, repo, { enabled: on });
+  if (err) return err;
+  showToast(`${repoName(repo)} ${on ? "enabled" : "disabled"} in the draft.`, { action: { label: "Undo", run: () => void setRepo(draft, repo, { enabled: !on }) } });
+  return null;
+}
 
 /** Sends `set_repo`, checked first with ?preview=1 (Decided 8): a problem the edit
  *  would add at this repo answers its message and nothing is saved. */

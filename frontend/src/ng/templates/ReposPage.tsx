@@ -5,14 +5,13 @@ import { Inspector } from "../graph/Inspector";
 import { useRoving } from "../graph/useRoving";
 import { request } from "../http";
 import { Button } from "../ui/Button";
-import { Popover } from "../ui/Popover";
 import { AreaFrame } from "./draft/AreaFrame";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import type { Problem } from "./draft/types";
 import { Kv, Note } from "./panes/controls";
 import { ConnectForm } from "./repos/ConnectForm";
-import { testsCell, testsTitle } from "./repos/evidence";
-import { RepoConfig } from "./repos/RepoConfig";
+import { readiness, testsCell, testsTitle } from "./repos/evidence";
+import { RepoConfig, setEnabled } from "./repos/RepoConfig";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos/types";
 import { useRepoFragment } from "./repos/useRepoFragment";
 import { NoMatch } from "../ui/NoMatch";
@@ -112,8 +111,10 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               <>
                 <div className="rp-bar">
                   <input className="rp-search" type="search" aria-label="Search repos" placeholder="Search repos" value={q} onChange={(e) => setQ(e.target.value)} />
-                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-haspopup="dialog" aria-expanded={connecting}><Plus size={13} aria-hidden /> Connect repo</button>
-                  <Popover anchor={connectBtn} open={connecting} onClose={() => setConnecting(false)} role="dialog" label="Connect a repo">
+                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-expanded={connecting}><Plus size={13} aria-hidden /> Connect repo</button>
+                </div>
+                {connecting && (
+                  <div className="rp-connect-panel" role="dialog" aria-label="Connect a repo" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setConnecting(false); connectBtn.current?.focus(); } }}>
                     <ConnectForm
                       draft={draft}
                       known={new Set([...repos, ...data.detected].map((x) => x.path))}
@@ -121,22 +122,21 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       chains={chains}
                       onDone={(path) => {
                         setConnecting(false);
-                        const x = path;
-                        navigate(reposUrl(x));
+                        navigate(reposUrl(path));
                         setPaneOpen(true);
                         setTab("config");
                       }}
                     />
-                  </Popover>
-                </div>
+                  </div>
+                )}
                 <div className="rp-head" aria-hidden>
-                  <span>Repo</span><span>Chain</span><span>Steering</span><span>Tests</span><span>State</span>
+                  <span>Repo</span><span>Chain</span><span>Can run work</span><span>Tests</span><span>State</span>
                 </div>
                 <div className="rp-rows" role="listbox" aria-label="Repos" onKeyDown={onKey}>
                   {matches.map((x) => {
                     const c = change(x.path);
                     const bad = problemsOf(r, x.path).length > 0;
-                    const steer = x.resolved.steering.join(", ");
+                    const ready = readiness(x.entry);
                     const n = running[x.path] ?? 0;
                     const state = STATE_WORD(x, n);
                     return (
@@ -145,7 +145,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                         ref={rove.ref(x.path)}
                         role="option"
                         aria-selected={sel?.path === x.path}
-                        aria-label={`${repoName(x)}, chain ${String(x.entry.default_chain ?? "default")}, ${state}${bad ? ", has a problem" : ""}`}
+                        aria-label={`${repoName(x)}, chain ${String(x.entry.default_chain ?? "default")}, ${ready.word}, ${state}${bad ? ", has a problem" : ""}`}
                         tabIndex={rove.tabIndex(x.path)}
                         className={`rp-row${sel?.path === x.path ? " is-sel" : ""}${x.entry.enabled === false ? " is-off" : ""}`}
                         onClick={() => select(x)}
@@ -157,7 +157,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                           {bad && <span className="rp-dot" role="img" aria-label="has a problem" />}
                         </span>
                         <span className="rp-cell">{String(x.entry.default_chain ?? "default")}</span>
-                        <span className="rp-cell rp-cut" data-allow-ellipsis title={steer || undefined}>{steer || "—"}</span>
+                        <span className={`rp-cell rp-ready${ready.ok ? "" : " is-no"}`} title={ready.why}>{ready.word}</span>
                         <span className="rp-cell rp-cut" data-allow-ellipsis title={testsTitle(x.entry)}>{testsCell(x.entry)}</span>
                         <span className={`rp-cell rp-state${x.entry.enabled === false ? "" : " is-on"}`}>{state}</span>
                       </div>
@@ -223,7 +223,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
   const enabled = repo.entry.enabled !== false;
   const name = repoName(repo);
 
-  const toggle = () => void draft.ops([{ op: "set_repo", path: repo.path, patch: { enabled: !enabled } }]);
+  const toggle = () => void setEnabled(draft, repo, !enabled).then((e) => e && setNote(e));
   const disconnect = () => {
     // The server's refusal in the same words (`DELETE /repos`, the repos draft).
     if (running > 0) return setNote(`${name} has ${running} open ${running === 1 ? "item" : "items"}; finish or cancel ${running === 1 ? "it" : "them"} first. Disconnect is refused until then.`);
@@ -262,6 +262,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
           <Kv k="default chain" v={String(repo.entry.default_chain ?? "default")} mono />
           <Kv k="open items" v={String(running)} />
           <Kv k="state" v={enabled ? "enabled" : "disabled"} />
+          <Kv k="can run work" v={readiness(repo.entry).word} muted={readiness(repo.entry).ok} />
           <Kv k="steering" v={repo.resolved.steering.join(", ") || "—"} mono muted={!repo.resolved.steering.length} />
           <Kv k="steering from" v={repo.sources.steering === "repo" ? "this repo" : "the chain's library"} />
           <Kv k="forge" v={forge ? `${forge}${typeof repo.entry.project === "string" ? ` · ${repo.entry.project}` : ""}` : "—"} muted={!forge} />

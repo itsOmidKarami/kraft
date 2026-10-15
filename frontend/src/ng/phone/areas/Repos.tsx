@@ -3,8 +3,9 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
-import { FIELDS, forgeOptions, NO_TESTS, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
-import { setRepo } from "../../templates/repos/RepoConfig";
+import { readiness } from "../../templates/repos/evidence";
+import { FIELDS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
+import { setEnabled, setRepo } from "../../templates/repos/RepoConfig";
 import { harnessChoices, steeringChoices } from "../../templates/choices";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { useLibrary } from "../../templates/useLibrary";
@@ -46,8 +47,8 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: `${r.path} · chain ${String(r.entry.default_chain ?? "default")}${r.entry.test_command === "" ? ` · ${NO_TESTS}` : r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
-            chips: [{ label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
+            sub: r.path, subCut: true, value: String(r.entry.default_chain ?? "default"),
+            chips: [{ label: readiness(r.entry).word, tone: readiness(r.entry).ok ? "ok" as const : "warn" as const }, { label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
       )}
@@ -113,7 +114,7 @@ export function RepoView() {
         <>
           <Group
             rows={[
-              { label: "enabled", sw: repo.entry.enabled !== false, changed: changed("enabled"), onSwitch: (on) => void setRepo(draft, repo, { enabled: on }).then((e) => e && showToast(e)) },
+              { label: "enabled", sw: repo.entry.enabled !== false, changed: changed("enabled"), onSwitch: (on) => void setEnabled(draft, repo, on).then((e) => e && showToast(e)) },
               ...(running ? [{ label: "open items", value: String(running) } as RowSpec] : []),
               ...FIELDS.map(rowOf),
             ]}
