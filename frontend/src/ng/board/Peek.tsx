@@ -112,7 +112,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
         <Banner item={item} onRaise={onRaise} reload={reload} note={<GateNote item={item} version={version} />} />
-        <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
+        <StateCard item={item} footerArchives reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <ComesAfterCard item={item} reload={reload} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />

@@ -299,6 +299,12 @@ describe("StateCard", () => {
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
   });
 
+  it("done on a surface with its own Archive (the peek's footer) has none in the card", () => {
+    stubFetch();
+    routed(<StateCard item={detail({ display_status: "done", stop: null })} footerArchives {...handlers()} />);
+    expect(within(screen.getByRole("region", { name: "Done" })).queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
   it("done with no MR says none was opened; a closed one says so", async () => {
     stubFetch();
     const { unmount } = show({ display_status: "done", stop: null, mr_ref: null });

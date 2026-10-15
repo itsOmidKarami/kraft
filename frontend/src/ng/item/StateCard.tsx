@@ -38,12 +38,13 @@ const pathOf = (task?: string | null) => (task ? task.split(".").join(" › ") :
  *  where, a paragraph, up to four facts, actions with the primary first, and
  *  "Open <node> →". Content from `stop` and `stop.facts` only: a fact the
  *  server does not send is left out, never written here. */
-export function StateCard({ item, files = null, ...h }: { item: ItemDetail; files?: DiffFile[] | null } & Handlers) {
+/** `footerArchives`: the surface has its own Archive (the board peek's footer), so the done card leaves it out. */
+export function StateCard({ item, files = null, footerArchives = false, ...h }: { item: ItemDetail; files?: DiffFile[] | null; footerArchives?: boolean } & Handlers) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, files, logUrl: logLink(item), footerArchives, onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -99,7 +100,7 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
   return failedFix(item) === "repo" ? [...retries, { label: "Check the repo settings", run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string; footerArchives: boolean }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
@@ -219,7 +220,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       tone: "neutral", glyph: <CircleCheck size={14} aria-hidden />, title: "Done",
       text: mr ? undefined : "The chain finished. No merge request was opened.",
       facts,
-      actions: when(admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
+      actions: when(!h.footerArchives && admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
     };
   }
   if (status === "cancelled") {
