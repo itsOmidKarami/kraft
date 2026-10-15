@@ -5,6 +5,7 @@ import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Button } from "../ui/Button";
+import { NotFound } from "../ui/NotFound";
 import { showToast } from "../ui/Toast";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import { counts } from "../templates/draft/view";
@@ -141,10 +142,10 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
     <DraftLibrary.Provider value={draftLibrary}>
     <div className="lib-page" data-ref={refId}>
       <HeaderTail>
-        {sel && (
+        {row && (
           <>
             <span className="lib-sep" aria-hidden>›</span>
-            <span className="lib-ref">{sel.name}</span>
+            <span className="lib-ref">{row.name}</span>
           </>
         )}
         {row?.addon && <AddonBadge addon={row.addon} />}
@@ -172,7 +173,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         ) : (
           <div className={`lib-canvas${refId ? "" : " is-landing"}`} style={{ right: reserve }}>
             <Button className="lib-back" onClick={() => navigate("/templates/library")}>← Library</Button>
-            {!refId ? <LibraryLanding rows={rows} loaded={published !== null} /> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : null}
+            {!refId ? <LibraryLanding rows={rows} loaded={published !== null} /> : !row ? <NotFound what="component" id={refId} backTo="/templates/library" backLabel="Back to the Library" /> : null}
           </div>
         )}
         {surface === "canvas" && row && (

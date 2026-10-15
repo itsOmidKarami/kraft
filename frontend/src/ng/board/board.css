@@ -8,6 +8,7 @@
 .board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
 .board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: var(--fs-label); color: var(--text-muted); }
+.board-empty-solo { padding-left: 14px; }
 .board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
 .board-more:hover { background: var(--surface-2); color: var(--text); }
 .board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

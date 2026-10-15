@@ -4,7 +4,7 @@ import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
-import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES } from "../../analytics/shared";
+import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE } from "../../analytics/shared";
 import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -46,16 +46,17 @@ export function Analytics() {
         {!report && !error && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
         {report && t && (
           <>
-            <div className="ph-tiles">
-              <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
-              <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
-              <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
-              <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
-            </div>
             {empty ? (
-              <p className="ph-empty">Nothing has completed in this range yet.</p>
+              <p className="ph-empty">{EMPTY_RANGE}</p>
             ) : (
               <>
+                <div className="ph-tiles">
+                <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
+                <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
+                <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
+                <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
+                </div>
+
                 <Block title="Waiting at each gate">
                   {gates.length === 0 ? <p className="ph-note">No gate waits in this range.</p> : (
                     <div className="ph-list">

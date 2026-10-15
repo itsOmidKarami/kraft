@@ -71,7 +71,6 @@ export interface Group {
   rows: WorkItem[];
   /** All rows the group holds; `rows` is cut to the Done cap. */
   total: number;
-  empty: string;
   /** Done under Group by Status: the auto-archive note, Select all, the cap. */
   done: boolean;
 }
@@ -84,28 +83,25 @@ export interface BoardView {
   doneCap: number | null;
 }
 
-/** The groups the board draws, in order. Needs you always comes first. */
+/** The groups the board draws, in order, Needs you first. A group with no rows is not drawn. */
 export function groupsOf(items: WorkItem[], v: BoardView): Group[] {
-  const filtered = !!(v.filter.q.trim() || v.filter.repo || v.filter.chain);
   const shown = items.filter((i) => i.display_status !== "archived" && matches(i, v.filter)).sort(sorter(v.sort));
-  // An empty group is its head line alone; only a filter earns it a hint.
-  const emptyLine = filtered ? "nothing here for this filter" : "";
   if (v.group === "status")
     return STATUS_GROUPS.map(({ key, label }) => {
       const all = shown.filter((i) => groupOf(i) === key);
       const done = key === "done";
       const rows = done && v.doneCap != null ? newest(all, v.doneCap) : all;
-      return { key, label, rows, total: all.length, empty: emptyLine, done };
-    });
+      return { key, label, rows, total: all.length, done };
+    }).filter((g) => g.total > 0);
   const needs = shown.filter((i) => groupOf(i) === "needs");
   const rest = shown.filter((i) => groupOf(i) !== "needs");
   const keyOf = (i: WorkItem) => (v.group === "repo" ? i.repo : chainOf(i));
   const keys = [...new Set(rest.map(keyOf))].sort((a, b) => a.localeCompare(b));
   return [
-    ...(needs.length ? [{ key: "needs", label: "Needs you", rows: needs, total: needs.length, empty: "", done: false }] : []),
+    ...(needs.length ? [{ key: "needs", label: "Needs you", rows: needs, total: needs.length, done: false }] : []),
     ...keys.map((k) => {
       const rows = rest.filter((i) => keyOf(i) === k);
-      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : k, rows, total: rows.length, empty: "", done: false };
+      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : k, rows, total: rows.length, done: false };
     }),
   ];
 }

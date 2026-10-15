@@ -1,3 +1,4 @@
+import { NotFound } from "../ui/NotFound";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -58,7 +59,7 @@ export function ChainsPage() {
 
 function ChainEditor({ chain, node }: { chain: string; node?: string }) {
   const draft = useConfigDraft("chains", chain);
-  if (draft.status === "notFound") return <div className="tpl-note"><h1>No chain called {chain}</h1></div>;
+  if (draft.status === "notFound") return <NotFound what="chain" id={chain} backTo="/templates/chains" backLabel="Back to Chains" />;
   if (draft.status === "error" && !draft.view) return <div className="tpl-note" role="alert">Couldn't load {chain}. {draft.error}</div>;
   if (!draft.view) return <div className="tpl-note">Loading {chain}…</div>;
   return <Editor chain={chain} node={node} draft={draft} />;

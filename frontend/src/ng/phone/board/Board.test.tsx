@@ -126,6 +126,17 @@ describe("the phone board (B)", () => {
     expect(where()).not.toContain("f=");
   });
 
+  it("says one line with Clear when the chosen chip holds nothing, and Clear shows the board again", async () => {
+    put(item("r3", "running"));
+    mount("/?f=done");
+    await act(async () => {});
+    expect(screen.getByText("Nothing matches this filter.")).toBeInTheDocument();
+    expect(screen.queryByRole("region")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(where()).not.toContain("f=");
+    expect(screen.getByText("Item r3")).toBeInTheDocument();
+  });
+
   it("has a Not started chip, so the four chips add up to All", async () => {
     put(gate("g1"), item("r2", "running"), item("n3", "paused", { current_node_id: null }), item("n4", "paused", { current_node_id: null }), item("d5", "done"));
     mount();

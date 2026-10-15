@@ -12,6 +12,7 @@ import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
 import { tip } from "../ui/Tooltip";
+import { NoMatch } from "../ui/NoMatch";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
@@ -142,6 +143,7 @@ export function BoardPage() {
     [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
   );
   const needsN = countIn(items, "needs");
+  const filtered = !!(query.q.trim() || query.repo || query.chain);
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
   const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {
@@ -314,7 +316,11 @@ export function BoardPage() {
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
-            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.map((g) => (
+            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.length === 0 ? (
+              filtered
+                ? <NoMatch className="board-empty board-empty-solo" query={query.q} onClear={() => setQuery({ q: "", repo: "", chain: "" })} />
+                : <p className="board-empty board-empty-solo">No work items yet.</p>
+            ) : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">
                   <span>{g.label}</span>
@@ -330,7 +336,6 @@ export function BoardPage() {
                     <button type="button" className="board-select-all" onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</button>
                   )}
                 </h2>
-                {g.rows.length === 0 && g.empty && <p className="board-empty">{g.empty}</p>}
                 {g.rows.map((i) => (
                   <Row
                     key={i.id}

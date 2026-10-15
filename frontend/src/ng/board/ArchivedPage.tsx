@@ -6,6 +6,7 @@ import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { Menu } from "../ui/Menu";
+import { NoMatch } from "../ui/NoMatch";
 import { BulkBar } from "./BulkBar";
 import { sendBulk } from "./bulk";
 import { Row } from "./Row";
@@ -77,26 +78,28 @@ export function ArchivedPage() {
         <div className="board-list">
           <div className="board-list-inner">
             {error && <p className="item-error board-empty" role="alert">{error}</p>}
-            <section className="board-group" aria-label="Archived">
-              <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>
-              {items && !shown.length && <p className="board-empty">{q.trim() ? "nothing here for this filter" : "Nothing is archived."}</p>}
-              {shown.map((i) => (
-                <Row
-                  key={i.id}
-                  item={i}
-                  now={now}
-                  selected={false}
-                  checked={checked.has(i.id)}
-                  offline={false}
-                  error={rowErrors[i.id]}
-                  onSelect={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
-                  onOpen={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
-                  onCheck={toggle}
-                  onAction={() => {}}
-                  own={{ label: "Restore", run: () => void restore(i.id), tail: `archived by ${i.archived_by ?? "you"}`, age: ago(i.archived_at, now) }}
-                />
-              ))}
-            </section>
+            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <p className="board-empty board-empty-solo">Nothing is archived.</p>)}
+            {shown.length > 0 && (
+              <section className="board-group" aria-label="Archived">
+                <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>
+                {shown.map((i) => (
+                  <Row
+                    key={i.id}
+                    item={i}
+                    now={now}
+                    selected={false}
+                    checked={checked.has(i.id)}
+                    offline={false}
+                    error={rowErrors[i.id]}
+                    onSelect={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
+                    onOpen={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)}
+                    onCheck={toggle}
+                    onAction={() => {}}
+                    own={{ label: "Restore", run: () => void restore(i.id), tail: `archived by ${i.archived_by ?? "you"}`, age: ago(i.archived_at, now) }}
+                  />
+                ))}
+              </section>
+            )}
           </div>
         </div>
         {checked.size > 0 && (

@@ -77,5 +77,6 @@ describe("ArchivedPage", () => {
     list.mockResolvedValue({ items: [], cursor: 1 });
     mount();
     expect(await screen.findByText("Nothing is archived.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Archived/, level: 2 })).toBeNull();
   });
 });
