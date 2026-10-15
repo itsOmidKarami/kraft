@@ -73,7 +73,7 @@ describe("the gate review (F)", () => {
   it("shows an agent's note under its file, labelled, read-only", async () => {
     mount(gateItem());
     await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
-    expect(screen.getByText("agent · line +5")).toBeInTheDocument();
+    expect(screen.getByText("agent · line 5")).toBeInTheDocument();
     expect(screen.getByText("No bound on the cache.")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
@@ -96,8 +96,8 @@ describe("the gate review (F)", () => {
     it("names each range with its sides and quotes its lines, as the desktop does", async () => {
       mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
       await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
-      expect(screen.getByText("you · lines −2 to +6")).toBeInTheDocument();
-      expect(screen.getByText("you · lines −1 to −2")).toBeInTheDocument();
+      expect(screen.getByText("you · old 2 – new 6")).toBeInTheDocument();
+      expect(screen.getByText("you · old lines 1–2")).toBeInTheDocument();
       const quote = screen.getByRole("group", { name: "Lines commented on" });
       expect(within(quote).getByText("+class EmbeddingCache:")).toHaveClass("ph-diff-add");
       expect(within(quote).getByText(/old = 1/)).toHaveClass("ph-diff-del");
@@ -106,7 +106,7 @@ describe("the gate review (F)", () => {
     it("marks a comment not sent yet as pending", async () => {
       mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
       await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
-      expect(screen.getByText("you · line +14 · pending")).toBeInTheDocument();
+      expect(screen.getByText("you · line 14 · pending")).toBeInTheDocument();
     });
 
     it("lists a thread on the whole change above the files", async () => {
@@ -171,11 +171,17 @@ describe("Approve (F.3)", () => {
     expect(await screen.findByText("Approving starts verification · no gate after this")).toBeInTheDocument();
   });
 
-  it("is disabled when the item is not waiting at this gate", async () => {
+  it("shows the outcome, not a greyed Approve, once the item is not waiting at this gate", async () => {
     mount(gateItem({ pending_gate: "other_gate" }), "/work-items/w1/review?gate=plan_approval");
-    expect(await screen.findByText("Available when the item is waiting at a gate.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(await screen.findByText("This item is not waiting at this gate.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
     expect(screen.queryByText(/^Approving /)).toBeNull();
+  });
+
+  it("says it is read-only", async () => {
+    mount(gateItem());
+    expect(await screen.findByText("Read-only here: add comments on the desktop.")).toBeInTheDocument();
   });
 
   it("keeps a refusal on the screen", async () => {
@@ -193,7 +199,7 @@ describe("Request changes (F.3)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
     expect(screen.getByText("Goes back to: plan")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Request changes" });
+    const send = screen.getByRole("button", { name: "Reject to plan" });
     expect(send).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "bound the cache");
     await userEvent.click(send);
@@ -222,10 +228,24 @@ describe("Request changes (F.3)", () => {
     expect(!!screen.queryByRole("button", { name: "Request changes" })).toBe(shown);
   });
 
+  it("asks before Cancel drops a typed note, and leaves at once with none", async () => {
+    mount(gateItem(), "/work-items/w1/review?compose=reject");
+    const note = await screen.findByRole("textbox", { name: "Your note" });
+    await userEvent.type(note, "bound it");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Discard your note?")).toBeInTheDocument();
+    expect(where()).toBe("/work-items/w1/review?compose=reject");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(note).toHaveValue("bound it");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(where()).not.toContain("compose"));
+  });
+
   it("stays on the composer, with the text, when the server refuses", async () => {
     mount(gateItem(), "/work-items/w1/review?compose=reject", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "no fix rounds left" }] });
     await userEvent.type(await screen.findByRole("textbox", { name: "Your note" }), "x");
-    await userEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
     expect(screen.getByRole("textbox", { name: "Your note" })).toHaveValue("x");
   });

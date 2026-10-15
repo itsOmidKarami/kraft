@@ -242,8 +242,8 @@ describe("the other composers (C.7)", () => {
 
   it("Reject names its target and needs a note", async () => {
     const calls = mount(gateItem(), "/work-items/w1?compose=reject");
-    expect(await screen.findByText("Reject target: plan")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Reject with note" });
+    expect(await screen.findByText("Goes back to: plan")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Reject to plan" });
     expect(send).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox"), "the plan skips the cache bound");
     await userEvent.click(send);
@@ -284,7 +284,7 @@ describe("the other composers (C.7)", () => {
   it("keeps a refusal under the button and the text in the box", async () => {
     mount(gateItem(), "/work-items/w1?compose=reject", { "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await userEvent.type(await screen.findByRole("textbox"), "no");
-    await userEvent.click(screen.getByRole("button", { name: "Reject with note" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not pending");
     expect(screen.getByRole("textbox")).toHaveValue("no");
   });
@@ -418,9 +418,9 @@ describe("pair actions that call straight through", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
     await waitFor(() => expect(lastPost(calls)?.body).toEqual({ path: expect.stringContaining("verification") }));
   });
-  it("a gate stop goes to the review, and Reject… to its composer", async () => {
+  it("a gate stop goes to the review, and Request changes… to its composer", async () => {
     mount(item("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval", current_node_id: "plan_approval" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Reject…" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Request changes…" }));
     await waitFor(() => expect(where()).toBe("/work-items/w1?compose=reject"));
   });
 });

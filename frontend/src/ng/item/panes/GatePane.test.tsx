@@ -37,28 +37,28 @@ describe("GateFooter", () => {
   it("rejects only with a note, naming where it goes back to", async () => {
     const calls = stubFetch(WRITES);
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     const card = screen.getByRole("group", { name: "Reject plan_approval" });
     expect(card).toHaveTextContent("goes back to plan");
-    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject to plan" })).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
   });
 
   // Escape closes an empty note as Cancel does; one with text in it stays, text and all (R11b-02).
-  it.each(["Cancel", "Escape"])("moves focus into the note on Reject…, and back to Reject… on %s (R7b-10)", async (how) => {
+  it.each(["Cancel", "Escape"])("moves focus into the note on Request changes…, and back to Request changes… on %s (R7b-10)", async (how) => {
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveFocus();
     if (how === "Cancel") await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     else await userEvent.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Reject…" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Request changes…" })).toHaveFocus();
   });
 
   it("keeps a note with text in it on Escape (R11b-02)", async () => {
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     await userEvent.keyboard("The spec misses the cache eviction policy.{Escape}");
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveValue("The spec misses the cache eviction policy.");
   });
@@ -66,7 +66,7 @@ describe("GateFooter", () => {
   it("rejects on ⌘↵ from the note, and not before there is one", async () => {
     const calls = stubFetch(WRITES);
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     const note = screen.getByLabelText("Why (the next agent reads it)");
     await userEvent.click(note);
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
@@ -90,9 +90,9 @@ describe("GateFooter", () => {
     stubFetch({ "POST /work-items/w1/gates/plan_approval/reject": [409, { detail: "no fix rounds left" }] });
     const reload = vi.fn();
     render(<GateFooter item={pending} gate={gate} reload={reload} onRead={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Request changes…" }));
     await userEvent.type(screen.getByLabelText("Why (the next agent reads it)"), "Add the invalidation story.");
-    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject to plan" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no fix rounds left");
     expect(screen.getByRole("group", { name: "Reject plan_approval" })).toBeInTheDocument();
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveValue("Add the invalidation story.");

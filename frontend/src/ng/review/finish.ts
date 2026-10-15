@@ -29,6 +29,10 @@ export function gateConsequence(item: Pick<WorkItem, "pending_gate" | "chain_def
   ].filter(Boolean).join(" · ");
 }
 
+/** The two words for sending a gate back, one source for the desktop dialog and both phone screens. */
+export const REQUEST_CHANGES = "Request changes";
+export const rejectTo = (node: string) => `Reject to ${node}`;
+
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
 /** What the next review would send: draft threads and your draft replies. */
@@ -69,7 +73,7 @@ export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status">
   }
   const block = approveBlock(item, gate, threads);
   return [
-    { key: "request_changes", label: "Request changes", parts: request, disabled: ended || noRounds || !fix },
+    { key: "request_changes", label: REQUEST_CHANGES, parts: request, disabled: ended || noRounds || !fix },
     { key: "comment", label: "Comment only", parts: [{ t: atGate ? "Agents answer questions in-thread. No code runs; the gate stays open." : "Agents answer questions in-thread. No code runs and the item keeps going." }], disabled: false },
     { key: "approve", label: "Approve", parts: [{ t: block ?? `Marks ${gate} approved, same as Approve on the gate.` }], disabled: !!block },
   ];
@@ -84,7 +88,9 @@ export function barText(threads: ReviewThread[], item: Pick<WorkItem, "pending_g
     return {
       published: false,
       title: "Your review",
-      text: `${pend.length} pending, ${pend.filter((t) => t.label === "must_fix").length} must fix, ${pend.filter((t) => !t.label).length} unlabeled`,
+      text: pend.length
+        ? `${pend.length} pending, ${pend.filter((t) => t.label === "must_fix").length} must fix, ${pend.filter((t) => !t.label).length} unlabeled`
+        : `No comments yet${!!gate && item.pending_gate === gate ? " · Ready to approve" : ""}`,
       agent: agentReplies ? `${agentReplies} agent ${agentReplies === 1 ? "reply" : "replies"}` : null,
       pending: pend.length,
     };
@@ -96,7 +102,7 @@ export function barText(threads: ReviewThread[], item: Pick<WorkItem, "pending_g
   return {
     published: true,
     title: `${resolved} of ${threads.length} resolved`,
-    text: `${pending ? `${pending} pending · ` : ""}${!atGate ? "Not at a gate, so Approve is unavailable" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve"}`,
+    text: `${pending ? `${pending} pending · ` : ""}${!atGate ? "Not at a gate" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve"}`,
     agent: null,
     pending,
   };

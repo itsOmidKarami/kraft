@@ -1,3 +1,4 @@
+import { REQUEST_CHANGES } from "../../review/finish";
 import { ago, elapsed, plural, until, usd } from "../../../format";
 import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
 import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED } from "../../item/status";
@@ -208,7 +209,7 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {
-        case "gate": return { secondary: a("reject", "Reject…"), primary: a("review", "Review and decide") };
+        case "gate": return { secondary: a("reject", `${REQUEST_CHANGES}…`), primary: a("review", "Review and decide") };
         // No Steer: a retry with one would only stop at the same cap again.
         case "budget": return { secondary: null, primary: offersRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
         // Retry with no raise would only stop at the same cap again, so with the stop's limit the way on is the raise.

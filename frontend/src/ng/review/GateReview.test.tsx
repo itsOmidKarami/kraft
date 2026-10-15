@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -132,7 +132,7 @@ describe("the overlay on the review page", () => {
   it("sends a chain revision's digest with Approve, through the review route (#355)", async () => {
     await open("?doc=1", {}, { ...DOC, digest: "d1" });
     await screen.findByText("Review brief");
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog", { name: /Gate review/ })).getByRole("button", { name: "Approve" })));
     const [path, init] = vi.mocked(http.request).mock.calls.at(-1)!;
     expect([path, JSON.parse(init!.body as string)]).toEqual(["/work-items/w1/gates/final_review/review", { outcome: "approve", digest: "d1" }]);
   });

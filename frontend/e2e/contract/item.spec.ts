@@ -152,8 +152,8 @@ const ROWS: Row[] = [
   },
 
   {
-    name: "gate: the gate pane offers Approve and Reject side by side",
-    run: async (p) => { await app(p, item("needs-gate", "/nodes/final_review")); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeVisible(); await expect(p.getByRole("button", { name: /^Reject/ }).first()).toBeVisible({ timeout: 2000 }); },
+    name: "gate: the gate pane offers Approve and Request changes side by side",
+    run: async (p) => { await app(p, item("needs-gate", "/nodes/final_review")); await expect(p.getByRole("button", { name: /^Approve/ }).first()).toBeVisible(); await expect(p.getByRole("button", { name: /^Request changes/ }).first()).toBeVisible({ timeout: 2000 }); },
   },
 
   // V2.1

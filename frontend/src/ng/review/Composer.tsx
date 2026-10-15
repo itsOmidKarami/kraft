@@ -5,7 +5,7 @@ import { useReason } from "../ui/Reason";
 import { COMMENT_NEEDS_TEXT } from "../ui/reasons";
 import { Markdown } from "../ui/Markdown";
 import { IconButton } from "../ui/IconButton";
-import { X } from "../icons";
+import { Check, X } from "../icons";
 import { isMixed, isOneLine, rangeName, startSideOf, type LineRange } from "./range";
 import { LABELS, codeBlock } from "./Thread";
 import { mod, sendOnModEnter } from "../keys";
@@ -118,12 +118,13 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
         }}>
           {LABELS.map(([k, text], i) => (
             <button key={text} ref={(el) => void (chips.current[i] = el)} type="button" role="radio" aria-checked={d.label === k} tabIndex={d.label === k ? 0 : -1} className={`rv-chip${d.label === k ? " is-on" : ""}`} onClick={() => set({ label: k })}>
+              {d.label === k && <Check size={12} aria-hidden />}
               {text}
             </button>
           ))}
         </span>
         <span className="rv-spacer" />
-        <button type="button" className="rv-chip" aria-pressed={preview} onClick={() => setPreview((p) => !p)}>{preview ? "Continue editing" : "Preview"}</button>
+        <button type="button" className="rv-viewed-btn" aria-pressed={preview} onClick={() => setPreview((p) => !p)}>{preview ? "Continue editing" : "Preview"}</button>
       </div>
       {preview ? (
         <div className="rv-preview"><Markdown text={d.body || "Nothing to preview"} code={codeBlock} /></div>

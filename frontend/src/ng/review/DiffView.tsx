@@ -303,9 +303,9 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         {collapsed && threads > 0 && <span className="rv-file-threads">{threads} {threads === 1 ? "thread" : "threads"}</span>}
         <span className="rv-spacer" />
         {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>}
-        <button type="button" className="rv-viewed-btn" aria-pressed={viewed} onClick={() => p.onViewed(file.path, !viewed)}>
-          <span aria-hidden="true">{viewed ? "☑" : "☐"}</span> Viewed
-        </button>
+        <label className="rv-viewed-btn">
+          <input type="checkbox" checked={viewed} onChange={() => p.onViewed(file.path, !viewed)} /> Viewed
+        </label>
         <Menu
           label={`File menu for ${file.path}`}
           trigger={<EllipsisVertical size={15} aria-hidden />}
