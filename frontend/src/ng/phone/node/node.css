@@ -2,7 +2,7 @@
 .ph-strip { flex: none; display: flex; gap: 4px; padding: 6px 16px 12px; overflow-x: auto; border-bottom: 1px solid var(--line); }
 .ph-strip-chip { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 104px; min-height: 64px; padding: 8px 4px; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .ph-strip-chip.ph-is-on { background: var(--surface-2); color: var(--text); }
-.ph-strip-label { max-width: 96px; font: var(--fs-label) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; text-align: center; line-height: 1.25; }
+.ph-strip-label { max-width: 96px; font: var(--fs-label) ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; line-height: 1.25; }
 .ph-node-head { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
 .ph-node-title { margin: 0; font: 600 var(--fs-h1) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
 .ph-node-sub { margin: 0; font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }

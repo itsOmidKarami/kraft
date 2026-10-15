@@ -15,7 +15,7 @@ export function Strip({ nodes, current, onPick }: { nodes: ChainNode[]; current:
       {nodes.map((n) => (
         <button key={n.id} ref={n.id === current ? on : undefined} type="button" className={`ph-strip-chip${n.id === current ? " ph-is-on" : ""}`} aria-current={n.id === current ? "true" : undefined} onClick={() => onPick(n.id)}>
           <NodeGlyph kind={n.kind} size="sm" state={n.state} icon={n.icon} running={n.running} paused={n.paused} capped={n.capped} />
-          <span className="ph-strip-label">{n.id}</span>
+          <span className="ph-strip-label" title={n.id}>{n.id}</span>
         </button>
       ))}
     </div>
