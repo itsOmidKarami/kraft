@@ -200,6 +200,16 @@ describe("StageGraph", () => {
       expect(screen.getByRole("button", { name: "3 more nodes off-screen" })).toBeInTheDocument();
     });
 
+    it("counts the gate it waits at as the next one, so it reaches to the gate after that and not to the chain's end", () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+      const waiting: ChainNode[] = [...ten.slice(0, 3).map((n) => ({ ...n, state: "done" as const })), { id: "g1", kind: "gate", state: "amber" }, ten[3], ten[4], { id: "g2", kind: "gate", state: "todo" }, ...ten.slice(5, 8)];
+      render(<StageGraph name="c" nodes={waiting} fit={{ floor: 1, left: 12 }} focus="current" />);
+      // The chain's end would fit beside g1 in 1000px, but the view stops at g2, the end of what comes next.
+      expect(btn(/^g2,/)).not.toHaveClass("is-clipped");
+      expect(btn(/^n7,/)).toHaveClass("is-clipped");
+    });
+
     it("ends the canvas where the pane starts, so nothing is drawn under it", () => {
       narrow();
       expect(screen.getByRole("group", { name: "c" })).toHaveStyle({ right: "380px" });

@@ -212,7 +212,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
 
   return (
     <div className="item-canvas" ref={frame}>
-      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
+      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} names onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}

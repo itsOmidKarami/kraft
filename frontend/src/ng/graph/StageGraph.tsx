@@ -6,7 +6,6 @@ import type { FitRule } from "./camera";
 import { arcShapes, L, layout, SEAM, seamX, type ChainArc, type ChainNode, type Seam } from "./layout";
 import { Minimap } from "./Minimap";
 import { NodeGlyph } from "./NodeGlyph";
-import { stagesOf } from "./stages";
 import { accessibleName, breakable } from "./types";
 import { useCamera } from "./useCamera";
 import { useRoving } from "./useRoving";
@@ -70,16 +69,16 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
   // Where the run stands: the running node, else the one it stopped on (failed) or waits at (a gate).
   const cur = lay.items.find((i) => i.node.state === "current") ?? lay.items.find((i) => i.node.state === "failed" || i.node.state === "amber");
   const focusAt = (focus === "last" ? lay.items.at(-1) : focus === "current" ? cur : undefined)?.cx;
-  // Past the current node, what the opening view tries to show whole: the next stage's end, else the current stage's, else the next column.
+  // Past the current node, what the opening view tries to show whole: up to the gate after the next one, else up to the
+  // next gate, else the next column (a gate the run stands on counts as the next; past the last gate, the chain's end).
   const reach = useMemo(() => {
     if (focus !== "current" || !cur) return undefined;
-    const right = (id: string) => lay.items.find((i) => i.node.id === id);
     const edge = (c?: { cx: number; w: number }) => (c ? [c.cx + c.w / 2] : []);
-    const stages = stagesOf(nodes);
-    const at = stages.findIndex((st) => st.nodes.some((n) => n.id === cur.node.id));
-    const nextCol = lay.items.filter((c) => c.cx > cur.cx).sort((a, b) => a.cx - b.cx)[0];
-    return [...edge(stages[at + 1] && right(stages[at + 1].nodes.at(-1)!.id)), ...edge(right(stages[at].nodes.at(-1)!.id)), ...edge(nextCol)];
-  }, [focus, cur, lay, nodes]);
+    const gates = lay.items.filter((c) => c.cx >= cur.cx && c.node.kind === "gate");
+    const end = lay.items.at(-1);
+    const nextCol = lay.items.find((c) => c.cx > cur.cx);
+    return [...edge(gates[0] && (gates[1] ?? end)), ...edge(gates[0] ?? end), ...edge(nextCol)];
+  }, [focus, cur, lay]);
   const runFit = fit && mapped ? { ...fit, top: ROW_TOP } : fit;
   const camera = useCamera({ canvas: "chain", world: lay, opening, cover, fit: runFit && focusAt != null ? { ...runFit, focus: focusAt, reach } : runFit, current: cur && { cx: cur.cx, cy: L.CY } });
 

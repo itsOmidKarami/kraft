@@ -27,7 +27,8 @@ type Props = {
   onDown: (id: string) => void;
 };
 
-const tone = (n: ChainNode) => (n.needs || n.state === "amber" || n.state === "esc" ? "amber" : n.state === "ghost" || !n.state ? "todo" : n.state);
+/** A node's state as the small glyph draws it. */
+export const tone = (n: ChainNode) => (n.needs || n.state === "amber" || n.state === "esc" ? "amber" : n.state === "ghost" ? "todo" : n.state ?? "plain");
 
 /** The chain overview over a long chain's canvas: every node as a small glyph in order, with its state and no label,
  *  scaled to fit the width, and a frame on the part the canvas shows. A click or a drag on it moves the canvas there. */
@@ -81,7 +82,7 @@ export function Minimap({ nodes, lay, cam, view, names, glyphId, current, onPan,
             type="button"
             tabIndex={roving.tabIndex(n.id)}
             {...tip(accessibleName({ ...n, id: names ? displayName(n) : n.id }, ""))}
-            className={`minimap-node is-${n.kind} is-${tone(n)}`}
+            className={`minimap-node map-glyph is-${n.kind} is-${tone(n)}`}
             style={{ left: x(cx) - size / 2, top: MAP.CY - size / 2, width: size, height: size }}
             onFocus={() => roving.go(n.id)}
             onClick={() => onPan(cx)}

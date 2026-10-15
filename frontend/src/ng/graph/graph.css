@@ -161,23 +161,21 @@
 .node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: var(--fs-label); white-space: nowrap; color: var(--text-muted); }
 
 /* ChainStrip */
-.strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.strip { flex: none; box-sizing: border-box; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .strip-back { flex: none; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; font-size: var(--fs-label); color: var(--text-sub); white-space: nowrap; cursor: pointer; }
 .strip-back:is(:hover, :focus-visible) { background: var(--surface-2); }
 .strip-scroll { mask-image: linear-gradient(to right, transparent, var(--bg) 16px, var(--bg) calc(100% - 16px), transparent); flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .strip-scroll::-webkit-scrollbar { display: none; }
-.strip-world { position: relative; margin: 0 auto; }
-.strip-world svg { position: absolute; left: 0; top: 0; }
-.strip-edge { stroke: var(--stroke); stroke-width: 1.5; fill: none; }
-.strip-edge.is-todo { stroke-dasharray: 3 3; }
-.strip-node { position: absolute; width: 90px; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; z-index: 1; }
-.strip-btn { display: flex; margin: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; pointer-events: auto; }
-.strip-btn:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
-.strip-label { overflow-wrap: anywhere; text-align: center; line-height: 1.25; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
-.strip-label.is-viewing { font-weight: 600; color: var(--text); }
-.strip-fold { position: absolute; z-index: 1; display: flex; align-items: center; gap: 4px; box-sizing: border-box; margin: 0; padding: 0 10px 0 2px; border: 1px solid var(--stroke); border-radius: 13px; background: var(--bg); font: 400 var(--fs-label) ui-monospace, Menlo, monospace; white-space: nowrap; color: var(--text-sub); cursor: pointer; }
-.strip-fold:is(:hover, :focus-visible) { border-color: var(--text-muted); }
-.strip-fold-n { margin-left: 4px; color: var(--text-muted); }
+.strip-map { display: flex; align-items: center; width: max-content; min-width: 100%; justify-content: center; }
+/* One glyph per node in a 24px target, an edge between; the node in view ringed. */
+.strip-glyph { flex: none; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.strip-glyph .map-glyph { width: 14px; height: 14px; }
+.strip-glyph .map-glyph.is-gate { width: 12px; height: 12px; }
+.strip-glyph:hover .map-glyph { border-color: var(--text-muted); }
+.strip-glyph[aria-current] .map-glyph { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--selection); }
+.strip-glyph:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.strip-edge { flex: 1 1 0; min-width: 4px; max-width: 22px; border-top: 1px solid var(--stroke); }
+.strip-edge.is-todo { border-top-style: dashed; }
 
 /* GateView */
 .gateview { position: absolute; top: 0; left: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; }
@@ -330,8 +328,6 @@
 .scope-key { padding: 0 6px; border: 1px dashed var(--border); border-radius: 6px; font-size: var(--fs-label); color: var(--text-muted); }
 .scope-key.is-ring { display: block; width: 12px; height: 12px; padding: 0; box-sizing: border-box; border-radius: 50%; align-self: center; }
 
-/* A folded pill's done mark (ChainStrip). */
-.fold-done { margin-left: 4px; color: var(--ok); }
 /* A column the view cuts at an edge is not drawn: the edge's cue counts it instead. */
 .graph-node.is-clipped { opacity: 0; pointer-events: none; }
 
@@ -344,13 +340,16 @@
 .minimap-edge { stroke: var(--stroke); stroke-width: 1; }
 .minimap-edge.is-todo { stroke-dasharray: 2 2; }
 .minimap-frame { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border: 1px solid var(--text-muted); border-radius: 5px; background: color-mix(in srgb, var(--text) 5%, transparent); pointer-events: none; }
-.minimap-node { position: absolute; box-sizing: border-box; margin: 0; padding: 0; border: 1px solid var(--stroke); border-radius: 3px; background: var(--bg); cursor: pointer; }
-.minimap-node.is-gate { border-radius: 1px; transform: rotate(45deg); }
-.minimap-node.is-done { border-color: var(--text-muted); background: var(--text-muted); }
-.minimap-node.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
-.minimap-node.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
-.minimap-node.is-failed { border: 1.5px solid var(--bad); }
-.minimap-node.is-todo { border-style: dashed; }
+.minimap-node { position: absolute; margin: 0; padding: 0; cursor: pointer; }
+/* A node drawn small, in its state: the overview's glyph and the node view strip's. */
+.map-glyph { box-sizing: border-box; border: 1px solid var(--stroke); border-radius: 3px; background: var(--bg); }
+.map-glyph.is-gate { border-radius: 1px; transform: rotate(45deg); }
+.map-glyph.is-done { border-color: var(--text-muted); background: var(--text-muted); }
+.map-glyph.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
+.map-glyph.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
+.map-glyph.is-failed { border: 1.5px solid var(--bad); }
+.map-glyph.is-todo { border-style: dashed; }
+.map-glyph.is-prob { border-color: var(--bad); }
 .minimap-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* An edge of the canvas with more of the chain past it. */
 .canvas-fade { position: absolute; top: 0; bottom: 0; z-index: 2; width: 40px; pointer-events: none; }

@@ -67,7 +67,7 @@ describe("Workspace with a draft", () => {
 
   it.each<[string, Partial<ItemDetail>, boolean]>([["a running item", {}, true], ["an ended item", { display_status: "done" }, false]])("the chain's Config tab says where to add a node, on %s: %s", async (_n, over, hint) => {
     mount("/work-items/w1", draft([]), over);
-    await screen.findByRole("button", { name: /^merge_request, node/ });
+    await screen.findByRole("button", { name: /^merge request, node/ });
     await userEvent.click(screen.getByRole("tab", { name: "Config" }));
     expect(await screen.findByText("Limits in use")).toBeInTheDocument();
     expect(!!screen.queryByTestId("add-node-hint")).toBe(hint);
