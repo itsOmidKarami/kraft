@@ -23,7 +23,7 @@ ContentSwitcher {
     height: 1fr;
 }
 
-#down {
+#down, #tiny, #narrow-keys {
     display: none;
 }
 
@@ -36,4 +36,24 @@ Screen.-down #down {
     display: block;
     height: 1fr;
     padding: 1 2;
+}
+
+Screen.-narrow Footer {
+    display: none;
+}
+
+Screen.-narrow #narrow-keys {
+    display: block;
+    dock: bottom;
+    height: 1;
+    color: $kraft-muted;
+}
+
+/* Too small to draw anything well: say so instead of drawing it clipped. */
+Screen.-tiny > * {
+    display: none;
+}
+
+Screen.-tiny #tiny {
+    display: block;
 }

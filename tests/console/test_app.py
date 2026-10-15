@@ -10,12 +10,15 @@ from pathlib import Path
 
 import pytest
 from support.harness import connected_repo
-from textual.widgets import ContentSwitcher
+from textual.app import App
+from textual.binding import Binding
+from textual.widgets import ContentSwitcher, Footer, HelpPanel
 
 from kraft import client
 from kraft.console import app as console_app
-from kraft.console.app import TABS
+from kraft.console.app import TABS, KraftConsole
 from kraft.console.live import Link
+from kraft.console.screens import VIEWS
 
 
 def _text(app, selector: str) -> str:
@@ -162,3 +165,95 @@ def test_a_wheel_carries_every_file_the_console_reads():
     ]
     assert files
     assert [f for f in files if not any(fnmatch(f, pattern) for pattern in shipped)] == []
+
+
+@pytest.mark.parametrize(
+    ("start", "keys", "view", "running"),
+    [
+        ("board", "2", "server", True),
+        ("board", "3", "addons", True),
+        ("board", "4", "repos", True),
+        ("server", "1", "board", True),
+        ("item", "escape", "board", True),
+        ("item", "q", "board", True),
+        ("server", "escape", "server", True),
+        ("server", "q", "server", False),
+    ],
+    ids=["2", "3", "4", "1", "item-esc", "item-q", "top-esc", "top-q-quits"],
+)
+def test_the_keys_move_between_views(console, start, keys, view, running):
+    """Every key acts on the view it lands on, so focus follows the view;
+    `q` goes back from the Item and quits only from a top view."""
+
+    async def scenario(app, pilot):
+        app.show(start)
+        await pilot.press(keys)
+        return app.view.id, app.focused is app.view, app.is_running
+
+    assert console.run(scenario) == (view, True, running)
+
+
+def test_question_mark_opens_and_closes_every_key(console):
+    async def scenario(app, pilot):
+        await pilot.press("question_mark")
+        opened = bool(app.screen.query(HelpPanel))
+        await pilot.press("question_mark")
+        return opened, bool(app.screen.query(HelpPanel))
+
+    assert console.run(scenario) == (True, False)
+
+
+@pytest.mark.parametrize(
+    ("size", "tiny", "narrow"),
+    [
+        ((59, 24), True, True),
+        ((80, 15), True, False),
+        ((60, 16), False, True),
+        ((79, 24), False, True),
+        ((80, 24), False, False),
+    ],
+    ids=["59-wide", "15-high", "60x16", "79-wide", "80x24"],
+)
+def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
+    console, size, tiny, narrow
+):
+    """Under 60x16 nothing fits, so the frame says so instead of drawing it
+    clipped; under 80 columns the footer keeps only `? keys`."""
+
+    async def scenario(app, pilot):
+        await pilot.resize_terminal(*size)
+        await pilot.pause()
+        return (
+            app.query_one("#tiny").display and app.query_one("#tiny").region.area > 0,
+            app.query_one("#narrow-keys").display and not app.query_one(Footer).display,
+        )
+
+    assert console.run(scenario) == (tiny, narrow)
+
+
+def test_the_palette_switches_kraft_looks_not_textuals(console):
+    """Textual's theme picker lists its own themes, none of them Kraft's."""
+
+    async def scenario(app, pilot):
+        commands = {c.title: c for c in app.get_system_commands(app.screen)}
+        commands["Light"].callback()
+        await pilot.pause()
+        return sorted(commands), app.theme, app.theme_variables["kraft-side"]
+
+    titles, theme, side = console.run(scenario)
+    assert "Theme" not in titles
+    assert {"Dark", "Light"} <= set(titles)
+    assert (theme, side) == ("kraft-light", console_app.theme.LIGHT["side"])
+
+
+@pytest.mark.parametrize("name", list(VIEWS))
+def test_no_key_does_two_things_on_one_view(name):
+    """Spec §6: no key means two things on one view, and no upper and lower
+    pair (`R` and `r`) shares one. `R,shift+r` is one binding: kitty's name
+    for the same key."""
+    actions: dict[str, set[str]] = {}
+    for owner in (App, KraftConsole, VIEWS[name]):
+        for binding in Binding.make_bindings(owner.BINDINGS):
+            key = binding.key.removeprefix("shift+").lower()
+            actions.setdefault(key, set()).add(binding.action)
+    assert {key: found for key, found in actions.items() if len(found) > 1} == {}

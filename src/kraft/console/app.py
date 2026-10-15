@@ -6,20 +6,30 @@ line (and, from PR 2b, the prompt) stays on every view."""
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
+from typing import ClassVar
 
-from textual.app import App, ComposeResult
+from textual import events
+from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding, BindingType
 from textual.containers import Horizontal
 from textual.content import Content
+from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import ContentSwitcher, Footer, Static
+from textual.widgets import ContentSwitcher, Footer, HelpPanel, Static
 
 from kraft import client, update
 from kraft.console import theme
 from kraft.console.live import Link, Live
 from kraft.console.screens import VIEWS, View
 
-#: The top views, in tab order.
+#: The top views, in tab order: the number keys `1`-`4` follow it.
 TABS = ("board", "server", "addons", "repos")
+#: Below this the frame shows only "make the window larger" (spec §6).
+MIN_SIZE = (60, 16)
+#: Below this many columns the rows drop chain and age, and the footer keeps
+#: only `? keys`: the console still works as a side pane.
+NARROW = 80
 
 
 def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
@@ -62,6 +72,15 @@ def down_sentence(error: client.ClientError | None) -> str:
 class KraftConsole(App):
     CSS_PATH = "kraft.tcss"
     TITLE = "Kraft"
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("1", "show('board')", "Board", show=False),
+        Binding("2", "show('server')", "Server", show=False),
+        Binding("3", "show('addons')", "Add-ons", show=False),
+        Binding("4", "show('repos')", "Repos", show=False),
+        Binding("escape", "back", "back", show=False),
+        Binding("q", "back(True)", "back or quit", show=False),
+        Binding("question_mark", "keys", "keys"),
+    ]
 
     def __init__(self) -> None:
         super().__init__()
@@ -89,10 +108,13 @@ class KraftConsole(App):
             yield Static(id="tabs")
             yield Static(id="where")
         yield Static(id="down")
+        yield Static("make the window larger", id="tiny")
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
                 yield view(id=name)
         yield Footer(show_command_palette=False)
+        # Textual's Footer cannot hide one key, so a narrow frame swaps it for this.
+        yield Static("? keys", id="narrow-keys")
 
     def on_mount(self) -> None:
         self.show("board")
@@ -125,6 +147,39 @@ class KraftConsole(App):
             return
         # markup=False: the server's words may hold `[/]`, which markup reads as a tag.
         self.notify(client.reason_of(str(error)), severity="error", markup=False)
+
+    def action_show(self, name: str) -> None:
+        self.show(name)
+
+    def action_back(self, quit: bool = False) -> None:
+        if self.view.back():
+            return
+        if self.view.id not in TABS:
+            self.show(self._last_top)
+        elif quit:
+            self.exit()
+
+    def action_keys(self) -> None:
+        if self.screen.query(HelpPanel):
+            self.action_hide_help_panel()
+        else:
+            self.action_show_help_panel()
+
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        # Textual's own theme picker lists its themes; Kraft has two.
+        for command in super().get_system_commands(screen):
+            if command.title != "Theme":
+                yield command
+        yield SystemCommand("Dark", "Kraft's dark look", lambda: self._use("kraft-dark"))
+        yield SystemCommand("Light", "Kraft's light look", lambda: self._use("kraft-light"))
+
+    def _use(self, name: str) -> None:
+        self.theme = name
+
+    def on_resize(self, event: events.Resize) -> None:
+        width, height = event.size
+        self.screen.set_class(width < MIN_SIZE[0] or height < MIN_SIZE[1], "-tiny")
+        self.screen.set_class(width < NARROW, "-narrow")
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
         self.rows = rows
