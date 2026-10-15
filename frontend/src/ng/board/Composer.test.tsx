@@ -139,10 +139,15 @@ describe("Composer", () => {
     await settle();
     expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create paused" })).toHaveAccessibleDescription("Add a title to create it.");
+    // A fresh composer reassures; the reason is spoken but not drawn until a create is refused.
+    expect(screen.getByText(/Created paused. Nothing spends tokens/)).toBeInTheDocument();
+    expect(screen.getByText("Add a title to create it.")).toHaveClass("is-quiet");
     // ⌘↵ on an empty title does not create; it lands on the title, whose reason is already on screen.
     screen.getByRole("button", { name: "Cancel" }).focus();
     fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Enter", metaKey: true });
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
+    expect(screen.getByText("Add a title to create it.")).not.toHaveClass("is-quiet");
+    expect(screen.getByText(/Created paused. Nothing spends tokens/)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
     expect(screen.getByRole("button", { name: "Create paused" })).not.toHaveAccessibleDescription();
     fireEvent.keyDown(screen.getByRole("button", { name: "More ways to create" }), { key: "ArrowDown" });

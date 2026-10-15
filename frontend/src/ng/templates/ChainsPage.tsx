@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
@@ -19,8 +19,6 @@ import { Dialog } from "../ui/Dialog";
 import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
-import { useReason } from "../ui/Reason";
-import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
 import { addonRepo } from "../library/types";
@@ -203,7 +201,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     loadPublished();
   };
   const yamlErr = r.yaml_error;
-  const noDraft = useReason(view.draft ? null : NOTHING_TO_PUBLISH);
+  const publishedId = useId();
   const toggleYaml = () => {
     // A syntax error keeps you here until it is fixed or reverted (Decisions §9 YAML): the button is disabled.
     if (surface === "yaml") return setSurface("canvas");
@@ -306,7 +304,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {view.draft
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="tpl-published">published</span>}
+          : <span className="tpl-published" id={publishedId}>published <span className="reason is-quiet">· nothing to publish</span></span>}
         {n.problems > 0 && (
           <button
             type="button"
@@ -338,7 +336,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
-          : <>{noDraft.note}<Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} {...noDraft.attrs} onClick={review ? endReview : startReview}>Review &amp; publish</Button></>}
+          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} aria-describedby={view.draft ? undefined : publishedId} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

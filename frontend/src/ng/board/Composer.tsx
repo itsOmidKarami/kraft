@@ -78,6 +78,8 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const [tried, setTried] = useState(false);
+  useEffect(() => { if (d.title.trim()) setTried(false); }, [d.title]);
   const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
   const dirty = !!(d.title.trim() || d.brief.trim());
 
@@ -145,9 +147,10 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const gates = run ? run.gates.length : full.filter((n) => n.kind === "gate").length;
   const repo = repos?.find((r) => r.path === d.repo);
   const ok = !!d.title.trim() && !!d.repo && !busy && !(preview && "error" in preview);
-  const why = useReason(busy || ok || (preview && "error" in preview) || (repos && repos.length === 0) ? null : !d.title.trim() ? ADD_TITLE : CHOOSE_REPO);
-  // The reason is already on screen; the keys point at what is missing instead of doing nothing.
+  // Quiet until a create is refused: a fresh composer shows its reassurance, not a complaint.
+  const why = useReason(busy || ok || (preview && "error" in preview) || (repos && repos.length === 0) ? null : !d.title.trim() ? ADD_TITLE : CHOOSE_REPO, { quiet: !tried });
   const refuse = () => {
+    setTried(true);
     if (!d.title.trim()) titleRef.current?.focus();
   };
 
@@ -199,10 +202,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
             <span className="composer-note">
               {error ? <span className="item-error" role="alert">{error}</span>
                 : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
-                : why.note ?? "Created paused. Nothing spends tokens until you start it."}
+                : "Created paused. Nothing spends tokens until you start it."}
             </span>
             <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>
+            {why.note}
             <CreateSplit disabled={!ok} describedBy={why.attrs["aria-describedby"]} onCreate={create} />
           </>
         )}

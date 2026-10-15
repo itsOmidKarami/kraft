@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useResizable } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Button } from "../ui/Button";
-import { useReason } from "../ui/Reason";
-import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { showToast } from "../ui/Toast";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import { counts } from "../templates/draft/view";
@@ -73,7 +71,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   shown.current = sub ?? row?.id ?? "";
   const n = counts(r);
   const yamlErr = r.yaml_error;
-  const noDraft = useReason(draft.view!.draft ? null : NOTHING_TO_PUBLISH);
+  const publishedId = useId();
 
   useEffect(() => {
     if (draft.error) showToast(draft.error);
@@ -151,7 +149,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         {row?.addon && <AddonBadge addon={row.addon} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="lib-published">published</span>}
+          : <span className="lib-published" id={publishedId}>published <span className="reason is-quiet">· nothing to publish</span></span>}
         {n.problems > 0 && (
           <button type="button" className="lib-problems" title="Step through the problems" onClick={stepProblems}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
@@ -162,7 +160,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
-        {surface === "canvas" && <>{noDraft.note}<Button variant="primary" aria-pressed={review} disabled={!review && !draft.view!.draft} {...noDraft.attrs} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button></>}
+        {surface === "canvas" && <Button variant="primary" aria-pressed={review} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft ? undefined : publishedId} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button>}
       </HeaderActions>
       <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
       <div className="lib-main" ref={frame}>

@@ -127,3 +127,5 @@ body:has(.dv-drawer) .toasts { top: auto; bottom: 16px; }
 /* Why a control is disabled (useReason): plain text next to it, so touch and screen readers get it too. */
 .reason { min-width: 0; font-size: var(--fs-meta); line-height: 1.4; color: var(--text-muted); text-align: right; }
 .reason + .btn { flex: none; white-space: nowrap; }
+.reason.is-below { flex: 1 0 100%; order: 1; text-align: left; }
+.reason.is-quiet { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }

@@ -75,7 +75,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
   const r = view.result;
   const n = counts(r);
   const blocked = n.problems > 0;
-  const why = useReason(blocked ? fixProblems(n.problems) : null);
+  const why = useReason(blocked ? fixProblems(n.problems) : null, { below: true });
   const stale: StaleBody | null = draft.stale;
   const live = scopeFile(view.files, scope);
   const text = view.files[live] ?? "";
