@@ -74,7 +74,10 @@ describe("Library page: the list", () => {
     expect(screen.getAllByRole("option")[1]).toHaveFocus();
     await u.click(screen.getByRole("textbox", { name: "Search the library" }));
     await u.keyboard("zzz");
-    expect(await screen.findByText("No component matches.")).toBeInTheDocument();
+    expect(await screen.findByText("No match for “verifzzz”.")).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("textbox", { name: "Search the library" })).toHaveValue("");
+    expect(screen.queryByText(/No match for/)).toBeNull();
   });
 
   it("marks what the draft changes and what has a problem", async () => {

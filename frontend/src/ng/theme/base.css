@@ -3,6 +3,8 @@
 body { margin: 0; font: 14px/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }
+/* The browser's own placeholder grey is 3.5:1; every field uses the muted text colour. */
+::placeholder { color: var(--text-muted); opacity: 1; }
 
 /* Decisions §13 and R4: one neutral 2px ring on keyboard focus, everywhere. */
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

@@ -11,6 +11,7 @@ import { termsOf } from "../item/DocViewer";
 import { gateWords, reasonTail } from "../board/rowText";
 import { headerState, neverStarted } from "../item/status";
 import { Kbd } from "../ui/Kbd";
+import { NoMatch } from "../ui/NoMatch";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
 import "./search.css";
@@ -306,8 +307,8 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
         )}
         <div role="listbox" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${tab}`} className="ng-search-list">
           {sections}
-          {empty && <p className="ng-search-note" role="none">No matches for “{query}”</p>}
         </div>
+        {empty && <NoMatch className="ng-search-note" query={query} onClear={() => setQ("")} />}
         <div className="ng-search-foot">
           <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span>
           <span><Kbd>⏎</Kbd> open</span>

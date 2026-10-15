@@ -15,6 +15,7 @@ import { testsCell, testsTitle } from "./repos/evidence";
 import { RepoConfig } from "./repos/RepoConfig";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos/types";
 import { useRepoFragment } from "./repos/useRepoFragment";
+import { NoMatch } from "../ui/NoMatch";
 import "./repos/repos.css";
 
 export const reposUrl = (repo?: string) => `/settings/repos${repo ? `/${encodeURIComponent(repo)}` : ""}`;
@@ -162,7 +163,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       </div>
                     );
                   })}
-                  {!matches.length && <p className="rp-empty">{repos.length ? "No repo matches." : "No repos connected yet. Connect one to start."}</p>}
+                  {!matches.length && repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>}
                 </div>
                 {data.detected.length > 0 && !q.trim() && (
                   <section className="rp-detected" aria-label="Detected, not connected">

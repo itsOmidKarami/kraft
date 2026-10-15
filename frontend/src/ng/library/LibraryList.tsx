@@ -10,6 +10,7 @@ import { loadHidden, saveHidden } from "./kinds";
 import { shownRows, type Row } from "./rows";
 import { SECTIONS, SECTION_LABEL, type Section } from "./types";
 import { tip } from "../ui/Tooltip";
+import { NoMatch } from "../ui/NoMatch";
 import { AddonBadge } from "../templates/addon";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
@@ -137,7 +138,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
       )}
       <div className="lib-rows" role="listbox" aria-label="Library components">
         {!rows.length && <p className="lib-empty">The library is empty. + New to add the first component.</p>}
-        {!!rows.length && !shown.length && <p className="lib-empty">No component matches.</p>}
+        {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => setQ("")} />}
         {SECTIONS.map((s) => {
           const inGroup = shown.filter((x) => x.section === s);
           if (!inGroup.length) return null;

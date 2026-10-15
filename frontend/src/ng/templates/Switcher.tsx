@@ -9,6 +9,7 @@ import { IdRow } from "./menus/IdRow";
 import { isOpen } from "../board/counts";
 import type { Addon } from "../../types";
 import { AddonBadge } from "./addon";
+import { NoMatch } from "../ui/NoMatch";
 
 type Row = { id: string; nodes: number; open: number; draft: boolean; addon?: Addon | null };
 export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: string } | { kind: "dup"; id: string };
@@ -83,6 +84,7 @@ export function Switcher({ chain, renamedTo, onGo, startDup, copy }: { chain: st
             }} />
             <div className="picklist-items" role="listbox" aria-label="Chains">
               {rows === null && <p className="picklist-empty">Loading…</p>}
+              {rows !== null && !shown.length && q && <NoMatch className="picklist-empty" query={q} onClear={() => setQ("")} />}
               {shown.map((r, k) => (
                 <button key={r.id} ref={(el) => void (refs.current[k] = el)} type="button" role="option" aria-selected={r.id === chain} className="menu-item sw-row" onKeyDown={(e) => move(e, k)} onClick={() => go({ kind: "switch", id: r.id })}>
                   <span className="sw-check" aria-hidden="true">{r.id === chain && <Check size={12} />}</span>

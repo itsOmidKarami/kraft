@@ -58,6 +58,17 @@ describe("FileTree", () => {
     expect(screen.queryByRole("button", { name: "search/" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "test_cache.py" }));
     expect(onSelect).toHaveBeenCalledWith("tests/test_cache.py");
+    expect(screen.getByText("1 of 4 files")).toBeInTheDocument();
+  });
+
+  it("says no file matches, keeps the count honest, and clears", () => {
+    tree();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter files" }), { target: { value: "zzz" } });
+    expect(screen.getByText("No match for “zzz”.")).toBeInTheDocument();
+    expect(screen.getByText("0 of 4 files")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText(/No match for/)).toBeNull();
+    expect(screen.getByText("4 files")).toBeInTheDocument();
   });
 });
 

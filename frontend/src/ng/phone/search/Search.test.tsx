@@ -129,13 +129,15 @@ describe("Search (I)", () => {
     mount({ "GET /search": [500, { detail: "index down" }], "GET /beads/search": [200, { beads: [] }] });
     await type("zzz");
     expect(await screen.findByText("Documents could not be searched.")).toBeInTheDocument();
-    expect(screen.queryByText("Nothing matches.")).toBeNull();
+    expect(screen.queryByText(/No match for/)).toBeNull();
   });
 
   it("says nothing matches when every source answered empty", async () => {
     mount({ "GET /search": [200, { query: "q", mode: "hybrid", results: [] }], "GET /beads/search": [200, { beads: [] }] });
     await type("zzzqx");
-    expect(await screen.findByText("Nothing matches.")).toBeInTheDocument();
+    expect(await screen.findByText("No match for “zzzqx”.")).toBeInTheDocument();
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText(/No match for/)).toBeNull();
   });
 
   it("filters go to the server and stay in the URL", async () => {

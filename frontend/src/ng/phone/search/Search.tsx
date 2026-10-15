@@ -1,4 +1,5 @@
 import { CircleDot, FileText, Kanban, MoveRight, Search as SearchIcon } from "lucide-react";
+import { NoMatch } from "../../ui/NoMatch";
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { docTitle, repoName } from "../../../format";
@@ -121,7 +122,7 @@ export function Search() {
         {failed("Documents", docs.load)}
         {failed("Beads", beads.load)}
         {docs.load === "ok" && docs.results.length > 0 && <p className="ph-note">Documents come from a lagging index, not live state.</p>}
-        {nothing && <p className="ph-empty">Nothing matches.</p>}
+        {nothing && <NoMatch className="ph-empty" query={query} onClear={() => set({ q: "" })} />}
       </div>
       {sheet.is("source") && <ChoiceSheet title="Search in" value={f.source} options={SOURCES} onPick={(v) => sheet.closeThen(() => set({ source: v }))} onClose={sheet.close} />}
       {sheet.is("mode") && <ChoiceSheet title="Match by" value={f.mode} options={MODES} onPick={(v) => sheet.closeThen(() => set({ mode: v === "hybrid" ? "" : v }))} onClose={sheet.close} />}

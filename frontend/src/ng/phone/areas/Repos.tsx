@@ -10,6 +10,7 @@ import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { useLibrary } from "../../templates/useLibrary";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "../../templates/repos/types";
 import { showToast } from "../../ui/Toast";
+import { NoMatch } from "../../ui/NoMatch";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
@@ -39,7 +40,8 @@ export function ReposList() {
       {draft.status === "error" && <p className="ph-error" role="alert">The repos could not be read.</p>}
       {error && <p className="ph-error" role="alert">{error}</p>}
       {data && data.repos.length === 0 && <p className="ph-empty">No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</p>}
-      {data && data.repos.length > 0 && (
+      {data && data.repos.length > 0 && !shown.length && <NoMatch className="ph-empty" query={params.get("q") ?? ""} onClear={() => { const n = new URLSearchParams(params); n.delete("q"); setParams(n, { replace: true }); }} />}
+      {data && shown.length > 0 && (
         <Group
           title="Connected"
           rows={shown.map((r): RowSpec => ({

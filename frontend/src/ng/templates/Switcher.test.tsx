@@ -59,6 +59,10 @@ describe("chain switcher", () => {
     expect(def.querySelector(".sw-dot")).toBeNull();
     await userEvent.type(screen.getByRole("textbox", { name: "Search chains" }), "quick");
     expect(within(list).getAllByRole("option")).toHaveLength(1);
+    await userEvent.type(screen.getByRole("textbox", { name: "Search chains" }), "zzz");
+    expect(within(list).getByText("No match for “quickzzz”.")).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("textbox", { name: "Search chains" })).toHaveValue("");
   });
 
   it("switches by keyboard with no draft open, without asking", async () => {
