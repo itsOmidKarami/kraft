@@ -15,7 +15,8 @@ const REPORT = {
   weekly_merged: [{ week_start: "2026-09-07", n: 3 }],
   by_node: [{ node: "implementation", runs: 18, wall_ms: 1, avg_ms: 1, tokens: 1, cost_usd: 14.2, cost_complete: true, rounds: 1, capped_out: 0 }],
   by_repo: [{ repo: "/code/kraft-plugins", items: 8, mrs: 6, tokens: 1, cost_usd: 20, cost_complete: false, done: 6, cycles: 3 }],
-  rejected_gates_by_gate: [],
+  rejected_gates_by_gate: [{ gate: "plan_approval", n: 1 }],
+  gate_waits: [{ gate: "plan_approval", n: 4, median_ms: 1800_000, total_ms: 9e6 }],
   stop_reasons: [{ label: "gate wait", n: 5 }],
 } as unknown as Report;
 
@@ -29,17 +30,16 @@ const asked = (calls: Call[]) => calls.filter((c) => c.path === "/analytics");
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Analytics (J): each tile reads one field", () => {
-  it("shows Spent, Items done, Time at gates and Fix loops from the report", async () => {
-    useStore.setState({ workItems: { a: { id: "a", display_status: "running" }, b: { id: "b", display_status: "done" } } } as never);
+  it("shows Completed, Lead time, Cost and Repairs per item from the report, one short line each", async () => {
     mount();
     await screen.findByText("$38.20");
-    expect(within(tile("Spent")).getByText("$3.18 spend per completed item, all spend counted")).toBeInTheDocument();
-    expect(within(tile("Items done")).getByText("12")).toBeInTheDocument();
-    expect(within(tile("Items done")).getByText("+3 vs previous · 1 running now")).toBeInTheDocument();
-    expect(within(tile("Time at gates")).getByText("14m")).toBeInTheDocument();
-    expect(within(tile("Time at gates")).getByText("completed items waited 8% of their lead time")).toBeInTheDocument();
-    expect(within(tile("Fix loops")).getByText("1.5")).toBeInTheDocument();
-    expect(within(tile("Fix loops")).getByText("repairs per item that needed one · 2 hit their cap")).toBeInTheDocument();
+    expect(within(tile("Completed")).getByText("12")).toBeInTheDocument();
+    expect(within(tile("Completed")).getByText("+3 vs previous")).toBeInTheDocument();
+    expect(within(tile("Lead time")).getByText("1h")).toBeInTheDocument();
+    expect(within(tile("Lead time")).getByText("median · 8% waiting on you")).toBeInTheDocument();
+    expect(within(tile("Cost")).getByText("$3.18 per completed item")).toBeInTheDocument();
+    expect(within(tile("Repairs per item")).getByText("1.5")).toBeInTheDocument();
+    expect(within(tile("Repairs per item")).getByText("2 hit their cap")).toBeInTheDocument();
   });
 
   it("makes its scrolling area reachable from the keyboard (R14b-03)", async () => {
@@ -48,10 +48,9 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByRole("region", { name: "Analytics figures" })).toHaveAttribute("tabindex", "0");
   });
 
-  it("does not claim a median, a spend delta or a per-day chart (R66)", async () => {
+  it("does not claim a spend delta or a per-day chart (R66)", async () => {
     mount();
     await screen.findByText("$38.20");
-    expect(screen.queryByText(/median wait/i)).toBeNull();
     expect(screen.queryByText(/Spend per day/i)).toBeNull();
     expect(screen.queryByText(/vs last week/i)).toBeNull();
     expect(screen.queryByRole("group", { name: /per day|per week/i })).toBeNull();
@@ -62,29 +61,48 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(await screen.findByText("$38.20+")).toBeInTheDocument();
   });
 
-  it("lists nodes, repos and stop reasons with the desktop's footnotes", async () => {
+  it("lists gates, nodes, repos and stop reasons, and keeps the footnotes behind one disclosure", async () => {
     mount();
     expect(await screen.findByText("implementation")).toBeInTheDocument();
+    expect(screen.getByText("plan_approval")).toBeInTheDocument();
+    expect(screen.getByText("4 waits · median 30m · 1 rejected")).toBeInTheDocument();
+    expect(screen.getByText("2h 30m")).toBeInTheDocument();
     expect(screen.getByText("18 runs")).toBeInTheDocument();
     expect(screen.getByText("kraft-plugins")).toBeInTheDocument();
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
     expect(screen.getByText("8 items · 6 done · avg repairs 3.0")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
-    expect(screen.getByText(/Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/)).toBeInTheDocument();
     expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();
+    const how = /Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/;
+    expect(screen.getByText(how)).not.toBeVisible();
+    await userEvent.click(screen.getByText("How this is counted"));
+    expect(screen.getByText(how)).toBeVisible();
   });
 
-  it("asks for the range the person picks, 7 days first", async () => {
+  it("asks for the range the person picks, 8 weeks first, as the desktop does", async () => {
     const calls = mount();
     await screen.findByText("$38.20");
     expect(asked(calls)).toHaveLength(1);
-    await userEvent.click(screen.getByRole("button", { name: /7 days/ }));
+    await userEvent.click(screen.getByRole("button", { name: /8 weeks/ }));
     const sheet = screen.getByRole("dialog", { name: "Range" });
-    expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["7 days", "30 days", "90 days"]);
+    expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["7 days", "30 days", "8 weeks", "90 days"]);
     await userEvent.click(within(sheet).getByRole("radio", { name: "30 days" }));
     await waitFor(() => expect(asked(calls)).toHaveLength(2));
-    expect(asked(calls).map((c) => c.query.get("range"))).toEqual(["7d", "30d"]);
+    expect(asked(calls).map((c) => c.query.get("range"))).toEqual(["8w", "30d"]);
     expect(screen.getByRole("button", { name: /30 days/ })).toBeInTheDocument();
+  });
+
+  it("narrows by the repo and chain the person picks, as the desktop does", async () => {
+    useStore.setState({ workItems: { a: { id: "a", repo: "/code/kraft-plugins", chain_template: "quick-task" }, b: { id: "b", repo: "/code/kraft", chain_template: null } } } as never);
+    const calls = mount();
+    await screen.findByText("$38.20");
+    await userEvent.click(screen.getByRole("button", { name: /All repos/ }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Repo" })).getByRole("radio", { name: /kraft-plugins/ }));
+    await waitFor(() => expect(asked(calls)).toHaveLength(2));
+    await userEvent.click(screen.getByRole("button", { name: /All chains/ }));
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Chain" })).getByRole("radio", { name: /quick-task/ }));
+    await waitFor(() => expect(asked(calls)).toHaveLength(3));
+    expect(asked(calls).map((c) => [c.query.get("repo"), c.query.get("template")])).toEqual([[null, null], ["/code/kraft-plugins", null], ["/code/kraft-plugins", "quick-task"]]);
   });
 
   it("says when nothing completed, with no zero-height chart", async () => {

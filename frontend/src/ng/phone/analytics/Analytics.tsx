@@ -4,51 +4,71 @@ import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
+import { DEFAULT_RANGE, gateRows, HOW_COUNTED, RANGES } from "../../analytics/shared";
+import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { Block } from "../ui/Rows";
 import "./analytics.css";
 
-const RANGES = [{ value: "7d", label: "7 days" }, { value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }];
-
-/** `/analytics` (W17 brief J): four tiles, each read from one field of the report, and the node, repo and stop lists. What the API cannot feed is not drawn: no spend per day, no median gate wait, no spend delta (R66). */
+/** `/analytics` (W17 brief J): four tiles, each read from one field of the report, and the gate, node, repo and stop lists. The range, repo and chain choices are the desktop's. What the API cannot feed is not drawn: no spend per day, no spend delta (R66). */
 export function Analytics() {
   const sheet = useSheet();
-  const [range, setRange] = useState("7d");
+  const [range, setRange] = useState(DEFAULT_RANGE);
+  const [repo, setRepo] = useState("");
+  const [chain, setChain] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const running = useStore((s) => Object.values(s.workItems).filter((i) => i.display_status === "running" || i.display_status === "escalated").length);
+  const items = useStore((s) => Object.values(s.workItems));
   useEffect(() => {
     let live = true;
     setError(null);
-    api.getAnalytics({ range }).then((r) => live && setReport(r), (e) => live && setError(e instanceof Error ? e.message : String(e)));
+    api.getAnalytics({ range, repo: repo || undefined, template: chain || undefined }).then((r) => live && setReport(r), (e) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => void (live = false);
-  }, [range]);
+  }, [range, repo, chain]);
 
   const t = report?.totals;
   const delta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
+  const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
+  const chains = [...new Set(items.map(chainOf))].sort();
+  const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
   return (
     <>
-      <RootHeader title="Analytics">
-        <span className="ph-spacer" />
+      <RootHeader title="Analytics" />
+      <div className="ph-chips" role="group" aria-label="Filters">
         <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{RANGES.find((r) => r.value === range)!.label}<ChevronDown size={14} aria-hidden="true" /></button>
-      </RootHeader>
+        <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className="ph-pill" onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></button>
+      </div>
       <div className="ph-content" tabIndex={0} role="region" aria-label="Analytics figures">
         {error && <p className="ph-error" role="alert">{error}</p>}
         {!report && !error && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
         {report && t && (
           <>
             <div className="ph-tiles">
-              <Tile label="Spent" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} spend per completed item, all spend counted` : "nothing completed yet"} />
-              <Tile label="Items done" value={String(t.completed)} sub={[delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`, `${running} running now`].join(" · ")} />
-              <Tile label="Time at gates" value={elapsed(t.human_wait_ms)} sub={`completed items waited ${t.human_wait_pct}% of their lead time`} />
-              <Tile label="Fix loops" value={t.fix_cycles.toFixed(1)} sub={`repairs per item that needed one · ${t.fix_cycles_capped} hit their cap`} />
+              <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
+              <Tile label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
+              <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
+              <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
             </div>
             {empty ? (
               <p className="ph-empty">Nothing has completed in this range yet.</p>
             ) : (
               <>
+                <Block title="Waiting at each gate">
+                  {gates.length === 0 ? <p className="ph-note">No gate waits in this range.</p> : (
+                    <div className="ph-list">
+                      {gates.map((g) => (
+                        <div key={g.gate} className="ph-stat-row">
+                          <span className="ph-stat-name ph-mono">{g.gate}</span>
+                          <span className="ph-stat-meta">{g.n} {g.n === 1 ? "wait" : "waits"} · median {elapsed(g.median_ms)}{g.rejected ? ` · ${g.rejected} rejected` : ""}</span>
+                          <span className="ph-stat-val">{elapsed(g.total_ms)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Block>
                 <Block title="By node">
                   {report.by_node.length === 0 ? <p className="ph-note">Nothing here yet.</p> : (
                     <div className="ph-list">
@@ -61,7 +81,6 @@ export function Analytics() {
                       ))}
                     </div>
                   )}
-                  <p className="ph-note">Tokens are as recorded, never estimated. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "+" on the sum.</p>
                 </Block>
                 <Block title="By repo">
                   {report.by_repo.length === 0 ? <p className="ph-note">Nothing here yet.</p> : (
@@ -89,12 +108,22 @@ export function Analytics() {
                   )}
                   <p className="ph-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {elapsed(t.open_mr_to_green_ci_ms)} median</p>
                 </Block>
+                <details className="ph-how">
+                  <summary>How this is counted</summary>
+                  {HOW_COUNTED.map((line) => <p key={line} className="ph-note">{line}</p>)}
+                </details>
               </>
             )}
           </>
         )}
       </div>
       {sheet.is("range") && <ChoiceSheet title="Range" value={range} options={RANGES} onPick={(v) => sheet.closeThen(() => setRange(v))} onClose={sheet.close} />}
+      {sheet.is("repo") && (
+        <ChoiceSheet title="Repo" value={repo} options={[{ value: "", label: "All repos", hint: String(items.length) }, ...repos.map((r) => ({ value: r, label: repoName(r), hint: String(items.filter((i) => i.repo === r).length) }))]} onPick={(v) => sheet.closeThen(() => setRepo(v))} onClose={sheet.close} />
+      )}
+      {sheet.is("chain") && (
+        <ChoiceSheet title="Chain" value={chain} options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: c, hint: String(items.filter((i) => chainOf(i) === c).length) }))]} onPick={(v) => sheet.closeThen(() => setChain(v))} onClose={sheet.close} />
+      )}
     </>
   );
 }
