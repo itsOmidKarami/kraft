@@ -198,7 +198,10 @@ def test_human_wait_is_counted_apart_from_wall_time(conn):
 
 
 def test_gate_waits_name_the_gate_each_stop_waited_at(conn):
-    # w1: gate_requested -2d, approved -1.5d. The needs_human stops are no gate.
+    # w1: gate_requested -2d, approved -1.5d. A stop that is no gate (w2's, retried
+    # 2h later) adds to the human wait but to no gate's.
+    _event(conn, "w2", "work_item_needs_human", {"reason": "needs_context: x"}, _at(1.0))
+    _event(conn, "w2", "work_item_retried", {}, _at(1.0 - 2 / 24))
     a = analytics.compute(conn, range_="7d", now=NOW)
     assert a["gate_waits"] == [
         {

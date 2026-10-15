@@ -13,7 +13,7 @@ const EMPTY: Record<string, [number, unknown]> = {
   "GET /apply": [200, { restart: [], reload: [], managed: false }],
   "GET /drafts": [200, []],
   "GET /templates/chains": [200, []],
-  "GET /analytics": [200, { totals: { work_items: 0, work_items_run: 0, by_status: {}, mrs_merged: 0, wall_ms: 0, human_wait_ms: 0, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, rounds: 0, capped_out: 0, completed: 0, completed_prev: null, median_lead_ms: 0, human_wait_pct: 0, fix_cycles: 0, fix_cycles_capped: 0, rejected_gates: 0, unplanned_touches_per_item: 0, open_mr_to_green_ci_ms: 0 }, by_node: [], by_repo: [], by_template: [], daily: [], findings: [] }],
+  "GET /analytics": [200, { totals: { work_items: 0, work_items_run: 0, by_status: {}, mrs_merged: 0, wall_ms: 0, human_wait_ms: 0, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, rounds: 0, capped_out: 0, completed: 0, completed_prev: null, median_lead_ms: 0, human_wait_pct: 0, fix_cycles: 0, fix_cycles_capped: 0, rejected_gates: 0, unplanned_touches_per_item: 0, open_mr_to_green_ci_ms: 0 }, by_node: [], by_repo: [], rejected_gates_by_gate: [], gate_waits: [], by_template: [], daily: [], findings: [] }],
   "GET /notify": [200, { enabled: false, url_set: false, base_url: null, events: [], last_test: null }],
   "GET /access": [200, { bind: "127.0.0.1", port: 8765, session_expiry_days: 7, password_set: false, auth_required: false, allowed_hosts: [] }],
   "GET /sessions": [200, { sessions: [] }],
