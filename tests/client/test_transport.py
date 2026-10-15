@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+from pathlib import Path
 
 import httpx
 import pytest
@@ -212,3 +214,37 @@ def test_a_call_with_no_usable_answer_is_one_sentence(monkeypatch, handler, kind
         asyncio.run(client.get_work_item("w1"))
     assert caught.value.kind == kind
     assert said in str(caught.value)
+
+
+def test_the_client_raises_no_bare_value_error():
+    """The console catches `ClientError` and lets anything else crash as a
+    bug, so a refusal raised as a plain ValueError would crash it."""
+    bare = [
+        f"{path.name}:{node.lineno}"
+        for path in sorted(Path(client.__file__).parent.glob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Raise)
+        and isinstance(node.exc, ast.Call)
+        and getattr(node.exc.func, "id", None) == "ValueError"
+    ]
+    assert bare == []
+
+
+@pytest.mark.parametrize(
+    ("call", "kind"),
+    [
+        (lambda: client.health(), client.Failure.OTHER_INSTANCE),
+        (lambda: client.reject_gate("  ", "spec_approval", "w1"), client.Failure.REFUSED),
+        (lambda: client.get_work_item(), client.Failure.REFUSED),
+    ],
+    ids=["other-instance", "blank-note", "no-item"],
+)
+def test_a_refusal_the_client_makes_itself_is_a_client_error(monkeypatch, tmp_path, call, kind):
+    """The client's own checks refuse before or after a request; the console
+    tells them from a crash the same way it does a server's refusal."""
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    monkeypatch.chdir(tmp_path)  # not a Kraft worktree, so no item to default to
+    _serve(monkeypatch, lambda request: httpx.Response(200, json={"run_dir": "/elsewhere"}))
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(call())
+    assert caught.value.kind == kind

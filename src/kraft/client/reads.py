@@ -110,8 +110,9 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
         work_item_id, _origin = context.resolve_context()
     if work_item_id is None:
         worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
-        raise ValueError(
-            f"no work item: pass an id, or run from a Kraft worktree under {worktrees}"
+        raise transport.ClientError(
+            f"no work item: pass an id, or run from a Kraft worktree under {worktrees}",
+            kind=transport.Failure.REFUSED,
         )
     item = await transport._get(f"/work-items/{transport.segment(work_item_id)}")
     if full:
@@ -255,7 +256,7 @@ async def stream_log(
             ) as response:
                 if response.status_code >= 400:
                     await response.aread()
-                    raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
+                    raise transport.status_error(response.status_code, transport._detail(response))
                 async for raw in response.aiter_lines():
                     if raw.startswith("event: end"):
                         return
@@ -266,14 +267,13 @@ async def stream_log(
                             if line.get("n", 0) >= after_line:
                                 yield line
         except httpx.ConnectError as exc:
-            raise ValueError(
-                f"no Kraft server at {transport.base_url()} — start one with `kraft`"
-            ) from exc
+            raise transport._unreachable() from exc
         except httpx.HTTPError as exc:
             # a follow outlives its request: a read error mid-stream is the
             # server going away, and reads as a sentence like any other failure
-            raise ValueError(
-                f"the Kraft server at {transport.base_url()} closed the log stream"
+            raise transport.ClientError(
+                f"the Kraft server at {transport.base_url()} closed the log stream",
+                kind=transport.Failure.INTERRUPTED,
             ) from exc
 
 
@@ -371,14 +371,13 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
             async for message in socket:
                 yield json.loads(message)
     except (OSError, InvalidHandshake) as exc:
-        raise ValueError(
-            f"no Kraft server at {transport.base_url()} — start one with `kraft`"
-        ) from exc
+        raise transport._unreachable() from exc
     except ConnectionClosed as exc:
         # mid-stream: the server went away while we were watching, which is a
         # sentence like any other failure, not a traceback out of the event loop
-        raise ValueError(
-            f"the Kraft server at {transport.base_url()} closed the event stream"
+        raise transport.ClientError(
+            f"the Kraft server at {transport.base_url()} closed the event stream",
+            kind=transport.Failure.INTERRUPTED,
         ) from exc
 
 
@@ -492,9 +491,10 @@ async def health() -> dict:
             else "probably a different KRAFT_HOME/KRAFT_RUN_DIR, or something "
             "else already on this port"
         )
-        raise ValueError(
+        raise transport.ClientError(
             f"kraft: the server at {transport.base_url()} is a different instance "
-            f"(run_dir {actual!r}, expected {expected!r}) - {cause}"
+            f"(run_dir {actual!r}, expected {expected!r}) - {cause}",
+            kind=transport.Failure.OTHER_INSTANCE,
         )
     return payload
 
@@ -509,8 +509,8 @@ async def reindex(repo: str | None = None) -> dict:
         "POST", "/index/rescan", params={"repo": context.absolute_path(repo)} if repo else None
     )
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
-    return response.json()
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def search(q: str, limit: int = 20) -> dict:

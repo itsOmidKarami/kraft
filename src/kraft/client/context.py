@@ -104,7 +104,9 @@ def _forbid_self_action(work_item_id: str | None) -> str:
     resolved, origin = resolve_context()
     target = work_item_id or resolved
     if target is None:
-        raise ValueError("no work item: pass an id, or run from a Kraft worktree")
+        raise transport.ClientError(
+            "no work item: pass an id, or run from a Kraft worktree", kind=transport.Failure.REFUSED
+        )
     own = target == resolved or (
         resolved is not None and len(target) >= _MIN_PREFIX and resolved.startswith(target)
     )
@@ -129,5 +131,7 @@ async def resolve_work_item(work_item_id: str | None) -> str:
         return work_item_id
     resolved, _origin = resolve_context()
     if resolved is None:
-        raise ValueError("no work item: pass an id, or run from a Kraft worktree")
+        raise transport.ClientError(
+            "no work item: pass an id, or run from a Kraft worktree", kind=transport.Failure.REFUSED
+        )
     return resolved
