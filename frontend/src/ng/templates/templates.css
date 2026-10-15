@@ -8,7 +8,7 @@
 /* Header tail (brief Decided 8): the chain, its node, the draft state, the problems badge. */
 .tpl-crumb-sep { color: var(--text-muted); }
 .tpl-crumb-chain, .tpl-crumb-node { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
-.tpl-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
+.tpl-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--mark-change); }
 .tpl-published { flex: none; margin-left: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
 .tpl-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
 .tpl-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
@@ -89,7 +89,7 @@
 .yv-status.is-bad { color: var(--bad); }
 .yv-legend { font-size: var(--fs-meta); color: var(--text-muted); }
 .yv-plus { color: var(--ok); }
-.yv-tilde { margin-left: 6px; color: var(--warn); }
+.yv-tilde { margin-left: 6px; color: var(--mark-change); }
 .yv-err { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); font-size: var(--fs-label); color: var(--text); }
 .yv-scroll { flex: 1; min-height: 0; overflow: auto; }
 .yv-doc { display: flex; padding: 12px 0 60px; font: var(--fs-label)/18px ui-monospace, Menlo, monospace; }
@@ -98,12 +98,12 @@
 .yv-g.is-bad { color: var(--bad); }
 .yv-mark { width: 8px; }
 .yv-mark.is-add { color: var(--ok); }
-.yv-mark.is-change { color: var(--warn); }
+.yv-mark.is-change { color: var(--mark-change); }
 .yv-body { position: relative; flex: 1; min-width: 0; }
 .yv-bg { position: absolute; inset: 0 0 auto 0; pointer-events: none; }
 .yv-bgl { position: relative; height: 18px; }
 .yv-bgl.is-add { background: color-mix(in srgb, var(--ok) 9%, transparent); }
-.yv-bgl.is-change { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.yv-bgl.is-change { background: color-mix(in srgb, var(--mark-change) 9%, transparent); }
 .yv-bgl.is-bad { background: color-mix(in srgb, var(--bad) 16%, transparent); }
 .yv-msg { position: absolute; top: 0; white-space: nowrap; font: var(--fs-label)/18px inherit; color: var(--bad); }
 .yv-ta { position: relative; display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 0 16px 0 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: var(--text); caret-color: var(--text); font: inherit; white-space: pre; tab-size: 2; }
@@ -122,7 +122,7 @@
 .sw-row { display: flex; align-items: center; gap: 8px; }
 .sw-check { flex: none; width: 12px; color: var(--text); }
 .sw-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.sw-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.sw-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
 .sw-acts { display: flex; flex-direction: column; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .unsaved p { margin: 0 0 8px; font-size: var(--fs-meta); color: var(--text-sub); line-height: 1.5; }
 .tpl-first { max-width: 420px; }
@@ -158,7 +158,7 @@
 .adr-val { display: inline-block; max-width: 100%; box-sizing: border-box; margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; font-size: var(--fs-label); color: var(--text); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .adr-val.is-mono, .adr-in.is-mono { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); }
 .adr-val.is-muted { color: var(--text-muted); }
-.adr-val.is-changed { color: var(--text); text-decoration: underline dotted var(--warn); text-underline-offset: 3px; }
+.adr-val.is-changed { color: var(--text); text-decoration: underline dotted var(--mark-change-line); text-underline-offset: 3px; }
 .adr-val.is-bad { color: var(--bad); }
 .adr-val:is(:hover, :focus-visible):not(:disabled) { background: var(--line); }
 .adr-val:disabled { cursor: default; }

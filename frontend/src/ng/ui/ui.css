@@ -47,6 +47,7 @@
 .menu-item:has(.menu-mark, .menu-hint, .menu-icon, .menu-dot) { display: flex; align-items: center; gap: 8px; }
 .menu-icon { flex: none; display: flex; color: var(--text-sub); }
 .menu-dot { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--warn); }
+.menu-dot.is-draft { box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
 .menu-dot.is-problem { background: var(--bad); }
 .menu-dot + .menu-hint { margin-left: 8px; }
 .menu-mark { flex: none; width: 10px; color: var(--text-sub); }

@@ -253,7 +253,7 @@ describe("Policy page: the section menu and problems", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Limits/ }));
   };
 
-  it("marks a section with a change amber and one with a problem red, and switches by route", async () => {
+  it("marks a section with a change and one with a problem red, and switches by route", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(policyView({
       changes: [{ path: "max_concurrent", kind: "change", summary: "5 → 7", file: "policy.yaml" }],
       problems: [problem({ scope: "limits", level: "tasks", field: "defaults.tasks.time_cap_minutes", message: "too high" })],

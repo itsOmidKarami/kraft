@@ -2,7 +2,7 @@
 .ph-group-block { display: flex; flex-direction: column; gap: 8px; }
 .ph-row-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-sub); }
 .ph-row-value { flex: none; max-width: 150px; font-size: var(--fs-meta); color: var(--text-sub); text-align: right; overflow-wrap: anywhere; }
-.ph-row-value.ph-is-changed { color: var(--warn); }
+.ph-row-value.ph-is-changed { color: var(--mark-change); }
 .ph-row-static { cursor: default; }
 .ph-row.ph-is-danger { color: var(--bad); }
 .ph-chips-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
@@ -10,8 +10,8 @@
 .ph-chipword.ph-tone-ok { color: var(--ok); }
 .ph-chipword.ph-tone-warn { color: var(--warn); }
 .ph-chipword.ph-tone-bad { color: var(--bad); }
-.ph-switch.ph-is-changed { outline: 2px solid var(--warn); outline-offset: 1px; }
-.ph-add-btn { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 10px; border: 1px dashed color-mix(in oklab, var(--ok) 60%, transparent); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--ok); cursor: pointer; }
+.ph-switch.ph-is-changed { outline: 2px solid var(--mark-change-line); outline-offset: 1px; }
+.ph-add-btn { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 10px; border: 1px dashed var(--stroke); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 
 .ph-area-head { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
 .ph-area-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -28,7 +28,7 @@
 .ph-review-sign { width: 14px; flex: none; font-family: ui-monospace, Menlo, monospace; }
 .ph-review-sign.ph-add { color: var(--ok); }
 .ph-review-sign.ph-del { color: var(--bad); }
-.ph-review-sign.ph-chg { color: var(--warn); }
+.ph-review-sign.ph-chg { color: var(--mark-change); }
 .ph-review-text { min-width: 0; overflow-wrap: anywhere; }
 .ph-problem { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-meta); }
 .ph-problem-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }

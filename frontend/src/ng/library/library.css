@@ -10,7 +10,7 @@
 /* Header tail: the selected component, the draft state, the problems badge. */
 .lib-sep { color: var(--text-muted); }
 .lib-ref { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
-.lib-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
+.lib-draft { flex: none; margin-left: 4px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--mark-change); }
 .lib-published { flex: none; margin-left: 4px; font-size: var(--fs-meta); color: var(--text-muted); }
 .lib-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
 .lib-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
@@ -21,7 +21,7 @@
 .lib-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); }
 .lib-search:focus-within { border-color: var(--focus); }
 .lib-q { flex: 1; min-width: 0; min-height: 26px; padding: 0; border: 0; background: transparent; font-size: var(--fs-label); color: var(--text); outline: none; }
-.lib-filter-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.lib-filter-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--mark-change-line); }
 .lib-head .icon-btn { position: relative; }
 .lib-filter { width: 180px; padding: 4px; }
 .lib-filter-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 5px; font-size: var(--fs-label); color: var(--text); cursor: pointer; }
@@ -41,7 +41,7 @@
 .lib-used { flex: none; font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
 .lib-mark, .lib-prob { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .lib-mark.is-add { background: var(--ok); }
-.lib-mark.is-change { background: var(--warn); }
+.lib-mark.is-change { background: var(--mark-change-line); }
 .lib-prob { background: var(--bad); }
 .lib-diamond { flex: none; width: 9px; height: 9px; margin: 0 2.5px; transform: rotate(45deg); border: 1.5px solid currentColor; border-radius: 2px; }
 
