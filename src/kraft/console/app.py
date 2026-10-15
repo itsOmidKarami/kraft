@@ -10,17 +10,18 @@ import os
 import sys
 from collections.abc import Iterable
 from typing import ClassVar
+from urllib.parse import urlsplit
 
-from textual import events
+from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import ContentSwitcher, Footer, HelpPanel, Static
+from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Static
 
-from kraft import client, update
+from kraft import client, config, update
 from kraft.console import runner, theme
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
@@ -85,6 +86,12 @@ def down_sentence(error: client.ClientError | None) -> str:
     return f"No server at {client.base_url().removeprefix('http://')}."
 
 
+def starts_here() -> bool:
+    """Whether "Start server" can start the server the console reads: only
+    one on this machine (spec §7.3)."""
+    return urlsplit(client.base_url()).hostname in config.LOOPBACK
+
+
 class KraftConsole(App):
     CSS_PATH = "kraft.tcss"
     TITLE = "Kraft"
@@ -130,6 +137,8 @@ class KraftConsole(App):
             yield Static(id="tabs")
             yield Static(id="where")
         yield Static(id="down")
+        if starts_here():
+            yield Button("Start server", id="start")
         yield Static("make the window larger", id="tiny")
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
@@ -207,6 +216,15 @@ class KraftConsole(App):
     def action_output(self) -> None:
         self.push_screen("output")
 
+    @on(Button.Pressed, "#start")
+    def _start(self) -> None:
+        self.run_worker(self._start_server(), group="typed")
+
+    async def _start_server(self) -> None:
+        if await self.run_command(["admin", "start", "--detach"]) == 0:
+            # It returns once the server answers: follow it now, not after the backoff.
+            self.live.retry()
+
     def action_show(self, name: str) -> None:
         self.show(name)
 
@@ -255,10 +273,22 @@ class KraftConsole(App):
             view.health_changed(health)
 
     def _live_link(self, link: Link, error: client.ClientError | None) -> None:
+        was_down = self.link is Link.DOWN
         self.link = link
-        self.default_screen.set_class(link is Link.DOWN, "-down")
+        frame = self.default_screen
+        frame.set_class(link is Link.DOWN, "-down")
+        no_server = link is Link.DOWN and (
+            error is None or error.kind == client.Failure.UNREACHABLE
+        )
+        frame.set_class(no_server, "-no-server")
+        start = self.query_one_optional("#start", Button)
         if link is Link.DOWN:
             self.query_one("#down", Static).update(Content(down_sentence(error)))
+            # Focused once, on the way down: Enter presses it (spec §6).
+            if no_server and not was_down and start is not None:
+                start.focus()
+        elif was_down and frame.focused in (None, start):
+            self.view.focus()
         if link is Link.LIVE and not self._scoped:
             self.run_worker(self._resolve_scope, name="scope", group="scope", exclusive=True)
         self._draw_top()

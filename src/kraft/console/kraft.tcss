@@ -42,8 +42,18 @@ Screen.-down ContentSwitcher {
 
 Screen.-down #down {
     display: block;
-    height: 1fr;
+    height: auto;
     padding: 1 2;
+}
+
+/* Only when nothing answers, and only for a server on this machine. */
+#start {
+    display: none;
+    margin: 0 2;
+}
+
+Screen.-no-server #start {
+    display: block;
 }
 
 Screen.-narrow Footer {
@@ -64,6 +74,7 @@ Screen.-tiny > * {
 
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
 Screen.-tiny #down,
+Screen.-tiny #start,
 Screen.-tiny #narrow-keys {
     display: none;
 }
