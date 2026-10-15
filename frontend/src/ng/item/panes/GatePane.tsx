@@ -1,4 +1,5 @@
-import { REQUEST_CHANGES } from "../../review/finish";
+import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
+import { gateName, nameOf } from "../../board/rowText";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChainNode, KraftEvent } from "../../../types";
@@ -97,13 +98,13 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
   if (rejecting)
     return (
       // Escape closes the note, not the pane, and only when there is no text in it to lose (R11b-02).
-      <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`} onKeyDown={(e) => {
+      <div className="ip-confirm" role="group" aria-label={`${REQUEST_CHANGES}: ${gateName(item.chain_definition.nodes, gate.id)}`} onKeyDown={(e) => {
         if (!isEscape(e)) return;
         e.preventDefault();
         e.stopPropagation();
         if (!holdsText(e.target)) { refocus.current = true; setRejecting(false); }
       }}>
-        <p className="ip-confirm-q">Reject <code>{gate.id}</code>{to && <> · goes back to <code>{to}</code></>}</p>
+        <p className="ip-confirm-q">{sendsBack(false)}{to ? nameOf(item.chain_definition.nodes, to) : "the previous node"}</p>
         {/* Focus moves into the note: the Reject… button that had it is gone (R7b-10, R10b-04). */}
         <textarea autoFocus aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
         {error && <p className="item-error" role="alert">{error}</p>}

@@ -30,8 +30,8 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   // same gate. The re-run takes well under a second and the gate looks the
   // same before and after, so the wait is on the server's events.
   await gate.getByRole("button", { name: "Request changes…" }).click();
-  const reject = gate.getByRole("group", { name: "Reject spec_approval" });
-  await expect(reject).toContainText("goes back to spec");
+  const reject = gate.getByRole("group", { name: "Request changes: approve spec" });
+  await expect(reject).toContainText("Sends your note back to spec");
   await reject.getByRole("textbox").fill("the spec misses the error path");
   await reject.getByRole("button", { name: "Request changes" }).click();
   await expect.poll(() => eventCount(page, id, "gate_rejected"), { timeout: scaledTimeout(30_000) }).toBe(1);
