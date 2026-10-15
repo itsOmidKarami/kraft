@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { PanelLeftClose, PanelLeftOpen } from "../icons";
 import { Kbd } from "../ui/Kbd";
@@ -6,7 +6,7 @@ import { useStore } from "../../store";
 import { NAV_ICON } from "../icons";
 import { isTextField, mod } from "../keys";
 import { routesIn, type NgRoute } from "./routes";
-import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
+import { effectiveSidebar, subscribeSidebar, writeSidebar } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
 import { request } from "../http";
@@ -18,7 +18,8 @@ const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
 
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
-  const [mode, setMode] = useState<SidebarMode>(currentSidebar);
+  // The stored choice, or the rail while a page holds a pane open on a narrow screen.
+  const mode = useSyncExternalStore(subscribeSidebar, effectiveSidebar);
   const connection = useStore((s) => s.connection);
   // The board's own Needs you count: failed and paused mid-chain included.
   const needsYou = useGroupCount("needs");
@@ -45,9 +46,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
     toPage();
   };
   const toggle = () => {
-    const next = mode === "pinned" ? "rail" : "pinned";
-    writeSidebar(next);
-    setMode(next);
+    writeSidebar(mode === "pinned" ? "rail" : "pinned");
   };
 
   useEffect(() => {

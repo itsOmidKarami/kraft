@@ -20,6 +20,7 @@ import { showToast } from "../ui/Toast";
 import "../templates/templates.css";
 import "./notify.css";
 import "./settings.css";
+import { usePane } from "../shell/usePane";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -55,6 +56,7 @@ export function NotifyPage() {
   const [sel, setSel] = useState<Channel | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [paneOpen, setPaneOpen] = useState(true);
+  usePane(paneOpen);
   const [url, setUrl] = useState("");
   const [urlBad, setUrlBad] = useState<string | null>(null);
   const [base, setBase] = useState<string | null>(null);

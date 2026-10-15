@@ -27,6 +27,7 @@ import "./board.css";
 import { countIn } from "./counts";
 import { Shortcuts } from "./Shortcuts";
 import { Skeleton } from "./Skeleton";
+import { usePane } from "../shell/usePane";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -142,6 +143,7 @@ export function BoardPage() {
     [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
   );
   const needsN = countIn(items, "needs");
+  usePane(!!query.sel);
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
   const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {

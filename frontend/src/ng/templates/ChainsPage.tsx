@@ -25,6 +25,7 @@ import { addonRepo } from "../library/types";
 import { AddonBadge, ReadOnly } from "./addon";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
+import { usePane } from "../shell/usePane";
 
 /** An element's width and height, kept current. */
 export function useBox() {
@@ -76,6 +77,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
   const [s, dispatch] = usePaneSelection(true);
+  usePane(s.open);
   const [refused, setRefused] = useState<string | null>(null);
   const [bottomTab, setBottomTab] = useState<BottomTab>("on_failure");
   const [bottomOpen, setBottomOpen] = useState(false);
