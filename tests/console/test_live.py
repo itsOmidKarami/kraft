@@ -33,6 +33,9 @@ def _script(monkeypatch, boards: list, streams: list) -> list[int]:
         answer = boards.pop(0)
         if isinstance(answer, Exception):
             raise answer
+        if len(answer) == 3:  # (rows, cursor, seconds the read takes)
+            await asyncio.sleep(answer[2])
+            return answer[:2]
         return answer
 
     async def stream_events(after_seq=0):
@@ -40,6 +43,9 @@ def _script(monkeypatch, boards: list, streams: list) -> list[int]:
         if not streams:
             await asyncio.Event().wait()
         for event in streams.pop(0):
+            if isinstance(event, float):  # a pause before the next event
+                await asyncio.sleep(event)
+                continue
             if event is OPEN:
                 await asyncio.Event().wait()
             if isinstance(event, Exception):
@@ -82,15 +88,37 @@ def _recording():
     return watched, seen
 
 
-async def test_a_burst_of_events_reads_the_board_once(monkeypatch):
+@pytest.mark.parametrize(
+    ("boards", "stream", "delivered", "after"),
+    [
+        ([([], 7), ([], 10)], [{"seq": 8}, {"seq": 9}, {"seq": 10}, OPEN], [[], [8, 9, 10]], [7]),
+        (
+            [([], 7), ([], 8, 0.1), ([], 9)],
+            [{"seq": 8}, 0.05, {"seq": 9}, OPEN],
+            [[], [8], [9]],
+            [7],
+        ),
+        (
+            [([], 7), GONE, ([], 9)],
+            [{"seq": 8}, 0.05, {"seq": 9}, OPEN],
+            [[], [8, 9]],
+            [7],
+        ),
+    ],
+    ids=["burst", "event-during-the-read", "read-fails-keeps-the-batch"],
+)
+async def test_a_burst_of_events_reads_the_board_once(
+    monkeypatch, boards, stream, delivered, after
+):
     """Three events in a burst are one redraw, and the stream starts at the
-    board's cursor rather than replaying every event the server ever wrote."""
-    burst = [{"seq": 8}, {"seq": 9}, {"seq": 10}, OPEN]
-    after = _script(monkeypatch, [([], 7), ([], 10), ([], 10), ([], 10)], [burst])
+    board's cursor rather than replaying every event the server ever wrote.
+    An event that arrives while the board is being read is not left waiting
+    for the next one."""
+    opened = _script(monkeypatch, boards + [([], 10)] * 3, [stream])
     watched, seen = _recording()
-    await _run_until(watched, lambda: len(seen["events"]) >= 2)
-    assert seen["events"] == [[], [8, 9, 10]]
-    assert after == [7]
+    await _run_until(watched, lambda: len(seen["events"]) >= len(delivered))
+    assert seen["events"] == delivered
+    assert opened == after
 
 
 @pytest.mark.parametrize(
@@ -140,3 +168,45 @@ async def test_the_health_poll_reports_no_answer_as_none(monkeypatch):
     watched, seen = _recording()
     await _run_until(watched, lambda: seen["health"])
     assert seen["health"][0] is None
+
+
+@pytest.mark.parametrize(
+    ("stream", "waits"),
+    [
+        ([], [0.011, 0.022, 0.033, 0.033]),
+        ([{"seq": 8}], [0.011, 0.011, 0.011, 0.011]),
+    ],
+    ids=["closes-at-once", "delivered-an-event"],
+)
+async def test_the_backoff_grows_until_a_stream_has_worked(monkeypatch, stream, waits):
+    """The board answering is not the stream working: a stream that closes the
+    moment it opens must walk the backoff, and one that delivered an event starts over."""
+    _script(monkeypatch, [([], 7)] * 12, [stream] * 6)
+    monkeypatch.setattr(live, "BACKOFF_S", (0.011, 0.022, 0.033))
+    seen_waits: list[float] = []
+    sleep = asyncio.sleep
+
+    async def spy(delay, *args):
+        seen_waits.append(delay)
+        await sleep(delay, *args)
+
+    monkeypatch.setattr(live.asyncio, "sleep", spy)
+    watched, seen = _recording()
+    await _run_until(watched, lambda: len(seen["links"]) >= 8)
+    assert [w for w in seen_waits if w in (0.011, 0.022, 0.033)][:4] == waits
+
+
+async def test_a_view_that_fails_ends_the_run_not_just_a_task(monkeypatch):
+    """Only a ClientError is expected: anything else a callback raises must
+    reach whoever runs `run()`, not die unseen in a background task."""
+    _script(monkeypatch, [([], 7), ([], 8)], [[{"seq": 8}, OPEN]])
+
+    def on_event(rows, events):
+        if events:
+            raise RuntimeError("a view broke")
+
+    watched = live.Live(on_event=on_event, on_health=lambda h: None, on_link=lambda *a: None)
+    with pytest.raises(ExceptionGroup) as raised:
+        async with asyncio.timeout(5):
+            await watched.run()
+    assert raised.value.exceptions[0].args == ("a view broke",)

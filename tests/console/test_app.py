@@ -3,6 +3,7 @@ windows, the no-server state, and `kraft console`'s own refusals."""
 
 from __future__ import annotations
 
+import asyncio
 import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
@@ -111,6 +112,28 @@ def test_the_board_tab_counts_what_needs_you_where_it_was_opened(
         return _text(app, "#where")
 
     assert console.run(scenario).startswith(opened_in or "all repos")
+
+
+@pytest.mark.parametrize(
+    ("answer", "word"),
+    [("wait", "Server …"), ("none", "Server down"), ("ok", "Server ok")],
+    ids=["not-yet", "no-answer", "answered"],
+)
+def test_the_server_tab_does_not_say_down_before_health_answers(console, monkeypatch, answer, word):
+    async def health():
+        if answer == "wait":
+            await asyncio.Event().wait()
+        if answer == "none":
+            raise client.ClientError("no server", kind=client.Failure.UNREACHABLE)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(client, "health", health)
+
+    async def scenario(app, pilot):
+        await pilot.pause(0.1)
+        return _text(app, "#tabs")
+
+    assert word in console.run(scenario)
 
 
 def test_a_refusal_is_shown_in_the_servers_own_words(console):

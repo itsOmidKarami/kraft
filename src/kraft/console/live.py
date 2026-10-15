@@ -24,6 +24,9 @@ BACKOFF_S = (0.5, 1.0, 2.0, 5.0, 10.0)
 #: "reconnecting" before the views say there is no server: long enough for
 #: `kraft admin restart` to come back without blanking every view.
 GRACE_S = 15.0
+#: How long a stream must stay open, without an event, to count as having
+#: worked: only then does the backoff start over.
+STABLE_S = 5.0
 
 
 class Link(enum.StrEnum):
@@ -54,14 +57,14 @@ class Live:
         self._connected = False
         self._dropped_at: float | None = None
         self._pending: list[dict] = []
-        self._flush: asyncio.Task | None = None
+        self._wake = asyncio.Event()
 
     async def run(self) -> None:
-        try:
-            await asyncio.gather(self._follow(), self._poll())
-        finally:
-            if self._flush is not None:
-                self._flush.cancel()
+        # A TaskGroup, so a failure in any of the three ends the others and
+        # reaches the caller; only ClientError is handled inside.
+        async with asyncio.TaskGroup() as group:
+            for work in (self._follow, self._flusher, self._poll):
+                group.create_task(work())
 
     async def _follow(self) -> None:
         failures = 0
@@ -70,17 +73,22 @@ class Live:
                 rows, cursor = await client.board_rows()
                 # From the cursor, not 0, so the stream does not replay history.
                 self.seq = cursor if self.seq is None else self.seq
-                self._connected, self._dropped_at, failures = True, None, 0
+                self._connected, self._dropped_at = True, None
                 self.on_link(Link.LIVE, None)
                 self.on_event(rows, [])
-                async for event in client.stream_events(self.seq):
-                    self.seq = event["seq"]
-                    self._pending.append(event)
-                    if self._flush is None or self._flush.done():
-                        self._flush = asyncio.create_task(self._refresh())
-                # The server closed the stream without an error: a drop all the same.
-                self._dropped()
-                self.on_link(Link.RECONNECTING, None)
+                opened = time.monotonic()
+                try:
+                    async for event in client.stream_events(self.seq):
+                        failures = 0
+                        self.seq = event["seq"]
+                        self._pending.append(event)
+                        self._wake.set()
+                    # The server closed the stream without an error: a drop all the same.
+                    self._dropped()
+                    self.on_link(Link.RECONNECTING, None)
+                finally:
+                    if time.monotonic() - opened >= STABLE_S:
+                        failures = 0
             except client.ClientError as exc:
                 self._dropped()
                 self.on_link(self._link_after(exc), exc)
@@ -100,14 +108,20 @@ class Live:
             return Link.DOWN
         return Link.RECONNECTING
 
-    async def _refresh(self) -> None:
-        await asyncio.sleep(BATCH_S)
-        batch, self._pending = self._pending, []
-        try:
-            rows, _cursor = await client.board_rows()
-        except client.ClientError:
-            return  # the stream is failing too; its reconnect reads the board again
-        self.on_event(rows, batch)
+    async def _flusher(self) -> None:
+        while True:
+            await self._wake.wait()
+            # Cleared before the read, so an event arriving during it wakes the next round.
+            self._wake.clear()
+            await asyncio.sleep(BATCH_S)
+            batch, self._pending = self._pending, []
+            try:
+                rows, _cursor = await client.board_rows()
+            except client.ClientError:
+                # The stream is failing too; keep the batch for the next read.
+                self._pending = batch + self._pending
+                continue
+            self.on_event(rows, batch)
 
     async def _poll(self) -> None:
         while True:

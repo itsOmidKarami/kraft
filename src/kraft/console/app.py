@@ -73,6 +73,7 @@ class KraftConsole(App):
         self.version = update.installed()
         self.rows: list[dict] = []
         self.health: dict | None = None
+        self._health_answered = False
         #: The repo the console was opened in, or None for all repos.
         self.scope: str | None = None
         self.link = Link.RECONNECTING
@@ -133,6 +134,7 @@ class KraftConsole(App):
 
     def _live_health(self, health: dict | None) -> None:
         self.health = health
+        self._health_answered = True
         self._draw_top()
         for view in self.query(View):
             view.health_changed(health)
@@ -196,7 +198,7 @@ class KraftConsole(App):
         status = (self.health or {}).get("status", "down")
         counts = {
             "board": (str(needs_you), "$warning") if needs_you else "",
-            "server": status,
+            "server": status if self._health_answered else "…",
             "addons": str(held) if held else "",
             "repos": "",
         }
