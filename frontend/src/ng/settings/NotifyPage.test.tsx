@@ -90,12 +90,13 @@ describe("ng NotifyPage", () => {
   });
 
   it("says inactive in the pane too, when the switch is on but the channel cannot send", async () => {
-    stubNotification("default");
+    stubNotification("granted");
+    localStorage.setItem("kraft.browserNotify.enabled", "1");
     setup({ url_set: false, last_test: null });
     await open("This browser");
     const browser = screen.getByRole("complementary", { name: "This browser pane" });
     await userEvent.click(within(browser).getByRole("switch", { name: "Alerts on this device" }));
-    expect(within(browser).getByRole("switch", { name: "Alerts on this device" })).toBeChecked();
+    expect(within(browser).getByRole("switch", { name: "Alerts on this device" })).not.toBeChecked();
     expect(within(browser).getByText("inactive")).toBeInTheDocument();
     expect(within(browser).queryByText("active")).toBeNull();
     await userEvent.click(within(browser).getByRole("button", { name: "Notifications" }));
@@ -126,43 +127,61 @@ describe("ng NotifyPage", () => {
     const put = setup();
     await open("Webhook");
     await userEvent.click(screen.getByRole("switch", { name: "Webhook notifications" }));
-    await userEvent.click(screen.getByRole("switch", { name: "gate_requested (webhook)" }));
+    await userEvent.click(screen.getByRole("switch", { name: "A decision is waiting (webhook)" }));
     await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
     expect(put.mock.calls.map((c) => c[0])).toEqual([{ enabled: false }, { events: ["work_item_needs_human"] }]);
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
-  it("sends the typed URL and link back only on Save, and Discard sends nothing", async () => {
+  it("saves the URL and the link back as each field is left, with Enter too, and has no Save button", async () => {
     stubNotification("default");
     const put = setup();
     await open("Webhook");
-    const save = screen.getByRole("button", { name: "Save" });
-    expect(save).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     await userEvent.type(screen.getByLabelText("Webhook URL"), "https://ntfy.sh/topic");
-    const linkBack = screen.getByLabelText("Link back");
-    await userEvent.clear(linkBack);
-    await userEvent.type(linkBack, "http://10.0.0.5:8765");
     expect(put).not.toHaveBeenCalled();
-    await userEvent.click(save);
-    await waitFor(() => expect(put).toHaveBeenCalledWith({ url: "https://ntfy.sh/topic", base_url: "http://10.0.0.5:8765" }));
+    const linkBack = screen.getByLabelText("Link back");
+    await userEvent.click(linkBack);
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ url: "https://ntfy.sh/topic" }));
     expect(screen.getByLabelText("Webhook URL")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await userEvent.clear(linkBack);
+    await userEvent.type(linkBack, "http://10.0.0.5:8765{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ base_url: "http://10.0.0.5:8765" }));
+    expect(put).toHaveBeenCalledTimes(2);
+    await userEvent.click(screen.getByLabelText("Webhook URL"));
+    await userEvent.click(linkBack);
+    expect(put).toHaveBeenCalledTimes(2);
+  });
 
-    await userEvent.type(screen.getByLabelText("Webhook URL"), "https://other.example/x");
-    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(screen.getByLabelText("Webhook URL")).toHaveValue("");
-    expect(put).toHaveBeenCalledTimes(1);
+  it("refuses a URL that is not http(s) before sending it, and names why on the field", async () => {
+    stubNotification("default");
+    const put = setup();
+    await open("Webhook");
+    await userEvent.type(screen.getByLabelText("Webhook URL"), "ntfy{Enter}");
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Webhook URL")).toBeInvalid();
+    expect(screen.getByLabelText("Webhook URL")).toHaveAccessibleDescription("Start it with http:// or https://");
+    expect(screen.getByLabelText("Webhook URL")).toHaveValue("ntfy");
   });
 
   it("shows the server's refusal inline and keeps what was typed", async () => {
     stubNotification("default");
     const put = setup();
-    put.mockRejectedValueOnce(new Error("url: must be an http(s) URL"));
+    put.mockRejectedValueOnce(new Error("url: host not allowed"));
     await open("Webhook");
-    await userEvent.type(screen.getByLabelText("Webhook URL"), "ntfy");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("url: must be an http(s) URL");
-    expect(screen.getByLabelText("Webhook URL")).toHaveValue("ntfy");
+    await userEvent.type(screen.getByLabelText("Webhook URL"), "https://bad.example{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("url: host not allowed");
+    expect(screen.getByLabelText("Webhook URL")).toHaveValue("https://bad.example");
+  });
+
+  it("reads the typed, unsaved URL in the test's reason, and not 'set a URL' again", async () => {
+    stubNotification("default");
+    setup({ url_set: false, last_test: null });
+    await open("Webhook");
+    const pane = screen.getByRole("complementary", { name: "Webhook pane" });
+    expect(within(pane).getByRole("button", { name: /Send a test/ })).toHaveAccessibleDescription("Set a webhook URL first.");
+    await userEvent.type(screen.getByLabelText("Webhook URL"), "https://ntfy.sh/topic");
+    expect(within(pane).getByRole("button", { name: /Send a test/ })).toHaveAccessibleDescription("Press Enter to save the URL first.");
   });
 
   it("puts the switch back and shows the reason when the server refuses it", async () => {
@@ -194,43 +213,56 @@ describe("ng NotifyPage", () => {
     expect(screen.getByLabelText("notify.yaml").textContent).toBe('enabled: false\n# webhook_url: not set\nbase_url: ""\nevents:');
   });
 
-  it("asks for browser permission only from its own button", async () => {
+  it("asks for browser permission only from its own button, which comes before the switch", async () => {
     const { N } = stubNotification("default") as { N: { requestPermission: ReturnType<typeof vi.fn> } };
     setup();
     await open("This browser");
-    await userEvent.click(screen.getByRole("switch", { name: "Alerts on this device" }));
-    expect(browserNotify.isEnabled()).toBe(true);
+    const allow = screen.getByRole("button", { name: "Allow notifications" });
+    const sw = screen.getByRole("switch", { name: "Alerts on this device" });
+    expect(allow.compareDocumentPosition(sw) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(sw).toBeDisabled();
+    expect(sw).toHaveAccessibleDescription("Allow notifications first.");
     expect(N.requestPermission).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Allow notifications" }));
+    await userEvent.click(allow);
     expect(N.requestPermission).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Allow notifications" })).toBeNull());
-    expect(screen.getByText(/Allowed in this browser/)).toBeInTheDocument();
+    expect(screen.getByText("Notifications are allowed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("switch", { name: "Alerts on this device" }));
     expect(within(card("This browser")).getByText("active")).toBeInTheDocument();
   });
 
-  it("explains a denied browser and offers no retry; a missing one disables the switch", async () => {
-    stubNotification("denied");
+  it("gives a blocked browser its steps and a Check again, with the switch disabled and no retry prompt", async () => {
+    const { N } = stubNotification("denied") as { N: { permission: string; requestPermission: ReturnType<typeof vi.fn> } };
     setup();
     await open("This browser");
-    expect(within(screen.getByRole("complementary", { name: "This browser pane" })).getByText(/Blocked in the browser's site settings/)).toBeInTheDocument();
+    const pane = screen.getByRole("complementary", { name: "This browser pane" });
+    expect(within(pane).getByText("Notifications are blocked")).toBeInTheDocument();
+    expect(within(pane).getByText(/Open the site settings/)).toBeInTheDocument();
     expect(within(card("This browser")).getByText("blocked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Allow notifications" })).toBeNull();
+    expect(within(pane).getByRole("switch", { name: "Alerts on this device" })).toBeDisabled();
     expect(within(card("This browser")).getByRole("button", { name: /Send a test/ })).toBeDisabled();
+    N.permission = "granted";
+    await userEvent.click(within(pane).getByRole("button", { name: "Check again" }));
+    expect(within(pane).getByRole("switch", { name: "Alerts on this device" })).toBeEnabled();
+    expect(N.requestPermission).not.toHaveBeenCalled();
   });
 
-  it("disables browser alerts where there are no notifications", async () => {
+  it("says an unsupported browser can't show notifications, with no switch to look off", async () => {
     stubNotification(null);
     setup();
     await open("This browser");
-    expect(screen.getByRole("switch", { name: "Alerts on this device" })).toBeDisabled();
-    expect(within(screen.getByRole("complementary", { name: "This browser pane" })).getByText(/no notifications/)).toBeInTheDocument();
+    const pane = screen.getByRole("complementary", { name: "This browser pane" });
+    expect(within(pane).getByText("This browser can't show notifications")).toBeInTheDocument();
+    expect(within(pane).queryByRole("switch")).toBeNull();
+    expect(within(pane).queryByRole("button", { name: /Send a test|Allow notifications|Check again/ })).toBeNull();
   });
 
   it("keeps the browser's own events apart from the webhook's, in this browser", async () => {
     stubNotification("granted");
     const put = setup();
     await open("This browser");
-    await userEvent.click(screen.getByRole("switch", { name: "gate_requested (this browser)" }));
+    await userEvent.click(screen.getByRole("switch", { name: "A decision is waiting (this browser)" }));
     expect(browserNotify.enabledEvents()).toEqual(["work_item_needs_human", "work_item_storage_held"]);
     expect(within(card("This browser")).queryByText("gate_requested")).toBeNull();
     expect(within(card("Webhook")).getByText("gate_requested")).toBeInTheDocument();
