@@ -7,7 +7,6 @@ import { App } from "../App";
 import { useStore } from "../../store";
 import { item } from "../../testFixtures";
 import type { SearchResult } from "../../types";
-import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 
 const Where = () => {
@@ -127,11 +126,9 @@ describe("SearchOverlay", () => {
     await screen.findByText("Caching spec");
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
     // Waiting at a gate, it is an action: review that gate.
-    const gate = within(section("Needs you")).getByTitle("Review human review").closest("[role=option]")!;
-    expect(gate).toHaveTextContent("Review human reviewGated work · wi_gate · alpha");
-    // The item's title is the part of the sub that shortens.
-    expect(gate.querySelector(".ng-search-sublead")).toHaveTextContent(/^Gated work$/);
-    expect(gate.querySelector(".ng-search-sublead")).toHaveAttribute("data-allow-ellipsis");
+    // The item's name leads; the gate it waits at is the sub, as the board words it.
+    const gate = within(section("Needs you")).getByTitle("Gated work").closest("[role=option]")!;
+    expect(gate.querySelector(".ng-search-sub")).toHaveTextContent("Review · approve human review · wi_gate · alpha");
     expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
     const says = (row: string) => {
       const o = screen.getByTitle(row).closest("[role=option]")!;
@@ -155,7 +152,7 @@ describe("SearchOverlay", () => {
       const o = row(name);
       return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
     };
-    expect(parts("Review human review")).toEqual(["lucide-diamond", "NEEDS YOU", undefined]);
+    expect(parts("Gated work")).toEqual(["lucide-diamond", "NEEDS YOU", undefined]);
     expect(parts("Plain work")).toEqual(["lucide-box", "RUNNING", "beta"]);
     expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
     expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
@@ -205,7 +202,7 @@ describe("SearchOverlay", () => {
     const go = async (name: RegExp | string) => {
       await user.click(within(screen.getByRole("listbox")).getByText(name));
     };
-    await go("Review human review");
+    await user.click(within(screen.getByRole("listbox")).getByTitle("Gated work")); // "work" is marked inside the title
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate/review");
     expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -263,7 +260,10 @@ describe("SearchOverlay", () => {
     mount();
     const { user } = await open();
     expect(screen.getByRole("option", { name: "Archived" })).toBeInTheDocument();
-    for (const r of ROUTES) expect(screen.getByRole("option", { name: r.label })).toBeInTheDocument();
+    // A few top pages, not all of them; typing finds the rest.
+    expect(document.querySelectorAll(".ng-search-chip")).toHaveLength(5);
+    expect(screen.queryByRole("option", { name: "Policy" })).toBeNull();
+    expect(screen.getByText("Type a page name to find the rest.")).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Archived" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/archived");
     await user.keyboard("{Meta>}k{/Meta}");
@@ -288,7 +288,7 @@ describe("SearchOverlay", () => {
 
   it.each([
     ["plain", "Plain work", "/work-items/wi_plain"],
-    ["gated", "Review human review", "/work-items/wi_gate/review"],
+    ["gated", "Gated work", "/work-items/wi_gate/review"],
   ])("opens the active row on Enter: %s", async (query, row, to) => {
     mount();
     const { user, input } = await open();
@@ -306,7 +306,7 @@ describe("SearchOverlay", () => {
     expect(await screen.findByText("Documents could not be searched")).toBeInTheDocument();
     expect(headings()).toContain("Work items");
     expect(screen.getByTitle("Plain work")).toBeInTheDocument();
-    expect(screen.getByTitle("Review human review")).toBeInTheDocument();
+    expect(screen.getByTitle("Gated work")).toBeInTheDocument();
   });
 
   it("sends one request for a burst of typing, not one per key", async () => {
@@ -321,7 +321,10 @@ describe("SearchOverlay", () => {
   it("cycles the search mode and sends it", async () => {
     mount();
     const { user, input } = await open();
-    await user.click(screen.getByRole("button", { name: /Search mode: hybrid/ }));
+    // Labelled in words, as the phone's Match by sheet has them.
+    expect(screen.getByRole("button", { name: /Search mode: Hybrid/ })).toHaveTextContent("Match: Hybrid");
+    await user.click(screen.getByRole("button", { name: /Search mode: Hybrid/ }));
+    expect(screen.getByRole("button", { name: /Search mode: Keywords/ })).toHaveTextContent("Match: Keywords");
     await user.type(input, "cache");
     await screen.findByText("Caching spec");
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "fts" }));

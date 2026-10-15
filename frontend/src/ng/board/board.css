@@ -9,6 +9,9 @@
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
 .board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: var(--fs-label); color: var(--text-muted); }
 .board-empty-solo { padding-left: 14px; }
+.board-page-head { flex: none; max-width: 1180px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 14px 14px 0; }
+.board-page-head h1 { margin: 0 0 2px; font-size: var(--fs-h2); font-weight: 600; }
+.board-page-head p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
 .board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
 .board-more:hover { background: var(--surface-2); color: var(--text); }
 .board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -153,7 +156,9 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--stroke); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 30px color-mix(in oklab, var(--side) 50%, transparent); }
 .composer-row { display: flex; align-items: center; gap: 12px; }
 .composer-title { all: unset; flex: 1; min-width: 0; font: 500 var(--fs-h3)/1.3 var(--font-sans); color: var(--text); border-radius: 4px; }
-.composer-title:focus-visible, .composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+/* The title is the field a person lands in: an underline as the search bar's, not a box around the text. */
+.composer-title:focus-visible { outline: none; box-shadow: 0 2px 0 var(--focus); }
 .composer-hint { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .composer-indent { padding-left: 42px; }
 .composer-brief { width: 100%; box-sizing: border-box; min-height: 38px; resize: vertical; padding: 0; border: none; background: transparent; font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); border-radius: 4px; }

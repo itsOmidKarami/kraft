@@ -27,6 +27,7 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
+import { autoArchiveNote } from "../ui/archivedWords";
 import { countIn } from "./counts";
 import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
@@ -343,7 +344,7 @@ export function BoardPage() {
                   <span className="board-count">{g.total}</span>
                   {g.done && (
                     <span className="board-note">
-                      <Link to="/archived">completed and cancelled{archiveDays != null ? ` · auto-archive after ${archiveDays} days` : ""}</Link>
+                      <Link to="/archived">Archived</Link>{autoArchiveNote(archiveDays) && ` · ${autoArchiveNote(archiveDays)}`}
                     </span>
                   )}
                   <span className="board-head-gap" />

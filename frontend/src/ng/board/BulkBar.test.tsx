@@ -52,11 +52,13 @@ describe("BulkBar", () => {
     expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
   });
 
-  it("greys Archive when nothing checked has ended, and says why", () => {
+  it("greys Archive when nothing checked has ended, and says why in text beside it, not in a title", () => {
     mount([NEED]);
     const archive = screen.getByRole("button", { name: "Archive" });
     expect(archive).toBeDisabled();
-    expect(archive).toHaveAttribute("title", "Only done items can be archived");
+    expect(archive).not.toHaveAttribute("title");
+    expect(archive).toHaveAccessibleDescription("Only done or cancelled items can be archived.");
+    expect(screen.getByText("Only done or cancelled items can be archived.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Pause/ })).toBeNull();
   });
 
@@ -103,6 +105,38 @@ describe("BulkBar", () => {
     expect(within(strip).getByRole("listitem")).toHaveTextContent("Item r5 r5 · work item is paused, not running");
     fireEvent.click(within(strip).getByRole("button", { name: "Dismiss" }));
     expect(useBulk.getState().last).toBeNull();
+  });
+
+  it("keeps Archive's reason off once something checked can be archived", () => {
+    mount([DONE]);
+    expect(screen.queryByText(/can be archived/)).toBeNull();
+  });
+
+  const PAUSED = detail({ id: "p6", title: "Item p6", display_status: "paused", status: "paused", current_node_id: "plan", bead_id: null });
+  const NEW = detail({ id: "p7", title: "Item p7", display_status: "paused", status: "paused", current_node_id: null, bead_id: null });
+  const FAILED = detail({ id: "f8", title: "Item f8", display_status: "failed", status: "needs_human", bead_id: null });
+
+  it("counts Resume on the paused ones that have begun (a never-started one has Start) and Retry on the stopped ones", () => {
+    const GATE = detail({ id: "g9", title: "Item g9", display_status: "needs_you", status: "needs_human", stop: { kind: "gate", reason: "approve spec", node: "spec_approval", resume_at: null }, pending_gate: "spec_approval", bead_id: null });
+    mount([PAUSED, NEW, FAILED, RUN, GATE]);
+    expect(screen.getByRole("button", { name: "Resume 1" })).toBeInTheDocument(); // the gate has its own Review, so Retry is 1, not 2
+    expect(screen.getByRole("button", { name: "Retry 1" })).toBeInTheDocument();
+  });
+
+  it("sends Resume and Retry through the item's own routes, one per item, and lists the one that refused", async () => {
+    const calls = stubFetch({ "POST /work-items/f8/retry": [409, { detail: "work item is not stopped" }], "POST /work-items/p6/resume": [200, {}] });
+    vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: [], cursor: 1 });
+    const onChecked = vi.fn();
+    render(<BulkBar checked={[PAUSED, FAILED]} byId={{ p6: PAUSED, f8: FAILED }} offline={false} onChecked={onChecked} />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume 1" }));
+    await act(async () => {});
+    expect(useBulk.getState().last).toBeNull(); // all went: nothing to read
+    fireEvent.click(screen.getByRole("button", { name: "Retry 1" }));
+    await act(async () => {});
+    expect(calls.some((c) => c.path === "/work-items/bulk")).toBe(false);
+    expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(["/work-items/p6/resume", "/work-items/f8/retry"]));
+    expect(await screen.findByRole("alert")).toHaveTextContent("0 of 1 item retried");
+    expect(screen.getByRole("listitem")).toHaveTextContent("work item is not stopped");
   });
 
   it("archives at once with an Undo that restores", async () => {

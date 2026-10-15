@@ -1,4 +1,5 @@
 import { CircleDot, FileText, Kanban, MoveRight, Search as SearchIcon } from "lucide-react";
+import { SEARCH_MODES } from "../../ui/searchModes";
 import { NoMatch } from "../../ui/NoMatch";
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -33,7 +34,7 @@ interface Row {
 }
 
 const SOURCES = [{ value: "", label: "Any source" }, { value: "artifact", label: "Documents" }, { value: "session_summary", label: "Session summaries" }];
-const MODES = [{ value: "hybrid", label: "Hybrid" }, { value: "fts", label: "Keywords" }, { value: "vector", label: "Meaning" }];
+const MODES = [...SEARCH_MODES];
 
 /** `/search` (W17 brief I): items, documents and beads in the sections the ⌘K overlay has, in one list. A Needs you row opens the gate and never approves. Only what the server returned is shown. */
 export function Search() {
