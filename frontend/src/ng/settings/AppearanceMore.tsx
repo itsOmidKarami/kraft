@@ -1,9 +1,20 @@
+import type { ReactNode } from "react";
 import type { BoardOpenIn, Theme } from "../../types";
 import { DEFAULT_PREFS, type DiffPrefs } from "../review/prefs";
 import { Segmented } from "../ui/Segmented";
 import { editorName, useEditors } from "../item/editors";
 import { Switch } from "../ui/Switch";
 import { onMac } from "../keys";
+
+/** One folded section of the page: closed it is a heading and what is set; open, its controls. */
+function Fold({ id, title, now, children }: { id: string; title: string; now: string; children: ReactNode }) {
+  return (
+    <details className="set-fold">
+      <summary><h3 id={id} className="set-h3">{title}</h3><span className="set-fold-now">{now}</span></summary>
+      <div className="set-fold-body">{children}</div>
+    </details>
+  );
+}
 
 type Scheme = NonNullable<Theme["code_scheme"]>;
 type Mode = "light" | "dark";
@@ -12,6 +23,8 @@ const SCHEMES: { [M in Mode]: { id: Scheme[M]; name: string }[] } = {
   light: [{ id: "auto", name: "Auto" }, { id: "none", name: "None" }, { id: "solarized-light", name: "Solarized Light" }],
   dark: [{ id: "auto", name: "Auto" }, { id: "none", name: "None" }, { id: "solarized-dark", name: "Solarized Dark" }, { id: "monokai", name: "Monokai" }, { id: "dracula", name: "Dracula" }],
 };
+
+const schemeName = (mode: Mode, id: string) => SCHEMES[mode].find((s) => s.id === id)?.name.toLowerCase() ?? id;
 
 const SAMPLE: [string, string][][] = [
   [["com", "# find a work item"]],
@@ -75,15 +88,13 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
   return (
     <section className="set-more" aria-labelledby="set-more-title">
       <h2 id="set-more-title" className="set-h2">Code and board view</h2>
-      <section aria-labelledby="set-code">
-        <h3 id="set-code" className="set-h3">Syntax highlighting</h3>
+      <Fold id="set-code" title="Syntax highlighting" now={`light ${schemeName("light", scheme.light)}, dark ${schemeName("dark", scheme.dark)}`}>
         <p className="set-hint">Colours code in review diffs. Chosen separately for light and dark. Auto follows Colour amount; None is a single colour.</p>
         {group("light")}
         {group("dark")}
-      </section>
+      </Fold>
 
-      <section aria-labelledby="set-diff">
-        <h3 id="set-diff" className="set-h3">Review diff</h3>
+      <Fold id="set-diff" title="Review diff" now={`${unified ? "inline" : "side-by-side"}, ${DIFF_COLOURS.find((c) => c.id === diff.colours)?.name.toLowerCase()} colours`}>
         <div className="set-diff-cols">
           <div className="set-diff-controls">
             <h4 className="set-sub">Layout</h4>
@@ -115,16 +126,15 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
             </div>
           </div>
         </div>
-      </section>
+      </Fold>
 
-      <section aria-labelledby="set-board">
-        <h3 id="set-board" className="set-h3">Board</h3>
+      <Fold id="set-board" title="Board" now={`opens items in ${theme.board.open_in === "peek" ? "the peek" : "a full page"}`}>
         <div className="set-row">
           <span className="set-row-label">Open items in</span>
           <Segmented<BoardOpenIn> label="Open items in" options={[{ value: "peek", label: "Peek" }, { value: "full", label: "Full page" }]} value={theme.board.open_in} onChange={(v) => save({ board: { ...theme.board, open_in: v } })} />
           <span className="set-hint">What a row click does; {onMac() ? "⌘-click" : "Ctrl+click"} always opens the page.</span>
         </div>
-      </section>
+      </Fold>
 
       <DefaultEditor value={theme.editor ?? null} save={(editor) => save({ editor })} />
     </section>
@@ -139,12 +149,11 @@ function DefaultEditor({ value, save }: { value: string | null; save: (editor: s
   // Unset is not the system opener: Open in editor then takes KRAFT_EDITOR first (r12 review).
   const options = [...ids, ...(value && !ids.includes(value) ? [value] : []), ""].map((id) => ({ value: id, label: id ? editorName(id) : "Not set" }));
   return (
-    <section aria-labelledby="set-editor">
-      <h3 id="set-editor" className="set-h3">Default editor</h3>
+    <Fold id="set-editor" title="Default editor" now={value ? editorName(value) : "not set"}>
       {typeof editors === "string" ? <p className="set-hint">{editors}</p> : (
         <Segmented label="Default editor" options={options} value={value ?? ""} onChange={(v) => save(v || null)} />
       )}
       <p className="set-hint">Not set: KRAFT_EDITOR, else the system's default app.</p>
-    </section>
+    </Fold>
   );
 }
