@@ -118,7 +118,7 @@ export const STATES: State[] = [
   // Gates and review
   { area: "gates-review", state: "gate-chain", app: (p) => app(p, item("needs-gate")) },
   { area: "gates-review", state: "gate-view", app: (p) => app(p, item("needs-gate", "/nodes/final_review")) },
-  { area: "gates-review", state: "gate-reject", app: async (p) => { await app(p, item("needs-gate", "?sel=final_review")); await click("Reject…")(p); } },
+  { area: "gates-review", state: "gate-reject", app: async (p) => { await app(p, item("needs-gate", "?sel=final_review")); await click("Request changes…")(p); } },
   { area: "gates-review", state: "gate-review", app: (p) => appReview("default", "?doc=1")(p) },
   { area: "gates-review", state: "review", app: (p) => appReview()(p) },
 

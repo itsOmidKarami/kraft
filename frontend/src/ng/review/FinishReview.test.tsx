@@ -227,6 +227,14 @@ describe("BottomBar", () => {
     expect(onFinish).not.toHaveBeenCalled();
   });
 
+  it("away from a gate: no Approve or Request changes, only Finish review once there are drafts", () => {
+    bar([], item({ pending_gate: null }));
+    expect(screen.getByText("No comments yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finish review" })).toBeNull();
+  });
+
   it("approves from the bar when it can", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
     bar([th({ draft: false, state: "resolved", comments: [c({ draft: false })] })]);

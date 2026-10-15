@@ -102,7 +102,7 @@ export function barText(threads: ReviewThread[], item: Pick<WorkItem, "pending_g
   return {
     published: true,
     title: `${resolved} of ${threads.length} resolved`,
-    text: `${pending ? `${pending} pending · ` : ""}${!atGate ? "Not at a gate, so Approve is unavailable" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve"}`,
+    text: `${pending ? `${pending} pending · ` : ""}${!atGate ? "Not at a gate" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve"}`,
     agent: null,
     pending,
   };

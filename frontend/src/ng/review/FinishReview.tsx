@@ -68,6 +68,7 @@ function useFixTarget(item: Item, atGate: boolean, open: boolean) {
 export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: { item: Item; gate: string | null; threads: ReviewThread[]; readOnly?: boolean; onFinish: (o?: ReviewOutcome) => void; submit: ReturnType<typeof useSubmit> }) {
   const [error, setError] = useState<string | null>(null);
   const bar = barText(threads, item, gate);
+  const atGate = !!gate && item.pending_gate === gate;
   const block = approveBlock(item, gate, threads);
   const why = useReason(block);
   if (readOnly)
@@ -84,11 +85,15 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
       {bar.agent && <><span aria-hidden="true" className="rv-muted">·</span><span className="rv-muted">{bar.agent}</span></>}
       {error && <span className="rv-error" role="alert">{error}</span>}
       <span className="rv-spacer" />
-      <Button onClick={() => onFinish("request_changes")}>{REQUEST_CHANGES}</Button>
-      {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
-          them: it opens Finish your review on Approve instead, which lists them first. */}
-      {why.note}
-      <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} {...why.attrs} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
+      {atGate && (
+        <>
+          <Button onClick={() => onFinish("request_changes")}>{REQUEST_CHANGES}</Button>
+          {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
+              them: it opens Finish your review on Approve instead, which lists them first. */}
+          {why.note}
+          <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} {...why.attrs} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
+        </>
+      )}
       {bar.pending > 0 && <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>}
     </div>
   );
