@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useResizable } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
@@ -22,7 +22,7 @@ import { ProblemWhere } from "./ProblemWhere";
 import { listRows, withAddons } from "./rows";
 import { AddonBadge, ReadOnly } from "../templates/addon";
 import { LIBRARY_FILE } from "../templates/draft/view";
-import { addonRepo, parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
+import { addonRepo, parseRef, refUrl, SECTIONS, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 import { usePane } from "../shell/usePane";
 
@@ -46,6 +46,10 @@ export function LibraryPage() {
 
 function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraft }) {
   const navigate = useNavigate();
+  // A landing tile's section (`?section=tasks`) narrows the list and rides along while a component is picked.
+  const [params, setParams] = useSearchParams();
+  const asked = params.get("section");
+  const only = SECTIONS.find((s) => s === asked);
   const r = draft.view!.result;
   const [published, reloadPublished] = usePublished();
   // Review & publish takes the pane's place (Decisions §10 Publish); the canvas stays.
@@ -166,7 +170,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         </Button>
         {surface === "canvas" && <Button variant={review ? undefined : "primary"} disabled={!review && !draft.view!.draft} aria-describedby={draft.view!.draft || review ? undefined : `${publishedId} ${publishedId}-why`} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>{review ? "Back to editing" : "Review & publish"}</Button>}
       </HeaderActions>
-      <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
+      <LibraryList rows={rows} selected={id} only={only} onShowAll={() => setParams({}, { replace: true })} onSelect={(x) => navigate({ pathname: refUrl(x), search: only ? `?section=${only}` : "" })} onAdd={add} />
       <div className="lib-main" ref={frame}>
         {surface === "yaml" ? (
           <div className="lib-yaml">
@@ -194,7 +198,6 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onBackground={() => pick(row.id)}
               onGoTo={(x) => navigate(refUrl(x))}
             />
-            {uses && <p className="lib-used-line">{uses.length ? `used by ${[...new Set(uses.map((u) => u.chain))].join(", ")}` : "not used by any chain"}</p>}
             {review ? null : <LibraryPane
               draft={shownDraft}
               path={sub ?? row.id}

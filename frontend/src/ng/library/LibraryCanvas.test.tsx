@@ -17,7 +17,8 @@ describe("Library canvas: a node", () => {
     expect(within(g).getByRole("button", { name: "review, step" })).toBeInTheDocument();
     // `code_review` writes only `extends: code_review`, whose own base is the agent task `implementer`.
     expect(within(g).getByRole("button", { name: "code_review, agent task" })).toBeInTheDocument();
-    expect(await screen.findByText("used by default")).toBeInTheDocument();
+    // Who uses it is the pane's to say, not a pill on the canvas.
+    expect(screen.queryByText("used by default")).toBeNull();
     // A node can take another step before, between and after (the seams a one-step component lacks).
     expect(within(g).getAllByRole("button", { name: "Add a step here" }).length).toBeGreaterThan(0);
   });
@@ -119,5 +120,7 @@ describe("Library canvas: a step and a task", () => {
     expect(await screen.findByRole("button", { name: "code_review, agent task" })).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: "extends implementer" }));
     expect(where()).toBe("/templates/library/tasks.implementer");
+    // The canvas carries where it is used, as links to the chain's node.
+    expect(within(document.querySelector(".lib-glyph-uses")!).getByRole("link", { name: "default" })).toHaveAttribute("href", "/templates/chains/default/nodes/implementation");
   });
 });

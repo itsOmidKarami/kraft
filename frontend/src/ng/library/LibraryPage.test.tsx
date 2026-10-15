@@ -23,12 +23,13 @@ describe("Library page: the list", () => {
     expect(within(box).getByRole("option", { name: /approval/ })).toHaveTextContent("unpublished");
   });
 
-  it("shows a long id whole, wrapping instead of cutting", async () => {
+  it("cuts a long id to one line, the whole id in its title", async () => {
     mount();
     const box = await list();
     const long = within(box).getByText("never-signal-processes-you-didnt-start");
-    expect(long).not.toHaveAttribute("data-allow-ellipsis");
-    expect(long).not.toHaveAttribute("title");
+    // One line, cut with an ellipsis, the whole id in the title.
+    expect(long).toHaveAttribute("data-allow-ellipsis");
+    expect(long).toHaveAttribute("title", "never-signal-processes-you-didnt-start");
   });
 
   it("folds a group on its heading, and a search opens it again", async () => {
@@ -58,6 +59,22 @@ describe("Library page: the list", () => {
     expect(within(counts).getAllByRole("listitem").map((x) => x.textContent)).toEqual(["2nodes", "1steps", "4tasks", "2steering"]);
     const unused = (await screen.findByRole("heading", { name: "Used by no chain" })).parentElement!;
     await waitFor(() => expect(within(unused).getByRole("link", { name: "tasks.verify" })).toHaveAttribute("href", "/templates/library/tasks.verify"));
+  });
+
+  it("a count tile narrows the list to its section, which a pick keeps until Show all", async () => {
+    const u = userEvent.setup();
+    mount();
+    const counts = await screen.findByRole("list", { name: "Components per section" });
+    await u.click(within(counts).getByRole("link", { name: /tasks/ }));
+    const box = await list();
+    expect(within(box).queryByRole("group", { name: "Nodes" })).toBeNull();
+    expect(within(box).getByRole("group", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    await u.click(within(box).getByRole("option", { name: /implementer/ }));
+    expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "Show all" }));
+    expect(within(await list()).getByRole("group", { name: "Nodes" })).toBeInTheDocument();
+    expect(screen.queryByText("Showing tasks only")).toBeNull();
   });
 
   it("opens a component by its ref in the URL, and says so for one that isn't there", async () => {

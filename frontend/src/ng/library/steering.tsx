@@ -92,18 +92,20 @@ export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: 
       <div className="lib-instructions"><Instructions draft={draft} path={row.id} /></div>
       <h2 className="lib-preview-title">Launch order</h2>
       <div className="lib-preview-pick">
-        <label>
-          <span>as used in</span>
-          <select aria-label="Use" value={useAt} disabled={!uses?.length} onChange={(e) => setUseAt(Number(e.target.value))}>
-            {(uses ?? []).map((u, i) => <option key={`${u.chain}|${u.path}`} value={i}>{u.chain} · {u.path}</option>)}
-          </select>
-        </label>
-        <label>
+        {uses && !uses.length ? <p className="lib-preview-note">Not used by any chain</p> : (
+          <label>
+            <span>as used in</span>
+            <select aria-label="Use" value={useAt} disabled={!uses?.length} onChange={(e) => setUseAt(Number(e.target.value))}>
+              {(uses ?? []).map((u, i) => <option key={`${u.chain}|${u.path}`} value={i}>{u.chain} · {u.path}</option>)}
+            </select>
+          </label>
+        )}
+        {!(uses && !uses.length) && <label>
           <span>in</span>
           <select aria-label="Repository" value={repoAt} disabled={!repos?.length} onChange={(e) => setRepoAt(Number(e.target.value))}>
             {(repos ?? []).map((n, i) => <option key={n} value={i}>{n}</option>)}
           </select>
-        </label>
+        </label>}
       </div>
       {row.mark && <p className="lib-preview-note">Preview shows the published text. Publish to see this change.</p>}
       {preview.state === "loading" && <p className="lib-preview-note">Loading…</p>}

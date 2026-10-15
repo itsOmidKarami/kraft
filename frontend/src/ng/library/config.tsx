@@ -1,4 +1,4 @@
-import { Head, Note } from "../templates/panes/controls";
+import { Head } from "../templates/panes/controls";
 import { ConfigRow, type Row } from "../templates/panes/Config";
 import type { PaneCtx } from "../templates/panes/Overview";
 import { authoredAt } from "../templates/draft/view";
@@ -30,14 +30,14 @@ const ON_OVERVIEW: Partial<Record<LibKind, ReadonlySet<string>>> = {
   gate: new Set(["message", "timeout"]),
 };
 
+/** The keys a component writes that its Overview tab does not edit: what the Config tab holds, and the pane shows
+ *  that tab only when there is one. */
+export const configRows = (own: Record<string, unknown> | null, kind: LibKind): Row[] => ownRows(own).filter((x) => !ON_OVERVIEW[kind]?.has(x.field));
+
 /** The Config tab of a library component: the keys it writes that the Overview tab does not edit. The library has no
  *  inherited values to chip (its draft answers no `sources`), so each row is the component's own: ✎ edits, ↺ removes the key. */
 export function LibraryConfig({ ctx, kind }: { ctx: PaneCtx; kind: LibKind }) {
-  const own = authoredAt(ctx.r, ctx.scope, ctx.path);
-  const all = ownRows(own);
-  const rows = all.filter((x) => !ON_OVERVIEW[kind]?.has(x.field));
-  if (!all.length) return <Note>This component writes no settings of its own.</Note>;
-  if (!rows.length) return <Note>Everything this component writes is edited on the Overview tab.</Note>;
+  const rows = configRows(authoredAt(ctx.r, ctx.scope, ctx.path), kind);
   return (
     <>
       <Head>Settings it writes</Head>

@@ -37,6 +37,8 @@ describe("Chains, read only (L.1)", () => {
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));
     expect(await screen.findByText(/id: default/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Review & publish|Discard/ })).toBeNull();
+    // The footnote is said once, on the list.
+    expect(screen.queryByText(/The graph canvas, drag to reorder/)).toBeNull();
     expect(posts(calls)).toEqual([]);
   });
 
@@ -52,5 +54,6 @@ describe("Chains, read only (L.1)", () => {
     expect(screen.getByText("lint")).toBeInTheDocument();
     expect(screen.getByText("verification_fix_loop")).toBeInTheDocument();
     expect(screen.getByText("fix")).toBeInTheDocument();
+    expect(screen.queryByText(/The graph canvas, drag to reorder/)).toBeNull();
   });
 });

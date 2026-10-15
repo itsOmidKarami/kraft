@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, ChevronRight, ListFilter, Plus, Search } from "lucide-react";
 import { useRoving } from "../graph/useRoving";
 import { isTextField } from "../keys";
@@ -36,9 +36,12 @@ function RowGlyph({ row }: { row: Row }) {
 /** The library's list (Decisions §10): grouped by kind, a kind filter and a
  *  search, `+ New` through an id step, a row per component with its used-by
  *  words, its change mark and a problem dot. */
-export function LibraryList({ rows, selected, onSelect, onAdd }: {
+export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }: {
   rows: Row[];
   selected: string | undefined;
+  /** A section a landing tile asked for: the list shows only it, until Show all. */
+  only?: Section;
+  onShowAll: () => void;
   onSelect: (id: string) => void;
   /** Adds a component; resolves to the server's refusal, or null once it is in. */
   onAdd: (section: Section, name: string, kind?: string) => Promise<string | null>;
@@ -53,7 +56,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
   const head = useRef<HTMLDivElement>(null);
   // Groups the person folded; a search or the selection's own group opens one again.
   const [folded, setFolded] = useState<ReadonlySet<Section>>(new Set());
-  const shown = shownRows(rows, q, hidden);
+  const shown = shownRows(rows, q, hidden).filter((x) => !only || x.section === only);
   const selectedSection = rows.find((x) => x.id === selected)?.section;
   const isFolded = (s: Section) => folded.has(s) && !q.trim();
   const reachable = shown.filter((x) => !isFolded(x.section));
@@ -145,6 +148,12 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
           onClose={() => setAdding(null)}
         />
       )}
+      {only && (
+        <p className="lib-only">
+          <span>Showing {SECTION_LABEL[only].toLowerCase()} only</span>
+          <button type="button" className="lib-only-all" onClick={onShowAll}>Show all</button>
+        </p>
+      )}
       <div className="lib-rows" role="listbox" aria-label="Library components">
         {!rows.length && <p className="lib-empty">The library is empty. + New to add the first component.</p>}
         {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => setQ("")} />}
@@ -172,7 +181,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
                   onKeyDown={(e) => move(e, reachable.indexOf(row))}
                 >
                   <RowGlyph row={row} />
-                  <span className="lib-name">{row.name.split(/(?<=[_\-.:])/).map((part, i) => <Fragment key={i}>{i > 0 && <wbr />}{part}</Fragment>)}</span>
+                  <span className="lib-name" data-allow-ellipsis title={row.name}>{row.name}</span>
                   {row.addon && <AddonBadge addon={row.addon} />}
                   {row.problem && <span className="lib-prob" role="img" aria-label="has a problem" />}
                   {row.mark && <span className={`lib-mark is-${row.mark}`} role="img" aria-label={row.mark === "add" ? "added in the draft" : "changed in the draft"} />}

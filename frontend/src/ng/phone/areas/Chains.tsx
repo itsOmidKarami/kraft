@@ -11,6 +11,7 @@ import { coveredText } from "../../item/chainName";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
 
+/** Said once, on the list: the chain and node screens under it read as the same chain. */
 const FOOT = "The graph canvas, drag to reorder, adding steps, drafts and publish are on desktop. This is the same chain, read here.";
 
 function useChains() {
@@ -67,7 +68,7 @@ export function ChainView() {
     <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}` : undefined} status={draftChanges ? { label: `draft · ${draftChanges} change${draftChanges === 1 ? "" : "s"}`, tone: "warn" } : { label: "published" }} yaml={text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
-      <Group title={`Nodes · ${nodes.length}`} rows={nodes.map((n) => ({ key: n.id, label: n.id, mono: true, sub: nodeSub(n), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} foot={FOOT} />
+      <Group title={`Nodes · ${nodes.length}`} rows={nodes.map((n) => ({ key: n.id, label: n.id, mono: true, sub: nodeSub(n), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />
     </AreaScreen>
   );
 }
@@ -95,7 +96,7 @@ export function ChainNodeView() {
   return (
     <AreaScreen title={node} sub={chain} status={{ label: "published" }} yaml={false}>
       {c && !n && <p className="ph-empty">There is no node {node} in {chain}.</p>}
-      <Group rows={rows} foot={FOOT} />
+      <Group rows={rows} />
     </AreaScreen>
   );
 }
