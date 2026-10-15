@@ -19,8 +19,8 @@ beforeEach(() => useStore.setState({ workItems: {} }));
 afterEach(() => vi.unstubAllGlobals());
 
 type Handlers = { reload: () => void; onSettings: () => void; onRaise: () => void; onGate: (gate: string) => void; onAnswer: () => void };
-const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<Handlers> = {}) =>
-  inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
+const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<Handlers> = {}, bodyActs?: boolean) =>
+  inShell(<ItemHeader bodyActs={bodyActs} item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
 
 describe("ItemHeader", () => {
   it("counts the others that need you, never this item, and hides at zero", () => {
@@ -258,6 +258,33 @@ describe("ItemHeader", () => {
       expect(handlers[want.handler as keyof typeof handlers]).toHaveBeenCalledWith(...(want.arg ? [want.arg] : []));
       expect(writes(calls)).toEqual([]);
     } else await waitFor(() => expect(writes(calls)).toEqual([want.write]));
+  });
+
+  // One primary per state: on the item page a state whose banner or card carries its action has no main button in the header,
+  // and the panel's doors it would have held are on the ⋮; a state with no card keeps its button (a null `moved`).
+  const stop = (kind: string, more: object = {}) => ({ stop: { kind, node: "verification", task: null, resume_at: null, reason: null, ...more } as never });
+  it.each<[string, Parameters<typeof detail>[0], string | null]>([
+    ["a gate", { display_status: "needs_you", ...stop("gate") }, "Cancel…"],
+    ["a question", { display_status: "needs_you", needs_context_question: "Which?", ...stop("question") }, "Cancel…"],
+    ["a cap", { display_status: "needs_you", ...stop("cap") }, "Cancel…"],
+    ["conflicts", { display_status: "needs_you", ...stop("conflict") }, "Cancel…"],
+    ["a closed MR", { display_status: "needs_you", ...stop("mr_closed") }, "Cancel…"],
+    ["a stuck loop", { display_status: "needs_you", ...stop("stuck") }, "Cancel…"],
+    ["a failed item", { display_status: "failed", ...stop("failed") }, "Cancel…"],
+    ["a paused item", { display_status: "paused", current_node_id: "verification" }, "Cancel…"],
+    ["a cancelled item", { display_status: "cancelled" }, "Archive"],
+    ["a running item", { display_status: "running" }, null],
+    ["a done item", { display_status: "done" }, null],
+    ["a never-started item", { display_status: "paused", current_node_id: null }, null],
+    ["an escalated item", { display_status: "escalated" }, null],
+    ["a question with no text", { display_status: "needs_you", ...stop("question") }, null],
+    ["a budget the item cannot raise", { display_status: "needs_you", ...stop("budget", { scope: "daily" }) }, null],
+  ])("on the item page, %s", async (_name, over, moved) => {
+    show(over, {}, true);
+    expect(!!document.querySelector(".item-main-action")).toBe(moved === null);
+    if (!moved) return;
+    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    expect(screen.getByRole("menuitem", { name: moved })).toBeInTheDocument();
   });
 
   it("puts every ⋮ item on its route, and the copied link on the shipped path; Cancel… is the main menu's only (WI-13)", async () => {

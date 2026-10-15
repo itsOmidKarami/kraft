@@ -5,6 +5,12 @@ import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row }
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
 
+/** A row of the header's ⋮: where a state whose banner or card carries its action keeps Escalate…, Mark complete… and Cancel…. */
+const fromKebab = async (p: Page, row: RegExp) => {
+  await p.getByRole("button", { name: "Item menu" }).click(); await pause(p, 300);
+  await p.getByRole("menuitem", { name: row }).click();
+};
+
 const appLog = async (p: Page, data: "default" | "long" = "default", sel = "verification.review.code_review") => {
   await app(p, item("running", `/nodes/verification?sel=${sel}&tab=log`), { data, ready: (pg) => pg.getByLabel("Log lines").first().waitFor() });
   return p.getByLabel("Log lines").first();
@@ -69,9 +75,12 @@ const ROWS: Row[] = [
     name: `item header: ${act} opens as a card anchored under the main button, not a modal [decided]`,
     run: async (p) => {
       // Escalate only where /escalate takes it (#504): not on a running item, so its card is shot on the failed one.
-      await app(p, item(act === "Escalate" ? "failed" : "running"));
-      const main = (await p.locator(".item-main").boundingBox())!;
-      { await p.locator(".item-main-action").hover(); await pause(p, 400); await p.getByRole("menuitem", { name: new RegExp(`^${act}`) }).click(); }
+      // A failed item's Retry is the card's, so its header has no main button: the card anchors under the ⋮ group, and Escalate… is in the ⋮.
+      const failed = act === "Escalate";
+      await app(p, item(failed ? "failed" : "running"));
+      const main = (await p.locator(failed ? ".item-main-group" : ".item-main").boundingBox())!;
+      if (failed) await fromKebab(p, /^Escalate/);
+      else { await p.locator(".item-main-action").hover(); await pause(p, 400); await p.getByRole("menuitem", { name: new RegExp(`^${act}`) }).click(); }
       await pause(p, 400);
       const card = p.getByRole("dialog").last(); await expect(card).toBeVisible();
       expect(await card.getAttribute("aria-modal"), "a card, not a modal").not.toBe("true");
@@ -95,7 +104,7 @@ const ROWS: Row[] = [
       await app(p, item("running")); await p.locator(".item-main-action").hover(); await pause(p, 400);
       await expect(p.getByRole("menuitem", { name: /^Mark complete/ })).toBeVisible();
       await expect(p.getByRole("menuitem", { name: /^Escalate/ })).toHaveCount(0);
-      await app(p, item("failed")); await p.locator(".item-main-action").hover(); await pause(p, 400);
+      await app(p, item("failed")); await p.getByRole("button", { name: "Item menu" }).click(); await pause(p, 400);
       await expect(p.getByRole("menuitem", { name: /^Escalate/ })).toBeVisible();
     },
   },
@@ -152,8 +161,7 @@ const ROWS: Row[] = [
     name: "escalate: the card's Escalate stays off until the note says what to look at [V2.1]",
     run: async (p) => {
       await app(p, item("failed"));
-      await p.locator(".item-main-action").hover(); await pause(p, 400);
-      await p.getByRole("menuitem", { name: /^Escalate/ }).click(); await pause(p, 400);
+      await fromKebab(p, /^Escalate/); await pause(p, 400);
       const card = p.getByRole("dialog").last();
       const go = card.getByRole("button", { name: /^Escalate$/ });
       await expect(go).toBeDisabled({ timeout: 2000 });
@@ -215,8 +223,7 @@ const ROWS: Row[] = [
     name: "item header: the Escalate card says what \"Start a new thread\" changes, from the threads the item has [decided]",
     run: async (p) => {
       await app(p, item("failed"), { tweak: withEscalationThread(2) });
-      await p.locator(".item-main-action").hover(); await pause(p, 400);
-      await p.getByRole("menuitem", { name: /^Escalate/ }).click(); await pause(p, 400);
+      await fromKebab(p, /^Escalate/); await pause(p, 400);
       const card = p.getByRole("dialog").last();
       await expect(card.getByText("continues thread 1 (turn 3)", { exact: false })).toBeVisible();
       await card.getByRole("checkbox", { name: /new thread/i }).check();

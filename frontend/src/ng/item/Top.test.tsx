@@ -123,7 +123,7 @@ describe("Brief", () => {
 });
 
 /** The line as the item page draws it: the diff read once, handed down. */
-const Line = ({ version, gone }: { version: string; gone?: boolean }) => <DiffLine id="w1" version={version} files={useDiffFiles("w1", version, gone)} />;
+const Line = ({ version, gone, review }: { version: string; gone?: boolean; review?: boolean }) => <DiffLine id="w1" version={version} files={useDiffFiles("w1", version, gone)} review={review} />;
 
 describe("DiffLine", () => {
   it("counts each path once across landed and in-flight changes, and hides with no diff", async () => {
@@ -146,6 +146,13 @@ describe("DiffLine", () => {
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }], "GET /work-items/w1/threads": [200, threads] });
     render(<MemoryRouter><Line version="v" /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText(/1 file/)).toHaveTextContent(text));
+  });
+
+  it("leaves out Review changes where a banner already offers the review", async () => {
+    stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }], "GET /work-items/w1/threads": [200, []] });
+    render(<MemoryRouter><Line version="v" review={false} /></MemoryRouter>);
+    expect(await screen.findByText(/1 file/)).toHaveTextContent(/^1 file \+2 −1$/);
+    expect(screen.queryByRole("link", { name: "Review changes" })).toBeNull();
   });
 
   // R12b-11: an archived item's page asked anyway, and the 404 went to the console on every load.
