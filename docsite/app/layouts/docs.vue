@@ -9,7 +9,7 @@
 // of the 10 columns instead of 2: at 1024px that is 270px where "Troubleshooting"
 // was cut to "Troubleshooti…" in 160.
 const pageUi = {
-  root: 'lg:grid lg:gap-6 xl:gap-10',
+  root: 'lg:grid lg:gap-6 xl:grid-cols-10 xl:gap-10',
   left: 'lg:col-span-3 xl:col-span-2',
   center: 'lg:col-span-7 xl:col-span-8',
 }

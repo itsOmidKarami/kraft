@@ -4,26 +4,26 @@
    so these put back what its lg: classes take away from the bar. It is
    the same bar, so a change to what the phone shows is a change here. */
 @media (min-width: 1024px) and (max-width: 1279px) {
-  [data-slot='right'] [data-slot='root'] {
+  .docs-page [data-slot='right'] [data-slot='root'] {
     background-color: color-mix(in oklab, var(--ui-bg) 75%, transparent);
     margin-inline-start: -1.5rem;
   }
-  [data-slot='right'] [data-slot='container'] {
+  .docs-page [data-slot='right'] [data-slot='container'] {
     padding-block: 1.5rem 1.125rem;
     border-bottom: 1px dashed var(--ui-border);
   }
-  [data-slot='right'] button[data-slot='trigger'] {
+  .docs-page [data-slot='right'] button[data-slot='trigger'] {
     display: flex;
   }
-  [data-slot='right'] p[data-slot='trigger'],
-  [data-slot='right'] div[data-slot='content']:not([data-state]),
-  [data-slot='right'] [data-slot='bottom'] {
+  .docs-page [data-slot='right'] p[data-slot='trigger'],
+  .docs-page [data-slot='right'] div[data-slot='content']:not([data-state]),
+  .docs-page [data-slot='right'] [data-slot='bottom'] {
     display: none;
   }
-  [data-slot='right'] [data-slot='content'][data-state='open'] {
+  .docs-page [data-slot='right'] [data-slot='content'][data-state='open'] {
     display: block;
   }
-  [data-slot='right'] [data-slot='trailingIcon'] {
+  .docs-page [data-slot='right'] [data-slot='trailingIcon'] {
     display: inline-block;
   }
 }
@@ -31,7 +31,13 @@
 /* A paragraph or a list ran the width of the column: 866px at 1440px, about
    115 characters a line. Prose is held to 70ch; a table, a code block or a
    callout still takes the column, so it sits under a shorter line of text,
-   left-aligned with it. A diagram is made of lists and keeps its own width. */
+   left-aligned with it. A diagram is made of lists and keeps its own width.
+   The description under the title is prose too, and ends where the body does:
+   it is larger type, so 70ch of it is wider than the body's, and it takes the
+   body's 672px (42rem) as it is. */
 main .docs-page :is(p, ul, ol, dl):not(figure *) {
   max-width: 70ch;
+}
+main .docs-page [data-slot='description'] {
+  max-width: 42rem;
 }

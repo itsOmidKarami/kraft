@@ -88,11 +88,13 @@ export default defineAppConfig({
     // 1024px, where "Questions" broke as "Question / s". Up to xl (1280px) the
     // inner page stays a column, and the contents are the "On this page" bar
     // above it, as on a phone (assets/css/layout.css draws the bar at those
-    // widths). The outer grid is set back to a grid in layouts/docs.vue.
+    // widths). From xl the contents column is 14rem, not two tenths of the
+    // page: 163px at 1280px broke names like merge_request_feedback. The outer grid is set back to a grid in layouts/docs.vue.
     page: {
       slots: {
-        root: 'lg:flex lg:gap-0 xl:grid xl:gap-10',
-        right: 'lg:order-first xl:order-last xl:col-span-2',
+        root: 'lg:flex lg:gap-0 xl:grid xl:grid-cols-[minmax(0,1fr)_14rem] xl:gap-10',
+        center: 'lg:col-span-1',
+        right: 'lg:col-span-1 lg:order-first xl:order-last',
       },
     },
     // The page body is a size container, so a table can ask how wide the text
