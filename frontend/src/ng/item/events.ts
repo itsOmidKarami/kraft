@@ -1,7 +1,10 @@
 import type { KraftEvent } from "../../types";
 import type { EventType } from "../../types/vocab.generated";
 import { elapsed } from "../../format";
+import { gateName, nameOf } from "../board/rowText";
 import { taskName } from "./paths";
+
+type Nodes = Parameters<typeof nameOf>[0];
 
 const s = (v: unknown) => (v == null ? "" : String(v));
 const cut = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
@@ -11,30 +14,33 @@ const QUIET = new Set<EventType>(["worker_session_created", "worker_session_exit
 
 /** One line of the chain pane's Recent (Decisions §5 Chain pane), or null for
  *  bookkeeping. An event type not listed here shows its own name. */
-export function eventLine(e: KraftEvent): string | null {
+export function eventLine(e: KraftEvent, nodes?: Nodes): string | null {
   if (QUIET.has(e.type)) return null;
   const p = e.payload ?? {};
   const node = s(e.node_id ?? p.node_id);
+  const at = node && nameOf(nodes, node);
+  // A gate the event names (`gate`), else the node it is on, each as a reader names it.
+  const gate = p.gate ? gateName(nodes, s(p.gate)) : at;
   switch (e.type) {
     case "work_item_created": return "filed";
-    case "node_started": return `${node} started`;
-    case "node_completed": return `${node} finished`;
-    case "node_skipped": return `${node} skipped`;
+    case "node_started": return `${at} started`;
+    case "node_completed": return `${at} finished`;
+    case "node_skipped": return `${at} skipped`;
     // A start, in the past tense: the list keeps it after the session ended, and "is running" read as live (R12b-12).
-    case "worker_session_started": return p.hook_point ? `${taskName(s(p.hook_point))} started on ${node}` : `a session started on ${node}`;
-    case "gate_requested": return `${s(p.gate) || node} is waiting for you`;
-    case "gate_approved": return `${s(p.gate) || node} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
-    case "gate_rejected": return `${s(p.gate) || node} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
-    case "fix_cycle_started": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
+    case "worker_session_started": return p.hook_point ? `${taskName(s(p.hook_point))} started on ${at}` : `a session started on ${at}`;
+    case "gate_requested": return `${gate} is waiting for you`;
+    case "gate_approved": return `${gate} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
+    case "gate_rejected": return `${gate} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
+    case "fix_cycle_started": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
     // What the round did, said once it ended; recent() folds it into the round's start line. null: git could not say.
-    case "fix_cycle_finished": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;
-    case "work_item_needs_human": return `stopped${node ? ` at ${node}` : ""}: ${cut(s(p.reason).replace(/^needs_context:\s*/, ""), 240)}`;
-    case "escalation_message": return `escalation${node ? ` on ${node}` : ""}: ${cut(s(p.message), 240)}`;
+    case "fix_cycle_finished": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;
+    case "work_item_needs_human": return `stopped${node ? ` at ${at}` : ""}: ${cut(s(p.reason).replace(/^needs_context:\s*/, ""), 240)}`;
+    case "escalation_message": return `escalation${node ? ` on ${at}` : ""}: ${cut(s(p.message), 240)}`;
     case "pause_requested": return "paused";
     case "work_item_resumed": return "resumed";
-    case "work_item_retried": return `retried${node ? ` ${node}` : ""}`;
-    case "work_item_rate_limited": return `${node} hit a rate limit`;
-    case "work_item_waiting": return `${node} is waiting`;
+    case "work_item_retried": return `retried${node ? ` ${at}` : ""}`;
+    case "work_item_rate_limited": return `${at} hit a rate limit`;
+    case "work_item_waiting": return `${at} is waiting`;
     case "work_item_cancelled": return "cancelled";
     case "work_item_completed": return "finished";
     case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
@@ -57,7 +63,8 @@ export type RecentLine = { e: KraftEvent; line: string };
  *  its end; a gate's decision takes the place of its request; a fix round's outcome joins its start line; an escalation's turn that ends reads "escalation answered". A node's start drops
  *  once a session on it starts, and its finish takes the place of everything that ran in it, with how long it ran.
  *  A gate reads once, by its decision (CG-4), and an item's end reads once, in its last node's line. */
-export function recent(events: KraftEvent[]): RecentLine[] {
+export function recent(events: KraftEvent[], nodes?: Nodes): RecentLine[] {
+  const nm = (id: string) => (id ? nameOf(nodes, id) : id);
   const out: (RecentLine & { node?: string; session?: string })[] = [];
   const started = new Map<string, { node: string; task: string }>();
   const nodeStart = new Map<string, number>();
@@ -69,16 +76,16 @@ export function recent(events: KraftEvent[]): RecentLine[] {
       const task = p.hook_point ? taskName(s(p.hook_point)) : "a session";
       started.set(s(p.session_id), { node, task });
       drop((x) => !(x.node === node && x.e.type === "node_started"));
-      out.push({ e, node, session: s(p.session_id), line: `${task} is running on ${node}` });
+      out.push({ e, node, session: s(p.session_id), line: `${task} is running on ${nm(node)}` });
     } else if (e.type === "worker_session_exited") {
       const at = started.get(s(p.session_id));
       drop((x) => x.session !== s(p.session_id));
       if (!at) continue;
       const ok = s(p.status).startsWith("done");
       if (at.task === "escalation") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: ok ? "escalation answered" : `escalation ${s(p.status).replaceAll("_", " ")}` });
-      else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${at.node}` });
+      else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${nm(at.node)}` });
     } else {
-      let line = eventLine(e);
+      let line = eventLine(e, nodes);
       if (!line) continue;
       if (e.type === "node_started") nodeStart.set(node, Date.parse(e.created_at));
       // A round's outcome joins its start line; with no start left to join, it stands alone.

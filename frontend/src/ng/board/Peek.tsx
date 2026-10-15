@@ -94,7 +94,7 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       footer={<Footer cards={tab === "overview"} item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
-      {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
+      {tab === "activity" && <Activity id={item.id} nodes={item.chain_definition.nodes} version={loaded.version} />}
       {tab === "config" && <Config item={item} reload={loaded.reload} budget={budget} onBudget={onBudget} />}
     </Inspector>
   );
@@ -144,7 +144,7 @@ function GateNote({ item, version }: { item: ItemDetail; version: string }) {
 const PAGE = 50;
 
 /** Every event of the item, newest first, paged backwards (B13). */
-function Activity({ id, version }: { id: string; version: string }) {
+function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain_definition"]["nodes"]; version: string }) {
   const navigate = useNavigate();
   const [events, setEvents] = useState<KraftEvent[]>([]);
   const [more, setMore] = useState(false);
@@ -160,7 +160,7 @@ function Activity({ id, version }: { id: string; version: string }) {
     <div className="peek-activity">
       <ol className="peek-events">
         {events.map((e) => {
-          const text = eventLine(e) ?? e.type.replaceAll("_", " ");
+          const text = eventLine(e, nodes) ?? e.type.replaceAll("_", " ");
           return (
             <li key={e.seq}>
               <span className="peek-ev-t">{age(e.created_at, now)}</span>

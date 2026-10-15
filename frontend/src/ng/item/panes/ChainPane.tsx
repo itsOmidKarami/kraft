@@ -39,7 +39,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
   const cap = item.budget_cap;
   // The last few lines of the story (WI-2); the rest behind a link: the caller's (the peek's Activity) or in place.
   const [all, setAll] = useState(false);
-  const story = recentLines(events);
+  const story = recentLines(events, item.chain_definition.nodes);
   const recent = all ? story : story.slice(0, RECENT);
   const live = !["done", "archived", "cancelled"].includes(item.display_status ?? "");
   const [attached, setAttached] = useState<string | null>(null);
