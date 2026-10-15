@@ -47,3 +47,11 @@ export function pickableFor(verb: PickVerb, items: WorkItem[]): WorkItem[] {
 /** The items waiting at a gate, the longest-waiting first. */
 export const gatePicks = (items: WorkItem[]): WorkItem[] =>
   items.filter((i) => i.pending_gate).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+
+/** What Next Gate does with the gates waiting: the only one opens at once,
+ *  several are asked about (longest-waiting first, as nothing is newer than
+ *  what has waited longest), none is told so. */
+export function nextGate(items: WorkItem[]): { open?: WorkItem; ask: WorkItem[] } {
+  const ask = gatePicks(items);
+  return ask.length === 1 ? { open: ask[0], ask } : { ask };
+}

@@ -51,6 +51,35 @@ it("offers Show Log in the palette and keeps the status menu out of it", () => {
   expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.statusMenu", when: "false" });
 });
 
+it("explains each value of kraft.notifications", () => {
+  const { enum: values, enumDescriptions } = pkg.contributes.configuration.properties["kraft.notifications"];
+  expect(enumDescriptions).toHaveLength(values.length);
+});
+
+describe("default keybindings", () => {
+  type Binding = { command: string; key: string; mac: string; when: string };
+  const keybindings: Binding[] = pkg.contributes.keybindings;
+  const titleBar: { command: string; when: string }[] = pkg.contributes.menus["editor/title"];
+  const overlap = (a: string, b: string) => a === b || /\b(connected|true)\b/.test(a) || /\b(connected|true)\b/.test(b);
+
+  it.each(keybindings.map((k) => [k.command, k] as const))("%s names a command the extension contributes", (command) =>
+    expect(pkg.contributes.commands.map((c: { command: string }) => c.command)).toContain(command));
+
+  it.each(keybindings.map((k) => [k.command, k] as const))("%s has a mac key that is its key with ctrl as cmd", (_, k) =>
+    expect(k.mac).toBe(k.key.replace("ctrl", "cmd")));
+
+  it.each(["kraft.approve", "kraft.reject"])("%s works exactly where its title-bar button shows, readOnly aside", (command) => {
+    const shown = titleBar.filter((e) => e.command === command).map((e) => e.when.replace(" && !kraft.readOnly", ""));
+    const when = keybindings.find((k) => k.command === command)!.when;
+    expect(when.split(" || ").sort()).toEqual(shown.flatMap((w) => w.split(" && ").length > 1 ? [w.split(" && ").pop()!] : [w]).sort());
+  });
+
+  it("gives no two bindings the same key where both could fire", () => {
+    const clashes = keybindings.flatMap((a, i) => keybindings.slice(i + 1).filter((b) => a.key === b.key && overlap(a.when, b.when)));
+    expect(clashes).toEqual([]);
+  });
+});
+
 describe("a row's primary action", () => {
   const commands = pkg.contributes.commands as { command: string; icon?: string }[];
   const board = pkg.contributes.menus["view/item/context"] as { command: string; when?: string; group?: string }[];
