@@ -43,13 +43,20 @@
 .zoom { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
 .zoom-btn { display: flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); cursor: pointer; }
 .zoom-btn:is(:hover, :focus-visible), .zoom-btn[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
+.zoom-fit { gap: 4px; padding: 0 7px; font-size: 11px; }
 .zoom-pct { min-width: 38px; padding: 0 6px; font: 11px ui-monospace, Menlo, monospace; }
 
 /* Canvases (StageGraph, NodeGraph): docked into a positioned parent. */
 .canvas { position: absolute; inset: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; cursor: grab; touch-action: none; user-select: none; }
 .canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .canvas-svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.canvas-zoom { position: absolute; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; }
+.canvas-zoom { position: absolute; right: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; }
+/* A cue at the edge where the view cuts the chain off: how many nodes lie past it; a click slides them in. */
+.canvas-more { position: absolute; z-index: 3; display: flex; align-items: center; gap: 3px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-sub); font: 11px ui-monospace, Menlo, monospace; cursor: pointer; }
+.canvas-more.is-left { left: 8px; }
+.canvas-more.is-right { right: 8px; }
+.canvas-more:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.canvas-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .round-picker { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .round-btn { display: flex; align-items: center; gap: 6px; padding: 4px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .round-btn:is(:hover, [aria-expanded="true"]) { background: var(--line); }

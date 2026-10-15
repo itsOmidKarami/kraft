@@ -27,9 +27,9 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean };
 /** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
-/** A failed or finished item's fit (WI-16): labels stay legible, and a chain too wide for it opens on the node
- *  that matters (`focus`, a world x) instead of at a 30% fit nobody can read. */
-export const ENDED_FIT: FitRule = { floor: 0.45, left: 12, initial: true };
+/** An item's fit: labels stay legible, and a chain too wide for it opens on the node that matters (`focus`, a
+ *  world x) instead of at a 30% fit nobody can read; the canvas counts the nodes that are left off-screen. */
+export const ITEM_FIT: FitRule = { floor: 0.6, left: 12, initial: true };
 
 /** The whole world in view, never above 100% or below 30%, centred; the chain
  *  sits 10px above centre, and the node canvas keeps 20px off the left edge. */
@@ -44,12 +44,6 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
 
 /** 100%, the current node centred across and 30% down the view. */
 export const currentCam = (cx: number, cy: number, view: Size): Cam => ({ s: 1, tx: view.w / 2 - cx, ty: Math.round(view.h * 0.3) - cy });
-
-const LIVE = new Set(["running", "waiting", "needs_you", "escalated", "paused"]);
-/** Decisions §7 "Opening view": an item with a node in progress opens on it at
- *  100%; one not started, finished or failed opens fitted (R37, WI-4: a failure
- *  is read against the whole chain). */
-export const openingView = (status: string, hasCurrent: boolean): "current" | "fit" => (hasCurrent && LIVE.has(status) ? "current" : "fit");
 
 /** The least pan that brings a world box into view with `margin` px to spare
  *  (a node focused by keyboard must be visible). Unchanged when it already is. */

@@ -93,10 +93,15 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
     setMode("free");
   };
   return {
-    cam, mode,
+    cam, mode, view,
     bind: { ref: setEl, onPointerDown, onClickCapture },
     zoomIn: () => zoomCentre(STEP_IN),
     zoomOut: () => zoomCentre(STEP_OUT),
+    /** Slide the view `dx` px, as the off-screen cues do. */
+    pan: (dx: number) => {
+      setCam((c) => ({ ...c, tx: c.tx + dx }));
+      setMode("free");
+    },
     reset: () => zoomCentre(1 / cam.s),
     fit: () => { setAsked(true); setMode("fit"); },
     toCurrent: current ? () => setMode("current") : undefined,

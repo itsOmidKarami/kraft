@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { currentCam, fitCam, openingView, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
+import { currentCam, fitCam, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
 import { useCamera } from "./useCamera";
 
 describe("camera maths", () => {
@@ -60,11 +60,6 @@ describe("camera maths", () => {
     expect(revealCam(cam, { x0: -20, x1: 0, y0: -40, y1: 0 }, view)).toEqual({ tx: 34, ty: 44, s: 0.5 });
     expect(revealCam(cam, { x0: 0, x1: 10, y0: 600, y1: 620 }, view).ty).toBe(300 - 24 - 310);
   });
-  it("opens on the current node only while one is in progress", () => {
-    for (const s of ["running", "waiting", "needs_you", "escalated", "paused"]) expect(openingView(s, true)).toBe("current");
-    for (const s of ["queued", "done", "cancelled", "archived", "failed"]) expect(openingView(s, true)).toBe("fit");
-    expect(openingView("running", false)).toBe("fit");
-  });
 });
 
 function mount(opts: Parameters<typeof useCamera>[0]) {
@@ -92,6 +87,12 @@ describe("useCamera", () => {
     const click = { stopPropagation: () => (click.stopped = true), stopped: false };
     h.result.current.bind.onClickCapture(click as never);
     expect(click.stopped).toBe(true);
+  });
+  it("slides the view by a pan, which frees fit", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
+    act(() => h.result.current.pan(-100));
+    expect(h.result.current.mode).toBe("free");
+    expect(h.result.current.cam.tx).toBe(20 - 100);
   });
   it("keeps the current node clear of an overlaid pane, while fit keeps the full width (Kraft-gvfm2)", () => {
 

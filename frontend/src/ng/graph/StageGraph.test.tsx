@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChainNode } from "./layout";
 import { StageGraph } from "./StageGraph";
 
@@ -92,5 +92,28 @@ describe("StageGraph", () => {
     fireEvent.pointerUp(window);
     fireEvent.click(canvas);
     expect(onBackground).toHaveBeenCalledTimes(1);
+  });
+
+  describe("with a view narrower than the chain", () => {
+    afterEach(() => vi.restoreAllMocks());
+    const ten: ChainNode[] = Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, kind: "exec", state: "todo" }));
+    const narrow = () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+      render(<StageGraph name="c" nodes={ten} fit={{ floor: 0.6, left: 12 }} reserve={380} />);
+    };
+
+    it("counts the nodes it cuts off at an edge, and a click slides them in", async () => {
+      narrow();
+      // At 60% from 12px in, n0..n5 end by x = 560; n6..n9 run past 600.
+      await userEvent.click(screen.getByRole("button", { name: "4 more nodes off-screen" }));
+      expect(screen.getByRole("button", { name: "4 earlier nodes off-screen" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /more nodes? off-screen/ })).toBeNull();
+    });
+
+    it("ends the canvas where the pane starts, so nothing is drawn under it", () => {
+      narrow();
+      expect(screen.getByRole("group", { name: "c" })).toHaveStyle({ right: "380px" });
+    });
   });
 });
