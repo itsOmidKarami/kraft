@@ -94,7 +94,7 @@ export function RepoView() {
     }
     const choices = f.choices === "steering" ? steeringChoices(library) : f.choices === "harnesses" ? harnessChoices(typeof opts === "string" ? null : opts.harnesses) : [];
     const listed = choices.length ? { choices, closed: true, multiple: true, noun: f.choices === "steering" ? "steering profile" : "harness" } : undefined;
-    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: "Leave empty to clear it, which falls back to the default.", value: f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, listed, set: sendTo(draft, repo!, f) }) };
+    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: `Leave empty to clear it, which falls back to the default.${f.none ? ` Tick "${f.none}" for the empty command.` : ""}`, value: v === "" && f.none ? "" : f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, listed, none: f.none ? { label: f.none, on: v === "" } : undefined, set: (t, none) => none ? setRepo(draft, repo!, patchFor(repo!, f, "")) : sendTo(draft, repo!, f)(t) }) };
   };
 
   const disconnect = async () => {

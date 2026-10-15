@@ -129,17 +129,23 @@ export function ChoiceSheet<T extends string>({ title, text, options, value, onP
 /** The values a text edit takes (or, `multiple`, its comma-separated values), listed as you type. A `closed` set sets nothing else. */
 export type Listed = { choices: Choice[]; closed?: boolean; multiple?: boolean; noun: string };
 
-export function EditSheet({ title, text, initial = "", placeholder, secret, multiline, listed, inputMode, submitLabel = "Set", error, busy, onSubmit, onClose }: { title: string; text?: string; initial?: string; placeholder?: string; secret?: boolean; multiline?: boolean; listed?: Listed; /** The keyboard a phone shows: digits for an amount. */ inputMode?: "decimal" | "numeric"; submitLabel?: string; error?: string | null; busy?: boolean; onSubmit: (value: string) => void; onClose: () => void }) {
+export function EditSheet({ title, text, initial = "", placeholder, secret, multiline, listed, inputMode, submitLabel = "Set", none, error, busy, onSubmit, onClose }: { title: string; text?: string; initial?: string; placeholder?: string; secret?: boolean; multiline?: boolean; listed?: Listed; /** The keyboard a phone shows: digits for an amount. */ inputMode?: "decimal" | "numeric"; submitLabel?: string; /** A tick that says the empty command: no tests, no setup. Ticked, the field is not read. */ none?: { label: string; on: boolean }; error?: string | null; busy?: boolean; onSubmit: (value: string, none: boolean) => void; onClose: () => void }) {
   const [value, setValue] = useState(initial);
+  const [skip, setSkip] = useState(!!none?.on);
   return (
     <Frame title={title} text={text} onClose={onClose}>
-      <form className="ph-sheet-edit" onSubmit={(e) => { e.preventDefault(); onSubmit(value); }}>
+      <form className="ph-sheet-edit" onSubmit={(e) => { e.preventDefault(); onSubmit(value, skip); }}>
+        {none && (
+          <label className="ph-sheet-none">
+            <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> {none.label}
+          </label>
+        )}
         {multiline ? (
-          <textarea className="ph-input ph-input-area" aria-label={title} value={value} placeholder={placeholder} onChange={(e) => setValue(e.target.value)} />
+          <textarea className="ph-input ph-input-area" aria-label={title} disabled={skip} value={value} placeholder={placeholder} onChange={(e) => setValue(e.target.value)} />
         ) : listed ? (
           <Combobox className="ph-input" aria-label={title} value={value} placeholder={placeholder} choices={listed.choices} closed={listed.closed} multiple={listed.multiple} noun={listed.noun} listLabel={title} invalid={!!error} inline onChange={setValue} />
         ) : (
-          <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} inputMode={inputMode} value={value} placeholder={placeholder} autoComplete="off" onChange={(e) => setValue(e.target.value)} />
+          <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} inputMode={inputMode} disabled={skip} value={value} placeholder={placeholder} autoComplete="off" onChange={(e) => setValue(e.target.value)} />
         )}
         {/* Pressing Set would blur a listed field first, and its inline list
             would close and move Set out from under the tap: keep the focus. */}

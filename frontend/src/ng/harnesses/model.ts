@@ -15,6 +15,10 @@ export const ACCESS_HELP: Record<Access, string> = {
   never: "No task, repo or override may use it.",
 };
 
+/** Escalation's "runs on" when no harness is pinned: the item's own, and which that is now (both trees). */
+export const ITEM_HARNESS = "item's harness";
+export const itemHarnessNow = (effective: string) => `${ITEM_HARNESS} (${effective})`;
+
 export interface TaskRef {
   chain: string;
   path: string;
