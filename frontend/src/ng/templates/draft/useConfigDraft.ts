@@ -40,7 +40,7 @@ export function useConfigDraft(area: Area, key: string) {
     busy.current++;
     const run = queue.current.then(fn).then((a) => {
       if (keep && a.status >= 200 && a.status < 300 && a.body && typeof a.body === "object" && "result" in (a.body as object)) take(a.body as unknown as DraftView);
-      else if (keep && loud && a.status >= 300 && live.current) setError(detailOf(a.body));
+      else if (keep && loud && (a.status === 0 || a.status >= 300) && live.current) setError(detailOf(a.body));
       if (write) d.draftsChanged();
       return a;
     }).finally(() => { busy.current--; });
@@ -51,7 +51,7 @@ export function useConfigDraft(area: Area, key: string) {
   const load = useCallback(() => enqueue(async () => {
     const a = await d.getDraft(area, key);
     if (a.status === 404 && live.current) setStatus("notFound");
-    else if (a.status >= 300 && live.current) setStatus("error");
+    else if ((a.status === 0 || a.status >= 300) && live.current) setStatus("error");
     return a;
   }, false), [area, key, enqueue]);
 

@@ -1,28 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useStore } from "../../../store";
+import { useCallback, useEffect, useState } from "react";
+import { reload, useOffline } from "../../offline";
 
 type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
 
-/** The list, read again on mount: the store's boot load may have failed. Offline
- *  while that read failed or the event socket is reconnecting (the desktop
- *  board's rule, kept apart because the desktop's hook is private to its page). */
+/** The list, read again on mount: the store's boot load may have failed. Offline is the app's (`useOffline`). */
 export function useListLoad() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const connection = useStore((s) => s.connection);
   const refresh = useCallback(() => {
     setLoad((l) => (l.state === "error" ? l : { state: "loading" }));
-    useStore.getState().bootstrap().then(
+    reload().then(
       () => setLoad({ state: "ok" }),
       (e: Error) => setLoad({ state: "error", error: e.message }),
     );
   }, []);
   useEffect(refresh, [refresh]);
-  const was = useRef(connection);
-  useEffect(() => {
-    if (connection === "open" && was.current === "reconnecting") refresh();
-    was.current = connection;
-  }, [connection, refresh]);
-  return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
+  return { load, refresh, offline: useOffline().offline };
 }
 
 /** A half-minute clock for the rows' ages. */

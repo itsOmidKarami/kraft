@@ -21,6 +21,7 @@ import { NewItem } from "./new/NewItem";
 import { NodeRoute } from "./node/NodeRoute";
 import { Alias, ALIASES, ShippedHash } from "../shell/aliases";
 import { NotFound } from "./nav/NotFound";
+import { OfflineBanner } from "./nav/OfflineBanner";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
 import { Tooltip } from "../ui/Tooltip";
@@ -31,6 +32,7 @@ function Frame() {
   useTrail();
   return (
     <div className="ph-app">
+      <OfflineBanner />
       <main id="ph-main" className="ph-screen">
         <Outlet />
       </main>

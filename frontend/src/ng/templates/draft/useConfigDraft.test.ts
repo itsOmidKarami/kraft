@@ -42,6 +42,13 @@ describe("useConfigDraft", () => {
     await waitFor(() => expect(h.result.current.status).toBe("notFound"));
   });
 
+  it("is an error, with the detail, when the server cannot be reached (status 0)", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => answer({ detail: "could not reach the Kraft server" }, 0) as never);
+    const h = renderHook(() => useConfigDraft("policy", "policy"));
+    await waitFor(() => expect(h.result.current.status).toBe("error"));
+    expect(h.result.current.error).toBe("could not reach the Kraft server");
+  });
+
   it("replaces the view with an op's answer, and says a draft changed", async () => {
     const h = await mount();
     vi.spyOn(d, "postOps").mockImplementation(() => answer({ ...withChanges(1), ops: [{ op: "add_node" }] }));

@@ -11,6 +11,8 @@ interface State {
   eventsByItem: Record<string, KraftEvent[]>;
   lastSeq: number;
   connection: Connection;
+  /** Why the last list read failed; null once one succeeds. With `connection`, what the offline banner is about. */
+  loadError: string | null;
   /** Bumped on every work_item_archived/restored event so a count fetched
    *  from the archive endpoint (Header's breadcrumb, the board's Archived
    *  chip) knows to refetch instead of only refreshing after its own click. */
@@ -119,15 +121,24 @@ export const useStore = create<State>((set, get) => ({
   eventsByItem: {},
   lastSeq: 0,
   connection: "connecting",
+  loadError: null,
   archivedVersion: 0,
 
   setConnection: (connection) => set({ connection }),
 
   bootstrap: async () => {
-    const { items, cursor } = await api.listWorkItems();
+    let list;
+    try {
+      list = await api.listWorkItems();
+    } catch (e) {
+      set({ loadError: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+    const { items, cursor } = list;
     set({
       workItems: Object.fromEntries(items.map((i) => [i.id, i])),
       lastSeq: cursor,
+      loadError: null,
     });
     // W11 · J: whether a needs_human item has an escalation turn running lives
     // in its sessions, which the list does not carry. Hydrate those items so

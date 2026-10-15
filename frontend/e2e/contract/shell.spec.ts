@@ -200,6 +200,15 @@ const ROWS: Row[] = [
       await expect(p.getByText(/Python 3\.14/)).toBeVisible();
     },
   },
+  {
+    name: "offline: a page that loads its own data says the server is down and can retry, rather than loading forever [decided]",
+    run: async (p) => {
+      await app(p, "/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() });
+      await expect(p.getByText(/^Offline: /)).toBeVisible();
+      await expect(p.getByText("Loading policy…")).toHaveCount(0);
+      await expect(p.getByRole("heading", { name: "Could not load policy" })).toBeVisible();
+    },
+  },
 ];
 
 contract(ROWS);

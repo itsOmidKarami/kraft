@@ -193,12 +193,20 @@ describe("the phone board (B)", () => {
     expect(screen.queryByRole("link", { name: "More › Repos" })).toBeNull();
   });
 
-  it("says offline beside the title when the list read fails, and keeps the rows", async () => {
+  it("keeps the rows when the list read fails, and records why", async () => {
     put(item("r1", "running"));
-    vi.spyOn(useStore.getState(), "bootstrap").mockRejectedValue(new Error("down"));
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
     mount();
-    expect(await screen.findByText("offline")).toBeInTheDocument();
+    await waitFor(() => expect(useStore.getState().loadError).toBe("down"));
     expect(screen.getByText("Item r1")).toBeInTheDocument();
+  });
+
+  it("does not call an empty list nothing while the read failed", async () => {
+    put();
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
+    mount();
+    await waitFor(() => expect(useStore.getState().loadError).toBe("down"));
+    expect(screen.queryByText("Nothing here. Tap + to file one.")).toBeNull();
   });
 });
 
@@ -259,7 +267,7 @@ describe("a card's inline actions (B.4)", () => {
   it("disables the buttons while offline", async () => {
     put(gate("g1"));
     stubFetch();
-    vi.spyOn(useStore.getState(), "bootstrap").mockRejectedValue(new Error("down"));
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("down"));
     mount();
     expect(await screen.findByRole("button", { name: "Review to approve" })).toBeDisabled();
   });

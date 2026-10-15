@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { ApplyDialogs } from "../apply/ApplyChip";
 import { DocViewer } from "../item/DocViewer";
+import { useReloadOnReconnect } from "../offline";
 import { Header } from "./Header";
+import { OfflineBanner } from "./OfflineBanner";
 import { HeaderActionsHost, HeaderTailHost } from "./HeaderActions";
 import { SearchOverlay } from "./SearchOverlay";
 import { Sidebar } from "./Sidebar";
@@ -14,6 +16,7 @@ export function Shell() {
   const [tail, setTail] = useState<HTMLElement | null>(null);
   const [searching, setSearching] = useState(false);
   const [viewing, setViewing] = useState<{ id: string; q: string } | null>(null);
+  useReloadOnReconnect();
 
   // From every page, including with focus in a field.
   useEffect(() => {
@@ -36,6 +39,7 @@ export function Shell() {
           <Sidebar onSearch={() => setSearching(true)} />
           <div className="ng-frame">
             <Header actionsRef={setActions} tailRef={setTail} />
+            <OfflineBanner />
             <main id="ng-main" tabIndex={-1} className="ng-main">
               <Outlet />
             </main>

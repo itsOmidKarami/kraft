@@ -88,6 +88,7 @@ const ALLOWED = [
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
   "shell/routes", // the list of pages, as data: Search's Go to rows
   "board/cue", // the stop-kind icon of a Needs you reason, drawn the same on the card and the row
+  "offline", // the offline state and its words: one banner text, both layouts
   "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
 ];
 

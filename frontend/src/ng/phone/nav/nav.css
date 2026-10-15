@@ -50,3 +50,5 @@
 .ph-toast-action { min-height: 44px; padding: 0 8px; border: 0; background: transparent; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
 
 .ph-badge-dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: -2px; right: -4px; }
+.ph-offline-banner { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 10%, var(--bg)); font-size: var(--fs-meta); line-height: 1.45; color: var(--text); }
+.ph-offline-banner p { flex: 1; margin: 0; overflow-wrap: anywhere; }

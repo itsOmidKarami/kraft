@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
 import { Shell } from "../shell/Shell";
+import { reload } from "../offline";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
 import { resetBoardPrefs } from "./prefs";
@@ -309,20 +310,17 @@ describe("BoardPage", () => {
     expect(screen.queryByLabelText("Loading the board")).toBeNull();
   });
 
-  it("goes offline when the read fails: the banner carries the error, rows stay, actions are off; Retry now reads again", async () => {
+  it("goes offline when the read fails: rows stay, actions are off, and a successful read clears it", async () => {
     put(item("p1", "paused"));
     const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items?include_abandoned=true) — it may have stopped."));
     board();
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server — it may have stopped. Showing what was loaded before");
-    expect(screen.getByText("OFFLINE")).toBeInTheDocument();
+    expect(await screen.findByText("OFFLINE")).toBeInTheDocument();
     expect(screen.getByText("Item p1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "+ New work item" })).toBeDisabled();
     list.mockResolvedValue({ items: [item("p1", "paused")], cursor: 1 });
-    await userEvent.click(within(banner).getByRole("button", { name: "Retry now" }));
+    await act(async () => { await reload(); });
     expect(list).toHaveBeenCalledTimes(2);
-    await act(async () => {});
     expect(screen.queryByText("OFFLINE")).toBeNull();
     expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
   });
