@@ -254,6 +254,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             // Opens with the whole chain in the visible canvas, or no smaller than the floor, on the node the run stands on.
             fit={ITEM_FIT}
             focus={item.display_status === "done" ? "last" : "current"}
+            // Passed stages, and those past the next, fold to a pill each.
+            fold
             reserve={reserve}
             cover={cover}
             onSelect={(node) => pick({ kind: "node", node })}

@@ -61,7 +61,7 @@ describe("Workspace with a draft", () => {
 
   it("offers no seam on an ended item", async () => {
     mount("/work-items/w1", draft([]), { display_status: "done" });
-    await screen.findByRole("button", { name: /^plan, node/ });
+    await screen.findByRole("button", { name: /^merge_request, node/ });
     expect(screen.queryByRole("button", { name: "Add a library node here" })).toBeNull();
   });
 

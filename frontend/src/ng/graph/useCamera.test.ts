@@ -30,6 +30,11 @@ describe("camera maths", () => {
     ["clamped at the left end", { floor: 0.45, left: 12, focus: 100 }, { W: 2600, H: 250 }, 12],
     ["keeping the start mark whole while the focus still fits beside it", { floor: 0.45, left: 12, focus: 1000, start: 27 }, { W: 2600, H: 250 }, 12 - 27 * 0.45],
     ["centred on a focus too far right to keep the start mark", { floor: 0.45, left: 12, focus: 1800, start: 27 }, { W: 2600, H: 250 }, 690 / 2 - 1800 * 0.45],
+    ["sliding left from centred until what comes next (the reach) shows whole", { floor: 0.45, left: 12, focus: 1000, reach: [2000] }, { W: 2600, H: 250 }, 678 - 2000 * 0.45],
+    ["staying centred when that already shows the reach", { floor: 0.45, left: 12, focus: 1000, reach: [1500] }, { W: 2600, H: 250 }, -105],
+    ["taking the first reach that fits beside the whole focus", { floor: 0.45, left: 12, focus: 1000, reach: [2600, 2000] }, { W: 2600, H: 250 }, 678 - 2000 * 0.45],
+    ["centred when no reach fits", { floor: 0.45, left: 12, focus: 1000, reach: [2600] }, { W: 2600, H: 250 }, -105],
+    ["letting the start mark go when the reach would not fit beside it", { floor: 0.45, left: 12, focus: 600, start: 27, reach: [1550] }, { W: 2600, H: 250 }, 678 - 1550 * 0.45],
     ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
     ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
   ])("fits to a floor %s", (_, rule, world, tx) => {
