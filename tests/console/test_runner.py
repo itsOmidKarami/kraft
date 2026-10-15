@@ -104,10 +104,11 @@ print("up", flush=True)
         (
             "import subprocess\n"
             "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-            "subprocess.Popen([sys.executable, '-c', 'import signal, time; "
-            "signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(30)'])\n"
-            # Long enough for it to have started ignoring SIGINT.
-            "time.sleep(1)",
+            "grandchild = subprocess.Popen([sys.executable, '-c', 'import signal, time; "
+            'signal.signal(signal.SIGINT, signal.SIG_IGN); print("ready", flush=True); '
+            "time.sleep(30)'], stdout=subprocess.PIPE)\n"
+            # It is ignoring SIGINT once it has said so.
+            "grandchild.stdout.readline()",
             "sys.exit(0)",
             0,
         ),
