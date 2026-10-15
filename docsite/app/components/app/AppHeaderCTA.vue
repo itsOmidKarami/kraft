@@ -18,14 +18,17 @@ const at = useDocsVersion()
 // outside this component. Reka's own select event does not carry the click, and
 // cancelling the click is what keeps the browser from following the link before
 // the probe is back. A middle or modified click is the reader opening a tab,
-// which the browser's own handling covers.
+// which the browser's own handling covers. The link only names its version:
+// the address comes from the version list, never from the page.
 async function open(event: MouseEvent) {
-  const link = (event.target as Element).closest('a[data-home]')
+  const link = (event.target as Element).closest('a[data-version]')
   if (!link || event.button || event.metaKey || event.ctrlKey || event.shiftKey || link.getAttribute('aria-current')) return
+  const v = at.value.versions.find(v => v.id === link.getAttribute('data-version'))
+  if (!v) return
   event.preventDefault()
-  const href = link.getAttribute('href')!
+  const href = at.value.samePage(v.base)
   const found = await fetch(href, { method: 'HEAD' }).then(r => r.status !== 404, () => true)
-  location.assign(found ? href : link.getAttribute('data-home')!)
+  location.assign(found ? href : v.base)
 }
 onMounted(() => document.addEventListener('click', open))
 onBeforeUnmount(() => document.removeEventListener('click', open))
@@ -39,7 +42,7 @@ const items = computed<DropdownMenuItem[]>(() => at.value.versions.map((v) => {
     'external': true,
     'active': here,
     'aria-current': here ? 'true' : undefined,
-    'data-home': v.base,
+    'data-version': v.id,
   }
 }))
 </script>

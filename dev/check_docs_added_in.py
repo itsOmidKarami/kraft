@@ -57,7 +57,7 @@ _LOOSE = re.compile(r"[_*]Added in\b[^_*]*[_*]")
 _CODE_SPAN = re.compile(r"`[^`]*`")
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
-_COMMENT = re.compile(r"^<!--.*-->$")
+_COMMENT = re.compile(r"^<!--.*?--!?>$", re.DOTALL)
 _STABLE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 
