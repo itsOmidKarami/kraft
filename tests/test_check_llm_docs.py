@@ -105,7 +105,7 @@ def test_check_channel_refuses_a_build_with_no_raw_pages(cl, tmp_path):
 
 
 @pytest.mark.parametrize("version", ["next", "v1"])
-def test_main_checks_every_version(cl, tmp_path, capsys, version):
+def test_main_checks_both_channels(cl, tmp_path, capsys, version):
     latest = _site(tmp_path, "", "")
     folder = tmp_path / version
     folder.mkdir()
