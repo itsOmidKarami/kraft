@@ -168,7 +168,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
       new Notification(text.title, { body: text.body, icon: "/icon.svg" });
       showToast("Test alert shown on this device");
     } catch {
-      showToast("This browser could not show the alert");
+      showToast("This browser could not show the alert", { tone: "error" });
     }
   };
   if (tab === "overview")

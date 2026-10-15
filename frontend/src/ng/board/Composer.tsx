@@ -14,7 +14,7 @@ import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
 import { FILED_PAUSED, KEEP_EDITING } from "./newWords";
-import { mod, sendOnModEnter } from "../keys";
+import { mod, sendOnModEnter, useShortcutRows, type ShortcutRow } from "../keys";
 import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip } from "../ui/Tooltip";
@@ -79,9 +79,16 @@ const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
  *  title, a line of brief, repo, chain, an optional spec or plan, and a tick
  *  preview of what will run from the server's dry run. ⌘↵ creates paused. */
+/** What the composer adds to the shortcut help while it is open. */
+const COMPOSER_KEYS: ShortcutRow[] = [
+  { keys: [mod("↵")], does: "Create the item, paused" },
+  { keys: ["Esc"], does: "Close the composer, asking first if you typed something" },
+];
+
 export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: string; onClose: () => void; onCreated: (id: string) => void }) {
   const navigate = useNavigate();
   /** The enabled repos, null until read: an empty list is no repo to file to. */
+  useShortcutRows("New work item", COMPOSER_KEYS);
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [roots, setRoots] = useState<Set<string>>(new Set());
   const [chains, setChains] = useState<TemplateSummary[]>([]);

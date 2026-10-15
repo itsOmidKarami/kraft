@@ -1,48 +1,27 @@
-import { useEffect, useRef, useState } from "react";
-import type { ToastAction } from "../../ui/Toast";
+import { useToasts } from "../../ui/toastModel";
 
-type Detail = { message: string; ms?: number; action?: ToastAction };
-
-export const TOAST_MS = 3200;
-
-/** The phone's toaster (W17 brief A.6): the same `kraft:toast` event as
- *  `ng/ui` `showToast`, so shared code that toasts reaches it, one toast at a
- *  time, above the tab bar. A toast holding focus stays until focus leaves. */
+/** The phone's toaster (W17 brief A.6): the same `kraft:toast` event and the
+ *  same stack as the desktop's, above the tab bar. */
 export function Toaster() {
-  const [toast, setToast] = useState<(Detail & { id: number }) | null>(null);
-  const el = useRef<HTMLDivElement>(null);
-  const seq = useRef(0);
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const on = (e: Event) => {
-      const d = (e as CustomEvent<Detail>).detail;
-      const id = ++seq.current;
-      setToast({ ...d, id });
-      clearTimeout(timer);
-      const drop = () => {
-        if (el.current?.contains(document.activeElement)) return void (timer = setTimeout(drop, 500));
-        setToast((cur) => (cur?.id === id ? null : cur));
-      };
-      timer = setTimeout(drop, d.ms ?? TOAST_MS);
-    };
-    window.addEventListener("kraft:toast", on);
-    return () => {
-      window.removeEventListener("kraft:toast", on);
-      clearTimeout(timer);
-    };
-  }, []);
+  const { toasts, dismiss, bind } = useToasts();
+  const view = (tone: "error" | undefined) =>
+    toasts.filter((t) => t.tone === tone).map((t) => (
+      <div key={t.id} ref={bind(t.id)} role={tone ? "alert" : undefined} className={tone ? "ph-toast ph-toast-error" : "ph-toast"}>
+        <span>{t.message}</span>
+        {t.action && (
+          <button type="button" className="ph-toast-action" onClick={() => { dismiss(t.id); t.action!.run(); }}>
+            {t.action.label}
+          </button>
+        )}
+        {tone && (
+          <button type="button" className="ph-toast-action" onClick={() => dismiss(t.id)}>Dismiss</button>
+        )}
+      </div>
+    ));
   return (
-    <div className="ph-toasts" role="status" aria-live="polite">
-      {toast && (
-        <div ref={el} className="ph-toast">
-          <span>{toast.message}</span>
-          {toast.action && (
-            <button type="button" className="ph-toast-action" onClick={() => { setToast(null); toast.action!.run(); }}>
-              {toast.action.label}
-            </button>
-          )}
-        </div>
-      )}
+    <div className="ph-toasts">
+      {view("error")}
+      <div className="ph-toasts-live" role="status" aria-live="polite">{view(undefined)}</div>
     </div>
   );
 }

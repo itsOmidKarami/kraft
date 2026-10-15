@@ -30,3 +30,11 @@ Look up a command, field, endpoint, tool, status or event. The sidebar groups th
 - [HTTP API](/reference/http-api): when you call Kraft over HTTP and want the stable routes, the board's routes and the draft ops, the schema, and who may call.
 - [MCP tools](/reference/mcp-tools): when you wire an agent to Kraft and want every tool and its `kraft` command.
 - [Events](/reference/events): when you read a work item's timeline, stream events over the WebSocket, or send events to a webhook.
+
+**Use Kraft in your editor**
+
+- [Kraft for VS Code](/reference/vscode-extension): when you want the extension's status bar, settings, Restricted Mode and version rule.
+
+**Upgrading**
+
+- [Changes from 1.4 to 2.0](/reference/changes-from-1-4): when you upgrade from 1.4 and want what changed, what 1.4 did, and what to do about it.

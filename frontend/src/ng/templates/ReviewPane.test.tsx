@@ -50,7 +50,7 @@ describe("Review & publish pane", () => {
     const shown = vi.spyOn(toast, "showToast");
     const { onDone } = mount({ result: { changes: CHANGES }, answers: { publish: { status: 404, body: { detail: "no draft of chains 'default'" } } } });
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    await waitFor(() => expect(shown).toHaveBeenCalledWith("Couldn't publish: no draft of chains 'default'"));
+    await waitFor(() => expect(shown).toHaveBeenCalledWith("Couldn't publish: no draft of chains 'default'", { tone: "error" }));
     expect(onDone).not.toHaveBeenCalled();
   });
 

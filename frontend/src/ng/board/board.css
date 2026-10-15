@@ -34,10 +34,6 @@
 .board-keys-btn { padding: 2px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
 .board-keys-btn:is(:hover, :focus-visible) { background: var(--surface-2); }
 .board-keys-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.board-shortcuts-list { margin: 0; display: grid; gap: 8px; }
-.board-shortcut { display: flex; align-items: center; gap: 12px; }
-.board-shortcut dt { display: flex; gap: 4px; min-width: 96px; }
-.board-shortcut dd { margin: 0; color: var(--text-sub); }
 .board-filter input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .board-filters-gap { flex: 1; }
 .board-menu-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text); cursor: pointer; white-space: nowrap; }

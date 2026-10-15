@@ -60,7 +60,7 @@ export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick,
     if (at < 0 || to < 0 || to >= ids.length) return;
     const op = { op: "move", path, to };
     const check = await draft.ops([op], { preview: true });
-    if (check.status !== 200) return showToast(`Can't move ${sel.step}: ${detailOf(check.body)}`);
+    if (check.status !== 200) return showToast(`Can't move ${sel.step}: ${detailOf(check.body)}`, { tone: "error" });
     await draft.ops([op]);
   };
   useEffect(() => {
