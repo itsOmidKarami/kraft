@@ -4,8 +4,7 @@ import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { Announcer, toastActions, toastLevel, type Announcement } from "./core/announcer";
-import { announceable, onBoard, type Include } from "./core/board";
-import { gateHasNoDocument, notAtGate, readFirstMessage } from "./core/wording";
+import { announceable, nameOf, onBoard, type Include } from "./core/board";
 import { approvedMessage, approveOrRead, consequenceQuestion, gateConsequence, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
 import { showRefusal } from "./review/refusal";
@@ -79,7 +78,7 @@ export function registerGates(
     gate ??= gateOf(id);
     try {
       const a = await api.getArtifact(id);
-      if (!a) return void vscode.window.showInformationMessage(gateHasNoDocument(store.item(id)?.title ?? id)), false;
+      if (!a) return void vscode.window.showInformationMessage(`${nameOf(store, id)}'s gate has no document to show.`), false;
       await show(id, gate, a);
       return true;
     } catch (e) {
@@ -90,7 +89,7 @@ export function registerGates(
 
   // Clicked on a preview of an older render than the latest: open the latest instead of acting.
   const readFirst = async (id: string, gate: string) => {
-    if (await openArtifact(id, gate)) void vscode.window.showInformationMessage(readFirstMessage(store.item(id)?.title ?? id, gate));
+    if (await openArtifact(id, gate)) void vscode.window.showInformationMessage(`Read the ${gateWords(gate)} on ${nameOf(store, id)} first: the document is open.`);
   };
 
   // Guarded here, not at registration: a gate notification's buttons call these directly.
@@ -98,7 +97,7 @@ export function registerGates(
   const approve = mutating("kraft.approve", refusal, warn, async (id?: string, gate?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
-    if (!gate) return void vscode.window.showInformationMessage(notAtGate(store.item(id)?.title ?? id));
+    if (!gate) return void vscode.window.showInformationMessage(`${nameOf(store, id)} is not waiting at a gate.`);
     const g = gate;
     if (stale) return readFirst(id, g);
     // Read once the approve is about to go: drafts written since the document opened go with it.
@@ -129,7 +128,7 @@ export function registerGates(
         refuse: (r) => showRefusal(id, r, reveal),
         readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, send),
       });
-      if (outcome === "read-first") void vscode.window.showInformationMessage(readFirstMessage(store.item(id)?.title ?? id, g));
+      if (outcome === "read-first") void vscode.window.showInformationMessage(`Read the ${gateWords(g)} on ${nameOf(store, id)} first: the document is open.`);
       // The approve went through: a failed re-read is not a failed approve.
       if (outcome === "approved") {
         const title = store.item(id)?.title ?? id;
@@ -146,7 +145,7 @@ export function registerGates(
   const reject = mutating("kraft.reject", refusal, warn, async (id?: string, gate?: string, note?: string, stale = false) => {
     if (!id) return;
     gate ??= gateOf(id);
-    if (!gate) return void vscode.window.showInformationMessage(notAtGate(store.item(id)?.title ?? id));
+    if (!gate) return void vscode.window.showInformationMessage(`${nameOf(store, id)} is not waiting at a gate.`);
     if (stale) return readFirst(id, gate);
     note ??= await vscode.window.showInputBox({
       prompt: `Why reject ${store.item(id)?.title ?? id} at ${gateWords(gate)}?`,

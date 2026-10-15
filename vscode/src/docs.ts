@@ -4,7 +4,6 @@ import type { Api, WorkItem } from "./core/api";
 import { docPath, docText } from "./core/docs";
 import { isWebUrl } from "./core/links";
 import type { Store } from "./core/store";
-import { noMergeRequest } from "./core/wording";
 import { pickItem } from "./palette";
 
 const SCHEME = "kraft-doc";
@@ -50,7 +49,7 @@ export function registerDocs(context: vscode.ExtensionContext, store: Store, api
       if (!item) return;
       const url = (store.item(item.id) ?? item).mr_ref?.url;
       // The row token already asked; the row may be older than the store.
-      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(noMergeRequest(item.title));
+      if (!isWebUrl(url)) return void vscode.window.showInformationMessage(`${item.title} has no merge request to open.`);
       await vscode.env.openExternal(vscode.Uri.parse(url, true));
     }),
     vscode.commands.registerCommand("kraft.openSpec", attachment("spec")),

@@ -7,10 +7,10 @@ import {
   abandonRefusal, attachChoices, attachState, chainsFor, cwdFor, createBody, draftNote, draftUrl, isRemoteFolder, outcomeMessage, remoteEscape, pickRepo, previewLine, repoDefaultChain,
   titleFrom, titleProblem, warningActions, warningsOf, type FileDraft,
 } from "./core/fileWork";
+import { nameOf } from "./core/board";
 import { mutating } from "./core/guard";
 import { folderScope, type ScopeDeps } from "./core/repoScope";
 import type { Store } from "./core/store";
-import { abandonQuestion } from "./core/wording";
 
 type Kind = "spec" | "plan";
 /** What the command was started from: an Explorer file to attach as `as`, or an editor selection. */
@@ -97,7 +97,7 @@ export async function offerWarnings(deps: FileWorkDeps, id: string, warnings: st
     // D24: decided now, not when the item was filed: it may have started since.
     const no = abandonRefusal(store.item(id)?.title ?? id, store.item(id));
     if (no) return void vscode.window.showInformationMessage(no);
-    const ok = await vscode.window.showWarningMessage(abandonQuestion(store.item(id)?.title ?? id), { modal: true }, "Abandon");
+    const ok = await vscode.window.showWarningMessage(`Abandon ${nameOf(store, id)}? Kraft deletes its worktree and branch.`, { modal: true }, "Abandon");
     if (ok !== "Abandon") return;
     // The server has the last word: a 409 shows its detail.
     try {

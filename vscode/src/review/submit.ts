@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
+import { gateWords } from "../../../frontend/src/ng/board/rowText";
 import { drafts, outcomes } from "../../../frontend/src/ng/review/finish";
 import { reportError } from "../actions";
 import { ApiError, type Api, type Artifact, type FixTarget, type ReviewResult } from "../core/api";
+import { nameOf } from "../core/board";
 import { approveOrRead, isStaleRevision } from "../core/approve";
 import { mutating } from "../core/guard";
 import { approveFlow } from "../core/mustFix";
@@ -11,7 +13,6 @@ import type { ShownRenders } from "../core/shown";
 import type { Store } from "../core/store";
 import { canSend, OUTCOME_LABEL, outcomeChoices, submitMessage, type Outcome } from "../core/submit";
 import type { ThreadCache } from "../core/threadCache";
-import { noDrafts, outcomeUnavailable, readFirstMessage, restartTitle, submitPlaceholder } from "../core/wording";
 import { discardPlan, hasDrafts } from "../core/threads";
 import { showRefusal } from "./refusal";
 
@@ -64,13 +65,13 @@ export function registerReviewSubmit(
     }
     const choices = outcomeChoices(detail, fix, unknown);
     if ("refused" in choices) return warn(choices.refused), not("refused");
-    if (choice && !choices.includes(choice.outcome)) return warn(outcomeUnavailable(OUTCOME_LABEL[choice.outcome], store.item(id)?.title ?? id)), not("refused");
+    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${nameOf(store, id)} now.`), not("refused");
     let { outcome, summary } = choice ?? {};
     if (!outcome) {
       const rows = outcomes(detail!, gate, threads, fix);
       const picked = await vscode.window.showQuickPick(
         choices.map((o) => ({ label: OUTCOME_LABEL[o], detail: rows.find((r) => r.key === o)?.parts.map((p) => p.t).join(""), o })),
-        { placeHolder: submitPlaceholder(store.item(id)?.title ?? id) },
+        { placeHolder: `Submit your review of ${nameOf(store, id)}` },
       );
       if (!picked) return not("cancelled");
       outcome = picked.o;
@@ -82,7 +83,7 @@ export function registerReviewSubmit(
       const at = gate ? { gate } : { current: detail!.current_node_id ?? "" };
       const restart = restartChoices(detail!.chain_definition?.nodes ?? [], at, fix!);
       if ("refused" in restart) return warn(restart.refused), not("refused");
-      const picked = await vscode.window.showQuickPick(restart, { title: restartTitle(store.item(id)?.title ?? id) });
+      const picked = await vscode.window.showQuickPick(restart, { title: `Request changes on ${nameOf(store, id)}: restart at` });
       if (!picked) return not("cancelled");
       node = nodeToSend(picked);
       fixNode = picked.node;
@@ -108,7 +109,7 @@ export function registerReviewSubmit(
           }),
         });
         if (r === "refused") return not("must-fix");
-        if (r === "read-first") return info(readFirstMessage(store.item(id)?.title ?? id, g)), not("read-first");
+        if (r === "read-first") return info(`Read the ${gateWords(g)} on ${nameOf(store, id)} first: the document is open.`), not("read-first");
         if (r === "cancelled" || !sent) return not("cancelled");
         info(submitMessage("approve", sent, { id, title: detail!.title, n, gate: g, fixNode: null, paused: false }));
       } else {
@@ -165,7 +166,7 @@ export function registerReviewSubmit(
       const id = idOf(arg);
       if (!id) return;
       const threads = cache.get(id);
-      if (arg instanceof vscode.Uri && threads && !hasDrafts(threads)) return info(noDrafts(store.item(id)?.title ?? id));
+      if (arg instanceof vscode.Uri && threads && !hasDrafts(threads)) return info(`${nameOf(store, id)} has no draft comments to submit.`);
       return submit(id);
     })),
     vscode.commands.registerCommand("kraft.review.discard", mutating("kraft.review.discard", refusal, warn, (arg?: unknown) => {

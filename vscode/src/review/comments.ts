@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import { reportError } from "../actions";
 import type { Api, ReviewComment, ReviewThread, ThreadLabel, WorkItem } from "../core/api";
+import { nameOf } from "../core/board";
 import { mutating } from "../core/guard";
 import { commandItemId, leftUri, parseReviewUri, rightUri } from "../core/review";
 import type { Store } from "../core/store";
 import { preloadsDrafts, reviewGone, type ThreadCache } from "../core/threadCache";
-import { offFileThreads } from "../core/wording";
 import {
   authorName, commentContext, commentMarkdown, commentPatch, fitPlace, LABEL_TEXT, otherThreadsText, placeThread, quoteOf, hasDrafts,
   selectionLines, sideOfScheme, syncPlan, threadContext, threadLabel, toThreadIn, writeTarget, type Lines, type Place, type Side,
@@ -135,7 +135,7 @@ export function registerComments(
     const off = threads.filter((t) => places.get(t.id)?.kind !== "file").length;
     if (off && !noticed.has(id)) {
       noticed.add(id);
-      const msg = offFileThreads(off, store.item(id)?.title ?? id);
+      const msg = `${off} review thread${off === 1 ? "" : "s"} on ${nameOf(store, id)} ${off === 1 ? "is" : "are"} not on a file in this review.`;
       void vscode.window.showInformationMessage(msg, "Show").then((pick) => { if (pick === "Show") void showOthers(id); });
     }
   };

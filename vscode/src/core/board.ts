@@ -198,6 +198,9 @@ export function nextTick(items: Pick<WorkItem, "display_status" | "stop" | "retr
   return next;
 }
 
+/** What a message calls an item: its title, or its id before the board has read it. */
+export const nameOf = (store: { item(id: string): WorkItem | undefined }, id: string): string => store.item(id)?.title ?? id;
+
 /** A question's text without the worker's `needs_context:` marker. */
 export const questionText = (reason: string) => reason.replace(/^needs_context:\s*/, "");
 
