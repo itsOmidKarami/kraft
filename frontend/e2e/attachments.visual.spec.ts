@@ -26,7 +26,7 @@ test("intake from an existing spec and plan, end to end", async ({ page }) => {
   await page.goto(`/work-items/${id}`);
   const chain = page.getByRole("group", { name: "default" });
   await expect(chain.getByRole("button", { name: /^implementation, node, / })).toBeVisible();
-  await expect(chain.getByRole("button", { name: /^(spec|plan|spec_approval|plan_approval), / })).toHaveCount(0);
+  await expect(chain.getByRole("button", { name: /^(spec|plan|approve spec|approve plan), / })).toHaveCount(0);
   const pane = page.getByRole("complementary", { name: "default pane" });
   await expect(pane).toContainText("15 nodes");
   await expect(pane).toContainText("work item attachments");

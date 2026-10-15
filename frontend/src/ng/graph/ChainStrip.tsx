@@ -1,126 +1,58 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, type KeyboardEvent } from "react";
+import { displayName } from "../board/rowText";
 import type { ChainNode } from "./layout";
-import { NodeGlyph } from "./NodeGlyph";
-import { stripRow, type Fold, type RowEntry } from "./stages";
-import { accessibleName, breakable } from "./types";
+import { tone } from "./Minimap";
+import { accessibleName } from "./types";
 import { useRoving } from "./useRoving";
 import "./graph.css";
 import { tip } from "../ui/Tooltip";
 
-/** Strip geometry: a node's column holds its glyph and its id under it; a folded stage is one pill. */
-export const S = { B: 30, CE: 92, CG: 92, CY: 22, PAD: 28, H: 80, PILL: 26, GAP: 16, MAX: 140 } as const;
+type Props = {
+  nodes: ChainNode[];
+  viewing: string;
+  /** Nodes named in words ("approve spec"), the item's; an editor names them by id. */
+  names?: boolean;
+  onOpen?: (id: string) => void;
+  onBack?: () => void;
+};
 
-const foldW = (f: Fold) => 58 + f.words.length * 7.4 + (f.passed ? 14 : 0) + S.GAP;
-/** A node's column: its id's width (bold, monospace) when that is more than the minimum, up to a cap past which it wraps. */
-const nodeW = (n: { id: string; kind: string }) => Math.min(S.MAX, Math.max(n.kind === "gate" ? S.CG : S.CE, Math.ceil(n.id.length * 8) + 12));
-const foldKey = (key: string) => `f:${key}`;
-
-export function stripLayout(row: RowEntry[]) {
-  let x = S.PAD;
-  const cols = row.map((entry) => {
-    const w = entry.kind === "fold" ? foldW(entry) : nodeW(entry), cx = x + w / 2;
-    x += w;
-    return { entry, w, cx };
-  });
-  const half = (c: (typeof cols)[number]) => (c.entry.kind === "fold" ? (c.w - S.GAP) / 2 : c.entry.kind === "gate" ? 12 : S.B / 2);
-  const edges = cols.slice(1).map((b, i) => {
-    const a = cols[i];
-    const todo = b.entry.kind === "fold" ? !b.entry.passed : b.entry.state === "todo";
-    return { d: `M${a.cx + half(a) + 3} ${S.CY} L${b.cx - half(b) - 3} ${S.CY}`, todo };
-  });
-  return {
-    items: cols.flatMap((c) => (c.entry.kind === "fold" ? [] : [{ node: c.entry, cx: c.cx, w: c.w }])),
-    folds: cols.flatMap((c) => (c.entry.kind === "fold" ? [{ fold: c.entry, cx: c.cx, w: c.w }] : [])),
-    edges,
-    W: x + 2 * S.PAD,
-    H: S.H,
-  };
-}
-
-type Props = { nodes: ChainNode[]; viewing: string; onOpen?: (id: string) => void; onBack?: () => void };
-
-/** A pill's accessible name: the stage by its gate in words, how many nodes it holds. */
-const pillName = (f: Fold) => `${f.words} stage, ${f.nodes.length} ${f.nodes.length === 1 ? "node" : "nodes"}${f.passed ? ", passed" : ""}: expand`;
-
-/** The chain bar above a node view: the viewed node's stage node by node, every id under its glyph, the other stages
- *  folded to a pill named by their gate (a click opens one in place). */
-export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
-  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  const row = useMemo(() => stripRow(nodes, opened, viewing), [nodes, opened, viewing]);
-  const lay = useMemo(() => stripLayout(row), [row]);
-  const stops = row.map((e) => (e.kind === "fold" ? foldKey(e.key) : e.id));
-  const roving = useRoving(viewing, stops[0]);
+/** The chain bar above a node view: the whole chain as the overview draws it, one glyph per node in its state, the
+ *  node in view ringed; a click goes to that node. */
+export function ChainStrip({ nodes, viewing, names = false, onOpen, onBack }: Props) {
+  const roving = useRoving(viewing, nodes[0]?.id);
   // A strip wider than its bar scrolls to the node in view.
   const world = useRef<HTMLDivElement>(null);
   useEffect(() => {
     world.current?.querySelector("[aria-current]")?.scrollIntoView?.({ inline: "center", block: "nearest" });
   }, [viewing]);
-  // A stage opened in place hands focus to its first node, its pill having gone.
-  const landing = useRef<string | null>(null);
-  useEffect(() => {
-    if (landing.current && stops.includes(landing.current)) roving.go(landing.current);
-    landing.current = null;
-  }, [row]); // eslint-disable-line react-hooks/exhaustive-deps
-  const expand = (f: Fold) => {
-    landing.current = f.nodes[0].id;
-    setOpened((o) => new Set(o).add(f.key));
-  };
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const i = stops.indexOf(roving.active ?? "");
+    const i = nodes.findIndex((n) => n.id === roving.active);
     e.preventDefault();
-    roving.go(stops[Math.max(0, Math.min(stops.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))]);
+    roving.go(nodes[Math.max(0, Math.min(nodes.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))].id);
   };
   return (
     <div className="strip">
       <button type="button" className="strip-back" aria-label="Back to the chain" title="Back to the chain (Esc)" onClick={onBack}>← chain</button>
       <div className="strip-scroll">
-        <div ref={world} role="group" aria-label="Chain" className="strip-world" style={{ width: lay.W, height: lay.H }} onKeyDown={onKeyDown}>
-          <svg width={lay.W} height={lay.H} aria-hidden="true">
-            {lay.edges.map((e, i) => <path key={i} d={e.d} className={e.todo ? "strip-edge is-todo" : "strip-edge"} />)}
-          </svg>
-          {lay.items.map(({ node: n, cx, w }) => {
-            const v = n.id === viewing;
-            return (
-              <div key={n.id} className="strip-node" style={{ left: cx - w / 2, width: w, top: S.CY - S.B / 2 }}>
-                <button
-                  ref={roving.ref(n.id)}
-                  type="button"
-                  tabIndex={roving.tabIndex(n.id)}
-                  className="strip-btn"
-                  {...tip(accessibleName(n, n.kind === "gate" ? "gate" : "node"), n.id)}
-                  aria-current={v ? "step" : undefined}
-                  onFocus={() => roving.go(n.id)}
-                  onClick={() => onOpen?.(n.id)}
-                >
-                  <NodeGlyph {...n} size="sm" sel={v} prob={n.prob && !v} />
-                </button>
-                <span className={v ? "strip-label is-viewing" : "strip-label"} style={{ maxWidth: w - 6 }}>{breakable(n.id)}</span>
-              </div>
-            );
-          })}
-          {lay.folds.map(({ fold: f, cx, w }) => {
-            const key = foldKey(f.key);
-            const gate = f.nodes.at(-1)!;
-            return (
+        <div ref={world} role="group" aria-label="Chain" className="strip-map" onKeyDown={onKeyDown}>
+          {nodes.map((n, i) => (
+            <Fragment key={n.id}>
+              {i > 0 && <span className={n.state === "todo" ? "strip-edge is-todo" : "strip-edge"} aria-hidden="true" />}
               <button
-                key={key}
-                ref={roving.ref(key)}
+                ref={roving.ref(n.id)}
                 type="button"
-                tabIndex={roving.tabIndex(key)}
-                {...tip(pillName(f), f.nodes.map((n) => n.id).join(" → "))}
-                className="strip-fold"
-                style={{ left: cx - (w - S.GAP) / 2, top: S.CY - S.PILL / 2, width: w - S.GAP, height: S.PILL }}
-                onFocus={() => roving.go(key)}
-                onClick={() => expand(f)}
+                tabIndex={roving.tabIndex(n.id)}
+                className="strip-glyph"
+                {...tip(accessibleName(names ? { ...n, id: displayName(n) } : n, n.kind === "gate" ? "gate" : "node"))}
+                aria-current={n.id === viewing ? "step" : undefined}
+                onFocus={() => roving.go(n.id)}
+                onClick={() => onOpen?.(n.id)}
               >
-                {gate.kind === "gate" && <NodeGlyph kind="gate" state={f.passed ? "done" : undefined} size="sm" />}
-                <span>{f.words}</span>
-                {f.passed && <span className="fold-done" aria-hidden="true">✓</span>}
-                <span className="strip-fold-n">{f.nodes.length}</span>
+                <span className={`map-glyph is-${n.kind} is-${tone(n)}${n.prob ? " is-prob" : ""}`} aria-hidden="true" />
               </button>
-            );
-          })}
+            </Fragment>
+          ))}
         </div>
       </div>
     </div>

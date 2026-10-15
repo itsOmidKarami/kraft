@@ -5,7 +5,6 @@
   --fs-h1: 20px; --fs-h2: 16px; --fs-h3: 15px;
   /* The phone's page and tile titles, a step above the desktop headings. */
   --fs-ph-title: 26px; --fs-ph-h1: 22px;
-  /* The item graph's labels and captions, sized for its zoom floors (graph/camera.ts). */
   /* A draft or changed value: a neutral ink and line, never the amber that means a human is needed. */
   --mark-change: var(--text-sub); --mark-change-line: var(--stroke);
   /* What a "needs you" surface (the gate strip, the phone gate card) is painted with. A few percent of amber over the page
@@ -13,7 +12,6 @@
   --warn-wash: color-mix(in oklab, var(--warn) 8%, var(--bg)); --warn-edge: color-mix(in oklab, var(--warn) 45%, transparent);
   /* The one column every settings page (Appearance to Auto-intake) sits in. */
   --set-page-w: 820px;
-  --fs-graph-label: 11.5px; --fs-graph-caption: 11px;
 }
 :root[data-mode="light"] { --warn-wash: color-mix(in oklab, var(--warn) 12%, var(--surface)); --warn-edge: color-mix(in oklab, var(--warn) 75%, transparent); }
 body { margin: 0; font: 14px/1.5 var(--font-sans); background: var(--bg); color: var(--text); }

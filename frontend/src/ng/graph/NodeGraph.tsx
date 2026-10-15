@@ -12,6 +12,7 @@ import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
 import { tip } from "../ui/Tooltip";
+import { SEAM } from "./layout";
 
 /** A step, or a task in it, or one of an open task's scopes (its `key`). The escalation task's step is
  *  `escalation`, a fix loop's repair and judge `fix_loop`. */
@@ -236,7 +237,11 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const last = lay.cols[lay.cols.length - 1];
 
   const seam = (key: string, x: number, y: number, title: string, fire: (el: HTMLElement) => void) => (
-    <button key={key} type="button" className="seam is-node" {...tip(title)} style={{ left: x - 10, top: y - 10 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span></button>
+    <button key={key} type="button" className="seam is-node" {...tip(title)} style={{ left: x - SEAM / 2, top: y - SEAM / 2 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span></button>
+  );
+  /** The seam under a step's tasks says what it adds: a bare "+" there read as nothing. */
+  const below = (key: string, x: number, y: number, fire: (el: HTMLElement) => void) => (
+    <button key={key} type="button" className="seam-below" {...tip("Add a parallel task")} style={{ left: x, top: y - SEAM / 2 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span> parallel task</button>
   );
   // `away`: the task is open as a frame, so its box fades; the frame's own title holds its place in the keys.
   const taskButton = (s: NodeSel, t: GraphItem, x: number, y: number, kind: string, extra = "", away?: boolean) => {
@@ -322,7 +327,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
                 <span className="graph-label">{st.slot.label ?? "add a task"}</span>
               </button>
             ),
-            st.seamBelow && seam(`sb${st.id}`, cx, ys[ys.length - 1] + G.BOX / 2 + 56, "Add a parallel task", (el) => onSeam?.("below", st.id, el)),
+            st.seamBelow && below(`sb${st.id}`, cx, ys[ys.length - 1] + G.BOX / 2 + 56, (el) => onSeam?.("below", st.id, el)),
             st.seamBefore && seam(`sf${st.id}`, k === 0 ? (G.startX + 18 + cx - G.BOX / 2) / 2 : (lay.cols[k - 1].right + lay.cols[k].left) / 2, lay.TY, "Add a step here", (el) => onSeam?.("before", k, el)),
           ];
         })}

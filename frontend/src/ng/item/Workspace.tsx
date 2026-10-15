@@ -212,7 +212,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
 
   return (
     <div className="item-canvas" ref={frame}>
-      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
+      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} names onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
@@ -254,8 +254,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             // Opens with the whole chain in the visible canvas, or no smaller than the floor, on the node the run stands on.
             fit={ITEM_FIT}
             focus={item.display_status === "done" ? "last" : "current"}
-            // Passed stages, and those past the next, fold to a pill each.
-            fold
+            // A long chain draws under its overview; nodes read by name.
+            overview
+            names
             reserve={reserve}
             cover={cover}
             onSelect={(node) => pick({ kind: "node", node })}

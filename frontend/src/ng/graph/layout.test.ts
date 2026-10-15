@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arcShapes, FOLD, foldWidth, L, layout, seamX, type ChainNode } from "./layout";
-import type { Fold } from "./stages";
+import { arcShapes, L, layout, seamX, type ChainNode } from "./layout";
 
 const chain: ChainNode[] = [
   { id: "a", kind: "exec", state: "done" },
@@ -47,25 +46,8 @@ describe("chain layout", () => {
     expect(loop).toMatchObject({ dashed: false, label: { x: 155, y: 29, text: "fix" } });
     expect(arcShapes(layout(chain), [{ kind: "loop", node: "a" }])[0].dashed).toBe(true);
   });
-  it("sizes a folded stage's column by its words, and stops edges at its pill", () => {
-    const done: Fold = { kind: "fold", key: "g", words: "chain revision", nodes: chain.slice(0, 2), passed: true };
-    const ahead: Fold = { ...done, words: "x", passed: false };
-    // 60 for the glyph and padding, 7 a character, 14 for the done mark, 24 of room; never under a gate's column.
-    expect(foldWidth(done)).toBe(60 + 14 * 7 + 14 + 24);
-    expect(foldWidth(ahead)).toBe(L.COLG);
-    const lay = layout([done, chain[2], ahead]);
-    expect(lay.items.map((i) => i.node.id)).toEqual(["b"]);
-    expect(lay.folds.map((f) => f.cx)).toEqual([86 + 98, 86 + 196 + 138 + 48]);
-    expect(lay.edges[0].x2).toBe(86 + 98 - (196 - FOLD.GAP) / 2 - 5);
-    // A pill ahead dashes its edges as a todo node does; a passed one does not.
-    expect(lay.edges.map((e) => e.todo)).toEqual([false, true, true, true]);
-  });
-  it("ends a reject or rebase at the pill of a folded node, and draws no loop on one", () => {
-    const pill: Fold = { kind: "fold", key: "g", words: "a", nodes: chain.slice(0, 2), passed: true };
-    const lay = layout([pill, chain[2]]);
-    const [reject] = arcShapes(lay, [{ kind: "reject", from: "b", to: "a" }]);
-    expect(reject.arrow).toBe(`M${lay.folds[0].cx - 5} ${L.CY + 81} L${lay.folds[0].cx} ${L.CY + 74} L${lay.folds[0].cx + 5} ${L.CY + 81}`);
-    expect(arcShapes(lay, [{ kind: "loop", node: "a" }, { kind: "reject", from: "g", to: "a" }])).toEqual([]);
+  it("draws no arc to or from a node the row leaves out", () => {
+    expect(arcShapes(layout(chain.slice(1)), [{ kind: "loop", node: "a" }, { kind: "reject", from: "g", to: "a" }])).toEqual([]);
   });
   it("draws the rebase above the chain and the reject below it", () => {
     const [rebase, reject] = arcShapes(layout(chain), [{ kind: "rebase", from: "b", to: "a" }, { kind: "reject", from: "g", to: "a" }]);
