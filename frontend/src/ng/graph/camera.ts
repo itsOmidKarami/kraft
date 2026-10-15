@@ -1,5 +1,6 @@
 /** Pure camera maths for the chain and node canvases, from Kraft Prototype V2's
  *  `fit`, `goCurrent`, `zoomAt`, `g2Fit` and `g2ZoomAt`. */
+import { L } from "./layout";
 export type Cam = { tx: number; ty: number; s: number };
 export type Size = { w: number; h: number };
 export type CanvasKind = "chain" | "node";
@@ -27,19 +28,23 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean };
 /** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
-/** An item's fit: labels stay legible, and a chain too wide for it opens on the node that matters (`focus`, a
+/** An item's fit: node labels (11.5px) and captions (10.5px) stay at 10px or more, and a chain too wide for it opens on the node that matters (`focus`, a
  *  world x) instead of at a 30% fit nobody can read; the canvas counts the nodes that are left off-screen. */
-export const ITEM_FIT: FitRule = { floor: 0.6, left: 12, initial: true };
+export const ITEM_FIT: FitRule = { floor: 0.95, left: 12, initial: true };
 
-/** The whole world in view, never above 100% or below 30%, centred; the chain
- *  sits 10px above centre, and the node canvas keeps 20px off the left edge. */
+/** The whole world in view, never above 100% or below 30%, centred; the chain's
+ *  row of nodes and labels sits at the middle of the view (as far as the world
+ *  allows), and the node canvas keeps 20px off the left edge. */
 export function fitCam(world: { W: number; H: number }, view: Size, canvas: CanvasKind, rule?: FitRule): Cam {
   const s = Math.max(rule?.floor ?? 0.3, Math.min(1, (view.w - 40) / world.W, (view.h - 40) / world.H));
   const mid = (view.w - world.W * s) / 2;
   const wide = rule && world.W * s > view.w - 2 * rule.left;
   const tx = !rule ? mid : wide && rule.focus != null ? Math.min(rule.left, Math.max(view.w - world.W * s - rule.left, view.w / 2 - rule.focus * s)) : Math.max(rule.left, mid);
   const ty = (view.h - world.H * s) / 2;
-  return canvas === "chain" ? { s, tx, ty: ty - 10 } : { s, tx: Math.max(20, tx), ty };
+  // The row's middle is a label's depth below the node centre; a world taller than the view stays centred.
+  const row = view.h / 2 - (L.CY + 12) * s;
+  const chainTy = world.H * s <= view.h ? Math.min(Math.max(row, 0), view.h - world.H * s) : ty;
+  return canvas === "chain" ? { s, tx, ty: chainTy } : { s, tx: Math.max(20, tx), ty };
 }
 
 /** 100%, the current node centred across and 30% down the view. */

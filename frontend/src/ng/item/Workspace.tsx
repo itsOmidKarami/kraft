@@ -211,7 +211,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
   return (
-    <div className={`item-canvas${viewing ? "" : " is-chain"}`} ref={frame}>
+    <div className="item-canvas" ref={frame}>
       {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
