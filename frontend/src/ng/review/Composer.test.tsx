@@ -125,6 +125,7 @@ describe("Composer", () => {
     const box = screen.getByRole("textbox", { name: "Comment" });
     await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add to review" })).toHaveAccessibleDescription("A comment needs some text.");
     fireEvent.change(box, { target: { value: "Cap it lower" } });
     // A plain Enter is a new line.
     await act(async () => fireEvent.keyDown(box, { key: "Enter" }));

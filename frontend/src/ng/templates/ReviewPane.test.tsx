@@ -64,6 +64,7 @@ describe("Review & publish pane", () => {
     const { onFix } = mount({ result: { problems: [{ path: "lint", field: null, message: "Value error, 'steps' must not be empty", file: "f", line: 3, col: 5 }] } });
     expect(screen.getByText("✕ doesn't resolve · 1 problem block publishing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toHaveAccessibleDescription("Fix the 1 problem first.");
     expect(screen.getByText("'steps' must not be empty")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Fix →" }));
     expect(onFix).toHaveBeenCalledWith("lint", expect.objectContaining({ path: "lint" }));

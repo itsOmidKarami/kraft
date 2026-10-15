@@ -2,6 +2,9 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { Inspector } from "../../graph/Inspector";
 import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
+import { repoName } from "../../../format";
+import { useReason } from "../../ui/Reason";
+import { CHAIN_IN_USE } from "../../ui/reasons";
 import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { authoredAt, authoredNodes, liveChainId, nodeGlyph, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
@@ -118,6 +121,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   const glyph = d.kind === "node" ? nodeGlyph(r, path) : undefined;
   const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : glyph?.icon);
   const repos = r.impact.repos ?? [];
+  const inUse = useReason(repos.length ? CHAIN_IN_USE(repos.map(repoName)) : null, { below: true });
   const at = (el: HTMLElement) => void (anchor.current = el);
   const closeCard = () => {
     setCard(null);
@@ -192,7 +196,8 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         <Button onClick={onDuplicate}>Duplicate</Button>
         <span className="bp-gap" />
         {/* Refused while a repo defaults to it (Decisions §9 Chain settings). */}
-        <Button variant="danger" disabled={repos.length > 0} title={repos.length ? `Can't delete: ${repos.join(", ")} default to it` : undefined} onClick={() => setAsking(true)}>Delete chain</Button>
+        {inUse.note}
+        <Button variant="danger" disabled={repos.length > 0} {...inUse.attrs} onClick={() => setAsking(true)}>Delete chain</Button>
       </>
     )
   ) : (

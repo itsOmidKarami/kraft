@@ -170,6 +170,7 @@ describe("Chains page: the chain canvas", () => {
     await canvas();
     expect(screen.getByText("published")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review & publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review & publish/ })).toHaveAccessibleDescription("published nothing to publish");
   });
 
   it("shows a chain renamed in the draft by its new id, counts the rename and lists it in review (R10b-02)", async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import { repoName, shortId } from "../../../format";
@@ -137,6 +137,8 @@ export function DraftItemPage() {
     else if (/^https?:/.test(to)) window.location.assign(to);
   };
   const page = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const tagId = useId();
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const a = (e.target as Element).closest?.("a[href]") as HTMLAnchorElement | null;
@@ -185,20 +187,20 @@ export function DraftItemPage() {
   return (
     <div className="draft-page" ref={page}>
       <HeaderActions>
-        <span className={`draft-tag${d.title.trim() ? " is-ok" : ""}`}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</span>
+        <span id={tagId} className={`draft-tag${d.title.trim() ? " is-ok" : ""}`}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</span>
         <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
-        <CreateSplit disabled={!ok} onCreate={create} />
+        <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} onCreate={create} />
       </HeaderActions>
       {error && <p className="item-error" role="alert">{error}</p>}
       <h1 className="board-visually-hidden">New work item</h1>
-      <input className="draft-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />
+      <input ref={titleRef} className="draft-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />
       {d.bead && (
         <p className="draft-bead">
           Implements <code>{d.bead}</code>
           <button type="button" className="draft-bead-drop" {...tip(`Do not implement ${d.bead}`)} onClick={() => set({ bead: "" })}>×</button>
         </p>
       )}
-      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} onKeyDown={sendOnModEnter(() => create(true), ok)} />
+      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} onKeyDown={sendOnModEnter(() => create(true), ok, () => !d.title.trim() && titleRef.current?.focus())} />
       <div className="draft-chips">
         <span>Repo</span>
         <Menu

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReviewThread, ThreadLabel } from "../../types";
 import { Button } from "../ui/Button";
+import { useReason } from "../ui/Reason";
+import { COMMENT_NEEDS_TEXT } from "../ui/reasons";
 import { Markdown } from "../ui/Markdown";
 import { IconButton } from "../ui/IconButton";
 import { X } from "../icons";
@@ -68,6 +70,7 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
   };
   const dirty = !!(d.body.trim() || d.suggest !== null);
   const ready = !!d.body.trim() && !busy;
+  const noText = useReason(d.body.trim() ? null : COMMENT_NEEDS_TEXT);
   // One ⌘↵ handler, on the wrapper, for both boxes: a second one on a box
   // would send twice before React re-renders `ready`.
   const send = sendOnModEnter(() => submit(), ready);
@@ -163,7 +166,8 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
             <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null, wrote: undefined })}>± Suggest change</Button>
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
-          <Button variant="primary" disabled={!ready} title={d.body.trim() ? undefined : "A comment needs some text"} onClick={submit}>
+          {noText.note}
+          <Button variant="primary" disabled={!ready} {...noText.attrs} onClick={submit}>
             {editing ? "Save" : "Add to review"}
           </Button>
         </div>

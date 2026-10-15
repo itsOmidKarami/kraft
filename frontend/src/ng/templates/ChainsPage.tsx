@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
@@ -201,6 +201,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     loadPublished();
   };
   const yamlErr = r.yaml_error;
+  const publishedId = useId();
   const toggleYaml = () => {
     // A syntax error keeps you here until it is fixed or reverted (Decisions §9 YAML): the button is disabled.
     if (surface === "yaml") return setSurface("canvas");
@@ -303,7 +304,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {view.draft
           ? <span className="tpl-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <span className="tpl-published">published</span>}
+          : <><span className="tpl-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>nothing to publish</span></>}
         {n.problems > 0 && (
           <button
             type="button"
@@ -335,7 +336,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         {/* A repo library's chain is edited in its repository's `.kraft/`: the server refuses a copy. */}
         {readOnly
           ? (addonRepo(addon) ? null : <Button variant="primary" onClick={() => setDupTick((k) => k + 1)}>Copy to my library</Button>)
-          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
+          : <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} aria-describedby={view.draft ? undefined : `${publishedId} ${publishedId}-why`} onClick={review ? endReview : startReview}>Review &amp; publish</Button>}
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

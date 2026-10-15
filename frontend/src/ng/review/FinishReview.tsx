@@ -4,6 +4,8 @@ import type { CommentReview, FixTarget, GatelessChanges, ReviewOutcome, ReviewTh
 import { detailOf, jsonBody, request } from "../http";
 import { placeUrl } from "../item/url";
 import { Button } from "../ui/Button";
+import { useReason } from "../ui/Reason";
+import { ADD_TO_SUBMIT } from "../ui/reasons";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
 import { approveBlock, barText, drafts, outcomes } from "./finish";
@@ -67,6 +69,7 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
   const [error, setError] = useState<string | null>(null);
   const bar = barText(threads, item, gate);
   const block = approveBlock(item, gate, threads);
+  const why = useReason(block);
   if (readOnly)
     return (
       <div className="rv-bar">
@@ -86,7 +89,8 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
           <Button onClick={() => onFinish("request_changes")}>Request changes</Button>
           {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
               them: it opens Finish your review on Approve instead, which lists them first. */}
-          <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} title={block ?? undefined} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
+          {why.note}
+          <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} {...why.attrs} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
           {bar.pending > 0 && <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>}
         </>
       ) : (
@@ -109,6 +113,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const [busy, setBusy] = useState(false);
   const toSend = drafts(threads);
   const canSend = outcome === "approve" || toSend.length > 0 || !!note.trim();
+  const noSend = useReason(canSend ? null : ADD_TO_SUBMIT);
   // At the gate, Request changes is a rejection (the review route calls reject_gate): the dialog says so, and where it goes (GR-11).
   const rejectTo = atGate && outcome === "request_changes" ? fix?.node ?? null : null;
   const go = async () => {
@@ -126,7 +131,8 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
       footer={
         <>
           <Button onClick={onClose}>Keep reviewing</Button>
-          <Button variant="primary" disabled={!canSend || busy} title={canSend ? undefined : "Add a comment or a note first"} onClick={go}>{rejectTo ? `Reject to ${rejectTo}` : "Submit review"}</Button>
+          {noSend.note}
+          <Button variant="primary" disabled={!canSend || busy} {...noSend.attrs} onClick={go}>{rejectTo ? `Reject to ${rejectTo}` : "Submit review"}</Button>
         </>
       }
     >

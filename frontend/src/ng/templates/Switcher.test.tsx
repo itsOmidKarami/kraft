@@ -147,7 +147,7 @@ describe("chain settings footer", () => {
     const { unmount } = mount();
     const del = await screen.findByRole("button", { name: "Delete chain" });
     expect(del).toBeDisabled();
-    expect(del).toHaveAttribute("title", "Can't delete: /code/kraft default to it");
+    expect(del).toHaveAccessibleDescription("Can't delete: kraft default to it.");
     unmount();
 
     vi.mocked(d.getDraft).mockImplementation(() => ok(view(false)));

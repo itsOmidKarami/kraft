@@ -3,6 +3,8 @@ import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { detailOf } from "../http";
 import { Button } from "../ui/Button";
+import { useReason } from "../ui/Reason";
+import { fixProblems } from "../ui/reasons";
 import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
@@ -73,6 +75,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
   const r = view.result;
   const n = counts(r);
   const blocked = n.problems > 0;
+  const why = useReason(blocked ? fixProblems(n.problems) : null, { below: true });
   const stale: StaleBody | null = draft.stale;
   const live = scopeFile(view.files, scope);
   const text = view.files[live] ?? "";
@@ -134,7 +137,8 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
     <>
       <Button variant="danger" onClick={() => setAsking(true)}>Discard draft</Button>
       <span className="bp-gap" />
-      <Button variant="primary" disabled={blocked} title={blocked ? `Fix the ${plural(n.problems, "problem")} first` : undefined} onClick={publish}>Publish</Button>
+      {why.note}
+      <Button variant="primary" disabled={blocked} {...why.attrs} onClick={publish}>Publish</Button>
     </>
   );
 
