@@ -54,7 +54,7 @@ ui:
 :::landing-shot
 ---
 src: /assets/board.png
-alt: 'The Kraft board: work items grouped by Needs you (a paused, a failed and two waiting at a gate, each with its one button), Running, Not started, and Done'
+alt: 'The Kraft board in the dark graphite look: work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running, Not started, and Done, with a Select all link on every group and a ? shortcuts button in the toolbar'
 crop: 210 0 1230 688
 width: 1440
 ---
