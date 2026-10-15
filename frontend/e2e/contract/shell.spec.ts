@@ -102,8 +102,8 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 300); await p.keyboard.press("ControlOrMeta+k"); await pause(p); await expect(p.getByRole("combobox", { name: /search/i })).toBeVisible(); },
   },
   {
-    name: "search: a needs-you row for a gate is an action row, Review <gate>, and Enter opens that review (Q1)",
-    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /Review review brief/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
+    name: "search: a needs-you row for a gate leads with the item and names the gate (approve <gate>), and opens that review (Q1)",
+    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await pause(p, 400); const r = p.getByRole("option", { name: /approve review brief/ }).first(); await expect(r).toBeVisible({ timeout: 3000 }); await r.click(); await pause(p, 800); expect(p.url()).toMatch(/\/review/); },
   },
   {
     name: "search: the query is highlighted in titles (Q3)",
