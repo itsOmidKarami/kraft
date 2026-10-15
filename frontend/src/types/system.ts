@@ -80,6 +80,8 @@ export interface Analytics {
     cycles: number;
   }[];
   rejected_gates_by_gate: { gate: string; n: number }[];
+  /** Time items spent stopped at each gate, longest total first. */
+  gate_waits: { gate: string; n: number; median_ms: number; total_ms: number }[];
   stop_reasons: { label: string; n: number }[];
 }
 
