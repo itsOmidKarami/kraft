@@ -63,9 +63,13 @@ export function registerGates(
     latest.set(id, basename);
     preview.opening(id, basename); // before the tab appears, so its tab change finds it
     // Locked, so it never follows the active editor onto someone else's file.
-    if ((await vscode.commands.getCommands(true)).includes("markdown.showPreview"))
+    // Not checked against getCommands first: the Markdown extension registers its commands when it
+    // activates, which opening this document only starts, so a fresh window would show raw text.
+    try {
       await vscode.commands.executeCommand("markdown.showPreview", uri, undefined, { locked: true });
-    else await vscode.window.showTextDocument(doc, { preview: false }); // the Markdown extension is disabled
+    } catch {
+      await vscode.window.showTextDocument(doc, { preview: false }); // the Markdown extension is disabled
+    }
     if (gate) shown.record(id, gate, a.digest); // no gate to bind it to: shown, not remembered
   };
 

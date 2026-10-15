@@ -137,8 +137,9 @@ async function stage() {
   const gate = items.find((i) => i.title === "Design the caching layer");
   if (!gate) throw new Error("the seed made no gate item");
   const wt = join(home, "run", "worktrees", gate.id);
-  const specs = join(wt, ".engineering", "specs");
-  for (const f of readdirSync(specs)) writeFileSync(join(specs, f), SPEC);
+  // The documents live outside the worktree: run/items/<id>/docs/<kind>.md.
+  const docs = join(home, "run", "items", gate.id, "docs");
+  for (const f of readdirSync(docs)) writeFileSync(join(docs, f), SPEC);
   writeFileSync(join(wt, "cache.py"), CACHE);
   writeFileSync(join(wt, "calc.py"), CALC);
   const db = new DatabaseSync(join(home, "run", "orchestrator.db"));
@@ -203,21 +204,37 @@ async function drive(app) {
 
   await page.click('.activitybar [aria-label^="Kraft"]');
   await pause(3000);
-  await shot("screenshot-board", { x: 48, y: 32, width: 304, height: 168 });
   // Only the gate's toast: close any other (the Red Hat YAML nudge) that would stack on it.
-  const others = page.locator(".notification-toast").filter({ hasNotText: "spec_approval" });
+  const others = page.locator(".notification-toast").filter({ hasNotText: "approve spec" });
   // The clear button only shows while the toast is hovered (VS Code 1.141).
   while (await others.count()) {
     const o = others.first();
     await o.hover();
     await o.locator(".codicon-notifications-clear").click();
   }
-  const toast = page.locator(".notification-toast", { hasText: "spec_approval" });
+  const toast = page.locator(".notification-toast", { hasText: "approve spec" });
   await page.mouse.move(0, 0); // off the close button it just clicked
   await shot("screenshot-gate-notification", await toast.boundingBox());
   await toast.getByRole("button", { name: "Open" }).click();
   await pause(2500);
   await shot("screenshot-gate", { x: 0, y: 0, width: 1600, height: 576 });
+
+  // Wide enough to read a row's reason after its title.
+  const side = await page.locator(".part.sidebar").boundingBox();
+  await page.mouse.move(side.x + side.width, side.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(side.x + side.width + 220, side.y + 300, { steps: 8 });
+  await page.mouse.up();
+  await page.mouse.move(0, 0);
+  await pause(1000);
+  await shot("screenshot-board", { x: 48, y: 32, width: 456, height: 168 });
+  // Back to its width: the gate and the review shots want the room.
+  await page.mouse.move(side.x + side.width + 220, side.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(side.x + side.width, side.y + 300, { steps: 8 });
+  await page.mouse.up();
+  await page.mouse.move(0, 0);
+  await pause(1000);
 
   await page.locator('.editor-actions [aria-label="Review Changes"]').click();
   await pause(4000);
