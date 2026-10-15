@@ -13,7 +13,9 @@ Kraft isn't another coding agent. It runs the one you already use, and adds
 what a single session can't: a process the agent can't skip, checks it doesn't
 grade itself on, and a person at the decisions that matter.
 
-Hand Kraft a task and walk away. Your agent drafts the spec and the plan and
+Hand Kraft a task, start it and walk away. A new work item is filed paused,
+in the web interface, on a phone and from the CLI alike, so nothing runs until
+you start it. Your agent drafts the spec and the plan and
 stops for your approval of each, or starts from a spec you wrote. It's for
 developers tired of babysitting a session to the end of a task.
 
@@ -29,7 +31,7 @@ proposes, and rehearses them with `--verify`.
 [What's new in 2.0](https://kraft-sdlc.dev/next/get-started/whats-new)
 has the rest, and what to check before you upgrade from 1.4.
 
-![The Kraft board in the dark graphite look: work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running, Not started, and Done, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
+![The Kraft board in the dark graphite look: work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running, Not started, and Done, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; reject with a note and the node that wrote it
@@ -51,7 +53,7 @@ New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what 
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or request changes with a note that re-runs the node that wrote it.
 
-![The gate's review page headed Approve spec: Request changes and Approve buttons, a line saying Approving starts plan with the gates left and the spend, the spec an agent wrote rendered below, and the files on the branch with one pending comment](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
+![The gate's review page headed Approve spec: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts plan with the gates left and the spend, the spec an agent wrote rendered below, and the files on the branch with one pending comment](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
 <table>
 <tr>
@@ -160,7 +162,9 @@ from 1.4? Update with `uv tool install`, not `kraft admin update`: see
 
 ## First run
 
-Open http://127.0.0.1:8765, then follow the
+Open http://127.0.0.1:8765. With no repo connected, a short setup walks you
+through connecting one, the chain and policy, and a first work item, which is
+created paused. Then follow the
 [first-work-item tutorial](https://kraft-sdlc.dev/get-started/first-work-item)
 to file your first work item.
 
