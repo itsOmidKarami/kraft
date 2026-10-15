@@ -122,7 +122,7 @@ export function StoragePage() {
         )}
 
         {data && (
-          <Block id="set-st-worktrees" title="Worktrees" aside={plural(data.items.length, "item")}>
+          <Block id="set-st-worktrees" title="Worktrees" card aside={plural(data.items.length, "item")}>
             <div className="set-st-body">
               <div className="set-st-actions">
                 <Button disabled={!checked.size} onClick={() => setCleaning([...checked])}>{CLEAN_SELECTED}</Button>
