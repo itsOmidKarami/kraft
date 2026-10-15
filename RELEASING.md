@@ -143,7 +143,7 @@ inside the workflow. It needs an access token from
 1. **GitHub Release** `vX.Y.Z`, with the wheel and `kraft-X.Y.Z.vsix` attached.
    Needs nothing: the workflow's own `GITHUB_TOKEN`. Check:
    `gh release view vX.Y.Z --json assets --jq '.assets[].name'` lists both files.
-2. **Docs rebuild**, a dispatch of the `docs` workflow so `/kraft/` serves the
+2. **Docs rebuild**, a dispatch of the `docs` workflow so `/` serves the
    new tag. Needs nothing (`GITHUB_TOKEN`, `actions: write`), and only warns
    when it can't dispatch. Check: `gh run list --workflow docs --limit 1` shows
    success.
@@ -231,6 +231,36 @@ release before it. The artifacts don't lag. The wheel's version comes from the
 tag through setuptools-scm, and the `.vsix` gets its version from the
 `vsce package <version>` command line and its changelog from the build. The
 stamp pull request then brings `main` up to date.
+
+## Docs "Added in" notes
+
+A docs page, section or CLI verb that is new since the last release carries
+`_Added in next_`, written by its author (see CONTRIBUTING.md,
+"User-facing docs"). Nobody writes a version number, because the release does,
+in the stamp pull request, with `dev/stamp_docs_added_in.py VERSION`:
+
+- **X.Y.0 (Y above 0):** every `next` becomes `X.Y`, so the site's chip reads
+  "Added in 2.1" instead of "Unreleased".
+- **X.0.0:** every note is removed, numbered ones too. A new major starts clean,
+  and the site's version menu already says which major you are reading.
+- **X.Y.Z (Z above 0):** a patch adds no features, so a `next` note means one
+  shipped under a patch label. The script writes nothing and exits 1; the stamp
+  step warns, adds a line to the stamp pull request, and still stamps the plugin
+  manifests and changelogs. Until someone takes the notes off by hand, or relabels
+  and cuts the release again as a minor, `dev/check_docs_added_in.py` warns on
+  `main`, because a `next` note now sits on what the release has; the next minor
+  release stamps them with its own number.
+
+Every release also deletes the `<!-- renamed from: ... -->` and
+`<!-- not new: ... -->` comments, which only excuse a heading from a note until
+the next release is the comparison point.
+
+The tag is cut before the stamp pull request merges, so the tag's own pages still
+say `next`. `dev/build_docs_site.sh` stamps its copy of the tag's content the same
+way, so the release docs at `/` show the number from the moment they are
+built. Between the tag and the stamp pull request merging, the check warns on
+`main` for the same reason as above, without failing `lint`; it clears when that
+pull request merges.
 
 ## Verify a release
 

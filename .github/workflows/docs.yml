@@ -1,10 +1,10 @@
 # Builds the docs site with dev/build_docs_site.sh: the latest stable release's
-# pages at / and main's at /next/, both with main's site code. Runs
-# on every PR that touches it, building both versions, so a change to
-# docsite/app that breaks the release's older pages fails the PR, not a merge
-# to main after the fact. Publishes to GitHub Pages on push to main and on a
-# manual run, which release.yml dispatches after a stable release so /kraft/
-# switches to the new tag. Separate from test.yml/release.yml: a docs-only
+# pages at /, each older major's last release at /vN/ and main's at /next/, all
+# with main's site code. Runs on every PR that touches it, building every
+# version, so a change to docsite/app that breaks the release's older pages
+# fails the PR, not a merge to main after the fact. Publishes to GitHub Pages
+# on push to main and on a manual run, which release.yml dispatches after a
+# stable release so / switches to the new tag. Separate from test.yml/release.yml: a docs-only
 # change should not wait on the backend/frontend test matrix, and a docs build
 # failure should not block a release.
 name: docs
@@ -19,6 +19,7 @@ on:
       - ".github/assets/**"
       - "frontend/public/icon.svg"
       - "dev/build_docs_site.sh"
+      - "dev/docs_versions.py"
       - "dev/check_llm_docs.py"
       - ".github/workflows/docs.yml"
   push:
@@ -39,8 +40,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The stable build reads the latest release tag's pages, and a
-          # shallow clone has no tags.
+          # The builds read the release tags' pages, and a shallow clone has
+          # no tags.
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -48,7 +49,7 @@ jobs:
           cache: npm
           cache-dependency-path: docsite/package-lock.json
 
-      - name: build both versions
+      - name: build every version
         run: |
           npm ci --prefix docsite
           dev/build_docs_site.sh "$RUNNER_TEMP/site"
@@ -66,7 +67,7 @@ jobs:
       # the map comes back as a page, listed in the sitemap and llms.txt.
       - name: the map of moved addresses is not a page
         run: |
-          for page in "$RUNNER_TEMP/site/redirects.html" "$RUNNER_TEMP/site/next/redirects.html"; do
+          for page in "$RUNNER_TEMP/site/redirects.html" "$RUNNER_TEMP"/site/*/redirects.html; do
             if [ -e "$page" ]; then
               echo "::error::$page exists: the map of moved addresses was built as a page"
               exit 1
@@ -88,8 +89,9 @@ jobs:
       # Pages serves for it: --index-files index.html,. with
       # --fallback-extensions html resolves it the same way.
       #
-      # Excluded: the site outside /next/. The "Docs for the release"
-      # banner links every page to its release twin, which a page new on main
+      # Excluded: the site outside /next/, the latest release and the frozen
+      # majors included. The "Switch to" link of the banner and the version
+      # menu link every page to its twin in another version, which a page new on main
       # does not have yet (VersionBanner.vue says so). The example domains
       # the docs use (example.com and the like) lychee skips on its own.
       #

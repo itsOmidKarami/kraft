@@ -2,13 +2,19 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
-// the release docs are at / and main's at /next/. A build under another base
-// (a project page at /kraft/) needs it here, or every Nuxt-generated asset URL
-// (_nuxt/*, _payload.json) 404s and the page loads unstyled.
-// dev/build_docs_site.sh builds main's docs a second time under /next/.
+// the latest release's docs are at /, an older major's at /vN/ and main's at
+// /next/. A build under another base (a project page at /kraft/) needs it here,
+// or every Nuxt-generated asset URL (_nuxt/*, _payload.json) 404s and the page
+// loads unstyled. dev/build_docs_site.sh builds the docs once per version,
+// each with the whole list (dev/docs_versions.py) and its own id from it.
 const baseURL = process.env.KRAFT_DOCS_BASE || '/'
-// stable, next, or empty: a local or PR build shows no version UI.
-const channel = process.env.KRAFT_DOCS_CHANNEL || ''
+type DocsVersion = { id: string, label: string, base: string, tag: string, name: string }
+const versions: DocsVersion[] = JSON.parse(process.env.KRAFT_DOCS_VERSIONS || '[]')
+// This build's id: latest, vN or next. Empty for a local or PR build, which
+// shows no version UI.
+const version = process.env.KRAFT_DOCS_VERSION || ''
+// Only the latest release's pages belong in search results.
+const frozen = version !== '' && version !== 'latest'
 // The bare origin. Site config joins app.baseURL onto it itself, so an origin
 // that already ends in /kraft/ doubles the prefix (og:image at /kraft/kraft/).
 const origin = 'https://kraft-sdlc.dev'
@@ -55,9 +61,9 @@ function forwardingPage(from: string, to: string): string {
 // the JavaScript arrived, and with it off or failing stayed blank. This goes
 // inside #__nuxt and is replaced when the app mounts, with error.vue's page,
 // which says the same. GitHub Pages serves this one file for a missing path
-// under / and under /next/ alike, so it cannot know which docs the reader
-// wanted and links to both, at the fixed addresses runtimeConfig gives them
-// (stableBase, nextBase), not this build's base. Styled inline, in the site's own colour tokens
+// under / and under every other version alike, so it cannot know which docs
+// the reader wanted and links to all of them, at the addresses of the version
+// list, not this build's base. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
 const missingPage = `<style>
@@ -78,7 +84,7 @@ const missingPage = `<style>
 <p class="code">404</p>
 <h1>No page at this address</h1>
 <p>It may have been renamed or moved.</p>
-<p class="links"><a href="/">Release docs</a> <a href="/next/">Next docs, for unreleased main</a></p>
+<p class="links">${versions.map(v => `<a href="${v.base}">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
 </main>
 </div>`
 
@@ -146,19 +152,20 @@ export default defineNuxtConfig({
   site: {
     url: origin,
     name: 'Kraft',
-    // Only the release docs belong in search results. @nuxtjs/robots writes
-    // the robots meta tag from this; a tag in app.head would be overridden.
-    ...(channel === 'next' ? { indexable: false } : {}),
+    // Only the latest release's docs belong in search results; an older
+    // major's and main's carry a noindex tag. @nuxtjs/robots writes the robots
+    // meta tag from this; a tag in app.head would be overridden.
+    ...(frozen ? { indexable: false } : {}),
   },
   // nuxt-llms writes no llms.txt or llms-full.txt without a domain, and Docus
   // infers none on GitHub Pages. Its links are the domain plus a router path,
-  // so the domain carries this build's base ('' or /next).
+  // so the domain carries this build's base ('', /v1 or /next).
   llms: {
     domain: `${origin}${baseURL.replace(/\/$/, '')}`,
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
   // only reads one at the domain root anyway. server/routes/robots.txt.ts
-  // writes ours, one per channel.
+  // writes ours, one per version.
   robots: {
     robotsTxt: false,
   },
@@ -168,14 +175,12 @@ export default defineNuxtConfig({
     // override site.url above.
     sitemapBase: `${origin}${baseURL.replace(/\/$/, '')}`,
     public: {
-      // Read by the version switch and the /next/ banner. The bases are full
-      // paths, not router paths: each version is a separate build, so a link
-      // to the other one must leave this build's router.
+      // Read by the version menu and the banners. The bases are full paths,
+      // not router paths: each version is a separate build, so a link to
+      // another one must leave this build's router.
       docs: {
-        channel,
-        stableVersion: process.env.KRAFT_DOCS_STABLE_VERSION || '',
-        stableBase: '/',
-        nextBase: '/next/',
+        version,
+        versions,
       },
       // Every moved address, old to new. app/plugins/moved.ts forwards them:
       // not a `routeRules` redirect, which Nuxt follows in the browser before
@@ -220,16 +225,17 @@ export default defineNuxtConfig({
       // No page links to a moved page's old address, so the crawler would
       // never reach it on its own.
       routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
-      // The version switch links to the other build's root, which the crawler
-      // would take for one of this build's own pages and fail as a 404.
-      // Exactly that path: a prefix match on / would skip every page.
+      // The version menu links to the same page in every other build, which
+      // the crawler would take for one of this build's own pages and fail as
+      // a 404: a prefix match on each other version's base. The latest's is
+      // /, which would skip every page, so it is only ever matched exactly.
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
       // to indexing.
       ignore: [
         '/200.html',
-        ...(channel ? [new RegExp(`^${channel === 'next' ? '/' : '/next/'}$`)] : []),
+        ...versions.filter(v => v.id !== version).map(v => new RegExp(v.base === '/' ? '^/$' : `^${v.base}`)),
       ],
     },
   },

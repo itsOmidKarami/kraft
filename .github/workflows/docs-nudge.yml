@@ -64,6 +64,7 @@ jobs:
           but no \`docsite/\` page. If this changes a CLI flag, a config field, a
           chain template, or a harness, update the matching page in the same PR
           -- see CONTRIBUTING.md's [User-facing docs](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md#user-facing-docs)
-          table. If it doesn't, ignore this.
+          table. A new page, section or verb also carries \`_Added in next_\` under
+          its heading. If none of this applies, ignore this.
           EOF
           )"

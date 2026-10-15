@@ -75,13 +75,12 @@ The two local hooks need `just` on `PATH`:
 just docs       # cd docsite && npm ci && npm run dev
 ```
 
-The site is served at <http://localhost:3000/kraft/>, not at the root: it is
-built for GitHub Pages under `/kraft/`. The dev server logs a few warnings as it
-starts; the site works regardless.
+The site is served at <http://localhost:3000/>. The dev server logs a few
+warnings as it starts; the site works regardless.
 
 `just docs` serves `main`'s pages alone. To see the site as it publishes, with
-the latest release at <http://localhost:8000/kraft/> and `main` at
-<http://localhost:8000/kraft/next/>, run `just docs-site`.
+the latest release at <http://localhost:8000/>, each older major at
+`/vN/` and `main` at <http://localhost:8000/next/>, run `just docs-site`.
 
 ## Finding something to work on
 
@@ -191,7 +190,7 @@ the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
-| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_docs_added_in.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only, or changes no Python | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14, 1/3 … 3/3)` *(code)* | the unit tier (`-m "not e2e"`) in three shards on each supported Python, with `python -m kraft.intent` in the first; on 3.14 alone when the pull request changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it is not part of `test` | nothing to run |
@@ -205,7 +204,7 @@ the full suite.
 | `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/e2e/contract/`) | `just ui-contract` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
-| `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
+| `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages, each older major's and `main`'s, all with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
 | `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
@@ -353,6 +352,24 @@ Page rules:
   It also fails a `](/page#heading)` link between pages that lands on no
   heading, or on an address the file forwards (write the target), so a
   moved heading cannot leave a dead link behind.
+- Mark what is new. A page, section or CLI verb that is new since the latest
+  release carries `_Added in next_` on its own line directly under its heading
+  (a new page: under its title, which covers its sections), or at the end of
+  its table cell (a row in "Verbs at a glance", a flag row). Write exactly
+  that, never a version: the release stamps it into `_Added in 2.1_`
+  ([RELEASING.md](RELEASING.md#docs-added-in-notes)), and a new major strips
+  every note. Never put it in heading text, which would leak into the table of
+  contents, search titles and the sidebar. On the site it is a chip ("Unreleased",
+  then "Added in 2.1"); in the Markdown, `llms-full.txt` and search it stays plain
+  words. `dev/check_docs_added_in.py` (the `lint` job) compares `docsite/content`
+  with the latest release tag and fails on a new page, heading or verb with no
+  note, on a note in the wrong place or naming a release that does not exist,
+  and warns on a `next` note on something the release already had. A heading
+  is not new if its page moved (`redirects.yml`), or if you say so under it:
+  `<!-- renamed from: Old heading -->` for an old heading under a new name
+  (`/page#Old heading` from another page, `/old/page` for a page split or
+  renamed), `<!-- not new: why -->` for new text about something that already
+  shipped. The comment does not render, and the release deletes it.
 - No comment in a shell block (`bash`, `sh`, `shell`, `zsh`, `console`): an
   interactive zsh, the macOS default, does not read `#` as one, so a
   pasted `cmd # note` fails with `command not found: #`. Put the remark in
@@ -398,21 +415,45 @@ link that does not answer. Nothing catches "this paragraph no longer describes t
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
 
-### Two versions of the docs
+### Versions of the docs
 
-The site publishes two versions: the latest stable release's pages at
-[`/kraft/`](https://kraft-sdlc.dev/), and `main`'s at
-[`/kraft/next/`](https://kraft-sdlc.dev/next/). Write docs on
-`main`, in the same pull request as the code. They appear at `/next/` when it
-merges and become the default at the next stable release. There is nothing
-else to do. Link to `/kraft/next/` for a feature that hasn't shipped in a
-release yet.
+The site publishes three kinds of version: the latest stable release's pages at
+[`/`](https://kraft-sdlc.dev/), each older major frozen at `/vN/` (today `/v1/`,
+from the last `v1` release), and `main`'s
+at [`/next/`](https://kraft-sdlc.dev/next/). Write docs on `main`, in the same
+pull request as the code. They appear at `/next/` when it merges and become the
+default at the next stable release. There is nothing else to do. Link to
+`/next/` for a feature that hasn't shipped in a release yet.
 
-Both versions are built with `main`'s site code (`docsite/app`,
+A section that is new since the last release says so with an "Added in"
+note, which the release turns into the version that shipped it (see
+[User-facing docs](#user-facing-docs) above).
+
+`dev/docs_versions.py` picks the tags from the repo's tags, so nothing is
+configured: `/` is the highest `vX.Y.Z` tag, and each lower major with a
+`docsite/content` is built from its own highest such tag. When `v3.0.0` ships,
+`2.x` becomes `/v2/` with no code change. Only `/` is indexed; `/vN/` and
+`/next/` carry a `noindex` tag and stay out of the sitemap.
+
+Every version is built with `main`'s site code (`docsite/app`,
 `nuxt.config.ts`), so a theme or component fix reaches the release docs
 without a release, while their text stays what the release shipped. The flip
 side is that a docs-only fix to a released page, such as a typo, waits for the
-next release too.
+next release too. A frozen major keeps the words of the components that hold
+them: `dev/build_docs_site.sh` builds it with its own tag's `StageStrip.vue`,
+so the landing page still names the stages the way that release did. If a
+page of a frozen major ever shows text from a newer component, add the
+component to that list.
+
+If a frozen major stops building with `main`'s components, build it with its
+own tag's site code instead:
+`KRAFT_DOCS_OWN_SITE="v1" dev/build_docs_site.sh OUT_DIR` runs an `npm ci` of
+that tag's lockfile and its own `nuxt generate`. The limits: it has the old
+look and no version menu or banner (the tag's config knows nothing of them), a
+tag that hard-codes its origin (`v1.4.0` does: `itsomidkarami.github.io`) puts
+that origin in its canonical, `og:url` and sitemap URLs, and its pages are made
+`noindex` by a tag added after the build. Verify it with
+`KRAFT_DOCS_OWN_SITE=v1 just docs-site` before relying on it.
 
 ## The model price table
 

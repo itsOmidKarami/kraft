@@ -102,6 +102,8 @@ load `/openapi.json` into your own OpenAPI viewer.
 
 ## Work item IDs in a path
 
+_Added in next_
+
 The `{id}` segment of a route under `/api/work-items/` may be the start of a
 work item ID instead of all of it. A start is 4 characters or more, from `0-9`
 and `a-z`. Kraft makes it the whole ID before the route runs, so the answer
@@ -120,6 +122,8 @@ reaches Kraft through its own channel, which still takes only its own item's
 whole ID.
 
 ## Session IDs in a path
+
+<!-- not new: session routes changed shape with per-item session ids; nothing was added -->
 
 A session ID is unique only within its work item, so a session's routes are
 under its item:
@@ -255,6 +259,8 @@ The pages can change in any release. A script that must keep working calls the [
 | [`POST /api/work-items/{id}/open-worktree`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidopen-worktree) | Opens the item's worktree. |
 
 ### Storage
+
+_Added in next_
 
 | Route | What it does |
 |---|---|
