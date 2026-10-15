@@ -39,7 +39,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
         <span className="ph-ticks" aria-hidden="true">
           {ticksOf(item).map((t, k) => <span key={k} className={`ph-tick ph-tick-${t.state}${t.gate ? " ph-tick-gate" : ""}`} />)}
         </span>
-        <span className={`ph-card-tail${hot ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}`}>
+        <span className={`ph-card-tail${hot && cue !== "paused" ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}`}>
           {Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}
           {reasonTail(item, now)}
         </span>

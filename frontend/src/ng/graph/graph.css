@@ -11,6 +11,7 @@
 .glyph-box.is-failed { border-color: var(--bad); color: var(--bad); }
 .glyph-box.is-esc { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); color: var(--warn); }
 .glyph-box.is-ghost { border: 1px dashed var(--stroke); color: var(--text-faint); }
+.glyph-box.is-paused { border: 1.5px solid var(--text-muted); background: var(--surface-2); color: var(--text-sub); }
 .glyph-box.is-amber { border: 1.5px solid var(--warn); color: var(--warn); }
 .glyph-box.mark-add { border: 1.5px dashed var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--bg)); color: var(--ok); }
 .glyph-box.mark-add.is-prob { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); color: var(--bad); }
@@ -25,6 +26,7 @@
 .glyph-gate .glyph-box.is-done { border-color: var(--stroke); background: var(--stroke); }
 .glyph-gate .glyph-box.is-current { border-color: var(--warn); box-shadow: none; }
 .glyph-gate .glyph-box.is-amber { border-color: var(--warn); }
+.glyph-gate .glyph-box.is-paused { border-color: var(--text-muted); }
 .glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--stroke); background: var(--bg); }
 .glyph-gate .glyph-box.is-ghost { border: 1.5px dashed var(--stroke); }
 .glyph-gate .glyph-box.mark-add { border: 1.5px dashed var(--ok); }

@@ -106,6 +106,8 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("done"))).toMatchObject({ state: "done", icon: "check" });
     expect(glyphOf(row("archived"))).toMatchObject({ state: "done", icon: "check" });
     expect(glyphOf(row("paused", { current_node_id: null })).state).toBe("todo");
+    // Amber is "needs a human": a paused item waits on nobody, so it is neutral (not amber).
+    expect(glyphOf(row("paused")).state).toBe("paused");
     expect(glyphOf(row("blocked", { current_node_id: null })).state).toBe("todo");
     expect(glyphOf(row("blocked")).state).toBe("current");
   });
@@ -118,6 +120,7 @@ describe("glyphOf and ticksOf", () => {
     expect(states(row("archived"))).toBe("dddd");
     expect(ticksOf(row("done")).map((t) => t.gate)).toEqual([false, true, false, false]);
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
+    expect(states(row("paused"))).toBe("ddct");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
   });
 });

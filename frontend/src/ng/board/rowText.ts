@@ -189,7 +189,8 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
       case "cancelled": return "ghost";
       case "archived": return i.status === "abandoned" ? "ghost" : "done";
       case "running": case "waiting": return "current";
-      case "paused": return i.current_node_id ? "amber" : "todo";
+      // Amber is "needs a human"; a paused item waits on nobody, so it is neutral.
+      case "paused": return i.current_node_id ? "paused" : "todo";
       default: {
         const g = groupOf(i);
         return g === "needs" ? "amber" : g === "not_started" ? "todo" : "current";
@@ -207,7 +208,7 @@ export function ticksOf(i: Row): Tick[] {
   const nodes = i.chain_definition?.nodes ?? [];
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
-  const hot = groupOf(i) === "needs" || i.display_status === "escalated";
+  const hot = (groupOf(i) === "needs" && i.display_status !== "paused") || i.display_status === "escalated";
   return nodes.map((n, k) => ({
     gate: n.kind === "gate",
     state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",

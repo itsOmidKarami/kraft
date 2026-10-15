@@ -60,7 +60,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className={`board-meta-tail${hot ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
+          <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
             {Cue && <Cue size={12} aria-hidden className="board-cue" />}
             <span className="board-tail-text">{own?.tail ?? reasonTail(item, now)}</span>
           </span>

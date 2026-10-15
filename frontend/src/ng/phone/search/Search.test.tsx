@@ -100,6 +100,9 @@ describe("Search (I)", () => {
     expect(needs.getByRole("button", { name: /Item p6/ })).toHaveTextContent("paused at implementation");
     expect(needs.getByRole("button", { name: /Item g2/ })).toHaveTextContent("approve plan");
     expect(needs.getByRole("button", { name: /Item g2/ })).not.toHaveTextContent("plan_approval");
+    const hint = (re: RegExp) => needs.getByRole("button", { name: re }).querySelector(".ph-row-hint")!;
+    expect(hint(/Item p6/)).not.toHaveClass("ph-search-hot");
+    expect(hint(/Item g2/)).toHaveClass("ph-search-hot");
     expect(needs.queryByText(/Item n7/)).toBeNull();
     expect(within(screen.getByRole("region", { name: "Recent" })).getByRole("button", { name: /Item n7/ })).toHaveTextContent("created paused");
     await userEvent.click(needs.getByRole("button", { name: /Item f5/ }), { advanceTimers: vi.advanceTimersByTime });
