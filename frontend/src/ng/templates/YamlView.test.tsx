@@ -45,6 +45,11 @@ describe("YAML view", () => {
     expect(area().selectionStart).toBe(TEXT.indexOf("    kind"));
   });
 
+  it("names a chain-level problem (null path) as the chain, not an empty path", async () => {
+    render(<YamlView draft={fake(viewWith(TEXT, { problems: [{ path: null, field: null, message: "Value error, chain cap is under a task's own", file: FILE, line: 3, col: 1 }] }))} scope={{ area: "chains", key: "default" }} published={TEXT} />);
+    expect(within(screen.getByRole("list")).getByRole("button", { name: /line 3 · chain · chain cap is under a task's own/ })).toBeInTheDocument();
+  });
+
   it("on a syntax error says the canvas keeps the last valid draft, and Revert puts that text back", async () => {
     const draft = fake(viewWith(TEXT));
     const { rerender } = render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={TEXT} />);

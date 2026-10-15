@@ -4,7 +4,7 @@ import { detailOf } from "../../http";
 import { showToast } from "../../ui/Toast";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import type { Problem } from "../../templates/draft/types";
-import { counts } from "../../templates/draft/view";
+import { counts, problemPath } from "../../templates/draft/view";
 import { problemText } from "../../templates/problems";
 import { Button } from "../../ui/Button";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
@@ -117,7 +117,7 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
           {(problems.length > 0 || view.result.yaml_error) && (
             <div className="ph-review-lines" aria-label="Problems">
               {view.result.yaml_error && <div className="ph-problem"><span className="ph-problem-path">{view.result.yaml_error.file}, line {view.result.yaml_error.line}</span><span>{view.result.yaml_error.message}</span></div>}
-              {problems.map((p, i) => <div key={i} className="ph-problem"><span className="ph-problem-path">{p.path ?? "chain"}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span><span>{problemText(p)}</span></div>)}
+              {problems.map((p, i) => <div key={i} className="ph-problem"><span className="ph-problem-path">{problemPath(p)}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span><span>{problemText(p)}</span></div>)}
             </div>
           )}
           <div className="ph-review-lines" aria-label="Changes">
