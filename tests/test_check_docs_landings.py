@@ -55,6 +55,7 @@ _BOTH = "- [Install](/start/install): a\n- [First](/start/first): b\n"
             None,
         ),
         (f"## In this section\n\n{_BOTH}", ("3.run/1.ops.md",), "/start/run/ops is in this"),
+        (f"## In this section\n\n{_BOTH}", ("3.unreleased.md",), None),
         (
             f"## In this section\n\n{_BOTH}- [Run](/start/run/): c, see [Ops](/start/run/ops)\n",
             ("3.run/index.md", "3.run/1.ops.md"),
@@ -84,6 +85,7 @@ _BOTH = "- [Install](/start/install): a\n- [First](/start/first): b\n"
         "out-of-order",
         "group-without-a-landing-lists-its-pages",
         "group-without-a-landing-left-out",
+        "generated-page-not-listed",
         "group-with-a-landing-and-a-page-inside-it",
         "a-page-linked-twice",
         "prefixes-of-two-widths",

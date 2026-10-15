@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +34,15 @@ const redirects = (existsSync(redirectsFile) ? readFileSync(redirectsFile, 'utf8
   })
 const movedPages = redirects.filter(([from]) => !from.includes('#'))
 const movedSections = redirects.filter(([from]) => from.includes('#'))
+
+// What is new on main since the latest release: dev/gen_docs_unreleased.py
+// writes the Unreleased page from the "Added in next" notes and names the pages
+// that carry one. Only main's docs and a local build have such notes (a release
+// stamps them into numbers), so a released site gets no page, no banner link
+// and no marks. A tag's build never runs it: its content has no notes left.
+const unreleased: { page: string | null, routes: Record<string, 'new' | 'updated'> } = version === 'next' || version === ''
+  ? JSON.parse(execFileSync('python3', [fileURLToPath(new URL('../dev/gen_docs_unreleased.py', import.meta.url)), fileURLToPath(new URL('./content', import.meta.url))], { encoding: 'utf8' }))
+  : { page: null, routes: {} }
 const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
 
 // What a moved page's old address serves. The prerenderer writes a redirect
@@ -200,6 +210,7 @@ export default defineNuxtConfig({
       docs: {
         version,
         versions,
+        unreleased,
       },
       // Every moved address, old to new. app/plugins/moved.ts forwards them:
       // not a `routeRules` redirect, which Nuxt follows in the browser before

@@ -44,12 +44,20 @@ def route(rel: Path) -> str:
     return "/" + "/".join(parts)
 
 
+#: Written by dev/gen_docs_unreleased.py for main's build, gitignored, and
+#: reached from the version banner; no landing page lists it.
+GENERATED = {"3.unreleased.md"}
+
+
 def children(folder: Path) -> list[Path]:
     """A folder's pages and sub-folders, in the sidebar's order."""
     found = [
         p
         for p in folder.iterdir()
-        if not p.name.startswith(".") and p.name != "index.md" and (p.is_dir() or p.suffix == ".md")
+        if not p.name.startswith(".")
+        and p.name != "index.md"
+        and p.name not in GENERATED
+        and (p.is_dir() or p.suffix == ".md")
     ]
     # By stem, as the sidebar does: `1.a.md` comes before `1.a-b.md`.
     return sorted(found, key=lambda p: p.stem if p.is_file() else p.name)
