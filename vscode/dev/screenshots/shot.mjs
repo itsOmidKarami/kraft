@@ -195,6 +195,10 @@ async function drive(app) {
   };
   // Clips are in CSS pixels; the PNG keeps the display's density unless that makes it over 1600 wide.
   const shot = async (name, clip) => {
+    // VS Code as root (a container) ends the window title in " [Superuser]", whatever `window.title` says.
+    await page.evaluate(() => {
+      for (const n of document.querySelectorAll(".window-title")) n.textContent = n.textContent.replace(/ \[Superuser\]$/, "");
+    });
     let img = sharp(await page.screenshot({ clip }));
     const { width } = await img.metadata();
     if (width > 1600) img = sharp(await img.resize({ width: Math.round(width / 2) }).toBuffer());
@@ -227,7 +231,7 @@ async function drive(app) {
   await page.mouse.up();
   await page.mouse.move(0, 0);
   await pause(1000);
-  await shot("screenshot-board", { x: 48, y: 32, width: 456, height: 168 });
+  await shot("screenshot-board", { x: 48, y: 32, width: 456, height: 192 });
   // Back to its width: the gate and the review shots want the room.
   await page.mouse.move(side.x + side.width + 220, side.y + 300);
   await page.mouse.down();

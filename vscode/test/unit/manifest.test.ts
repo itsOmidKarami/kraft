@@ -39,8 +39,8 @@ it.each([
   expect(pkg.contributes.menus[menu]).toContainEqual(expect.objectContaining({ command, when })));
 
 it.each([
-  ["kraft.toggleAllRepos", "Show All Repos", "$(filter)"],
-  ["kraft.showThisRepo", "Show This Repo", "$(filter-filled)"],
+  ["kraft.toggleAllRepos", "Show All Repos", "$(filter-filled)"],
+  ["kraft.showThisRepo", "Show This Repo", "$(filter)"],
 ])("%s is %s with icon %s", (command, title, icon) =>
   expect(pkg.contributes.commands).toContainEqual({ command, title, category: "Kraft", icon }));
 

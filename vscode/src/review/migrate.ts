@@ -10,7 +10,7 @@ const ENDED = new Set(["done", "cancelled", "archived"]);
  * time. extension.ts runs it on each connect, once that connection's read-only
  * state is known, and when trust is granted.
  */
-export function registerMigration(context: vscode.ExtensionContext, api: Api, refusal: () => string | null, cache: ThreadCache) {
+export function registerMigration(context: vscode.ExtensionContext, api: Api, refusal: () => string | null, cache: ThreadCache, name: (id: string) => string = (id) => id) {
   const deps: MigrateDeps = {
     reviewable: async (id) => {
       try {
@@ -46,11 +46,11 @@ export function registerMigration(context: vscode.ExtensionContext, api: Api, re
           void cache.load(r.id).catch(() => {});
           const s = r.posted === 1 ? "" : "s";
           void vscode.window
-            .showInformationMessage(`Kraft moved ${r.posted} local review comment${s} on ${r.id} to its review, as drafts.`, "Review Changes")
+            .showInformationMessage(`Kraft moved ${r.posted} local review comment${s} on ${name(r.id)} to its review, as drafts.`, "Review Changes")
             .then((pick) => pick && vscode.commands.executeCommand("kraft.reviewChanges", r.id));
         }
         if (r.dropped) {
-          const text = dropMessage(r.id, r.dropped, r.why);
+          const text = dropMessage(name(r.id), r.dropped, r.why);
           void vscode.window.showWarningMessage(text, "Copy").then((pick) => pick && vscode.env.clipboard.writeText(text.split("\n").slice(1).join("\n")));
         }
       }

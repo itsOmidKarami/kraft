@@ -23,6 +23,10 @@ describe("bulkSummary", () => {
     ["refusals before skips", [{ id: "b", ok: false, error: "no" }], [{ id: "c", why: "can't pause now" }], "Not paused: b (no), c (can't pause now)."],
   ])("%s", (_, results, skipped, want) => expect(bulkSummary("pause", results, skipped)).toBe(want));
 
+  it("names the items it did not do by what the caller calls them", () =>
+    expect(bulkSummary("pause", [{ id: "b", ok: false, error: "no" }], [{ id: "c", why: "can't pause now" }], (id) => `Item ${id.toUpperCase()}`))
+      .toBe("Not paused: Item B (no), Item C (can't pause now)."));
+
   it.each([
     ["resume", "Resumed 1."],
     ["archive", "Archived 1."],

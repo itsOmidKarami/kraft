@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { reportError, runAction, runBulk } from "./actions";
 import { ApiError, type Api, type ItemAction, type WorkItem } from "./core/api";
-import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, nameOf, needsYouCount, nextTick, onBoard, tooltipOf, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
+import { archivedChildren, contextValueOf, hoverFromCache, colorOf, describe, groupHolding, groupItems, groupLabel, iconOf, itemLabel, nameOf, needsYouCount, nextTick, onBoard, tooltipOf, boardDescription, welcomeState, withArchived, worktreeTarget, type Include, type Welcome } from "./core/board";
 import { selectedItems, type BulkVerb, type SelectionRow } from "./core/bulk";
 import { findingsOf } from "./core/findings";
 import { downRow } from "./core/health";
@@ -207,6 +207,11 @@ export class Board implements vscode.TreeDataProvider<Node> {
     return t;
   }
 
+  /** How many items the board shows. */
+  rows(): number {
+    return groupItems(this.store.items(), this.include).reduce((n, g) => n + g.items.length, 0);
+  }
+
   badge(): vscode.ViewBadge | undefined {
     const n = needsYouCount(this.store.items(), this.include);
     return n ? { value: n, tooltip: `${n} waiting on you` } : undefined;
@@ -233,8 +238,18 @@ export function registerBoard(
     if (e.element.kind === "archived") void board.loadArchived();
   }));
   const updateBadge = () => (view.badge = board.badge());
+  // The description says which repos; a stale board also says so above its rows, where a single-view sidebar shows no description.
+  const updateDescription = () => {
+    const text = boardDescription(store.connected, scope.showAll, board.rows());
+    view.description = text;
+    view.message = store.connected ? undefined : text;
+  };
+  updateDescription();
   store.onChange(updateBadge);
+  store.onChange(updateDescription);
+  store.onConnection(updateDescription);
   scope.onChange(updateBadge);
+  scope.onChange(updateDescription);
 
   const itemOf = (node: { item?: WorkItem } | undefined) => node?.item;
   // From the palette there is no row: ask for one among the window's items,

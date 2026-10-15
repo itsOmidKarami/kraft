@@ -34,6 +34,18 @@ export function toastActions(item: Pick<WorkItem, "stop" | "actions">, readOnly:
 /** A stop that is a fault (failed, capped, over budget) toasts as a warning; the rest ask. */
 export const toastLevel = (item: Pick<WorkItem, "display_status" | "stop">): "warning" | "information" => (isFault(item) ? "warning" : "information");
 
+/** What to show for what just became news: each announcement on its own, or,
+ *  with two or more at once (a startup, reconnect or rescope finding a queue),
+ *  one summary that offers Next Gate when a gate is among them. */
+export function toastPlan(found: [WorkItem, Announcement][]): { each: [WorkItem, Announcement][] } | { summary: string; level: "warning" | "information"; nextGate: boolean } {
+  if (found.length < 2) return { each: found };
+  return {
+    summary: `${found.length} items need you`,
+    level: found.some(([i]) => toastLevel(i) === "warning") ? "warning" : "information",
+    nextGate: found.some(([, a]) => a.kind === "gate"),
+  };
+}
+
 export class Announcer {
   announced = new Set<string>();
   private current = new Map<string, string>();

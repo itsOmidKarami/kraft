@@ -1,6 +1,6 @@
-import { beforeEach, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ApiError } from "../../src/core/api";
-import { approvedMessage, approveGate, approveOrRead, gateConsequence, isStaleRevision } from "../../src/core/approve";
+import { approvedMessage, approveGate, approveOrRead, confirmConsequence, gateConsequence, isStaleRevision } from "../../src/core/approve";
 import { ShownRenders } from "../../src/core/shown";
 
 const withDigest = { title: "t", content: "c", truncated: false, path: "p", digest: "d2" };
@@ -128,3 +128,18 @@ it.each<[string, ReturnType<typeof node>[], string, "merge" | "push" | null]>([
   ["no such gate", [node("merge", "exec")], "nope", null],
 ])("gateConsequence: %s", (_, nodes, gate, want) =>
   expect(gateConsequence({ chain_definition: { template_id: "t", nodes } } as never, gate)).toBe(want));
+
+describe("confirmConsequence", () => {
+  const chain = (task: string) => ({ title: "Cache layer", chain_definition: { template_id: "t", nodes: [node("g", "gate"), node("x", "exec", [task])] } }) as never;
+  it.each<[string, unknown, string, boolean | undefined, boolean, string[]]>([
+    ["a merging gate asks with its own button", chain("merge"), "g", true, true, ["Approve and merge Cache layer into the target branch?|Approve and Merge"]],
+    ["a pushing gate asks with its own button", chain("push"), "g", true, true, ["Approve and push Cache layer?|Approve and Push"]],
+    ["declined", chain("merge"), "g", false, false, ["Approve and merge Cache layer into the target branch?|Approve and Merge"]],
+    ["an ordinary gate: no question", chain("lint"), "g", undefined, true, []],
+    ["an item not on the board: no question", undefined, "g", undefined, true, []],
+  ])("%s", async (_, item, gate, answer, want, asked) => {
+    const seen: string[] = [];
+    expect(await confirmConsequence(item as never, gate, async (q, b) => (seen.push(`${q}|${b}`), answer ?? false))).toBe(want);
+    expect(seen).toEqual(asked);
+  });
+});

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ApiError, type Api, type BulkResult, type ItemAction, type WorkItem } from "./core/api";
-import { steerPrompt } from "./core/board";
+import { nameOf, steerPrompt } from "./core/board";
 import { parseUsd } from "./core/budget";
 import { bulkPlan, bulkSummary, type BulkVerb } from "./core/bulk";
 import type { Store } from "./core/store";
@@ -122,8 +122,8 @@ export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: Wor
   } finally {
     await Promise.all(ids.map((id) => store.refresh(id).catch(() => {})));
   }
-  const line = bulkSummary(verb, results, skipped);
-  log.info(line);
+  const line = bulkSummary(verb, results, skipped, (id) => nameOf(store, id));
+  log.info(bulkSummary(verb, results, skipped));
   if (skipped.length || results.some((r) => !r.ok)) void vscode.window.showWarningMessage(line);
   else void vscode.window.showInformationMessage(line);
 }

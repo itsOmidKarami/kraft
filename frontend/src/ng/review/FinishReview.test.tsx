@@ -20,7 +20,7 @@ describe("outcomes", () => {
     expect(text(outcomes(item(), "final_review", [th()], FIX))).toEqual([
       ["request_changes", "Sends these threads back to implementation, the node this item runs a fix round on. Chain resumes from there: verification → work_brief → … → final_review. Fix round 2 of 3.", false],
       ["comment", "Agents answer questions in-thread. No code runs; the gate stays open.", false],
-      ["approve", "Marks final_review approved, same as Approve on the gate.", false],
+      ["approve", "Marks final review approved, same as Approve on the gate.", false],
     ]);
   });
 

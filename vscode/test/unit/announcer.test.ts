@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus } from "../../../frontend/src/types";
-import { Announcer, toastActions, toastLevel } from "../../src/core/announcer";
+import { Announcer, toastActions, toastLevel, toastPlan } from "../../src/core/announcer";
 import { announceable } from "../../src/core/board";
 import { WorkspaceScope, type ScopeDeps } from "../../src/core/repoScope";
 import { item, stopped } from "./fixtures/item";
@@ -124,3 +124,15 @@ it.each([
   ["a question", question, "information"],
   ["a gate", gate("spec"), "information"],
 ])("toastLevel: %s", (_, it_, want) => expect(toastLevel(it_)).toBe(want));
+
+describe("toastPlan", () => {
+  const g = (id: string) => [item({ id }), { kind: "gate", id, gate: "g", text: "approve g" }] as const;
+  const fail = [item({ id: "F", display_status: "failed", stop: { kind: "failed", node: "n", reason: "x", resume_at: null } }), { kind: "needs", id: "F", text: "failed at n" }] as const;
+  it.each([
+    ["none: nothing", [], { each: [] }],
+    ["one: as it is", [g("a")], { each: [g("a")] }],
+    ["two gates: one summary, Next Gate offered", [g("a"), g("b")], { summary: "2 items need you", level: "information", nextGate: true }],
+    ["a fault among them: a warning", [g("a"), fail], { summary: "2 items need you", level: "warning", nextGate: true }],
+    ["stops only: no Next Gate", [fail, fail], { summary: "2 items need you", level: "warning", nextGate: false }],
+  ])("%s", (_, found, want) => expect(toastPlan(found.map((f) => [...f]) as never)).toEqual(want));
+});

@@ -176,16 +176,16 @@ export function previewLine(chainLabel: string, dry: DryRun): string {
 /** What the create answered, said once (the web Composer's `sayIfFiledPaused`).
  *  VS Code sends no `depends_on`, so an autostart is never blocked, and a lost
  *  slot race answers `queued`, never `paused`. */
-export function outcomeMessage(autostart: boolean, c: Created): string {
-  if (!autostart) return `Filed ${c.id} paused. Nothing spends tokens until you start it.`;
-  if (c.status === "active") return `Filed ${c.id} and started it.`;
+export function outcomeMessage(autostart: boolean, c: Created, title: string): string {
+  if (!autostart) return `Filed ${title} paused. Nothing spends tokens until you start it.`;
+  if (c.status === "active") return `Filed ${title} and started it.`;
   if (c.status === "queued") {
     const held = c.slots?.storage;
-    if (held) return `Filed ${c.id}, queued: ${countedAgainst(held.used_bytes, held.limit_bytes)}. It starts when space frees.`;
+    if (held) return `Filed ${title}, queued: ${countedAgainst(held.used_bytes, held.limit_bytes)}. It starts when space frees.`;
     const busy = c.slots ? `${c.slots.busy} of ${c.slots.limit} slots are` : "every slot is";
-    return `Filed ${c.id}, queued: ${busy} busy. It starts when one frees.`;
+    return `Filed ${title}, queued: ${busy} busy. It starts when one frees.`;
   }
-  return `Filed ${c.id}: it is ${c.status}.`;
+  return `Filed ${title}: it is ${c.status}.`;
 }
 
 /** The warnings a create came back with, in the server's order of importance. */

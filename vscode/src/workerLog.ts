@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { reportError } from "./actions";
+import { nameOf } from "./core/board";
 import type { Api, WorkItem } from "./core/api";
 import { followLog, formatLogLine, logSession } from "./core/logStream";
 import type { Store } from "./core/store";
@@ -22,7 +23,7 @@ export function registerWorkerLog(context: vscode.ExtensionContext, store: Store
         return reportError(e, store, id);
       }
       const session = logSession(store.detail(id));
-      if (!session) return void vscode.window.showInformationMessage(`No worker session has run for ${id} yet.`);
+      if (!session) return void vscode.window.showInformationMessage(`No worker session has run for ${nameOf(store, id)} yet.`);
 
       const earlier = open.get(id);
       earlier?.abort.abort();

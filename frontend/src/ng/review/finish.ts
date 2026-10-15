@@ -1,6 +1,6 @@
 /** What Finish your review and the bottom bar say and allow, from data only (W8 G). Pure. */
 import type { FixTarget, ReviewComment, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
-import { nodeWords } from "../board/rowText";
+import { gateWords, nodeWords } from "../board/rowText";
 import { spentLine } from "../item/status";
 
 /** The server's `open_must_fix`: a must-fix thread not resolved, drafts included. */
@@ -75,7 +75,7 @@ export function outcomes(item: Pick<WorkItem, "pending_gate" | "display_status">
   return [
     { key: "request_changes", label: REQUEST_CHANGES, parts: request, disabled: ended || noRounds || !fix },
     { key: "comment", label: "Comment only", parts: [{ t: atGate ? "Agents answer questions in-thread. No code runs; the gate stays open." : "Agents answer questions in-thread. No code runs and the item keeps going." }], disabled: false },
-    { key: "approve", label: "Approve", parts: [{ t: block ?? `Marks ${gate} approved, same as Approve on the gate.` }], disabled: !!block },
+    { key: "approve", label: "Approve", parts: [{ t: block ?? `Marks ${gate ? gateWords(gate) : "the gate"} approved, same as Approve on the gate.` }], disabled: !!block },
   ];
 }
 

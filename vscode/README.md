@@ -61,7 +61,9 @@ When a gate opens, a notification offers **Open** and **Reject…**; read-only, 
 offers Open only. Open shows the gate's document as a rendered Markdown
 preview, with Approve and Reject in its tab's title bar: you approve a document
 once you have read it. Approving says what was approved ("Approved: title ·
-approve spec"), and asks first when the gate merges or pushes. A reject asks for
+approve spec"), and asks first when the gate merges or pushes, from Approve
+or from Submit Review. Several notifications at once become one ("3 items need
+you") with a Next Gate button. A reject asks for
 a reason, which goes to the agent.
 
 **Kraft: Next Gate** in the Command Palette opens the gate document of the item

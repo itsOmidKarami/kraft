@@ -177,7 +177,7 @@ async function fileWork(deps: FileWorkDeps, seed: Seed): Promise<void> {
   await store.refresh(c.id).catch(() => {});
   // Not on this window's board (another repo, or the list read failed): show it in the web UI instead.
   if (!(await deps.reveal(c.id))) void vscode.commands.executeCommand("kraft.openInWebUi", { item: { id: c.id } });
-  void vscode.window.showInformationMessage(outcomeMessage(how.start, c));
+  void vscode.window.showInformationMessage(outcomeMessage(how.start, c, draft.title));
   const warnings = warningsOf(c);
   if (warnings.length) void offerWarnings(deps, c.id, warnings, warningActions(c));
 }

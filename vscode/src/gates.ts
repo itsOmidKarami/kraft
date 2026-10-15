@@ -3,9 +3,9 @@ import { gateWords } from "../../frontend/src/ng/board/rowText";
 import { drafts } from "../../frontend/src/ng/review/finish";
 import { reportError } from "./actions";
 import type { Api, WorkItem } from "./core/api";
-import { Announcer, toastActions, toastLevel, type Announcement } from "./core/announcer";
+import { Announcer, toastActions, toastLevel, toastPlan, type Announcement } from "./core/announcer";
 import { announceable, nameOf, onBoard, type Include } from "./core/board";
-import { approvedMessage, approveOrRead, consequenceQuestion, gateConsequence, isStaleRevision } from "./core/approve";
+import { approvedMessage, approveOrRead, confirmConsequence, gateConsequence, isStaleRevision } from "./core/approve";
 import { approveFlow } from "./core/mustFix";
 import { showRefusal } from "./review/refusal";
 import type { Artifact } from "./core/api";
@@ -50,6 +50,10 @@ export function registerGates(
   const idOf = (arg: unknown) => direct(arg) ?? preview.target(arg)?.id;
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const warn = (msg: string) => void vscode.window.showWarningMessage(msg);
+
+  /** The merge/push question, for this route and Submit Review's; true when nothing needs asking or it was answered yes. */
+  const confirmApprove = (id: string, gate: string) =>
+    confirmConsequence(store.item(id), gate, async (question, button) => (await vscode.window.showWarningMessage(question, { modal: true }, button)) === button);
 
   // Resolves once the preview is up; only then is the render remembered as read.
   const show = async (id: string, gate: string | undefined, a: Artifact) => {
@@ -105,10 +109,7 @@ export function registerGates(
       const n = drafts(await cache.load(id)).length;
       const item = store.item(id);
       const what = item && gateConsequence(item, g);
-      if (!n && what) {
-        const ok = await vscode.window.showWarningMessage(consequenceQuestion(item.title, what), { modal: true }, "Approve");
-        if (ok !== "Approve") return false;
-      }
+      if (!n && !(await confirmApprove(id, g))) return false;
       if (!n) return api.approve(id, g, digest).then(() => true);
       const ok = await vscode.window.showWarningMessage(
         `Approve ${gateWords(g)} on ${item?.title ?? id} and send ${n} draft comment${n === 1 ? "" : "s"} with it?${what ? ` This also ${what === "merge" ? "merges it into the target branch" : "pushes it"}.` : ""} No agent acts on comments sent with an approval.`,
@@ -163,8 +164,16 @@ export function registerGates(
 
   const scoped = (ids: string[] | "all") =>
     announceable(ids === "all" ? store.items() : ids.map((id) => store.item(id)).filter((i) => i !== undefined), include);
-  const toast = (found: [WorkItem, Announcement][]) => {
-    for (const [item, a] of found) {
+  const toast = (all: [WorkItem, Announcement][]) => {
+    const plan = toastPlan(all);
+    if ("summary" in plan) {
+      const buttons = plan.nextGate ? ["Next Gate"] : [];
+      void (plan.level === "warning" ? vscode.window.showWarningMessage(plan.summary, ...buttons) : vscode.window.showInformationMessage(plan.summary, ...buttons)).then((pick) => {
+        if (pick === "Next Gate") void vscode.commands.executeCommand("kraft.approveNextGate");
+      });
+      return;
+    }
+    for (const [item, a] of plan.each) {
       if (a.kind === "gate") {
         const buttons = refusal() === null ? ["Open", "Reject…"] : ["Open"];
         void vscode.window.showInformationMessage(`${item.title}: ${a.text}`, ...buttons).then((pick) => {
@@ -173,7 +182,7 @@ export function registerGates(
         });
       } else {
         const buttons = toastActions(item, refusal() !== null);
-        const text = `${item.title} — ${a.text}`;
+        const text = `${item.title}: ${a.text}`;
         const labels = buttons.map((b) => b.label);
         void (toastLevel(item) === "warning" ? vscode.window.showWarningMessage(text, ...labels) : vscode.window.showInformationMessage(text, ...labels)).then((pick) => {
           const run = buttons.find((b) => b.label === pick);
@@ -202,5 +211,5 @@ export function registerGates(
       return reject(c.id, c.gate, c.note, c.stale);
     }),
   );
-  return { announcer, shown, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
+  return { announcer, shown, confirmApprove, show: (id: string, gate: string, a: Artifact) => show(id, gate, a), openArtifact };
 }
