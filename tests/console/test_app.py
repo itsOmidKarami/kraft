@@ -19,7 +19,7 @@ from kraft.console import app as console_app
 from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.live import Link
-from kraft.console.screens import VIEWS
+from kraft.console.screens import VIEWS, View
 
 OTHER_INSTANCE = client.ClientError(
     "kraft: the server at x is a different instance", kind=client.Failure.OTHER_INSTANCE
@@ -406,3 +406,37 @@ def test_a_link_change_under_the_palette_still_marks_the_frame(console):
         return app.query_one("#down").display, app.query_one(ContentSwitcher).display
 
     assert console.run(scenario) == (True, False)
+
+
+#: Each dialog the console pushes over its frame, opened.
+DIALOGS = {"output": lambda app: app.action_output()}
+
+
+@pytest.mark.parametrize("dialog", list(DIALOGS))
+def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialog):
+    """A dialog is a pushed screen. The board, health and the no-server state
+    belong to the frame underneath it, and reach it all the same."""
+    seen = set()
+    monkeypatch.setattr(
+        View, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
+    )
+    monkeypatch.setattr(View, "health_changed", lambda self, health: seen.add(("health", self.id)))
+
+    async def scenario(app, pilot):
+        DIALOGS[dialog](app)
+        await pilot.pause()
+        seen.clear()
+        app._live_event([{"id": "a1", "display_status": "needs_you"}], [])
+        app._live_health({"status": "degraded"})
+        app._live_link(Link.DOWN, None)
+        on_top = app.screen is not app.default_screen
+        await pilot.press("escape")
+        await pilot.pause()
+        return on_top, _text(app, "#tabs"), app.query_one("#down").display
+
+    on_top, tabs, down = console.run(scenario)
+    assert on_top
+    assert seen == {(hook, name) for hook in ("rows", "health") for name in VIEWS}
+    assert "Board 1" in tabs
+    assert "Server degraded" in tabs
+    assert down

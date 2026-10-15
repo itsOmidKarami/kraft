@@ -71,3 +71,36 @@ Screen.-tiny #narrow-keys {
 Screen.-tiny #tiny {
     display: block;
 }
+
+/* The output panel: above the prompt and footer, which stay in sight. */
+OutputPanel {
+    align: center bottom;
+}
+
+#output {
+    height: 70%;
+    margin-bottom: 2;
+    background: $surface;
+    border-top: solid $kraft-line;
+}
+
+#output-log {
+    height: 1fr;
+    background: $surface;
+}
+
+#output-bar {
+    height: 1;
+}
+
+#output-bar Button {
+    height: 1;
+    min-width: 8;
+    border: none;
+}
+
+#output-keys {
+    width: 1fr;
+    padding: 0 2;
+    color: $kraft-muted;
+}

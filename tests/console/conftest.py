@@ -9,6 +9,7 @@ import sys
 
 import pytest
 from support.api import run_with_app
+from textual.widgets import RichLog
 
 from kraft import client
 from kraft.console import live, runner
@@ -61,6 +62,11 @@ class Console:
                     await pilot.pause()
 
         return run_with_app(self.wired, inside)
+
+    @staticmethod
+    def output(app) -> list[str]:
+        """The output panel's lines, as drawn; none before it first opens."""
+        return [line.text for log in app.get_screen("output").query(RichLog) for line in log.lines]
 
     @staticmethod
     async def until(pilot, condition, timeout: float = 5.0) -> None:
