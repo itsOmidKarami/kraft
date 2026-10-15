@@ -65,6 +65,14 @@ describe("Workspace with a draft", () => {
     expect(screen.queryByRole("button", { name: "Add a library node here" })).toBeNull();
   });
 
+  it.each<[string, Partial<ItemDetail>, boolean]>([["a running item", {}, true], ["an ended item", { display_status: "done" }, false]])("the chain's Config tab says where to add a node, on %s: %s", async (_n, over, hint) => {
+    mount("/work-items/w1", draft([]), over);
+    await screen.findByRole("button", { name: /^merge_request, node/ });
+    await userEvent.click(screen.getByRole("tab", { name: "Config" }));
+    expect(await screen.findByText("Limits in use")).toBeInTheDocument();
+    expect(!!screen.queryByTestId("add-node-hint")).toBe(hint);
+  });
+
   it("opens the library's nodes from a seam", async () => {
     mount("/work-items/w1", draft([]), {}, { "GET /templates/library": [200, { components: [{ kind: "nodes", name: "security", definition: { steps: [{ id: "scan", tasks: [{ id: "sast" }] }] } }] }] });
     await userEvent.click((await screen.findAllByRole("button", { name: "Add a library node here" }))[0]);

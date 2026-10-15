@@ -18,8 +18,11 @@ export type FooterAct = "pause" | "resume" | "skip" | "retry";
  *  waiting one nothing (R10b-01). An ended item runs nothing again (R8b-06).
  *  Each also only where the server's `actions` admit it (`admits`), but a task's
  *  or a step's Skip: their `skip` is the node's, and `/skip` takes a task or a
- *  step its own `skippable` allows on a node that does not. */
-export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node"): FooterAct[] {
+ *  step its own `skippable` allows on a node that does not. A failed item's card carries the Retry for the node it
+ *  stopped on, so that node's pane (`path`) leaves it out. */
+export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node", path = ""): FooterAct[] {
+  // The failed card already offers Retry for the node it stopped on: the pane of that node does not say it twice.
+  const cardRetries = item.display_status === "failed" && !!item.stop?.node && path.split(".")[0] === item.stop.node && admits(item, "retry", true);
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
   const skips = what === "node" ? skippable(item) : skipsNow(item);
   return [
@@ -27,7 +30,7 @@ export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | 
     ...(state === "paused" && admits(item, "resume", true) ? ["resume" as const] : []),
     // Skip on a live footer only while the item runs: a stopped one with a live session (a gate's auto-review) has a walk /skip refuses.
     ...(((state === "running" && pausable(item)) || state === "paused") && skips ? ["skip" as const] : []),
-    ...((state === "paused" || state === "stopped") && retryable(item) ? ["retry" as const] : []),
+    ...((state === "paused" || state === "stopped") && retryable(item) && !cardRetries ? ["retry" as const] : []),
   ];
 }
 
@@ -38,7 +41,7 @@ export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | 
  *  destructive button), and Cancel or Escape hands it back to the button that
  *  opened it (R11b-03); Escape in a steer with text in it keeps the text. */
 export function PathFooter({ item, path, what, state, reload, extra, only }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode; only?: FooterAct }) {
-  const acts = footerActs(item, state, what).filter((x) => !only || x === only);
+  const acts = footerActs(item, state, what, path).filter((x) => !only || x === only);
   const [confirm, setConfirm] = useState<"skip" | "retry" | null>(null);
   const [steer, setSteer] = useState("");
   const [busy, setBusy] = useState(false);

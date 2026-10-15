@@ -55,6 +55,12 @@ describe("PathFooter", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  // The failed card carries the Retry for the node it stopped on; another node's pane still has its own.
+  it.each([["the node the item stopped on", "verification.r.code_review", false], ["another node", "implementation.w.code", true]])("a failed item's pane for %s (%s) shows Retry: %s", (_n, path, shown) => {
+    render(<PathFooter item={detail({ display_status: "failed", stop: { kind: "failed", node: "verification", resume_at: null, reason: "x" } })} path={path} what="task" state="stopped" reload={() => {}} />);
+    expect(!!screen.queryByRole("button", { name: "Retry" })).toBe(shown);
+  });
+
   it("confirms Skip in the pane before sending it, by path", async () => {
     const calls = stubFetch(WRITES);
     const reload = vi.fn();

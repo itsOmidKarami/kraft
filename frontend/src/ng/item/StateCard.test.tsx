@@ -209,11 +209,11 @@ describe("StateCard", () => {
     });
   });
 
-  it("Retry says what it restarts, on which branch, and what the item has cost", () => {
+  it("Retry says what it restarts and that the branch is kept", () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("failed", { facts: { error: "403" } }), branch: "kraft/design-the-cache-w1", budget_cap: { cap_usd: 10, source: "item", spent_usd: 0.04 } });
     const card = screen.getByRole("region", { name: "Failed" });
-    expect(card).toHaveTextContent("Restarts open_draft on the kept branch kraft/design-the-cache-w1 · $0.040 of $10.00 spent");
+    expect(card).toHaveTextContent(/Restarts open_draft on the kept branch$/);
     expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveAccessibleDescription(/^Restarts open_draft/);
   });
 

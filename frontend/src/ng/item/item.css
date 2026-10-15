@@ -77,7 +77,7 @@
 .item-del { color: var(--bad); font-family: ui-monospace, Menlo, monospace; }
 
 /* Banner (Decisions §4) and the cards under the brief (§14). */
-.item-banner { flex: none; display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid color-mix(in oklab, var(--warn) 45%, transparent); border-radius: 8px; background: color-mix(in oklab, var(--warn) 8%, var(--bg)); font-size: var(--fs-meta); color: var(--text); }
+.item-banner { flex: none; display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid var(--warn-edge); border-radius: 8px; background: var(--warn-wash); font-size: var(--fs-meta); color: var(--text); }
 .item-banner-glyph { color: var(--warn); }
 .item-banner-text { flex: 1 1 auto; min-width: 0; }
 .item-banner-note { display: block; margin-top: 2px; font-size: var(--fs-label); color: var(--text-sub); }

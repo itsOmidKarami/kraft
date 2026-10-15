@@ -123,8 +123,8 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : undefined,
       facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
-      // What Retry does, in the card's words: the task it restarts, the branch it keeps and what it has cost so far.
-      note: retries ? `Restarts ${retry.target}${item.branch ? ` on the kept branch ${item.branch}` : ""}${item.budget_cap ? ` · ${spentLine(item)} spent` : ""}` : undefined,
+      // What Retry does, in the card's words: the task it restarts. The branch and the spend are already facts above.
+      note: retries ? `Restarts ${retry.target}${item.branch ? " on the kept branch" : ""}` : undefined,
     };
   }
   if (status === "waiting" && stop?.kind === "rate_limit") {
