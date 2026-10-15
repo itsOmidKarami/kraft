@@ -20,7 +20,8 @@ describe("Repos list (M.2)", () => {
     expect(within(connected).getByRole("link", { name: /^product_root/ })).toHaveTextContent("on");
     expect(within(connected).getByRole("link", { name: /^platform/ })).toHaveTextContent("1 open");
     expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("off");
-    expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("chain docs_only");
+    expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("docs_only");
+    expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("No setup");
     expect(within(screen.getByRole("region", { name: "Detected" })).getByText("/src/plugins")).toBeInTheDocument();
   });
 
@@ -119,10 +120,15 @@ describe("a repo (M.2)", () => {
     expect(within(sheet).getByRole("radio", { name: /fake/ })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("enabled is a switch that patches the entry", async () => {
+  it("enabled is a switch that patches the entry and offers Undo", async () => {
     const { calls } = open("product_root");
+    const seen: CustomEvent[] = [];
+    window.addEventListener("kraft:toast", (e) => seen.push(e as CustomEvent));
     await userEvent.click(await screen.findByRole("switch", { name: /^enabled/ }));
     await waitFor(() => expect(ops(calls)[0]).toEqual({ op: "set_repo", path: "/src/product_root", patch: { enabled: false } }));
+    await waitFor(() => expect(seen.at(-1)?.detail).toMatchObject({ message: "product_root disabled in the draft.", action: { label: "Undo" } }));
+    seen.at(-1)!.detail.action.run();
+    await waitFor(() => expect(ops(calls).at(-1)).toEqual({ op: "set_repo", path: "/src/product_root", patch: { enabled: true } }));
   });
 
   it("Disconnect is refused while items run, with the desktop's words, and calls nothing", async () => {

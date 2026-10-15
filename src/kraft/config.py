@@ -909,6 +909,8 @@ def probe_repo(
     from kraft import detect as detect_mod  # `kraft.detect` imports this module
 
     p = Path(path).expanduser()
+    if not p.exists():
+        raise ConfigError(f"No folder at {p}")
     if not p.is_dir():
         raise ConfigError(f"{p} is not a directory")
     root = normalized_repo_root(p)
