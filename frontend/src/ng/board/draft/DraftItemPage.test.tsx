@@ -95,12 +95,12 @@ describe("DraftItemPage", () => {
     expect(creates(calls).at(-1)?.body).toMatchObject({ title: "Cache it", description: "By hash.", autostart: false });
   });
 
-  it("folds the stages it has not reached to pills and opens at no less than 65%, so a long chain shows whole and readable", async () => {
+  it("folds the stages it has not reached to pills and opens at the item page's readable fit", async () => {
     stub();
     mount({ draft: { title: "Cache it", brief: "", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });
     await settle();
     // jsdom has no layout, so a plain fit would floor at 30%.
-    expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.65)");
+    expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.95)");
     expect(screen.getByRole("button", { name: /^final review stage, 2 nodes/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^implementation,/ })).toBeNull();
   });

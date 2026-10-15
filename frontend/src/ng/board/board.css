@@ -207,7 +207,7 @@
 .draft-bead-drop:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-slot { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .draft-skips { color: var(--text-muted); }
-.draft-canvas { position: relative; flex: 0 1 520px; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.draft-canvas { position: relative; flex: 0 1 360px; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .draft-canvas-head { position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 10px; font-size: var(--fs-meta); color: var(--text-sub); }
 .draft-chain-btn { background: var(--bg); }
 .draft-pane-body { display: flex; flex-direction: column; gap: 14px; }
