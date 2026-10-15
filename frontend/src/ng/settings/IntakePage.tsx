@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
-import { plural } from "../../format";
 import { Inspector } from "../graph/Inspector";
 import { detailOf, request } from "../http";
 import { Button } from "../ui/Button";
@@ -14,6 +13,7 @@ import { subscribeLive } from "../live";
 import { checkText, hhmm, nextCheck } from "./intake/checks";
 import { describeCron } from "./intake/cron";
 import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule } from "./intake/types";
+import { pickup } from "./intake/pickup";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
 import "./intake/intake.css";
 
@@ -27,13 +27,6 @@ export function IntakePage() {
     return <div className="tpl-note" role="alert"><h1>Could not load auto-intake</h1><Button onClick={() => void draft.reload()}>Retry</Button></div>;
   if (!draft.view) return <div className="tpl-note" aria-busy="true">Loading auto-intake…</div>;
   return <Editor draft={draft} />;
-}
-
-/** What a pickup sentence says (AreaIntake's `pickupSentence`). */
-export function pickup(i: IntakeResolved): string {
-  return i.enabled
-    ? `Every ${plural(toMinutes(i.interval_s), "minute")}, starts ready beads at P${i.priority_ceiling} and below from ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}. Each runs to its first gate and waits for you there.`
-    : "Nothing is picked up automatically. Ready beads stay in the queue until someone files them.";
 }
 
 function Editor({ draft }: { draft: ConfigDraft }) {
