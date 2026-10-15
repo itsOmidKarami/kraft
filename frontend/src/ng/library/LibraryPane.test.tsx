@@ -20,10 +20,10 @@ const tab = (name: string) => userEvent.click(screen.getByRole("tab", { name }))
 describe("Library pane: Overview", () => {
   it("names who uses a component: the chain as a link to its node, an override, a use through a library node", async () => {
     await pane("tasks.implementer");
-    const a = await screen.findByRole("link", { name: "default" });
+    const a = await within(document.getElementById("library-pane-panel")!).findByRole("link", { name: "default" });
     expect(a).toHaveAttribute("href", "/templates/chains/default/nodes/implementation");
     expect(a.parentElement).toHaveTextContent("implementation.main.implementoverrides");
-    expect(screen.getByRole("link", { name: "quick-task" }).parentElement).toHaveTextContent("via build");
+    expect(within(document.getElementById("library-pane-panel")!).getByRole("link", { name: "quick-task" }).parentElement).toHaveTextContent("via build");
   });
 
   it("says so when no chain uses it", async () => {
@@ -88,11 +88,11 @@ describe("Library pane: Config and YAML", () => {
     expect(within(screen.getByRole("tab", { name: "Config" }).closest("aside") ?? document.body).queryByLabelText("overridden here")).toBeNull();
   });
 
-  it("says a task whose fields are all on the Overview has nothing for Config", async () => {
+  it("offers no Config tab for a task whose fields are all on the Overview", async () => {
     await pane("tasks.implementer");
-    await tab("Config");
-    expect(screen.getByText("Everything this component writes is edited on the Overview tab.")).toBeInTheDocument();
-    expect(document.querySelector(".cfg-k")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "YAML" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Config" })).toBeNull();
   });
 
   it("reads the component's own YAML from the library draft", async () => {

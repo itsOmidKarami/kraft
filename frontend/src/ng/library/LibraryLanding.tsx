@@ -23,7 +23,7 @@ export function LibraryLanding({ rows, loaded }: { rows: Row[]; loaded: boolean 
         {SECTIONS.map((s) => {
           const inSection = rows.filter((x) => x.section === s);
           const body = <><b>{inSection.length}</b>{SECTION_LABEL[s].toLowerCase()}</>;
-          return <li key={s}>{inSection.length ? <Link to={refUrl(inSection[0].id)}>{body}</Link> : <span>{body}</span>}</li>;
+          return <li key={s}>{inSection.length ? <Link to={`/templates/library?section=${s}`}>{body}</Link> : <span>{body}</span>}</li>;
         })}
       </ul>
       <Block title="Problems"><Links rows={rows.filter((x) => x.problem)} none="None." /></Block>

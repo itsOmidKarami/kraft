@@ -57,6 +57,8 @@ describe("backLabel", () => {
     expect(backLabel("/work-items/a?attached=spec")).toBe("Back");
     expect(backLabel("/templates/chains")).toBe("More");
     expect(backLabel("/templates/chains/default")).toBe("Chains");
+    // A node of a chain names the chain it came from.
+    expect(backLabel("/templates/chains/default/nodes/verification")).toBe("default");
   });
 });
 

@@ -65,6 +65,8 @@ export function backLabel(href: string): string {
   if (q.has("doc") || q.has("attached") || q.has("yaml") || q.has("compose")) return "Back";
   if (parent === "/") return "Board";
   if (parent === "/more") return "More";
+  // A chain's node comes back to the chain it names, not to a word for it.
+  if (pathname.startsWith("/templates/chains/") && pathname.includes("/nodes/") && !q.has("sel")) return decodeURIComponent(pathname.split("/")[3]);
   if (pathname.includes("/nodes/")) return q.has("sel") ? (q.get("scope") ? "Task" : "Node") : "Chain";
   if (pathname.endsWith("/review")) return "Back";
   if (parent && AREA.test(parent) && parent !== pathname) return parent.split("/").filter(Boolean).at(-1)!.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());

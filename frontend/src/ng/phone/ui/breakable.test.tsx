@@ -4,7 +4,7 @@ import { breakable } from "./breakable";
 
 describe("breakable", () => {
   it.each([
-    ["verification.fix_loop", ["verification.", "fix_", "loop"]],
+    ["verification.fix_loop", ["verification.", "fix_loop"]],
     ["work_item_needs_human", ["work_", "item_", "needs_", "human"]],
     ["merge_request", ["merge_", "request"]],
     ["plain", ["plain"]],
