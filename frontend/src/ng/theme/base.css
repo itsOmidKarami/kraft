@@ -8,6 +8,8 @@
   /* The item graph's labels and captions, sized for its zoom floors (graph/camera.ts). */
   /* A draft or changed value: a neutral ink and line, never the amber that means a human is needed. */
   --mark-change: var(--text-sub); --mark-change-line: var(--stroke);
+  /* The one column every settings page (Appearance to Auto-intake) sits in. */
+  --set-page-w: 820px;
   --fs-graph-label: 11.5px; --fs-graph-caption: 11px;
 }
 body { margin: 0; font: 14px/1.5 var(--font-sans); background: var(--bg); color: var(--text); }

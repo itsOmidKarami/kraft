@@ -16,6 +16,7 @@ import { PreviewPane } from "./policy/PreviewPane";
 import { SECTIONS, sectionOfKey, sectionOfProblem, type Section } from "./policy/sections";
 import { limitLabel } from "./policy/keys";
 import { policyOf } from "./policy/types";
+import "./settings.css";
 import "./policy/policy.css";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);

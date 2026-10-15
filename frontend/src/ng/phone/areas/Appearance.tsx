@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import * as api from "../../../api";
 import type { Accent, BoardOpenIn, ColourAmount, Surface, Theme, ThemeMode } from "../../../types";
 import { applyTheme, lookOf } from "../../theme/applyTheme";
-import { ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../../theme/looks";
+import { accentOf, ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../../theme/looks";
 import { DEFAULT_PREFS, type DiffPrefs } from "../../review/prefs";
+import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import type { Option } from "../nav/Sheet";
 import { Group, useEditor, type RowSpec } from "./kit";
@@ -40,11 +41,11 @@ export function AppearanceScreen() {
     if (theme) applyTheme(lookOf(theme));
   }, [theme]);
 
-  if (!theme) return <AreaScreen title="Appearance" status={{ label: "saved on change" }} yaml={false}>{error ? <p className="ph-error" role="alert">{error}</p> : <p className="ph-empty">Loading…</p>}</AreaScreen>;
+  if (!theme) return <AreaScreen title="Appearance" status={{ label: SAVED.change }} yaml={false}>{error ? <p className="ph-error" role="alert">{error}</p> : <p className="ph-empty">Loading…</p>}</AreaScreen>;
 
   const surface = theme.surface ?? "graphite";
   const amount = theme.colour_amount ?? "subtle";
-  const accent = amount === "mono" ? "none" : (theme.accent ?? "none");
+  const accent = amount === "mono" ? "none" : accentOf(theme.accent);
   const mode = resolveMode(theme.mode);
   const scheme: Scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
   const diff: DiffPrefs = theme.diff ?? DEFAULT_PREFS;
@@ -70,7 +71,7 @@ export function AppearanceScreen() {
   const setDiff = (patch: Partial<DiffPrefs>) => void save({ diff: { ...diff, ...patch } });
 
   return (
-    <AreaScreen title="Appearance" sub="The choice applies at once and is kept in theme.yaml." status={{ label: "saved on change" }} yaml={yamlOf(theme as unknown as Record<string, unknown>)}>
+    <AreaScreen title="Appearance" sub="Each choice applies at once." status={{ label: SAVED.change }} yaml={yamlOf(theme as unknown as Record<string, unknown>)}>
       {theme.derived && <p className="ph-note">These follow the {theme.palette} palette until you change one.</p>}
       {error && <p className="ph-error" role="alert">{error}</p>}
       <Group
@@ -78,6 +79,7 @@ export function AppearanceScreen() {
         rows={[
           { label: "Mode", value: label(MODES, theme.mode), onEdit: choose("Mode", theme.mode, MODES, (v) => ({ mode: v as ThemeMode })) },
           { label: "Colour amount", value: label(AMOUNTS, amount), sub: "Scales the tint of the surfaces, the accent and the status colours together. Mono leaves only grey.", onEdit: choose("Colour amount", amount, AMOUNTS, (v) => (v === "mono" ? { colour_amount: v as ColourAmount, accent: "none" } : { colour_amount: v as ColourAmount })) },
+          { label: "Density", value: theme.density === "comfortable" ? "Comfortable" : "Compact", sub: "Compact is the default. Comfortable adds 2px to row padding and 1px to body type.", onEdit: choose("Density", theme.density, [{ value: "compact", label: "Compact" }, { value: "comfortable", label: "Comfortable" }], (v) => ({ density: v as Theme["density"] })) },
         ]}
       />
       <Group
@@ -105,7 +107,6 @@ export function AppearanceScreen() {
       <Group
         title="Board"
         rows={[
-          { label: "Density", value: theme.density === "comfortable" ? "Comfortable" : "Compact", sub: "Compact is the default. Comfortable adds 2px to row padding and 1px to body type.", onEdit: choose("Density", theme.density, [{ value: "compact", label: "Compact" }, { value: "comfortable", label: "Comfortable" }], (v) => ({ density: v as Theme["density"] })) },
           { label: "Open items in", value: theme.board.open_in === "full" ? "Full page" : "Peek", sub: "What a tap on a board row does on a computer; the phone always opens the item.", onEdit: choose("Open items in", theme.board.open_in, [{ value: "peek", label: "Peek" }, { value: "full", label: "Full page" }], (v) => ({ board: { ...theme.board, open_in: v as BoardOpenIn } })) },
         ]}
       />

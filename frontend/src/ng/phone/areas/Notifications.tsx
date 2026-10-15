@@ -9,6 +9,7 @@ import { ALLOW, browserActive as browserOn, BROWSER_OFF, BROWSER_WHY, channelSta
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { TabStrip } from "../ui/Rows";
+import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
 import { yamlOf } from "./yaml";
@@ -31,7 +32,7 @@ export function NotificationsList() {
   const permission = permissionNow();
   const browserIsActive = browserOn(isEnabled(), permission);
   return (
-    <AreaScreen title="Notifications" sub="Where Kraft tells you it has stopped for you." status={{ label: "saved on change" }} yaml={false}>
+    <AreaScreen title="Notifications" sub="Where Kraft tells you it has stopped for you." status={{ label: SAVED.change }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {notify && (
         <Group
@@ -55,13 +56,13 @@ export function NotificationChannel() {
   const known = channel === "webhook" || channel === "browser";
   const { notify, setNotify, error } = useNotify();
   const view = (t: "overview" | "config") => setParams(t === "config" ? { tab: "config" } : {}, { replace: true });
-  if (!known) return <AreaScreen title="Notifications" status={{ label: "saved on change" }} yaml={false}><p className="ph-empty">There is no channel {channel}.</p></AreaScreen>;
+  if (!known) return <AreaScreen title="Notifications" status={{ label: SAVED.change }} yaml={false}><p className="ph-empty">There is no channel {channel}.</p></AreaScreen>;
   const name = CHANNELS[channel as Channel];
   return (
     <AreaScreen
       title={name}
       sub={channel === "webhook" ? "One webhook: ntfy, Pushover, Slack, Discord or your own receiver." : "Alerts in this browser while its tab is in the background."}
-      status={{ label: "saved on change" }}
+      status={{ label: SAVED.change }}
       yaml={notify && channel === "webhook" ? yamlOf({ enabled: notify.enabled, url: notify.url_set ? "(set, never shown)" : null, base_url: notify.base_url, events: notify.events }) : false}
     >
       <TabStrip label={name} value={tab} onChange={view} tabs={[{ id: "overview", label: "Overview" }, { id: "config", label: "Config" }]} />

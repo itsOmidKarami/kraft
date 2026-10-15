@@ -22,6 +22,13 @@ const radio = (name: RegExp) => screen.findByRole("radio", { name });
 afterEach(() => vi.restoreAllMocks());
 
 describe("Appearance (O.4)", () => {
+  it("says it saves on change in the words the desktop uses, and offers no amber or green accent", async () => {
+    setup();
+    expect(await screen.findByText("Saved on change")).toBeInTheDocument();
+    expect(await radio(/^Blue/)).toBeInTheDocument();
+    for (const gone of [/^Green/, /^Amber/]) expect(screen.queryByRole("radio", { name: gone })).toBeNull();
+  });
+
   it("sends only the key each control changes, and repaints at once", async () => {
     const put = setup();
     await userEvent.click(await row(/^Mode/));

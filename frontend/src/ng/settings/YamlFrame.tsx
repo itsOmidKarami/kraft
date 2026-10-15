@@ -4,6 +4,8 @@ import { useResizable, useWidth } from "../graph/useResizable";
 import { HeaderActions } from "../shell/HeaderActions";
 import { Note } from "../templates/panes/controls";
 import { Button } from "../ui/Button";
+import { SavedCue } from "./parts";
+import { SAVED } from "./savedWords";
 import "../templates/templates.css";
 import "./settings.css";
 
@@ -11,7 +13,7 @@ import "./settings.css";
  *  AreaAppearance): the file's text built from the page's own state, read-only.
  *  With `overview` the pane is always there, starting collapsed, on Overview and
  *  YAML tabs; without it the pane exists only while YAML is open. */
-export function YamlFrame({ pageKey, file, title, icon, status = "saved on change", yaml, yamlNote, overview, children }: {
+export function YamlFrame({ pageKey, file, title, icon, status = SAVED.change, yaml, yamlNote, overview, children }: {
   pageKey: string;
   file: string;
   title: string;
@@ -38,7 +40,7 @@ export function YamlFrame({ pageKey, file, title, icon, status = "saved on chang
   return (
     <div className="tpl-page" ref={frame}>
       <HeaderActions>
-        <span className="saved-note">{status}</span>
+        <SavedCue word={status} />
         <Button aria-pressed={pressed} onClick={toggle}>YAML</Button>
       </HeaderActions>
       <div className="tpl-area">

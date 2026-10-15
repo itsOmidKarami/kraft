@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
-import { humanSize } from "../../sizes";
+import { countedAgainst } from "../settings/storageWords";
 import { useStore } from "../../store";
 import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
 import { chainsForRepo } from "../library/types";
@@ -43,7 +43,7 @@ export function sayIfFiledPaused(autostart: boolean, body: Created): void {
   if (!autostart || (body.status !== "paused" && body.status !== "queued")) return;
   const held = body.slots?.storage;
   if (body.status === "queued" && held) {
-    showToast(`Queued: worktrees use ${humanSize(held.used_bytes)} of the ${humanSize(held.limit_bytes)} storage limit. It starts when space frees.`, 8000);
+    showToast(`Queued: ${countedAgainst(held.used_bytes, held.limit_bytes)}. It starts when space frees.`, 8000);
     return;
   }
   const s = body.slots;

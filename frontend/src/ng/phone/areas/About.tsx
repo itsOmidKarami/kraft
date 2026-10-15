@@ -73,7 +73,7 @@ export function AboutScreen() {
   ].filter(Boolean).join("\n");
 
   return (
-    <AreaScreen title="About" sub="This build and this instance." status={{ label: "read only" }} yaml={false}>
+    <AreaScreen title="About" sub="This build and this instance." yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       <Group
         title="Version"

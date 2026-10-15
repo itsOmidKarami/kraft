@@ -18,6 +18,7 @@ import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSch
 import { pickup, REMOVE_SCHEDULE } from "./intake/pickup";
 import { repoChoice, repoLabel, type NamedRepo } from "./intake/repos";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
+import "./settings.css";
 import "./intake/intake.css";
 
 const CHECKS_EVERY_MS = 30_000;

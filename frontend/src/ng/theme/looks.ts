@@ -8,7 +8,11 @@ export const SURFACES: { id: Surface; name: string; note: string }[] = [
   { id: "sand", name: "Sand", note: "warm grey" },
   { id: "moss", name: "Moss", note: "green grey" },
 ];
-export const ACCENTS: Accent[] = ["none", "blue", "violet", "green", "amber", "rose"];
+/** Green and amber are the signal colours (ok, needs a human), so they are not offered. */
+export const ACCENTS: Accent[] = ["none", "blue", "violet", "rose"];
+
+/** The accent a stored value paints: one this UI no longer offers (green, amber) falls back to none. */
+export const accentOf = (a: Accent | null | undefined): Accent => (a && ACCENTS.includes(a) ? a : "none");
 export const AMOUNTS: { value: ColourAmount; label: string }[] = [
   { value: "mono", label: "Mono" },
   { value: "subtle", label: "Subtle" },

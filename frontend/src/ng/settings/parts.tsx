@@ -1,12 +1,17 @@
 import type { ReactNode } from "react";
 
+/** The one saved-state cue of a settings page, for the header's actions: what it says is in savedWords. */
+export function SavedCue({ word }: { word: string }) {
+  return <span className="saved-note">{word}</span>;
+}
+
 /** A titled block of a settings page: the shared frame of Access, Notifications and About. */
-export function Block({ id, title, aside, card, pill, hidden, children }: { id: string; title: string; aside?: string; /** A bordered card (AreaAccess): the title at its top left, the aside at its top right. */ card?: boolean | "dashed"; /** The aside as a small outlined tag ("live"). */ pill?: boolean; /** The title is for a screen reader only (a card with no visible heading). */ hidden?: boolean; children: ReactNode }) {
+export function Block({ id, title, aside, card, hidden, children }: { id: string; title: string; aside?: string; /** A bordered card (AreaAccess): the title at its top left, the aside at its top right. */ card?: boolean | "dashed"; /** The title is for a screen reader only (a card with no visible heading). */ hidden?: boolean; children: ReactNode }) {
   return (
     <section className={`set-block${card ? " is-card" : ""}${card === "dashed" ? " is-dashed" : ""}`} aria-labelledby={id}>
       <div className="set-block-head">
         <h2 id={id} className={hidden ? "adr-sr" : undefined}>{title}</h2>
-        {aside && <span className={pill ? "set-block-pill" : "set-block-aside"}>{aside}</span>}
+        {aside && <span className="set-block-aside">{aside}</span>}
       </div>
       {children}
     </section>

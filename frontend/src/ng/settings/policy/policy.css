@@ -1,15 +1,15 @@
 /* The Policy page (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .pol-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
-.pol-page { max-width: 880px; box-sizing: border-box; margin: 0 auto; padding: 16px 24px 60px; display: flex; flex-direction: column; gap: 12px; }
+.pol-page { gap: 12px; }
 .pol-panel { display: flex; flex-direction: column; gap: 12px; }
 .pol-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 0 2px; }
-.pol-title { flex: none; margin: 0; font-size: var(--fs-h3); font-weight: 600; color: var(--text); }
+.pol-title { flex: none; }
 .pol-head .pol-intro { flex: 1; }
 .pol-head .btn { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
 .pol-intro { margin: 0; font-size: var(--fs-label); line-height: 1.5; color: var(--text-muted); }
 .pol-note { margin: 0; padding: 0 8px; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .pol-note.is-bad, .pol-help.is-bad { color: var(--bad); }
-.pol-h2 { margin: 6px 8px 2px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pol-h2 { margin: 6px 8px 2px; }
 
 .pol-card { display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 /* Each scope sits inside the one it can't exceed. */

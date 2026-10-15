@@ -1,3 +1,4 @@
+import { humanSize } from "../../sizes";
 import type { StorageUsage } from "../../types";
 
 /** The server's eight categories, in the order Storage lists them, on both layouts. */
@@ -26,3 +27,17 @@ export function storageNote(data: StorageUsage | null, measuring: boolean): stri
 }
 
 export const NOTHING_TO_CLEAN = "Nothing to clean up: no finished item holds a worktree. A running item is paused or abandoned from its own page.";
+
+/** The clean-up action has one name, here and on the phone; an item it can take is "can be cleaned up". */
+export const CLEAN_SELECTED = "Clean up selected";
+export const CLEANABLE = "can be cleaned up";
+export const cleanAll = (count: number, bytes: number) => `Clean up all (${count}, ${humanSize(bytes)})`;
+
+/** What `used_bytes` measures: the three categories the quota and limit govern, not the worktrees alone. */
+export const COUNTED = "worktrees, sandboxes and documents";
+
+/** The key figure, said once above the bar: what is counted, against the limit when there is one. */
+/** The same words wherever the total meets the limit: the Storage figure, the queued toast, the queued card. */
+export const countedAgainst = (used: number, limit: number) => `${humanSize(used)} counted against the ${humanSize(limit)} limit`;
+
+export const usageFigure = (used: number, limit: number | null) => (limit != null ? countedAgainst(used, limit) : `${humanSize(used)} counted: ${COUNTED}`);

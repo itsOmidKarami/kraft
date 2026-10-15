@@ -1,8 +1,11 @@
 .ng-settings { display: flex; flex-direction: column; }
 .saved-note { font-size: var(--fs-meta); color: var(--text-muted); }
-.appearance { width: 100%; max-width: 820px; box-sizing: border-box; margin: 0 auto; padding: 22px 24px 70px; }
-.appearance h1 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
-.appearance h2 { margin: 0 0 8px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+/* The frame every settings page shares: one column, one page heading, one section heading. */
+.set-page, .nt-page, .pol-page, .ink-page { width: 100%; max-width: var(--set-page-w); box-sizing: border-box; margin: 0 auto; padding: 22px 24px 70px; display: flex; flex-direction: column; }
+.set-title h1, .nt-title h1, .pol-title { margin: 0; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }
+.set-h2, .set-block h2, .nt-h2, .pol-h2, .ink-h2 { font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.appearance-controls h2, .appearance-preview h2 { margin: 0 0 8px; }
+.set-more > h2 { margin: 0; }
 .lede { margin: 4px 0 0; font-size: var(--fs-label); color: var(--text-muted); }
 .note { margin: 8px 2px 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .error { font-size: var(--fs-label); color: var(--bad); }
@@ -24,8 +27,8 @@
 .choice-note { padding: 0 2px; font-size: var(--fs-label); color: var(--text-muted); }
 .accent-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.set-more { margin-top: 28px; display: flex; flex-direction: column; gap: 26px; }
-.set-more h2 { margin: 0 0 8px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-more { margin-top: 12px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 26px; }
+.set-h3 { margin: 0 0 8px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-sub { margin: 12px 0 6px; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .set-hint { display: block; margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-muted); }
 .set-cards { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -70,12 +73,11 @@
 .set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: var(--fs-label); }
 .set-row-label { min-width: 110px; color: var(--text-sub); }
 
-.set-page { width: 100%; max-width: 760px; box-sizing: border-box; margin: 0 auto; padding: 22px 24px 70px; display: flex; flex-direction: column; gap: 22px; }
-.set-page h1 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
+.set-page { gap: 22px; }
 .set-page .lede { margin: -16px 0 0; }
 .set-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .set-block-head { display: flex; align-items: baseline; gap: 10px; }
-.set-block h2 { margin: 0; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.set-block h2 { margin: 0; }
 .set-block-aside { font-size: var(--fs-meta); color: var(--text-muted); }
 .set-error { font-size: var(--fs-meta); color: var(--bad); }
 .set-hint.is-warn { color: var(--warn); }
@@ -142,22 +144,22 @@
 .set-link { display: inline-flex; align-items: center; padding: 4px 11px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: var(--fs-label); text-decoration: none; }
 .set-link:hover { background: var(--line); }
 .set-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.set-textlink { text-decoration: underline; text-underline-offset: 3px; }
+.set-textlink:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .set-links { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .ys-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
 .ys-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
 
 /* Cards (AreaAccess): a bordered section, its title and aside on one line, a row's help in a column at the right. */
-.set-page.is-cards { max-width: 720px; gap: 10px; }
+.set-page.is-cards { gap: 10px; }
 .set-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
-.set-title h1 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
 .set-page .set-title .lede { flex: 1; min-width: 220px; margin: 0; line-height: 1.5; }
 .set-block.is-card { gap: 2px; padding: 10px 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
 .set-block.is-dashed { border-style: dashed; border-color: var(--line); }
 .set-block.is-card .set-block-head { justify-content: space-between; align-items: center; padding: 2px 8px 6px; }
 .set-block.is-card h2 { font-size: var(--fs-meta); letter-spacing: 0; text-transform: none; color: var(--text); }
 .set-block.is-dashed h2 { color: var(--text-sub); }
-.set-block-pill { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font-size: var(--fs-label); line-height: 16px; color: var(--text-muted); }
 .set-block.is-card .set-line-row { grid-template-columns: minmax(80px, 130px) minmax(0, 1.5fr) minmax(0, 1.5fr); gap: 10px; min-height: 30px; }
 .set-block.is-card .set-line-row > .set-hint, .set-block.is-card .set-line-row > .set-error { grid-column: 3; grid-row: 1; }
 .set-block.is-card > .set-hint, .set-block.is-card > .set-error { padding: 2px 8px; }

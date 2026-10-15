@@ -4,7 +4,7 @@ import { humanSize } from "../../../sizes";
 import type { StoragePreview, StorageUsage } from "../../../types";
 import { sendBulk } from "../../board/bulk";
 import { detailOf, jsonBody, request } from "../../http";
-import { CATEGORIES, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote } from "../../settings/storageWords";
+import { CATEGORIES, cleanAll, COUNTED, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote } from "../../settings/storageWords";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
@@ -55,12 +55,12 @@ export function StorageScreen() {
   };
 
   const usage: RowSpec[] = !data ? [] : [
-    { label: "worktrees use", value: humanSize(used), sub: data.measured_at ? `measured ${ago(data.measured_at)}` : undefined },
+    { label: "counted", value: humanSize(used), sub: data.measured_at ? `${COUNTED}, measured ${ago(data.measured_at)}` : COUNTED },
     ...(limit != null && data.state ? [{ label: "quota", value: humanSize(data.quota_bytes ?? 0) } as RowSpec, { label: "limit", value: humanSize(limit), sub: "starts are held above it" } as RowSpec] : [{ label: "limit", value: "not set", to: HOUSEKEEPING, sub: "Set one in Policy › Housekeeping" } as RowSpec]),
     ...(limit != null && data.state ? [{ label: "edit the quota and limit", to: HOUSEKEEPING } as RowSpec] : []),
   ];
   return (
-    <AreaScreen title="Storage" sub="What the worktrees use, and what removing the finished ones would free." status={{ label: measuring ? "measuring…" : "read only" }} yaml={false}>
+    <AreaScreen title="Storage" sub="What the worktrees use, and what removing the finished ones would free." yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {!data && measuring && <p className="ph-note">Measuring the run folder. This can take half a minute on a large instance.</p>}
       {note && <p className="ph-note" role="status">{note}</p>}
@@ -71,7 +71,7 @@ export function StorageScreen() {
           <Group
             title={`Worktrees · ${plural(data.items?.length ?? 0, "item")}`}
             rows={[
-              { label: `Clean up all reclaimable (${reclaimable.length}, ${humanSize(data.reclaimable_bytes)})`, onClick: () => void ask(), disabled: !reclaimable.length, danger: true },
+              { label: cleanAll(reclaimable.length, data.reclaimable_bytes), onClick: () => void ask(), disabled: !reclaimable.length, danger: true },
             ]}
             foot={reclaimable.length ? "Archives the finished items and deletes their worktrees. Choosing items one by one is on desktop." : NOTHING_TO_CLEAN}
           />
@@ -81,7 +81,7 @@ export function StorageScreen() {
         <ConfirmSheet
           title="Clean up finished worktrees?"
           text={preview ? `${plural(take.length, "item")} archived, their worktrees deleted. ${lost ? `${plural(lost, "uncommitted file")} will be lost.` : "No uncommitted files."} ${humanSize(preview.used_after_bytes)} used afterwards.` : "Asking the server what this would do…"}
-          confirm={{ label: "Archive them", danger: true, disabled: !take.length, run: () => void confirm() }}
+          confirm={{ label: "Clean up", danger: true, disabled: !take.length, run: () => void confirm() }}
           busy={busy || !preview}
           error={cleanError}
           onClose={sheet.close}

@@ -1,10 +1,9 @@
 /* Settings › Notifications (AreaNotifications). Colours only through theme.css tokens. */
 .nt-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
-.nt-page { max-width: 820px; box-sizing: border-box; margin: 0 auto; padding: 22px 20px 60px; display: flex; flex-direction: column; gap: 10px; }
+.nt-page { gap: 10px; }
 .nt-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
-.nt-title h1 { margin: 0; font-size: var(--fs-h2); font-weight: 500; }
 .nt-title .lede { flex: 1; min-width: 220px; margin: 0; line-height: 1.5; }
-.nt-h2 { margin: 6px 2px 0; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.nt-h2 { margin: 6px 2px 0; }
 .nt-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
 .nt-card:hover { background: var(--surface); }
 .nt-card.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }

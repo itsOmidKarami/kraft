@@ -33,8 +33,8 @@ const DIFF_COLOURS: { id: DiffPrefs["colours"]; name: string; note: string }[] =
   { id: "plain", name: "None", note: "marks only" },
 ];
 
-/** Settings › Appearance below the colour section (UX V2 W16 D): code scheme,
- *  review diff, density, board. Each control sends its own key; `code_scheme`
+/** Settings › Appearance below the look (UX V2 W16 D), under one heading: code
+ *  scheme, review diff, board, editor. Each control sends its own key; `code_scheme`
  *  and `diff` go whole because `PUT /theme` merges top-level keys only. */
 export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Partial<Theme>) => void }) {
   const scheme: Scheme = theme.code_scheme ?? { light: "auto", dark: "auto" };
@@ -45,7 +45,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
 
   const group = (mode: Mode) => (
     <div className="set-code-group" role="group" aria-label={`${mode === "light" ? "Light" : "Dark"} colour scheme`}>
-      <h3 className="set-sub">{mode === "light" ? "Light colour scheme" : "Dark colour scheme"}</h3>
+      <h4 className="set-sub">{mode === "light" ? "Light colour scheme" : "Dark colour scheme"}</h4>
       <div className="set-cards">
         {SCHEMES[mode].map((s) => (
           <button key={s.id} type="button" className="set-card" aria-label={`${mode} scheme: ${s.name}`} aria-pressed={scheme[mode] === s.id} onClick={() => save({ code_scheme: { ...scheme, [mode]: s.id } as Scheme })}>
@@ -73,21 +73,22 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
 
   const unified = diff.layout === "unified";
   return (
-    <div className="set-more">
+    <section className="set-more" aria-labelledby="set-more-title">
+      <h2 id="set-more-title" className="set-h2">Code and board view</h2>
       <section aria-labelledby="set-code">
-        <h2 id="set-code">Syntax highlighting</h2>
+        <h3 id="set-code" className="set-h3">Syntax highlighting</h3>
         <p className="set-hint">Colours code in review diffs. Chosen separately for light and dark. Auto follows Colour amount; None is a single colour.</p>
         {group("light")}
         {group("dark")}
       </section>
 
       <section aria-labelledby="set-diff">
-        <h2 id="set-diff">Review diff</h2>
+        <h3 id="set-diff" className="set-h3">Review diff</h3>
         <div className="set-diff-cols">
           <div className="set-diff-controls">
-            <h3 className="set-sub">Layout</h3>
+            <h4 className="set-sub">Layout</h4>
             <Segmented label="Layout" options={[{ value: "split", label: "Side-by-side" }, { value: "unified", label: "Inline" }]} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
-            <h3 className="set-sub">Added and removed colours</h3>
+            <h4 className="set-sub">Added and removed colours</h4>
             <div className="set-cards" role="group" aria-label="Added and removed colours">
               {DIFF_COLOURS.map((c) => (
                 <button key={c.id} type="button" className="set-card" aria-label={`Diff colours: ${c.name}`} aria-pressed={diff.colours === c.id} onClick={() => setDiff({ colours: c.id })}>
@@ -116,14 +117,8 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
         </div>
       </section>
 
-      <section aria-labelledby="set-density">
-        <h2 id="set-density">Density</h2>
-        <Segmented label="Density" options={[{ value: "compact", label: "Compact" }, { value: "comfortable", label: "Comfortable" }]} value={theme.density} onChange={(v) => save({ density: v })} />
-        <p className="set-hint">Compact is the default. This interface is dense on purpose. Comfortable adds 2px to row padding and 1px to body type.</p>
-      </section>
-
       <section aria-labelledby="set-board">
-        <h2 id="set-board">Board</h2>
+        <h3 id="set-board" className="set-h3">Board</h3>
         <div className="set-row">
           <span className="set-row-label">Open items in</span>
           <Segmented<BoardOpenIn> label="Open items in" options={[{ value: "peek", label: "Peek" }, { value: "full", label: "Full page" }]} value={theme.board.open_in} onChange={(v) => save({ board: { ...theme.board, open_in: v } })} />
@@ -132,7 +127,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
       </section>
 
       <DefaultEditor value={theme.editor ?? null} save={(editor) => save({ editor })} />
-    </div>
+    </section>
   );
 }
 
@@ -145,7 +140,7 @@ function DefaultEditor({ value, save }: { value: string | null; save: (editor: s
   const options = [...ids, ...(value && !ids.includes(value) ? [value] : []), ""].map((id) => ({ value: id, label: id ? editorName(id) : "Not set" }));
   return (
     <section aria-labelledby="set-editor">
-      <h2 id="set-editor">Default editor</h2>
+      <h3 id="set-editor" className="set-h3">Default editor</h3>
       {typeof editors === "string" ? <p className="set-hint">{editors}</p> : (
         <Segmented label="Default editor" options={options} value={value ?? ""} onChange={(v) => save(v || null)} />
       )}
