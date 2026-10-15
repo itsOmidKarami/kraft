@@ -55,7 +55,7 @@ const edit = async (name: RegExp | string, text: string) => {
 describe("Auto-intake page", () => {
   it("says what the rule does in a sentence, On and Off", async () => {
     mount();
-    expect(await screen.findByText(/Every 5 minutes, starts the open issues in your bd tracker that nothing blocks, at P2 and below, from every enabled repo\. Each runs to its first gate and waits for you there\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Every 5 minutes, starts the open issues in your bd tracker that nothing blocks, at P2 and below, from every enabled repo\. Each runs to its first gate and waits for you there. It skips epics and issues that already have a work item\./)).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Pickup" })).toHaveTextContent("On");
     expect(screen.getByRole("switch", { name: "enabled" })).toBeChecked();
     document.body.innerHTML = "";

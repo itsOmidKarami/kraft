@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { plural } from "../../../format";
 import { detailOf, request } from "../../http";
 import { outerValue, problemAt, scopeUnset, type Ctx } from "../../settings/policy/ctx";
-import { capKey, KEYS, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
+import { capKey, KEYS, limitLabel, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
 import { LOOP_WINS, SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, policyOf } from "../../settings/policy/types";
 import { parse, parseAge, parseSize, raw, show, sourceWord, UNIT_WORD } from "../../settings/policy/units";
@@ -136,8 +136,8 @@ function Limits(e: Edits) {
   return (
     <>
       <Group title="Instance" note="Dollars across every item. A per-day spend refuses the next agent task; it can't stop one already running." rows={[
-        single(e, KEYS.daily, "per day", (ctx.p.limits.daily_usd.value as number | null) ?? null, { sub: "since local midnight" }),
-        single(e, KEYS.outer, "per item", outerValue(ctx), { sub: ctx.p.limits.work_item_usd.binding ? `binding: ${ctx.p.limits.work_item_usd.binding.key} ${show("usd", ctx.p.limits.work_item_usd.binding.value)}` : "a second dollar cap on each item; the lower one wins" }),
+        single(e, KEYS.daily, limitLabel(KEYS.daily.key)!, (ctx.p.limits.daily_usd.value as number | null) ?? null, { sub: "since local midnight" }),
+        single(e, KEYS.outer, limitLabel(KEYS.outer.key)!, outerValue(ctx), { sub: ctx.p.limits.work_item_usd.binding ? `binding: ${limitLabel(ctx.p.limits.work_item_usd.binding.key) ?? ctx.p.limits.work_item_usd.binding.key} ${show("usd", ctx.p.limits.work_item_usd.binding.value)}` : "a second dollar cap on each item; the lower one wins" }),
       ]} />
       {LEVELS.filter((l) => caps[l]).map((level) => {
         const group = (

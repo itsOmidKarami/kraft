@@ -137,7 +137,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       };
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
-    case "paused": return item.current_node_id ? { tone: "warn", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
+    case "paused": return item.current_node_id ? { tone: "muted", title: "Paused", where: `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}`, text: "Nothing runs until you resume. Steering resumes the item with your note.", facts: [] } : null;
     case "done": return { tone: "ok", title: "Done", where: item.mr_ref ? `MR !${item.mr_ref.number} merged` : undefined, text: doneText(item), facts: spent(item) };
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
@@ -255,7 +255,7 @@ export function nodeSub(n: ChainNode, skipped = false): { text: string; tone: "w
     case "failed": return { text: n.capped ? "stopped at the cap" : "failed", tone: "bad" };
     case "current":
       if (n.capped) return { text: "stopped at the cap", tone: "bad" };
-      if (n.paused) return { text: "paused", tone: "warn" };
+      if (n.paused) return { text: "paused", tone: "muted" };
       if (n.sub === "needs you") return { text: gate ? "waiting for you" : "needs you", tone: "warn" };
       // A waiting node says what it waits on, as the badge does, not "running" (R11b-04).
       return { text: [n.wait ?? "running", n.sub].filter(Boolean).join(" · "), tone: "info" };

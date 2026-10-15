@@ -4,7 +4,7 @@ import { detailOf, request } from "../../http";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
 import { readiness } from "../../templates/repos/evidence";
-import { FIELDS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
+import { FIELDS, GROUPS, forgeOptions, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
 import { setEnabled, setRepo } from "../../templates/repos/RepoConfig";
 import { harnessChoices, steeringChoices } from "../../templates/choices";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -117,9 +117,9 @@ export function RepoView() {
             rows={[
               { label: "enabled", sw: repo.entry.enabled !== false, changed: changed("enabled"), onSwitch: (on) => void setEnabled(draft, repo, on).then((e) => e && showToast(e)) },
               ...(running ? [{ label: "open items", value: String(running) } as RowSpec] : []),
-              ...FIELDS.map(rowOf),
             ]}
           />
+          {GROUPS.map((g) => <Group key={g} title={g} rows={FIELDS.filter((f) => f.group === g).map(rowOf)} />)}
           <Group rows={[{ label: "Disconnect repo", danger: true, onClick: () => { setError(null); sheet.open("disconnect"); } }]} />
         </>
       )}

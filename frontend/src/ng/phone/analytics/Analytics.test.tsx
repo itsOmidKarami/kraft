@@ -89,6 +89,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(screen.getByText("$20.00+")).toBeInTheDocument();
     expect(screen.getByText("8 items · 6 done · avg repairs 3.0")).toBeInTheDocument();
     expect(screen.getByText("gate wait")).toBeInTheDocument();
+    expect(screen.getByText("Items created in the last 8 weeks")).toBeInTheDocument();
     expect(screen.getByText("0.25 unplanned touches per item · open MR → checks done 10m median")).toBeInTheDocument();
     const how = /Tokens are as recorded, never estimated\. Dollars are what agents reported plus Kraft's estimate from its price table where they reported none, and a session it cannot price puts a "\+" on the sum/;
     expect(screen.getByText(how)).not.toBeVisible();
@@ -107,6 +108,7 @@ describe("Analytics (J): each tile reads one field", () => {
     await waitFor(() => expect(asked(calls)).toHaveLength(2));
     expect(asked(calls).map((c) => c.query.get("range"))).toEqual(["8w", "30d"]);
     expect(screen.getByRole("button", { name: /30 days/ })).toBeInTheDocument();
+    expect(await screen.findByText("Items created in the last 30 days")).toBeInTheDocument();
   });
 
   it("narrows by the repo and chain the person picks, as the desktop does", async () => {
@@ -120,6 +122,7 @@ describe("Analytics (J): each tile reads one field", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "Chain" })).getByRole("radio", { name: /quick-task/ }));
     await waitFor(() => expect(asked(calls)).toHaveLength(3));
     expect(asked(calls).map((c) => [c.query.get("repo"), c.query.get("template")])).toEqual([[null, null], ["/code/kraft-plugins", null], ["/code/kraft-plugins", "quick-task"]]);
+    expect(await screen.findByRole("link", { name: /plan_approval/ })).toHaveAttribute("href", "/?repo=%2Fcode%2Fkraft-plugins&chain=quick-task");
   });
 
   it("says when nothing completed, with no zero-height chart", async () => {

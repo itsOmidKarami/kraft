@@ -20,7 +20,7 @@ describe("Policy limits (N.1)", () => {
     expect(await screen.findByRole("tab", { name: "Limits", selected: true })).toBeInTheDocument();
     const instance = screen.getByRole("region", { name: "Instance" });
     expect(within(instance).getByRole("button", { name: /^per day/ })).toHaveTextContent("$50");
-    expect(within(instance).getByRole("button", { name: /^per item/ })).toHaveTextContent("$10");
+    expect(within(instance).getByRole("button", { name: /^outer ceiling/ })).toHaveTextContent("binding: outer ceiling $10");
     const work = screen.getByRole("region", { name: "work item" });
     expect(within(work).getByRole("button", { name: /^running/ })).toHaveTextContent("default 480 min max 1440 min");
     expect(within(work).getByRole("button", { name: /^tokens/ })).toHaveTextContent("max 2,000,000");

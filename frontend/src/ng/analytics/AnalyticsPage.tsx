@@ -7,7 +7,7 @@ import { chainOf } from "../board/model";
 import { Link } from "react-router-dom";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
-import { boardHref, DEFAULT_RANGE, EMPTY_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES, waitingKpi } from "./shared";
+import { boardHref, DEFAULT_RANGE, EMPTY_RANGE, gateRows, HOW_COUNTED, measured, minutes, RANGES, scopeLine, waitingKpi } from "./shared";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 
@@ -104,7 +104,7 @@ export function AnalyticsPage() {
       {/* The header crumb is not a heading: the page keeps one, unseen, for a screen reader (R14b-03). */}
       <h1 className="an-visually-hidden">Analytics</h1>
       {filters}
-      <HeaderTail><span className="an-scope">· Items created in the last {rangeLabel}</span></HeaderTail>
+      <HeaderTail><span className="an-scope">· {scopeLine(rangeLabel)}</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
       {!report && !error && <p className="an-empty">Loading…</p>}
       {report && t && emptyRange && <p className="an-empty">{EMPTY_RANGE}</p>}

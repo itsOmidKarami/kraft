@@ -7,8 +7,7 @@ const row = (display_status: string, stop?: string, node_kind: "gate" | "exec" =
 
 describe("a phone row's glyph says the state, not the node kind (PH-11)", () => {
   it.each([
-    ["a gate wait", row("needs_you", "gate", "gate"), "flag"],
-    ["a cap", row("needs_you", "cap"), "ban"],
+        ["a cap", row("needs_you", "cap"), "ban"],
     ["a budget stop", row("needs_you", "budget"), "ban"],
     ["a question", row("needs_you", "question"), "message-square"],
     ["a failure", row("failed", "failed"), "circle-alert"],
@@ -20,5 +19,10 @@ describe("a phone row's glyph says the state, not the node kind (PH-11)", () => 
     const g = stateGlyph(item);
     expect(g.icon).toBe(icon);
     expect(g.kind).toBe("exec");
+  });
+
+  it("a gate wait is the desktop's diamond, not an icon in a box", () => {
+    const g = stateGlyph(row("needs_you", "gate", "gate"));
+    expect(g).toMatchObject({ kind: "gate", state: "amber" });
   });
 });

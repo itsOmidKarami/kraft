@@ -40,7 +40,8 @@ describe("About (O.5)", () => {
   it("shows the installed version and channel, the newer release, and the command to run", async () => {
     show();
     expect(await screen.findByText("v2.0.0 is available")).toBeInTheDocument();
-    expect(screen.getByText("1.4.0")).toBeInTheDocument();
+    expect(screen.getByText("1.4.0")).toHaveClass("ph-row-figure");
+    expect(screen.getByRole("button", { name: /^Check now/ }).querySelector(".ph-row-icon")).not.toBeNull();
     expect(screen.getAllByText("stable").length).toBeGreaterThan(0);
     expect(screen.getByText("kraft admin update")).toBeInTheDocument();
     expect(screen.getByText("all chains and policy valid")).toBeInTheDocument();

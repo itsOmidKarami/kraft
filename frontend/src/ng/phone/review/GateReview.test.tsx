@@ -156,10 +156,14 @@ describe("the gate review (F)", () => {
 });
 
 describe("Approve (F.3)", () => {
-  it("sends the review's approval with the document's digest", async () => {
+  it("asks first, since an approval cannot be taken back, then sends it with the document's digest", async () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/artifact": [200, { work_item_id: "w1", path: "p.md", title: "Chain revision", content: "x", truncated: false, artifact_max_bytes: 1, digest: "d1g" }], "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "approve", gate: "plan_approval" }] });
     await screen.findByText("x");
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const sheet = await screen.findByRole("dialog", { name: /^Approve (?!and send)/ });
+    expect(sheet).toHaveTextContent("An approval cannot be taken back.");
+    expect(posts(calls)).toEqual([]);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/review", body: { outcome: "approve", digest: "d1g" } }]));
     await waitFor(() => expect(where()).toBe("/work-items/w1"));
   });
@@ -205,6 +209,7 @@ describe("Approve (F.3)", () => {
     mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [409, { detail: "gate 'plan_approval' is not pending" }] });
     await screen.findByText("Add EmbeddingCache");
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("is not pending");
     expect(where()).toBe("/work-items/w1/review");
   });

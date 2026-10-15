@@ -44,6 +44,11 @@ const where = () => screen.getByLabelText("where").textContent;
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the item screen (C)", () => {
+  it("shows a paused item's badge in the neutral tone: amber is for what needs a person", async () => {
+    mount(item("paused"));
+    expect(await screen.findByText("PAUSED")).toHaveClass("ph-tag-muted");
+  });
+
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {
     mount(item("running"));
     expect(await screen.findByRole("heading", { level: 1, name: "Design the cache" })).toBeInTheDocument();

@@ -13,6 +13,7 @@ import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
+import { FILED_PAUSED, KEEP_EDITING } from "./newWords";
 import { mod, sendOnModEnter } from "../keys";
 import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
@@ -215,14 +216,14 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           <>
             <span className="composer-ask">Discard this draft? Nothing has been created.</span>
             <button type="button" className="btn btn-danger" onClick={discard}>Discard</button>
-            <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(false)}>Keep editing</button>
+            <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(false)}>{KEEP_EDITING}</button>
           </>
         ) : (
           <>
             <span className="composer-note">
               {error ? <span className="item-error" role="alert">{error}</span>
                 : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
-                : "Created paused. Nothing spends tokens until you start it."}
+                : FILED_PAUSED}
             </span>
             <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>

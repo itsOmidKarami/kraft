@@ -54,6 +54,9 @@ describe("the new work item screen (G)", () => {
     mount();
     expect(await screen.findByRole("button", { name: "Create paused" })).toHaveClass("ph-btn-primary");
     expect(screen.getByRole("button", { name: "Create and start" })).not.toHaveClass("ph-btn-primary");
+    const buttons = screen.getAllByRole("button", { name: /^Create / }).map((b) => b.textContent);
+    expect(buttons).toEqual(["Create paused", "Create and start"]);
+    expect(screen.getByText("Created paused. Nothing spends tokens until you start it.")).toBeInTheDocument();
   });
 
   it("Create paused and Create and start send the same body except autostart", async () => {
@@ -141,6 +144,8 @@ describe("discarding (G.2)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     const sheet = screen.getByRole("dialog", { name: "Discard this draft?" });
     expect(where()).toBe("/work-items/new");
+    expect(within(sheet).queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(within(sheet).getByRole("button", { name: "Keep editing" })).toBeInTheDocument();
     await userEvent.click(within(sheet).getByRole("button", { name: "Discard" }));
     await waitFor(() => expect(where()).toBe("/"));
     expect(sessionStorage.getItem("kraft.ng.phone.new")).toBeNull();

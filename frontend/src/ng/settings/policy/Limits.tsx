@@ -1,6 +1,6 @@
 import { Inbox, Layers, Rows3, Server, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
-import { capKey, KEYS } from "./keys";
+import { capKey, KEYS, limitLabel } from "./keys";
 import { PolicyCell } from "./PolicyCell";
 import { SectionHead } from "./SectionHead";
 import { outerValue, problemAt, scopeUnset, type Ctx } from "./ctx";
@@ -87,7 +87,7 @@ export function Limits({ ctx, preview }: { ctx: Ctx; preview?: ReactNode }) {
           <div className="pol-one">
             <span className="pol-k">outer ceiling</span>
             <PolicyCell draft={ctx.draft} k={KEYS.outer} label="outer ceiling" value={outerValue(ctx)} change={changes.get(KEYS.outer.key)} problem={problemAt(ctx, KEYS.outer.key)} />
-            <span className="pol-help">A second dollar cap on each item. Both bind; the lower one wins{p.limits.work_item_usd.binding ? `: ${p.limits.work_item_usd.binding.key} ${show("usd", p.limits.work_item_usd.binding.value)}` : ""}.</span>
+            <span className="pol-help">A second dollar cap on each item. Both bind; the lower one wins{p.limits.work_item_usd.binding ? `: ${limitLabel(p.limits.work_item_usd.binding.key) ?? p.limits.work_item_usd.binding.key} ${show("usd", p.limits.work_item_usd.binding.value)}` : ""}.</span>
           </div>
         )}
         {level === "tasks" && <p className="pol-note">A wait&apos;s timeout is its task&apos;s wall clock, so the tasks wall-clock maximum is also the longest any wait may wait.</p>}

@@ -4,7 +4,7 @@ import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
 import { SELF_RESTART, afterRestart, bindHost, restartNote, useApply } from "../../apply/store";
-import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "../../settings/accessWords";
+import { ACCESS_LEDE, EMPTY_HOSTS, REACHES, hostSuggestion } from "../../settings/accessWords";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { SAVED } from "../../settings/savedWords";
@@ -125,10 +125,11 @@ export function AccessScreen() {
       <Group
         title="Reach"
         foot="Takes effect on restart. 0.0.0.0 listens on every network this machine is on. To reach Kraft from your phone, prefer a Tailscale address: see Remote access in the docs."
-        rows={[
-          { key: "loopback", label: "This machine only", sub: `${LOOPBACK}:${back.port} · no password`, sw: !lan, onSwitch: () => !(!lan) && void put("bind", { bind: LOOPBACK }), ...mark("bind") },
-          { key: "lan", label: "Local network", sub: `0.0.0.0:${back.port} · password required. For the phone view.`, sw: lan, onSwitch: () => lan || toLan() },
-        ]}
+        radios
+        rows={REACHES.map((m): RowSpec => {
+          const loop = m.bind === LOOPBACK;
+          return { key: m.bind, label: m.title, sub: `${m.bind}:${back.port} · ${m.note}`, selected: loop ? !lan : lan, onClick: () => (loop ? (lan ? void put("bind", { bind: LOOPBACK }) : undefined) : lan ? undefined : toLan()), ...(loop ? mark("bind") : {}) };
+        })}
       />
       {envNote("bind") && <p className="ph-note">{envNote("bind")}</p>}
       <Group

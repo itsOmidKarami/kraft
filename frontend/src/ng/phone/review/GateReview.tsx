@@ -193,16 +193,16 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
           {block && <p className="ph-block-reason" id={blockId} role="status">{block}</p>}
           <ActionBar>
             {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>{REQUEST_CHANGES}</Button>}
-            <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
+            <Button className="ph-btn ph-btn-primary" variant="primary" onClick={() => sheet.open("approve")} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
           </ActionBar>
         </>
       ) : (
         <p className="ph-block-reason" role="status">{decided(events, gate)}</p>
       )}
-      {sheet.is("approve-drafts") && (
+      {sheet.is("approve") && gate && (
         <ConfirmSheet
-          title={`Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?`}
-          text={`Your pending ${pending === 1 ? "comment goes" : "comments go"} out with the approval, as the gate passes: no agent acts on ${pending === 1 ? "it" : "them"}. To have them acted on, Request changes instead.`}
+          title={pending ? `Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?` : `${capitalise(gateName(item.chain_definition.nodes, gate))}?`}
+          text={pending ? `Your pending ${pending === 1 ? "comment goes" : "comments go"} out with the approval, as the gate passes: no agent acts on ${pending === 1 ? "it" : "them"}. To have them acted on, Request changes instead.` : `${next ? `${next}. ` : ""}An approval cannot be taken back.`}
           busy={busy}
           confirm={{ label: "Approve", run: () => void approve() }}
           onClose={sheet.close}

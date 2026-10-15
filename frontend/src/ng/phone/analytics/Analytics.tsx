@@ -5,7 +5,7 @@ import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
-import { boardHref, DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, waitingKpi } from "../../analytics/shared";
+import { boardHref, DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, waitingKpi } from "../../analytics/shared";
 import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -32,14 +32,15 @@ export function Analytics() {
   const delta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   const chains = [...new Set(items.map(chainOf))].sort();
-  const scopeHref = boardHref({ repo });
+  const scopeHref = boardHref({ repo, chain });
   const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
+  const rangeLabel = RANGES.find((r) => r.value === range)!.label;
   return (
     <>
       <RootHeader title="Analytics" />
       <div className="ph-chips" role="group" aria-label="Filters">
-        <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{RANGES.find((r) => r.value === range)!.label}<ChevronDown size={14} aria-hidden="true" /></button>
+        <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{rangeLabel}<ChevronDown size={14} aria-hidden="true" /></button>
         <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></button>
         <button type="button" className="ph-pill" onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></button>
       </div>
@@ -48,6 +49,7 @@ export function Analytics() {
         {!report && !error && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
         {report && t && (
           <>
+            <p className="ph-note">{scopeLine(rangeLabel)}</p>
             {empty ? (
               <p className="ph-empty">{EMPTY_RANGE}</p>
             ) : (

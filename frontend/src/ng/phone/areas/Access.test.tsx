@@ -42,8 +42,9 @@ describe("portProblem", () => {
 describe("Access (O.3)", () => {
   it("on a LAN bind shows Reach, Port, hosts, password, expiry and the sessions", async () => {
     setup();
-    expect(await screen.findByRole("switch", { name: /Local network/ })).toBeChecked();
-    expect(screen.getByRole("switch", { name: /This machine only/ })).not.toBeChecked();
+    const reach = await screen.findByRole("radiogroup", { name: "Reach" });
+    expect(within(reach).getByRole("radio", { name: /Local network/ })).toBeChecked();
+    expect(within(reach).getByRole("radio", { name: /This machine only/ })).not.toBeChecked();
     expect(screen.getByRole("button", { name: /^port/ })).toHaveTextContent("8765");
     expect(screen.getByRole("button", { name: /^hosts/ })).toHaveTextContent("localhost, kraft.local");
     expect(screen.getByRole("button", { name: /^password/ })).toHaveTextContent("•••••••• set");
@@ -54,14 +55,14 @@ describe("Access (O.3)", () => {
 
   it("Reach says 0.0.0.0 listens on every network and points to Remote access, never that Kraft cannot bind publicly", async () => {
     setup();
-    await screen.findByRole("switch", { name: /Local network/ });
+    await screen.findByRole("radio", { name: /Local network/ });
     expect(screen.getByText(/0\.0\.0\.0 listens on every network this machine is on\. .*prefer a Tailscale address: see Remote access/)).toBeInTheDocument();
     expect(screen.queryByText(/never binds publicly/)).toBeNull();
   });
 
   it("on loopback with no password, Local network asks for one and sends it with the bind in one save", async () => {
     const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false });
-    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
     expect(put).not.toHaveBeenCalled();
     const box = screen.getByLabelText("Set a password", { selector: "input" });
     expect(box).toHaveAttribute("type", "password");
@@ -72,13 +73,13 @@ describe("Access (O.3)", () => {
 
   it("on loopback with a password set, Local network switches at once", async () => {
     const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false });
-    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
     await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0" }));
   });
 
   it("on loopback with a password set and no hosts, Local network asks for the phone's host first, pre-filled with this machine's address", async () => {
     const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20", "mybox.local"] });
-    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
     expect(put).not.toHaveBeenCalled();
     const box = screen.getByLabelText("Phone's host", { selector: "input" });
     expect(box).toHaveValue("192.168.1.20");
@@ -88,7 +89,7 @@ describe("Access (O.3)", () => {
 
   it("on loopback with no password and no hosts, saves this machine's address with the password and the bind", async () => {
     const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
-    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
     expect(screen.getByText(/192\.168\.1\.20, this machine's address, goes on Allowed hosts/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Set a password", { selector: "input" }), "hunter2{Enter}");
     await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2", allowed_hosts: ["192.168.1.20"] }));
@@ -105,7 +106,7 @@ describe("Access (O.3)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^session expiry/ }));
     await userEvent.click(screen.getByRole("radio", { name: "30 days" }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ session_expiry_days: 30 }));
-    await userEvent.click(screen.getByRole("switch", { name: /This machine only/ }));
+    await userEvent.click(screen.getByRole("radio", { name: /This machine only/ }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ bind: "127.0.0.1" }));
     expect(put).toHaveBeenCalledTimes(2);
   });

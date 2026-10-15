@@ -19,6 +19,8 @@ export interface RowSpec {
   subCut?: boolean;
   value?: string;
   mono?: boolean;
+  /** The value alone is monospace and stays on one line (a version); the label is plain. */
+  figure?: boolean;
   /** The draft differs from what is published: the value turns amber, with the word for a screen reader. */
   changed?: boolean;
   /** A tap opens an edit sheet (the ✎ shows). */
@@ -55,7 +57,7 @@ function RowBody({ r }: { r: RowSpec }) {
       {r.selected && <span className="ph-row-check" aria-hidden="true">✓</span>}
       {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <span key={c.label} className={`ph-chipword${c.tone ? ` ph-tone-${c.tone}` : ""}`}>{c.label}</span>)}</span>}
       {r.value != null && r.value !== "" && (
-        <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono ? " ph-mono" : ""}`}>
+        <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono || r.figure ? " ph-mono" : ""}${r.figure ? " ph-row-figure" : ""}`}>
           {r.mono ? breakable(r.value) : r.value}
           {r.changed && <span className="ph-visually-hidden"> (changed)</span>}
         </span>
@@ -81,7 +83,7 @@ export function Row({ r }: { r: RowSpec }) {
 }
 
 /** A group: a small-caps head with an optional + Add, a note, a bordered list of rows, a footnote. */
-export function Group({ title, add, note, rows, foot, children }: { title?: string; add?: { label: string; run: () => void }; note?: string; rows?: RowSpec[]; foot?: string; children?: ReactNode }) {
+export function Group({ title, add, note, rows, foot, radios, children }: { title?: string; add?: { label: string; run: () => void }; note?: string; rows?: RowSpec[]; foot?: string; /** The rows are one choice: a radio group named by the title. */ radios?: boolean; children?: ReactNode }) {
   return (
     <section className="ph-group-block" aria-label={title}>
       {(title || add) && (
@@ -91,7 +93,7 @@ export function Group({ title, add, note, rows, foot, children }: { title?: stri
         </div>
       )}
       {note && <p className="ph-note">{note}</p>}
-      {rows && rows.length > 0 && <div className="ph-list">{rows.map((r, i) => <Row key={r.key ?? `${r.label}:${i}`} r={r} />)}</div>}
+      {rows && rows.length > 0 && <div className="ph-list" role={radios ? "radiogroup" : undefined} aria-label={radios ? title : undefined}>{rows.map((r, i) => <Row key={r.key ?? `${r.label}:${i}`} r={r} />)}</div>}
       {children}
       {foot && <p className="ph-note">{foot}</p>}
     </section>
