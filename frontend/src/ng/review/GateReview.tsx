@@ -12,8 +12,7 @@ import { editorName, useEditors } from "../item/editors";
 import { copyPath } from "../ui/copyPath";
 import { FileTree } from "./FileTree";
 import { gateWords } from "../board/rowText";
-import { approveBlock, drafts } from "./finish";
-import { GateConsequence } from "./GateConsequence";
+import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
 
@@ -49,6 +48,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
   };
   const block = approveBlock(item, gate, threads);
   const blockId = useId();
+  const next = gateConsequence(item, gate);
   const pending = drafts(threads).length;
   const add = files.reduce((n, f) => n + f.insertions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
@@ -67,7 +67,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
         <Button variant="primary" disabled={!!block} aria-describedby={block ? blockId : undefined} onClick={onApprove}>Approve</Button>
         <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
       </div>
-      <GateConsequence item={item} gate={gate} className="rv-gate-next" />
+      {next && <p className="rv-gate-next">{next}</p>}
       <div className="rv-gate-body">
         <article className="rv-gate-doc" aria-label="Document">
           {(!doc || doc.state === "loading") && <p className="rv-muted">Loading the document…</p>}

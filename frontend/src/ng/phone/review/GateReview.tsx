@@ -7,8 +7,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { approveBlock, drafts } from "../../review/finish";
-import { GateConsequence } from "../../review/GateConsequence";
+import { approveBlock, drafts, gateConsequence } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -79,6 +78,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const verdict = gate ? autoVerdict(events, gate) : null;
   const block = approveBlock(item, gate, threads);
   const blockId = useId();
+  const next = gateConsequence(item, gate);
   // At the waiting gate the server's `fix_target` names where a rejection goes, and its null that there is
   // none (a legacy row, where the reject route answers 409): only a server that sends no `fix_target` gets
   // the chain's guess, as does a gate the item is not waiting at.
@@ -116,7 +116,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>
           <p className="ph-review-sub">{sub}</p>
-          <GateConsequence item={item} gate={gate} className="ph-review-next" />
+          {next && <p className="ph-review-next">{next}</p>}
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">
