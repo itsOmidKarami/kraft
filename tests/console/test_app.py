@@ -111,7 +111,10 @@ def test_a_server_the_console_cannot_use_is_said_on_every_view(
     assert offered is start
 
 
-def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch):
+@pytest.mark.parametrize(
+    "live_first", [True, False], ids=["live-under-the-open-panel", "live-as-it-closes"]
+)
+def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch, live_first):
     """Spec §7.3: the focused button runs `kraft admin start --detach` in the
     output panel, which returns once the server answers; the console then
     reconnects at once rather than at the end of its backoff."""
@@ -130,8 +133,13 @@ def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch
         focused = app.focused.id
         await pilot.press("enter")
         await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
+        # The server answers before the panel closes, or as it does: either way
+        # the frame's remembered focus must not be the button that is gone.
+        if live_first:
+            app._live_link(Link.LIVE, None)
         await pilot.press("escape")
-        app._live_link(Link.LIVE, None)
+        if not live_first:
+            app._live_link(Link.LIVE, None)
         await pilot.pause()
         return focused, console.output(app), retried, app.focused is app.view
 
