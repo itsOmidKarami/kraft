@@ -45,17 +45,17 @@
 .an-strong { font-weight: 500; }
 .an-share { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .an-share > span { display: block; height: 100%; background: var(--text-sub); }
-.an-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 30px 28px; align-items: start; }
+.an-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 28px; align-items: start; }
 .an-stops { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 .an-stop { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 30px; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .an-stop-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-stop-bar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .an-stop-bar > span { display: block; height: 100%; background: var(--text-sub); }
 .an-stop .an-num { text-align: right; font-variant-numeric: tabular-nums; }
+.an-wide { grid-column: 1 / -1; }
 
-@media (min-width: 1280px) {
-  .an-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .an-wide { grid-column: 1 / -1; }
+@media (max-width: 1279px) {
+  .an-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1023px) {
   .an-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
