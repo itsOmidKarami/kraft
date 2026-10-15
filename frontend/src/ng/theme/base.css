@@ -1,5 +1,5 @@
 /* The new UI's base. Colours come from theme.css, keyed on <html>'s data attributes (applyTheme.ts). */
-:root { --font-sans: "Inter Variable", Inter, system-ui, sans-serif; --fs-meta: 12px; --fs-label: 11px; }
+:root { --font-sans: "Inter Variable", Inter, system-ui, sans-serif; --fs-meta: 13px; --fs-label: 12px; }
 body { margin: 0; font: 14px/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }

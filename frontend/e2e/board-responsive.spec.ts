@@ -19,6 +19,8 @@ for (const width of [1440, 1100, 900]) {
     await page.goto("/");
     const row = page.getByRole("button", { name: new RegExp(`^${title} `) });
     await expect(row).toBeVisible();
+    // The reason tail wraps below 1280, so a row's height depends on the font being loaded.
+    await page.evaluate(() => document.fonts.ready);
     const before = (await row.boundingBox())!;
 
     await row.click();

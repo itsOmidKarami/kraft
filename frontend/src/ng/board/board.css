@@ -68,7 +68,7 @@
 .board-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .board-row-main { all: unset; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 5px; }
 .board-row-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-.board-title { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-title { font-size: 14px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-meta { display: flex; min-width: 0; overflow: hidden; gap: 5px; font-size: var(--fs-meta); color: var(--text-muted); white-space: nowrap; }
 /* What gives way, in order: the reason tail; the repo and chain only cap their own length; the id and the age never
    shrink (R10). The meta line clips at the very end for a row narrower than that. */
@@ -100,6 +100,13 @@
 .tick-gate.is-hot { background: var(--warn); border-color: var(--warn); }
 .tick.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); }
 .tick-gate.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); border-color: transparent; }
+
+/* Narrower than this the reason tail wraps instead of ellipsizing, so "failed at implementation" survives. */
+@media (max-width: 1279px) {
+  .board-meta { overflow: visible; }
+  .board-meta-tail { white-space: normal; align-items: flex-start; overflow: visible; }
+  .board-tail-text { overflow: visible; text-overflow: clip; }
+}
 
 @media (max-width: 1023px) {
   .board-row { grid-template-columns: 18px 30px minmax(0, 1fr) 96px 120px; gap: 4px 10px; }
