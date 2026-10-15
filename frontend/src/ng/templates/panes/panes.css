@@ -38,8 +38,8 @@
 .cfg-chip { flex: none; padding: 0 6px; border-radius: 4px; font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
 .cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
 /* An own value only the item's draft holds, until Review & apply applies it. */
-.cfg-chip.is-draft { background: color-mix(in oklab, var(--warn) 14%, transparent); color: var(--warn); }
-.cfg-dot.is-draft { background: var(--warn); }
+.cfg-chip.is-draft { border: 1px solid var(--mark-change-line); color: var(--mark-change); }
+.cfg-dot.is-draft { box-sizing: border-box; background: transparent; border: 1.5px solid var(--mark-change-line); }
 .cfg-row .icon-btn { min-width: 22px; min-height: 22px; }
 .cfg-gap { flex: none; width: 22px; }
 .cfg-lock { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
@@ -53,9 +53,9 @@
 .tpl-rv-change:is(:hover, :focus-visible) { background: var(--surface-2); }
 .tpl-rv-sign { flex: none; width: 12px; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; }
 .tpl-rv-sign.is-add { color: var(--ok); }
-.tpl-rv-sign.is-change { color: var(--warn); }
+.tpl-rv-sign.is-change { color: var(--mark-change); }
 .tpl-rv-sign.is-remove { color: var(--bad); }
-.tpl-rv-sign.is-rename { color: var(--warn); }
+.tpl-rv-sign.is-rename { color: var(--mark-change); }
 .tpl-rv-path { flex: none; max-width: 60%; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
 .tpl-rv-sum { flex: 0 1 auto; min-width: 0; margin-left: auto; font-size: var(--fs-meta); color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
 .tpl-rv-prob { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; padding: 6px 8px; border-left: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-size: var(--fs-label); color: var(--text); }

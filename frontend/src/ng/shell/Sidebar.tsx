@@ -84,7 +84,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         {board && needsYou > 0 && <span className="ng-side-dot" aria-hidden />}
         {area && (
           <span className="ng-side-badges ng-side-label" aria-hidden>
-            <span className="ng-side-dot" />
+            <span className="ng-side-dot is-draft" />
             {area.problems > 0 && <span className="ng-side-count">{area.problems}</span>}
           </span>
         )}

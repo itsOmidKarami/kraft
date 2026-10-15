@@ -16,7 +16,7 @@
 .rp-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .rp-mark { flex: none; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; }
 .rp-mark.is-add { color: var(--ok); }
-.rp-mark.is-change { color: var(--warn); }
+.rp-mark.is-change { color: var(--mark-change); }
 .rp-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
 .rp-cell { min-width: 0; color: var(--text-sub); }
 .rp-cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -37,7 +37,7 @@
 .rp-src { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
 .rp-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; font-size: var(--fs-label); color: var(--text-muted); }
 .rp-chip.is-own { color: var(--text-sub); }
-.rp-chip.is-changed { border-color: var(--warn); color: var(--text); }
+.rp-chip.is-changed { border-color: var(--mark-change-line); color: var(--text); }
 .rp-reset { padding: 0; border: 0; background: transparent; font-size: var(--fs-label); color: var(--text-muted); text-decoration: underline; cursor: pointer; }
 .rp-reset:is(:hover, :focus-visible) { color: var(--text); }
 .rp-v .segmented { flex-wrap: wrap; max-width: 100%; }

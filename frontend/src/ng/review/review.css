@@ -63,7 +63,7 @@
 .rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
 .rv-file-icon { flex: none; color: var(--text-muted); }
 .rv-file-icon[data-lang="python"] { color: var(--info); }
-.rv-file-icon[data-lang="clike"] { color: var(--warn); }
+.rv-file-icon[data-lang="clike"] { color: var(--text-sub); }
 .rv-file-icon[data-lang="shell"] { color: var(--ok); }
 .rv-file-row.is-viewed > :is(.rv-file-icon, .rv-file-name) { opacity: 0.6; }
 .rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }

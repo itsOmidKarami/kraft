@@ -48,7 +48,7 @@
 .pol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pol-chip { padding: 2px 10px; border: 1px dashed var(--border); border-radius: 5px; background: transparent; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); cursor: pointer; }
 .pol-chip.is-on { border-style: solid; background: var(--surface-2); color: var(--text); }
-.pol-chip.is-changed { border-color: var(--warn); }
+.pol-chip.is-changed { border-color: var(--mark-change-line); }
 .pol-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .pol-pv { display: flex; flex-direction: column; gap: 1px; margin: 2px 0; padding: 6px; border-radius: 6px; }
 .pol-pv.is-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }

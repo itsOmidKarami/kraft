@@ -95,7 +95,7 @@ describe("harness pane", () => {
     ]);
   });
 
-  it("a refusal is shown in the pane, and a changed harness turns its fields amber", async () => {
+  it("a refusal is shown in the pane, and a changed harness marks its fields as changed", async () => {
     serve(view(resolved(), { changes: [{ path: "harnesses.claude", kind: "change", summary: "enabled" }] }), {
       opsAnswer: () => new Response(JSON.stringify({ detail: "executable is a command name or path, or null" }), { status: 422 }),
     });
@@ -123,7 +123,7 @@ describe("harness pane", () => {
     expect(within(p).getByText(/an item or a retry override may name it/)).toBeInTheDocument();
   });
 
-  it("amber help text while the access is changed in the draft", async () => {
+  it("changed help text while the access is changed in the draft", async () => {
     serve(view(resolved(), { changes: [{ path: "access.claude", kind: "change", summary: "x" }] }));
     renderPage("?harness=claude");
     const p = await pane("claude");

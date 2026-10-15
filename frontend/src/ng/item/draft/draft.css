@@ -1,5 +1,5 @@
 /* The item draft (W11): the header state, passed and problem blocks, the review and leave dialogs. */
-.idr-chip { flex: none; margin-left: 4px; padding: 0; border: 0; background: none; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); cursor: pointer; }
+.idr-chip { flex: none; margin-left: 4px; padding: 0; border: 0; background: none; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--mark-change); cursor: pointer; }
 .idr-chip:is(:hover, :focus-visible) { text-decoration: underline; }
 .idr-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
 .idr-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
@@ -16,7 +16,7 @@
 .idr-prob:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
 .idr-lines { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-sub); }
 .idr-line.is-add { color: var(--ok); }
-.idr-line.is-change { color: var(--warn); }
+.idr-line.is-change { color: var(--mark-change); }
 .idr-line.is-remove { color: var(--bad); }
 .idr-h { margin: 0 0 4px; font-size: var(--fs-meta); color: var(--text-muted); }
 .idr-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-meta); }

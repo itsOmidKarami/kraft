@@ -14,13 +14,13 @@
 .ph-diff-line { white-space: pre; color: var(--text-muted); }
 .ph-diff-add { color: var(--diff-add-theme); }
 .ph-diff-del { color: var(--diff-del-theme); }
-.ph-thread { padding: 10px 14px; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); background: color-mix(in oklab, var(--warn) 8%, var(--side)); }
+.ph-thread { padding: 10px 14px; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); background: var(--side); }
 .ph-thread.ph-is-resolved { opacity: .7; }
-.ph-thread-head { display: block; margin-bottom: 4px; font-weight: 500; color: var(--warn); }
+.ph-thread-head { display: block; margin-bottom: 4px; font-weight: 500; color: var(--text); }
 .ph-thread-body { overflow-wrap: anywhere; }
 .ph-thread-body p { margin: 0 0 6px; }
 .ph-block-reason { flex: none; margin: 0; padding: 8px 16px 0; border-top: 1px solid var(--line); font-size: var(--fs-label); color: var(--text-muted); background: var(--bg); }
 .ph-review-group { margin: 0; padding: 10px 14px 2px; font-size: var(--fs-label); font-weight: 600; color: var(--text-muted); }
 .ph-thread-quote { margin: 0 0 6px; padding: 6px 8px; overflow-x: auto; border-radius: 6px; background: var(--side); font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; }
-.ph-thread-pending { display: inline-block; margin-bottom: 2px; font-size: var(--fs-label); font-weight: 600; color: var(--warn); }
+.ph-thread-pending { display: inline-block; margin-bottom: 2px; font-size: var(--fs-label); font-weight: 600; color: var(--mark-change); }
 .ph-review-next { margin: 4px 0 0; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; }

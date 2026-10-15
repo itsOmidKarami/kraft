@@ -14,7 +14,7 @@ export interface MenuItem {
   hint?: string;
   /** A second, quieter line under the label. */
   sub?: string;
-  /** A dot after the label: an unpublished draft (amber) or a problem (red); `dotLabel` names it for a screen reader. */
+  /** A dot after the label: an unpublished draft (a hollow neutral ring) or a problem (red); `dotLabel` names it for a screen reader. */
   dot?: "draft" | "problem";
   dotLabel?: string;
   /** A glyph before the label. */
