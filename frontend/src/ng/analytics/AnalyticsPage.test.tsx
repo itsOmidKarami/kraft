@@ -112,6 +112,24 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByRole("table", { name: "Merged items per week" })).toBeInTheDocument();
   });
 
+  it.each([
+    { id: "under a minute", node: { runs: 4, avg_ms: 20_000 }, cell: "<1 min" },
+    { id: "a true zero", node: { runs: 4, avg_ms: 0 }, cell: "0" },
+    { id: "no runs", node: { runs: 0, avg_ms: 0, cost_usd: 0, cost_complete: false }, cell: "—" },
+    { id: "whole minutes", node: { runs: 4, avg_ms: 1.2e6 }, cell: "20" },
+  ])("reads a node's mean as $cell for $id, and draws no cost bar where there is no data", async ({ node, cell }) => {
+    await show({ ...REPORT, by_node: [{ ...REPORT.by_node[0], ...node }] });
+    const row = document.querySelector<HTMLElement>("tr[data-node=implementation]")!;
+    expect(row.querySelectorAll("td")[2].textContent).toBe(cell);
+    expect(!!row.querySelector(".an-share")).toBe(cell !== "—");
+  });
+
+  it("reads a span nothing measured as a dash, not 0s", async () => {
+    await show({ ...REPORT, totals: { ...REPORT.totals, completed: 0, median_lead_ms: 0, open_mr_to_green_ci_ms: 0 } });
+    expect(screen.getByText("Lead time").parentElement).toHaveTextContent("—");
+    expect(screen.getByText(/open MR → checks done — median/)).toBeInTheDocument();
+  });
+
   it("collapses an empty section to one line under its heading, in no panel", async () => {
     await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 0, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
     expect(screen.getByText("Nothing merged in this range.")).toBeInTheDocument();

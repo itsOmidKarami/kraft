@@ -42,6 +42,13 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(tile("Repairs per item")).getByText("2 hit their cap")).toBeInTheDocument();
   });
 
+  it("reads a lead time and a checks span nothing measured as a dash, not 0s", async () => {
+    mount([200, { ...REPORT, totals: { ...REPORT.totals, completed: 0, median_lead_ms: 0, open_mr_to_green_ci_ms: 0 }, by_node: [{ ...REPORT.by_node[0] }] }]);
+    await screen.findByText("$38.20");
+    expect(within(tile("Lead time")).getByText("—")).toBeInTheDocument();
+    expect(screen.getByText(/open MR → checks done — median/)).toBeInTheDocument();
+  });
+
   it("makes its scrolling area reachable from the keyboard (R14b-03)", async () => {
     mount();
     await screen.findByText("$38.20");

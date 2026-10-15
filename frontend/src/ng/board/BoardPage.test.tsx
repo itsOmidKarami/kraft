@@ -220,6 +220,25 @@ describe("BoardPage", () => {
     expect(screen.getByRole("searchbox", { name: "Filter" })).toHaveFocus();
   });
 
+  it("lists its keyboard shortcuts from ? and from the button, and hints / in the empty filter", async () => {
+    put(item("r1", "running"));
+    board();
+    await screen.findByRole("button", { name: /Item r1/ });
+    const filter = screen.getByRole("searchbox", { name: "Filter" });
+    expect(filter.parentElement).toHaveTextContent("/");
+    fireEvent.keyDown(filter, { key: "?" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent("Focus the filter");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(filter, "x");
+    expect(filter.parentElement).not.toHaveTextContent("/");
+  });
+
   it("selects a row into the URL (peek), Escape clears it; with Open in: Full page it opens the item", async () => {
     put(item("r1", "running"));
     const { unmount } = board();
@@ -307,11 +326,16 @@ describe("BoardPage", () => {
   });
 
   it("selects Done's rows with Select all, and keeps the ones a bulk action failed on checked", async () => {
-    put(item("d1", "done", { status: "completed" }), item("d2", "done", { status: "completed" }), item("r3", "running"));
+    put(item("d1", "done", { status: "completed" }), item("d2", "done", { status: "completed" }), item("r3", "running"), item("n4", "needs_you"));
     stubFetch({ "POST /work-items/bulk": [200, { results: [{ id: "d1", ok: true }, { id: "d2", ok: false, error: "only a completed or abandoned item can be archived" }] }] });
     board();
     const done = await screen.findByRole("region", { name: "Done" });
-    expect(within(screen.getByRole("region", { name: "Running" })).queryByRole("button", { name: "Select all" })).toBeNull();
+    // Needs you carries it too, and takes only its own rows.
+    await userEvent.click(within(screen.getByRole("region", { name: "Needs you" })).getByRole("button", { name: "Select all" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Item n4" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Item r3" })).not.toBeChecked();
+    await userEvent.click(within(screen.getByRole("region", { name: "Needs you" })).getByRole("checkbox", { name: "Select Item n4" }));
     await userEvent.click(within(done).getByRole("button", { name: "Select all" }));
     expect(screen.getByText("2 selected")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Archive 2" }));

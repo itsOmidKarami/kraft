@@ -4,7 +4,7 @@ import * as api from "../../../api";
 import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
-import { DEFAULT_RANGE, gateRows, HOW_COUNTED, RANGES } from "../../analytics/shared";
+import { DEFAULT_RANGE, gateRows, HOW_COUNTED, measured, RANGES } from "../../analytics/shared";
 import { chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -48,7 +48,7 @@ export function Analytics() {
           <>
             <div className="ph-tiles">
               <Tile label="Completed" value={String(t.completed)} sub={delta == null ? "no previous period" : `${delta >= 0 ? "+" : ""}${delta} vs previous`} />
-              <Tile label="Lead time" value={elapsed(t.median_lead_ms)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
+              <Tile label="Lead time" value={measured(t.median_lead_ms, t.completed > 0)} sub={`median · ${t.human_wait_pct}% waiting on you`} />
               <Tile label="Cost" value={usd(t.cost_usd, t.cost_complete)} sub={t.completed ? `${usd(t.cost_usd / t.completed)} per completed item` : "nothing completed yet"} />
               <Tile label="Repairs per item" value={t.fix_cycles.toFixed(1)} sub={t.fix_cycles_capped ? `${t.fix_cycles_capped} hit their cap` : "none hit their cap"} />
             </div>
@@ -106,7 +106,7 @@ export function Analytics() {
                       ))}
                     </div>
                   )}
-                  <p className="ph-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {elapsed(t.open_mr_to_green_ci_ms)} median</p>
+                  <p className="ph-note">{t.unplanned_touches_per_item.toFixed(2)} unplanned touches per item · open MR → checks done {measured(t.open_mr_to_green_ci_ms)} median</p>
                 </Block>
                 <details className="ph-how">
                   <summary>How this is counted</summary>
