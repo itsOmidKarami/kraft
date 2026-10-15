@@ -19,6 +19,9 @@ import httpx
 import pytest
 from support.api import run_with_app
 from support.harness import connected_repo
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 from kraft import client
 
@@ -268,3 +271,36 @@ def test_cancel_preview_says_what_a_cancel_would_keep(wired, tmp_path):
     assert set(preview) == {"running", "kept", "mr", "spend", "beads"}
     assert preview["kept"]["worktree"].endswith(wid)
     assert item["status"] == "paused"
+
+
+def _handshake(status: int) -> InvalidStatus:
+    return InvalidStatus(Response(status, "", Headers()))
+
+
+@pytest.mark.parametrize(
+    ("refusal", "kind"),
+    [
+        (_handshake(401), client.Failure.UNAUTHORIZED),
+        (_handshake(403), client.Failure.UNAUTHORIZED),
+        (_handshake(502), client.Failure.UNREACHABLE),
+        (ConnectionRefusedError(61, "refused"), client.Failure.UNREACHABLE),
+    ],
+    ids=["401", "403", "502", "refused"],
+)
+def test_a_refused_event_stream_says_whether_the_token_was_refused(monkeypatch, refusal, kind):
+    """The server closes the handshake on a token it does not accept, which
+    arrives as a 403. Read as "no server", the console told a person whose
+    server was running to start one."""
+    import websockets.asyncio.client
+
+    def connect(url, **kwargs):
+        raise refusal
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", connect)
+
+    async def first():
+        return await anext(client.stream_events())
+
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(first())
+    assert caught.value.kind == kind
