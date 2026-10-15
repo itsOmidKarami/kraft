@@ -209,3 +209,62 @@ def test_health_rejects_a_server_that_omits_run_dir(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="older kraft daemon"):
         asyncio.run(client.reads.health())
+
+
+def test_board_rows_are_the_servers_whole_rows_with_their_cursor(wired, tmp_path):
+    """The console draws the board from `display_status`, `actions` and
+    `stop`, which `board()` trims away, and starts its stream at the cursor so
+    it does not replay every event the server ever committed."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("draw me", repo=str(repo))
+        rows, cursor = await client.board_rows()
+        return created["id"], rows, cursor, await client.events(created["id"])
+
+    wid, rows, cursor, evts = run_with_app(wired, scenario)
+    assert [r["id"] for r in rows] == [wid]
+    assert {"display_status", "actions", "updated_at", "stop", "bead_id"} <= set(rows[0])
+    # the cursor is the newest event of any item, so at least this one's newest
+    assert cursor >= evts[-1]["seq"]
+
+
+def test_events_pages_back_from_before_seq(wired, tmp_path, monkeypatch):
+    """The Activity tab loads the newest page, then pages back. The server
+    refuses `after_seq` alongside `before_seq`, so only one is sent."""
+    import kraft.executor
+
+    async def walk(_db, _run_dirs, **kwargs):
+        return None
+
+    monkeypatch.setattr(kraft.executor, "run", walk)
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("page me", repo=str(repo))
+        await client.resume(work_item_id=created["id"])
+        everything = await client.events(created["id"])
+        before = await client.events(created["id"], limit=1, before_seq=everything[-1]["seq"])
+        first = await client.events(created["id"], limit=1)
+        return everything, before, first
+
+    everything, before, first = run_with_app(wired, scenario)
+    assert len(everything) >= 2
+    assert before == [everything[-2]]
+    assert first == [everything[0]]
+
+
+def test_cancel_preview_says_what_a_cancel_would_keep(wired, tmp_path):
+    """The console's cancel confirm shows what stays (branch, worktree) and
+    what was spent before the person commits; nothing changes."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("keep me", repo=str(repo))
+        preview = await client.cancel_preview(created["id"])
+        return created["id"], preview, await client.get_work_item(created["id"])
+
+    wid, preview, item = run_with_app(wired, scenario)
+    assert set(preview) == {"running", "kept", "mr", "spend", "beads"}
+    assert preview["kept"]["worktree"].endswith(wid)
+    assert item["status"] == "paused"

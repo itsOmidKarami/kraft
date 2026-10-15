@@ -16,6 +16,19 @@ from kraft.paths import RunDirs, default_run_dir
 from kraft.vocab import ThreadState, WorkItemStatus
 
 
+async def board_rows(*, include_abandoned: bool = False) -> tuple[list[dict], int]:
+    """The board's rows as the server sends them, and the event cursor they
+    reflect: what the web board and the console draw from (`display_status`,
+    `actions`, `stop`, `updated_at`), where `board()` trims for the CLI and
+    MCP."""
+    # As a param, not in the path: `_get` always hands httpx a `params` dict,
+    # and httpx replaces a query written into the URL with it.
+    payload = await transport._get(
+        "/work-items", include_abandoned="true" if include_abandoned else None
+    )
+    return payload["items"], payload["cursor"]
+
+
 async def board(
     status: str | None = None, *, include_abandoned: bool = False
 ) -> tuple[list[dict], int]:
@@ -31,11 +44,9 @@ async def board(
     `with_cursor=True` flag on `list_work_items` that returns two different
     types: two fields, one caller that needs both.
     """
-    # As a param, not in the path: `_get` always hands httpx a `params` dict,
-    # and httpx replaces a query written into the URL with it.
     wanted = include_abandoned or status == WorkItemStatus.ABANDONED
-    payload = await transport._get("/work-items", include_abandoned="true" if wanted else None)
-    return trim_work_items(payload["items"], status), payload["cursor"]
+    rows, cursor = await board_rows(include_abandoned=wanted)
+    return trim_work_items(rows, status), cursor
 
 
 async def list_work_items(
@@ -110,8 +121,9 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
         work_item_id, _origin = context.resolve_context()
     if work_item_id is None:
         worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
-        raise ValueError(
-            f"no work item: pass an id, or run from a Kraft worktree under {worktrees}"
+        raise transport.ClientError(
+            f"no work item: pass an id, or run from a Kraft worktree under {worktrees}",
+            kind=transport.Failure.REFUSED,
         )
     item = await transport._get(f"/work-items/{transport.segment(work_item_id)}")
     if full:
@@ -170,16 +182,39 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
     return item.get("worker_sessions", [])
 
 
-async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[dict]:
+async def events(
+    work_item_id: str | None = None,
+    after_seq: int = 0,
+    *,
+    limit: int | None = None,
+    before_seq: int | None = None,
+) -> list[dict]:
     """The chain's own history: node transitions, gate decisions, escalations.
 
     This is the "why is it stopped" view, where the log is the "what is it
-    saying" view.
+    saying" view. Oldest first. `before_seq` pages back instead: the last
+    `limit` events before it. The server refuses `after_seq` alongside it, so
+    only one of the two is sent.
     """
     target = await context.resolve_work_item(work_item_id)
+    since = {"before_seq": before_seq} if before_seq is not None else {"after_seq": after_seq}
     return await transport._get(
-        f"/work-items/{transport.segment(target)}/events", after_seq=after_seq
+        f"/work-items/{transport.segment(target)}/events", limit=limit, **since
     )
+
+
+async def update_available(channel: str | None = None) -> dict:
+    """What the About page reads: the installed version, the newest release on
+    `channel` (the installed one's when None) and whether this is behind;
+    `behind` is None when the feed could not be read."""
+    return await transport._get("/update", channel=channel)
+
+
+async def cancel_preview(work_item_id: str | None = None) -> dict:
+    """What cancelling would do, changing nothing: what the web's cancel
+    dialog shows before the person commits."""
+    target = await context.resolve_work_item(work_item_id)
+    return await transport._get(f"/work-items/{transport.segment(target)}/cancel-preview")
 
 
 def _log_path(work_item_id: str | None, session_id: str) -> str:
@@ -255,7 +290,7 @@ async def stream_log(
             ) as response:
                 if response.status_code >= 400:
                     await response.aread()
-                    raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
+                    raise transport.status_error(response.status_code, transport._detail(response))
                 async for raw in response.aiter_lines():
                     if raw.startswith("event: end"):
                         return
@@ -266,14 +301,13 @@ async def stream_log(
                             if line.get("n", 0) >= after_line:
                                 yield line
         except httpx.ConnectError as exc:
-            raise ValueError(
-                f"no Kraft server at {transport.base_url()} — start one with `kraft`"
-            ) from exc
+            raise transport._unreachable() from exc
         except httpx.HTTPError as exc:
             # a follow outlives its request: a read error mid-stream is the
             # server going away, and reads as a sentence like any other failure
-            raise ValueError(
-                f"the Kraft server at {transport.base_url()} closed the log stream"
+            raise transport.ClientError(
+                f"the Kraft server at {transport.base_url()} closed the log stream",
+                kind=transport.Failure.INTERRUPTED,
             ) from exc
 
 
@@ -337,8 +371,8 @@ async def permission_request(
             },
             **({"timeout": ENFORCE_TIMEOUT} if mode == "enforce" else {}),
         )
-    # `_send` raises ValueError for a server that is not there; httpx's own
-    # errors (a timeout) are the same answer.
+    # `_send` turns every transport error into a ClientError (a ValueError), so
+    # the `httpx.HTTPError` catch only meets decoding and redirect errors.
     # Both failures read as the one line a refused call reads as everywhere
     # (`transport.refusal`): `kraft: 404: unknown session`, never `kraft 404:`.
     except (ValueError, httpx.HTTPError) as exc:
@@ -371,14 +405,13 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
             async for message in socket:
                 yield json.loads(message)
     except (OSError, InvalidHandshake) as exc:
-        raise ValueError(
-            f"no Kraft server at {transport.base_url()} — start one with `kraft`"
-        ) from exc
+        raise transport._unreachable() from exc
     except ConnectionClosed as exc:
         # mid-stream: the server went away while we were watching, which is a
         # sentence like any other failure, not a traceback out of the event loop
-        raise ValueError(
-            f"the Kraft server at {transport.base_url()} closed the event stream"
+        raise transport.ClientError(
+            f"the Kraft server at {transport.base_url()} closed the event stream",
+            kind=transport.Failure.INTERRUPTED,
         ) from exc
 
 
@@ -492,9 +525,10 @@ async def health() -> dict:
             else "probably a different KRAFT_HOME/KRAFT_RUN_DIR, or something "
             "else already on this port"
         )
-        raise ValueError(
+        raise transport.ClientError(
             f"kraft: the server at {transport.base_url()} is a different instance "
-            f"(run_dir {actual!r}, expected {expected!r}) - {cause}"
+            f"(run_dir {actual!r}, expected {expected!r}) - {cause}",
+            kind=transport.Failure.OTHER_INSTANCE,
         )
     return payload
 
@@ -509,8 +543,8 @@ async def reindex(repo: str | None = None) -> dict:
         "POST", "/index/rescan", params={"repo": context.absolute_path(repo)} if repo else None
     )
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
-    return response.json()
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def search(q: str, limit: int = 20) -> dict:

@@ -68,7 +68,7 @@ async def create_work_item(
         # the error below only fires when there really is no repo to find.
         repo = await context.resolve_repo()
     if not repo:
-        raise ValueError(_no_repo_message())
+        raise transport.ClientError(_no_repo_message(), kind=transport.Failure.REFUSED)
     status, body = await transport._post(
         "/work-items",
         {
@@ -89,7 +89,7 @@ async def create_work_item(
         },
     )
     if status >= 400:
-        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
+        raise transport.status_error(status, transport.detail_of(body))
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
     # `slots`: an --autostart filed paused because every slot was busy says so.
     for told in ("slots", "waiting_on", "repo_warning", "bead_warning", "duplicate_warning"):
@@ -138,7 +138,7 @@ async def probe_repo(
         payload["test_command"] = test_command
     status, body = await transport._post("/repos/probe", payload, timeout=CONNECT_TIMEOUT_S)
     if status >= 400:
-        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
+        raise transport.status_error(status, transport.detail_of(body))
     return body
 
 
@@ -165,9 +165,10 @@ async def ensure_repo(
     except ValueError as exc:
         if "in time" not in str(exc):
             raise
-        raise ValueError(
+        raise transport.ClientError(
             f"connecting {path} is taking longer than {CONNECT_TIMEOUT_S}s; the server may "
-            "still save it, so check `kraft repo list` before connecting again"
+            "still save it, so check `kraft repo list` before connecting again",
+            kind=transport.Failure.INTERRUPTED,
         ) from exc
     if status == 409:
         # The probe still runs, and still first: it is what resolves the given
@@ -181,7 +182,7 @@ async def ensure_repo(
             "/repos/probe", {"path": path, "detect": False}
         )
         if probe_status >= 400:
-            raise ValueError(f"kraft {probe_status}: {transport.detail_of(probed)}")
+            raise transport.status_error(probe_status, transport.detail_of(probed))
         listing = await transport._get("/repos")
         stored = next(
             (r for r in listing.get("repos", []) if r.get("path") == probed.get("path")),
@@ -191,16 +192,19 @@ async def ensure_repo(
         # a stale read must degrade to the old behaviour, not raise.
         return {**(stored or probed), "already_connected": True}
     if status >= 400:
-        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
+        raise transport.status_error(status, transport.detail_of(body))
     return {**body, "already_connected": False}
 
 
 async def update_repo(path: str, fields: dict) -> dict:
     """Change a connected repo's `fields` (`PATCH /repos`); the entry as saved."""
     response = await transport._send("PATCH", "/repos", params={"path": path}, json=fields)
-    body = response.json() if response.content else {}
+    try:
+        body = response.json() if response.content else {}
+    except ValueError:
+        body = {"detail": response.text}
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {body.get('detail', body)}")
+        raise transport.status_error(response.status_code, str(body.get("detail", body)))
     return body
 
 
@@ -221,8 +225,8 @@ async def repo_library(path: str | None = None) -> dict:
         "GET", "/repos/library", params={"path": await _connected_path(path)}, timeout=120
     )
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")
-    return response.json()
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def accept_repo_library(path: str | None, digest: str) -> dict:
@@ -234,7 +238,7 @@ async def accept_repo_library(path: str | None, digest: str) -> dict:
         timeout=120,
     )
     if status >= 400:
-        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
+        raise transport.status_error(status, transport.detail_of(body))
     return body
 
 
@@ -263,7 +267,9 @@ async def disconnect_repo(path: str | None = None) -> dict:
 async def _pending_gate_of(work_item_id: str) -> str:
     gate = (await reads.get_work_item(work_item_id)).get("pending_gate")
     if not gate:
-        raise ValueError(f"kraft: no gate is pending on {work_item_id}")
+        raise transport.ClientError(
+            f"kraft: no gate is pending on {work_item_id}", kind=transport.Failure.REFUSED
+        )
     return gate
 
 
@@ -293,7 +299,9 @@ async def reject_gate(
     own `reject_to`, and failing that the gate node itself (Kraft-ko7j).
     """
     if not note or not note.strip():
-        raise ValueError("a reject note is required: say what is wrong")
+        raise transport.ClientError(
+            "a reject note is required: say what is wrong", kind=transport.Failure.REFUSED
+        )
     target = context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
     payload: dict = {"note": note.strip()}
@@ -524,7 +532,9 @@ async def set_attachments(
     changes: dict = {k: v for k, v in (("spec", spec), ("plan", plan)) if v}
     changes |= dict.fromkeys(drop or [])
     if not changes:
-        raise ValueError("kraft: set-attachments needs --spec, --plan or --drop")
+        raise transport.ClientError(
+            "kraft: set-attachments needs --spec, --plan or --drop", kind=transport.Failure.REFUSED
+        )
     target = context._forbid_self_action(work_item_id)
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"attachments": changes, "cwd": str(Path.cwd())}
@@ -562,8 +572,9 @@ async def set_agent_overrides(
             if v is not None
         }
         if not overrides:
-            raise ValueError(
-                "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
+            raise transport.ClientError(
+                "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear",
+                kind=transport.Failure.REFUSED,
             )
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"agent_overrides": overrides}
@@ -612,9 +623,10 @@ async def set_node_overrides(
             if v is not None
         }
         if not fields:
-            raise ValueError(
+            raise transport.ClientError(
                 "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
-                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, or --clear"
+                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, or --clear",
+                kind=transport.Failure.REFUSED,
             )
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"node_overrides": {node_id: fields}}
@@ -636,7 +648,10 @@ async def set_work_item_policy(
     own caps is exactly the self-action the other verbs refuse."""
     target = context._forbid_self_action(work_item_id)
     if not clear and not policy:
-        raise ValueError("kraft: set-policy needs --policy FIELD=VALUE or --clear")
+        raise transport.ClientError(
+            "kraft: set-policy needs --policy FIELD=VALUE or --clear",
+            kind=transport.Failure.REFUSED,
+        )
     return await transport._patch(
         f"/work-items/{transport.segment(target)}", {"policy": {} if clear else policy}
     )
