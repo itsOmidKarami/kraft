@@ -54,6 +54,10 @@ jobs:
           npm ci --prefix docsite
           dev/build_docs_site.sh "$RUNNER_TEMP/site"
 
+      # The order of the search's hits (docsite/app/utils/searchRank.ts).
+      - name: test the docs search
+        run: node --experimental-strip-types --test "docsite/tests/*.test.ts"
+
       # The copies written for LLMs (raw/*.md, which llms.txt, "Copy page" and
       # "Open in Claude/ChatGPT" serve, and llms-full.txt) are not HTML, so the
       # lychee step below never reads them. Every push too, not only PRs:
