@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
 import { ago, elapsed, logLineText, plural, until, usd } from "../../format";
-import { humanSize } from "../../sizes";
+import { countedAgainst } from "../settings/storageWords";
 import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types";
 import { Ban, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
@@ -199,7 +199,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
     const s = item.queued.storage;
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued",
-      text: `Waiting for space: worktrees use ${humanSize(s.used_bytes)} of the ${humanSize(s.limit_bytes)} storage limit. It starts when space frees.`,
+      text: `Waiting for space: ${countedAgainst(s.used_bytes, s.limit_bytes)}. It starts when space frees.`,
       facts: [], actions: [],
     };
   }

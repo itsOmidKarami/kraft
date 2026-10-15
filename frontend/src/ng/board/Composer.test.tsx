@@ -120,7 +120,7 @@ describe("Composer", () => {
     window.addEventListener("kraft:toast", hear);
     sayIfFiledPaused(true, { id: "w", status: "queued", slots: { busy: 0, limit: 3, storage: { used_bytes: 12 * 1024 ** 3, limit_bytes: 10 * 1024 ** 3 } } });
     window.removeEventListener("kraft:toast", hear);
-    expect(toasts).toEqual(["Queued: worktrees use 12 GB of the 10 GB storage limit. It starts when space frees."]);
+    expect(toasts).toEqual(["Queued: 12 GB counted against the 10 GB limit. It starts when space frees."]);
   });
 
   it("says before filing that an item on a repo with no setup command stops before its first task", async () => {

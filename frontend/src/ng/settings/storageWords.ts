@@ -37,4 +37,7 @@ export const cleanAll = (count: number, bytes: number) => `Clean up all (${count
 export const COUNTED = "worktrees, sandboxes and documents";
 
 /** The key figure, said once above the bar: what is counted, against the limit when there is one. */
-export const usageFigure = (used: number, limit: number | null) => (limit != null ? `${humanSize(used)} counted against the ${humanSize(limit)} limit` : `${humanSize(used)} counted: ${COUNTED}`);
+/** The same words wherever the total meets the limit: the Storage figure, the queued toast, the queued card. */
+export const countedAgainst = (used: number, limit: number) => `${humanSize(used)} counted against the ${humanSize(limit)} limit`;
+
+export const usageFigure = (used: number, limit: number | null) => (limit != null ? countedAgainst(used, limit) : `${humanSize(used)} counted: ${COUNTED}`);
