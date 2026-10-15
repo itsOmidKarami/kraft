@@ -460,3 +460,45 @@ main table:has(th:nth-child(6)) :is(th, td):first-child {
 main table:has(th:nth-child(6)) th:first-child {
   background: var(--ui-bg-muted);
 }
+
+/* A card's description under a page (previous and next) is cut at two lines
+   with an ellipsis, but the next card sets its text at the right edge, and
+   there the browser draws no ellipsis: the description ended mid-sentence with
+   nothing to say it went on. The title and the arrow keep the edge; the
+   description reads from the start, as it does on the previous card. */
+[data-slot='linkDescription'] {
+  text-align: start;
+}
+
+/* A block fenced `bash each` has a copy button on every command line
+   (ProsePre.vue), at the end of the line: faint, and full on hover or
+   keyboard focus; always shown where there is no hover. */
+.copy-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-inline-start: 0.75rem;
+  vertical-align: middle;
+  border-radius: 0.375rem;
+  color: var(--ui-text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+.line:hover .copy-line,
+.copy-line:focus-visible {
+  opacity: 1;
+}
+.copy-line:hover {
+  color: var(--ui-text-highlighted);
+  background: var(--ui-bg-accented);
+}
+@media (hover: none) {
+  .copy-line {
+    opacity: 1;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-block: -0.5rem;
+  }
+}
