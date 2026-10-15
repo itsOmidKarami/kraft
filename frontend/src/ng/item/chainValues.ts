@@ -26,6 +26,9 @@ export type Given = { value: string; source: string };
 
 export const ENDED = new Set(["done", "cancelled", "archived"]);
 
+/** What a done card says when the chain left no merge request behind; with one, the request is the news. */
+export const doneText = (item: { mr_ref?: unknown }) => (item.mr_ref ? undefined : "The chain finished. No merge request was opened.");
+
 /** Filed and never started: no node has run, and it has not ended. */
 export const notStarted = (item: Pick<ItemDetail, "current_node_id" | "display_status">) => !item.current_node_id && !ENDED.has(item.display_status ?? "");
 

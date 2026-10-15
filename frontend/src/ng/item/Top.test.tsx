@@ -96,6 +96,15 @@ describe("Brief", () => {
     expect(screen.getByRole("textbox", { name: "Brief" })).toBeInTheDocument();
   });
 
+  it("offers no way in on an ended item, which the API refuses to patch", () => {
+    const { unmount } = render(<Brief id="w1" brief="" ended onSaved={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Add a brief" })).toBeNull();
+    unmount();
+    render(<Brief id="w1" brief="Cache embeddings." ended onSaved={() => {}} />);
+    expect(screen.queryByRole("button", { name: "edit" })).toBeNull();
+    expect(screen.getByText("Cache embeddings.")).toBeInTheDocument();
+  });
+
   it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
     const calls = stubFetch(WRITES);
     const onSaved = vi.fn();

@@ -28,7 +28,7 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number };
 /** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
-/** An item's fit: node labels (11.5px) and captions (10.5px) stay at 10px or more, and a chain too wide for it opens on the node that matters (`focus`, a
+/** An item's fit: node labels (11.5px) and captions (11px) stay at 10px or more, and a chain too wide for it opens on the node that matters (`focus`, a
  *  world x) instead of at a 30% fit nobody can read; the canvas counts the nodes that are left off-screen. `start`, the world x of the chain's first mark's left edge,
  *  is kept `left` px in while the focus still fits beside it. */
 export const ITEM_FIT: FitRule = { floor: 0.95, left: 12, initial: true, start: START.cx - START.h };

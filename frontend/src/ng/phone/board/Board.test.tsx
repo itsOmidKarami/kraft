@@ -94,6 +94,19 @@ describe("the phone board (B)", () => {
     expect(within(screen.getByRole("region", { name: "Not started" })).getByText("Item p4")).toBeInTheDocument();
   });
 
+  it("tells a failed card's reason from the other stops by --bad and an icon, as the desktop row does", async () => {
+    put(item("f1", "failed"), gate("g2"));
+    mount();
+    await act(async () => {});
+    const tails = [...document.querySelectorAll<HTMLElement>("[data-row] .ph-card-tail")];
+    const failed = document.querySelector('[data-row="f1"] .ph-card-tail')!;
+    const gated = document.querySelector('[data-row="g2"] .ph-card-tail')!;
+    expect(tails).toHaveLength(2);
+    expect(failed).toHaveClass("ph-is-failed");
+    expect(failed.querySelector("svg")).not.toBeNull();
+    expect(gated).not.toHaveClass("ph-is-failed");
+  });
+
   it("counts the chips from the same rule as the tab badge, and the chip is in the URL", async () => {
     const list = [gate("g1"), item("f2", "failed"), item("r3", "running"), item("d4", "done")];
     put(...list);
@@ -185,7 +198,11 @@ describe("a card's inline actions (B.4)", () => {
     mount();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject…" })).toBeNull();
-    await userEvent.click(await screen.findByRole("button", { name: "Review to approve" }));
+    const review = await screen.findByRole("button", { name: "Review to approve" });
+    // Outlined, as on the desktop row: the filled button is for retry and resume.
+    expect(review).toHaveClass("btn-secondary");
+    expect(review).not.toHaveClass("btn-primary");
+    await userEvent.click(review);
     await waitFor(() => expect(where()).toContain("/work-items/g1/review?gate=plan_approval"));
     expect(calls.filter((c) => c.method === "POST")).toEqual([]);
   });
@@ -208,6 +225,9 @@ describe("a card's inline actions (B.4)", () => {
     expect(card("b2").getByRole("button", { name: "Raise budget" })).toBeInTheDocument();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
+    // Filled or outlined as the desktop row draws the same action: only a gate is outlined.
+    const filled = (id: string, name: string) => card(id).getByRole("button", { name }).classList.contains("btn-primary");
+    expect([filled("c1", "Raise cap"), filled("b2", "Raise budget"), filled("q3", "Answer…"), filled("f4", "Retry…"), filled("p5", "Resume")]).toEqual([true, true, true, true, true]);
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 

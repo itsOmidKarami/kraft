@@ -1,10 +1,10 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import { CircleAlert, CircleHelp, Clock, Pause, TriangleAlert } from "../icons";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
+import { CUE_ICON } from "./cue";
 import { chainOf, groupOf } from "./model";
-import { admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction, type StopCue } from "./rowText";
+import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
 import { Ticks } from "./Ticks";
 
 export interface RowProps {
@@ -22,8 +22,6 @@ export interface RowProps {
   /** The archived view's own action and tail (H): Restore, "archived by you". */
   own?: { label: string; run: () => void; tail: string; age: string };
 }
-
-const CUE_ICON: Record<StopCue, typeof Clock> = { failed: CircleAlert, paused: Pause, gate: Clock, question: CircleHelp, limit: TriangleAlert, other: TriangleAlert };
 
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
@@ -72,7 +70,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
       <span className="board-act">
         {own && <button type="button" className="btn btn-secondary board-act-btn" aria-describedby={titleId} disabled={offline} onClick={own.run}>{own.label}</button>}
         {act && (
-          <button type="button" className={`btn ${act.kind === "gate" ? "btn-secondary" : "btn-primary"} board-act-btn`} aria-describedby={titleId} disabled={offline} onClick={() => onAction(item, act)}>
+          <button type="button" className={`btn btn-${actionVariant(act)} board-act-btn`} aria-describedby={titleId} disabled={offline} onClick={() => onAction(item, act)}>
             {act.label}
           </button>
         )}
