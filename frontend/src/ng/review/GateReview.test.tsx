@@ -12,11 +12,18 @@ const DOC = { work_item_id: "w1", path: ".engineering/reviews/kraft-cb59.md", ti
 const FILES: CompareFile[] = [{ path: "search/cache.py", insertions: 9, deletions: 1, touched_by: ["implementation"], viewed: true }];
 const must = { id: "t1", label: "must_fix", state: "open", draft: false, file_path: "search/cache.py", comments: [] } as unknown as ReviewThread;
 
+// Waiting at final_review, with a merge request to start and one more gate after it.
+const AT = {
+  id: "w1", pending_gate: "final_review",
+  chain_definition: { template_id: "t", nodes: [{ id: "final_review", kind: "gate" }, { id: "merge_request", kind: "exec" }, { id: "post_merge_review", kind: "gate" }] },
+  budget_cap: { spent_usd: 0.04, cap_usd: 10 },
+} as never;
+
 afterEach(() => vi.restoreAllMocks());
 
 const overlay = (o: { threads?: ReviewThread[] } = {}) => {
   const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-  render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: DOC }} files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
+  render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: DOC }} files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
   return p;
 };
 
@@ -26,13 +33,16 @@ describe("GateReview", () => {
     expect(await screen.findByText("Review brief")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Summary" })).toBeInTheDocument();
     expect(screen.getByText("WAITING FOR YOU")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Approve final review" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Files on the branch")).toBeInTheDocument();
+    expect(screen.getByText("Approving starts merge request · 1 gate left · $0.040 of $10.00 spent")).toBeInTheDocument();
     expect(screen.getAllByText("1 file")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
   });
 
   it("shows the document's title once and who wrote it (GR-6)", async () => {
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);
     expect(await screen.findAllByText("Review brief")).toHaveLength(1);
     expect(screen.queryByRole("heading", { level: 1, name: "Review brief" })).toBeNull();
     expect(screen.getByText(/^written by/)).toHaveTextContent("written by work_item_summary.main.author");
@@ -47,7 +57,7 @@ describe("GateReview", () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
     const open = await screen.findByRole("button", { name: "Open in editor" });
     await vi.waitFor(() => expect(open).toHaveAttribute("title", "Open in VS Code"));
     await act(async () => fireEvent.click(open));
@@ -64,7 +74,7 @@ describe("GateReview", () => {
     const on = (e: Event) => toasts.push((e as CustomEvent<{ message: string }>).detail.message);
     window.addEventListener("kraft:toast", on);
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
     await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Copy path" })));
     window.removeEventListener("kraft:toast", on);
     vi.unstubAllGlobals();
@@ -81,6 +91,8 @@ describe("GateReview", () => {
     const p = overlay({ threads: [must] });
     await screen.findByText("Review brief");
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveAccessibleDescription("Unavailable while must-fix threads are open.");
+    expect(screen.getByRole("status")).toHaveTextContent("Unavailable while must-fix threads are open.");
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(p.onRequestChanges).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "cache.py" }));

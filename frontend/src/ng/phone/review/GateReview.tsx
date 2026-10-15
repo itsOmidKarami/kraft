@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { docBody } from "../../../format";
@@ -7,7 +7,7 @@ import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { approveBlock, drafts } from "../../review/finish";
+import { approveBlock, drafts, gateConsequence } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
@@ -77,6 +77,8 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const sheet = useSheet();
   const verdict = gate ? autoVerdict(events, gate) : null;
   const block = approveBlock(item, gate, threads);
+  const blockId = useId();
+  const next = gateConsequence(item, gate);
   // At the waiting gate the server's `fix_target` names where a rejection goes, and its null that there is
   // none (a legacy row, where the reject route answers 409): only a server that sends no `fix_target` gets
   // the chain's guess, as does a gate the item is not waiting at.
@@ -114,6 +116,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>
           <p className="ph-review-sub">{sub}</p>
+          {next && <p className="ph-review-next">{next}</p>}
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">
@@ -170,10 +173,10 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         )}
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
-      {block && <p className="ph-block-reason" role="status">{block}</p>}
+      {block && <p className="ph-block-reason" id={blockId} role="status">{block}</p>}
       <ActionBar>
         {rejectable && <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>}
-        <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block}>Approve</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block} aria-describedby={block ? blockId : undefined}>Approve</Button>
       </ActionBar>
       {sheet.is("approve-drafts") && (
         <ConfirmSheet

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { CompareFile, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
 import { docBody, plural } from "../../format";
 import { useModal } from "../../useModal";
@@ -11,7 +11,8 @@ import { OpenInEditor } from "../item/DocViewer";
 import { editorName, useEditors } from "../item/editors";
 import { copyPath } from "../ui/copyPath";
 import { FileTree } from "./FileTree";
-import { approveBlock, drafts } from "./finish";
+import { gateWords } from "../board/rowText";
+import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
 
@@ -20,7 +21,7 @@ import type { Fetched } from "./useReview";
  *  full-page layer over the review page, with its own header; Escape closes it
  *  to the page. */
 export function GateReview({ item, gate, doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
-  item: Pick<WorkItem, "id" | "pending_gate">;
+  item: Pick<WorkItem, "id" | "pending_gate" | "chain_definition" | "budget_cap" | "running_time">;
   gate: string;
   /** GET /artifact, read by the page (its digest also rides on the page's Approve). */
   doc: Fetched<WorkItemArtifact> | null;
@@ -46,6 +47,8 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
   };
   const block = approveBlock(item, gate, threads);
+  const blockId = useId();
+  const next = gateConsequence(item, gate);
   const pending = drafts(threads).length;
   const add = files.reduce((n, f) => n + f.insertions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
@@ -53,15 +56,18 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
   return (
     <div ref={ref} className="rv-gate" role="dialog" aria-modal="true" aria-label={`Gate review: ${gate}`}>
       <div className="rv-gate-head">
-        <span className="rv-mono rv-gate-name">{gate}</span>
+        <h2 className="rv-gate-title">Approve {gateWords(gate)}</h2>
+        <span className="rv-mono rv-muted">{gate}</span>
         <span className="rv-gate-tag">WAITING FOR YOU</span>
         {pending > 0 && <span className="rv-muted">{pending} {pending === 1 ? "comment" : "comments"} pending</span>}
         {error && <span className="rv-error" role="alert">{error}</span>}
         <span className="rv-spacer" />
         <Button onClick={onRequestChanges}>Request changes</Button>
-        <Button variant="primary" disabled={!!block} title={block ?? undefined} onClick={onApprove}>Approve</Button>
+        {block && <span className="rv-muted" id={blockId} role="status">{block}</span>}
+        <Button variant="primary" disabled={!!block} aria-describedby={block ? blockId : undefined} onClick={onApprove}>Approve</Button>
         <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
       </div>
+      {next && <p className="rv-gate-next">{next}</p>}
       <div className="rv-gate-body">
         <article className="rv-gate-doc" aria-label="Document">
           {(!doc || doc.state === "loading") && <p className="rv-muted">Loading the document…</p>}
@@ -84,9 +90,9 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
             </>
           )}
         </article>
-        <aside className="rv-gate-side" aria-label="Changes">
+        <aside className="rv-gate-side" aria-label="Files on the branch">
           <div className="rv-gate-side-head">
-            <span>CHANGES</span>
+            <span>FILES ON THE BRANCH</span>
             <span>{plural(files.length, "file")} <span className="rv-add">+{add}</span> <span className="rv-del">−{del}</span></span>
           </div>
           <FileTree files={files} untracked={[]} notShown={new Set()} threads={threads} selected={null} isViewed={isViewed} onSelect={(f) => onReviewChanges(f)} error={null} />

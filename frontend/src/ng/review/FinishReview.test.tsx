@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FixTarget, ReviewComment, ReviewThread, WorkItem } from "../../types";
 import * as http from "../http";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
-import { approveBlock, outcomes } from "./finish";
+import { approveBlock, gateConsequence, outcomes } from "./finish";
 
 const FIX: FixTarget = { gate: "final_review", node: "implementation", then: ["verification", "work_brief", "local_review", "merge_request", "summary"], round: { n: 2, max: 3 } };
 const item = (o: Partial<WorkItem> = {}) => ({ id: "w1", pending_gate: "final_review", display_status: "needs_you", fix_target: FIX, ...o }) as WorkItem;
@@ -47,6 +47,19 @@ describe("approveBlock", () => {
     expect(approveBlock(item(), "final_review", [th({ label: "must_fix" })])).toBe("Unavailable while must-fix threads are open.");
     expect(approveBlock(item(), "final_review", [th({ label: "must_fix", draft: false, state: "claimed" })])).toBe("Unavailable while must-fix threads are open.");
   });
+});
+
+describe("gateConsequence", () => {
+  const chain = { template_id: "t", nodes: [{ id: "spec_approval", kind: "gate" }, { id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate" }, { id: "implementation", kind: "exec" }, { id: "final_review", kind: "gate" }] } as WorkItem["chain_definition"];
+  const at = (gate: string, o: Partial<WorkItem> = {}) => gateConsequence(item({ pending_gate: gate, chain_definition: chain, budget_cap: { spent_usd: 0.04, cap_usd: 10 } as WorkItem["budget_cap"], ...o }), gate);
+  it.each([
+    ["names the next node, the gates left and the spend", at("spec_approval"), "Approving starts plan · 2 gates left · $0.040 of $10.00 spent"],
+    ["counts one gate left in the singular", at("plan_approval"), "Approving starts implementation · 1 gate left · $0.040 of $10.00 spent"],
+    ["says when no gate follows, and the chain ends", at("final_review"), "Approving finishes the chain · no gate after this · $0.040 of $10.00 spent"],
+    ["reads a legacy chain, where the gate hangs on the node before it", gateConsequence(item({ pending_gate: "plan_ok", chain_definition: { template_id: "t", nodes: [{ id: "plan", gate_after: "plan_ok" }, { id: "implementation", gate_after: "final_ok" }, { id: "merge" }] } as WorkItem["chain_definition"] }), "plan_ok"), "Approving starts implementation · 1 gate left"],
+    ["leaves the spend out with no cap row", at("spec_approval", { budget_cap: undefined }), "Approving starts plan · 2 gates left"],
+    ["says nothing when the item waits elsewhere", gateConsequence(item({ pending_gate: "plan_approval", chain_definition: chain }), "spec_approval"), null],
+  ])("%s", (_, got, want) => expect(got).toBe(want));
 });
 
 let where = "";

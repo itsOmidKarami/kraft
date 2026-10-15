@@ -1,3 +1,4 @@
+import { gateWords } from "../board/rowText";
 import { repoName, shortId } from "../../format";
 import type { CrumbItem } from "./pageItem";
 import { ROUTES } from "./routes";
@@ -29,13 +30,14 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     return [mid("Board", { to: "/" }), ...(repo ? [mid(repoName(repo), { to: `/?repo=${encodeURIComponent(repo)}`, title: repo })] : []), current("new item")];
   }
   // Board › repo › bead id (else the short id), then the node in a node view
-  // (Decisions §1, §5, §14), or "Review changes" on the review page
+  // (Decisions §1, §5, §14), or "Approve <gate>" / "Review changes" on the review page
   // (prototype 326). The title is the page's own h1, never a crumb.
   const wi = /^\/work-items\/([^/]+)(?:\/nodes\/([^/]+)|\/(review))?/.exec(pathname);
   if (wi) {
     const id = decodeURIComponent(wi[1]);
-    const node = wi[2] ? decodeURIComponent(wi[2]) : wi[3] && "Review changes";
     const it = item(id);
+    // The review page names the gate it waits at, else the changes.
+    const node = wi[2] ? decodeURIComponent(wi[2]) : wi[3] && (it?.pending_gate ? `Approve ${gateWords(it.pending_gate)}` : "Review changes");
     const name = it?.bead_id || shortId(id);
     const out: Crumb[] = [mid("Board", { to: "/" })];
     // The repo, like the draft page's, is the board filtered to it.

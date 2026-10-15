@@ -1,5 +1,7 @@
 /** What Finish your review and the bottom bar say and allow, from data only (W8 G). Pure. */
 import type { FixTarget, ReviewComment, ReviewOutcome, ReviewThread, WorkItem } from "../../types";
+import { nodeWords } from "../board/rowText";
+import { spentLine } from "../item/status";
 
 /** The server's `open_must_fix`: a must-fix thread not resolved, drafts included. */
 export const openMustFix = (threads: ReviewThread[]) => threads.filter((t) => t.label === "must_fix" && t.state !== "resolved").length;
@@ -9,6 +11,22 @@ export function approveBlock(item: Pick<WorkItem, "pending_gate">, gate: string 
   if (!gate || item.pending_gate !== gate) return "Available when the item is waiting at a gate.";
   if (openMustFix(threads)) return "Unavailable while must-fix threads are open.";
   return null;
+}
+
+/** What approving this gate does next, while the item waits at it: the node it starts, the gates after it, the spend so far. */
+export function gateConsequence(item: Pick<WorkItem, "pending_gate" | "chain_definition" | "budget_cap" | "running_time">, gate: string | null): string | null {
+  if (!gate || item.pending_gate !== gate) return null;
+  const nodes = item.chain_definition?.nodes ?? [];
+  // A legacy chain names its gate on the node in front of it (`gate_after`), a V1 chain gives it a node.
+  const at = nodes.findIndex((n) => n.id === gate || n.gate_after === gate);
+  const next = at < 0 ? undefined : nodes[at + 1];
+  const left = nodes.slice(at + 1).filter((n) => n.kind === "gate" || n.gate_after).length;
+  const spent = spentLine(item);
+  return [
+    next ? `Approving starts ${nodeWords(next.id)}` : "Approving finishes the chain",
+    at < 0 ? null : left ? `${left} ${left === 1 ? "gate" : "gates"} left` : "no gate after this",
+    spent ? `${spent} spent` : null,
+  ].filter(Boolean).join(" · ");
 }
 
 const ENDED = new Set(["done", "cancelled", "archived"]);

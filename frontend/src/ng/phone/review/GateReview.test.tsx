@@ -163,12 +163,19 @@ describe("Approve (F.3)", () => {
     const approve = await screen.findByRole("button", { name: "Approve" });
     await waitFor(() => expect(approve).toBeDisabled());
     expect(screen.getByText("Unavailable while must-fix threads are open.")).toBeInTheDocument();
+    expect(approve).toHaveAccessibleDescription("Unavailable while must-fix threads are open.");
+  });
+
+  it("says what Approve starts next while the item waits at the gate, and nothing once it has left it", async () => {
+    mount(gateItem());
+    expect(await screen.findByText("Approving starts verification · no gate after this")).toBeInTheDocument();
   });
 
   it("is disabled when the item is not waiting at this gate", async () => {
     mount(gateItem({ pending_gate: "other_gate" }), "/work-items/w1/review?gate=plan_approval");
     expect(await screen.findByText("Available when the item is waiting at a gate.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.queryByText(/^Approving /)).toBeNull();
   });
 
   it("keeps a refusal on the screen", async () => {

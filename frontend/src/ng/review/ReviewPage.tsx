@@ -17,6 +17,7 @@ import { DiffView, pickOf, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
 import { GateReview } from "./GateReview";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
+import { gateConsequence } from "./finish";
 import { byNodes, folders, unresolved } from "./model";
 import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
@@ -106,6 +107,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
     onRetarget: (t) => t.range && setPicked(pickOf(t.path, { side: t.range.startSide ?? t.range.side, line: t.range.start }, { side: t.range.side, line: t.range.end })),
   });
   const artifact = useArtifact(item);
+  const next = gateConsequence(item, place.gate);
   const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
   // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).
   const [finish, setFinish] = useState<{ outcome?: ReviewOutcome } | null>(null);
@@ -157,6 +159,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         prefs={diff.prefs}
         setPrefs={diff.set}
       />
+      {next && <p className="rv-next">{next}</p>}
       {diff.error && <p className="rv-error rv-bar-error" role="alert">{diff.error}</p>}
       <div className={`rv-body${treeOpen ? " has-tree" : ""}${overlay ? " is-overlay" : ""}`}>
         {treeOpen && (
