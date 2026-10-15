@@ -5,12 +5,13 @@ against the real API in process (`wired`), the event stream faked at
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 from support.api import run_with_app
 
 from kraft import client
-from kraft.console import live
+from kraft.console import live, runner
 from kraft.console.app import KraftConsole
 
 
@@ -73,3 +74,14 @@ class Console:
 def console(wired, stream, monkeypatch) -> Console:
     monkeypatch.setattr(live, "BATCH_S", 0.01)
     return Console(wired)
+
+
+@pytest.fixture
+def kraft_is(monkeypatch):
+    """`kraft_is(script)`: the console's `kraft` child becomes the Python
+    `script`, given the command's words as its arguments."""
+
+    def use(script: str) -> None:
+        monkeypatch.setattr(runner, "COMMAND", (sys.executable, "-c", script))
+
+    return use
