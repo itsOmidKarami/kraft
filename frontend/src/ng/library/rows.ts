@@ -72,7 +72,7 @@ export function listRows(r: Result, published: PublishedComponent[] | null, addo
         glyph,
         used: published === null || (shipped && !pub) ? "" : !pub ? "unpublished" : n === 0 ? "unused" : n === 1 ? "" : `${n} chains`,
         mark: change ? (change.path === id && change.kind === "add" ? "add" : "change") : undefined,
-        problem: r.problems.some((p) => p.component === id || under(p.path, id)),
+        problem: r.problems.some((p) => p.component === id || under(p.path ?? "", id)),
         // Until the published list names its add-on, the namespace stands in for it.
         ...(shipped ? { addon: pub?.addon ?? { id: name.split(":")[0], version: "" } } : {}),
       };

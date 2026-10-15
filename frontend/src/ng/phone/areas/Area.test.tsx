@@ -146,6 +146,14 @@ describe("Review & publish (K.4)", () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it("a chain-level problem with a null path is listed in the review sheet without a path to crash on", async () => {
+    open(drafted({ problems: [{ ...problem("x", "chain cap is under a task's own"), path: null }] }));
+    await userEvent.click(await screen.findByRole("button", { name: /Review & publish/ }));
+    const sheet = within(screen.getByRole("dialog"));
+    expect(sheet.getByLabelText("Problems")).toHaveTextContent("chain cap is under a task's own");
+    expect(sheet.getByLabelText("Problems").querySelector(".ph-problem-path")).toHaveTextContent(/^chain$/);
+  });
+
   it("a 409 shows what changed and offers Keep my version and publish, which re-bases first", async () => {
     const stale = { detail: "stale", files: { "policy.yaml": { published: "a", draft: "b", diff: "@@\n-a\n+b" } } };
     const { calls } = open({

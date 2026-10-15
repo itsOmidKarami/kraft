@@ -4,7 +4,7 @@ import { detailOf } from "../../http";
 import * as d from "../draft/draftApi";
 import { FIELD_PAUSE_MS, type ConfigDraft } from "../draft/useConfigDraft";
 import type { Scope } from "../draft/types";
-import { problemsAt } from "../draft/view";
+import { problemPath, problemsAt } from "../draft/view";
 import { problemText } from "../problems";
 import { jumpTo } from "../YamlView";
 import { ReadOnly } from "../addon";
@@ -95,7 +95,7 @@ export function ItemYaml({ draft, scope, path, extendsName, fixed }: { draft: Co
               <Button onClick={() => { dirty.current = false; setRefusal(null); void load(); }}>Revert</Button>
             </div>
           )}
-          {probs.map((p, i) => <p key={i} className="yv-issue">{p.path}{p.field ? ` · ${p.field}` : ""} · {problemText(p)}</p>)}
+          {probs.map((p, i) => <p key={i} className="yv-issue">{problemPath(p)}{p.field ? ` · ${p.field}` : ""} · {problemText(p)}</p>)}
         </div>
       )}
     </div>

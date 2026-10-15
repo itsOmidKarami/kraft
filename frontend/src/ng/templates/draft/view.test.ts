@@ -38,6 +38,12 @@ describe("draft view", () => {
     expect(problemsAt(r, "verification_x", true)).toEqual([]);
   });
 
+  it("tolerates a chain-level problem with a null path: it belongs to no node", () => {
+    const r = withR({ problems: [{ path: null, field: "time_cap_minutes", message: "below a task's own cap", file: "f", line: null, col: null }] });
+    expect(problemsAt(r, "verification", true)).toEqual([]);
+    expect(problemsAt(r, "verification")).toEqual([]);
+  });
+
   it("marks a path by its own change, else an added or removed ancestor's, never a changed one's", () => {
     const r = withR({ changes: [{ path: "lint", kind: "add", summary: "added" }, { path: "verification", kind: "change", summary: "moved" }] });
     expect(changeAt(r, "lint")?.kind).toBe("add");

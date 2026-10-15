@@ -58,9 +58,12 @@ export function kindOf(r: Result, n: NodeA): "exec" | "gate" {
 
 const under = (path: string, root: string) => path === root || path.startsWith(`${root}.`);
 
+/** What a problem names as its place: its path, else the chain itself (the server sends `path: null` for a chain-level problem). */
+export const problemPath = (p: Problem): string => p.path ?? "chain";
+
 /** The problems at a path; `deep` adds its children's (a node's ring counts its tasks'). */
 export const problemsAt = (r: Result, path: string, deep = false): Problem[] =>
-  r.problems.filter((p) => (deep ? under(p.path, path) : p.path === path));
+  r.problems.filter((p) => (deep ? under(p.path ?? "", path) : p.path === path));
 
 /** The change at a path: its own, else an added or removed ancestor it folds into. */
 export function changeAt(r: Result, path: string): Change | undefined {

@@ -49,7 +49,7 @@ export function PolicyScreen() {
       <TabStrip label="Policy section" value={section} onChange={(id) => navigate(`/settings/policy/${id}`, { replace: true })} tabs={SECTIONS.map((s) => ({ id: s.id, label: s.label }))} />
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">The policy could not be read.</p>}
       {r && !ctx && <p className="ph-error" role="alert">policy.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. {repairElsewhere("policy.yaml")}</p>}
-      {here.length > 0 && <Group title="Problems" rows={here.map((x, i): RowSpec => ({ key: `p${i}`, label: problemText(x), sub: x.field ?? x.path, chips: [{ label: "problem", tone: "bad" }] }))} />}
+      {here.length > 0 && <Group title="Problems" rows={here.map((x, i): RowSpec => ({ key: `p${i}`, label: problemText(x), sub: x.field ?? x.path ?? undefined, chips: [{ label: "problem", tone: "bad" }] }))} />}
       {ctx && (section === "limits" ? <Limits ctx={ctx} edit={edit} /> : section === "loops" ? <Loops ctx={ctx} edit={edit} /> : <Housekeeping ctx={ctx} edit={edit} />)}
       {node}
     </AreaScreen>
