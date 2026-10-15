@@ -30,17 +30,14 @@ const isHttpUrl = (v: string) => {
   }
 };
 
-/** Send a test: with the reason beside it while it cannot send. On a card the reason sits above the button. */
-function TestButton({ card, busy, why, onClick }: { card?: string; busy?: boolean; why: string | null; onClick: () => void }) {
-  const r = useReason(why);
-  const button = <Button className={card ? "nt-test" : undefined} aria-label={card ? `Send a test, ${card}` : undefined} disabled={busy || !!why} {...r.attrs} onClick={onClick}><Send size={12} aria-hidden /> Send a test</Button>;
+/** Send a test: with the reason beside it while it cannot send. On a card the reason sits above the button.
+ *  `quiet` keeps the reason for screen readers (a resting state); `describedBy` points the button at text
+ *  already on the page instead of repeating it. */
+function TestButton({ card, busy, why, quiet, describedBy, onClick }: { card?: string; busy?: boolean; why: string | null; quiet?: boolean; describedBy?: string; onClick: () => void }) {
+  const r = useReason(describedBy ? null : why, { quiet });
+  const attrs = describedBy && why ? { "aria-describedby": describedBy } : r.attrs;
+  const button = <Button className={card ? "nt-test" : undefined} aria-label={card ? `Send a test, ${card}` : undefined} disabled={busy || !!why} {...attrs} onClick={onClick}><Send size={12} aria-hidden /> Send a test</Button>;
   return card ? <span className="nt-test-box">{r.note}{button}</span> : <>{button}{r.note}</>;
-}
-
-/** The browser's on/off switch: disabled with its reason beside it until permission is granted. */
-function BrowserSwitch({ checked, why, onChange }: { checked: boolean; why: string | null; onChange: (v: boolean) => void }) {
-  const r = useReason(why);
-  return <>{r.note}<Switch label="Alerts on this device" checked={checked} disabled={!!why} {...r.attrs} onChange={onChange} /></>;
 }
 
 type Tab = "overview" | "config" | "yaml";
@@ -174,18 +171,19 @@ export function NotifyPage() {
     ...notify.events.map((e) => `  - ${e}`),
   ].join("\n");
 
-  const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; why: string | null; test: () => void }[] = [
+  const typing = !!url.trim();
+  const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; why: string | null; quiet: boolean; test: () => void }[] = [
     {
       id: "webhook", icon: <Webhook size={15} />, name: CHANNELS.webhook, active: webhookActive, events: notify.events,
       sub: notify.url_set ? `URL stored · links to ${link || "no address"}` : "No URL set",
       extra: notify.url_set ? (test ? (test.error ? `last attempt ${ago(test.at)} failed` : `last sent ${ago(test.at)} · ${test.status} OK`) : "never sent") : "nothing can be sent",
-      extraBad: !notify.url_set || !!test?.error, testing, why: webhookWhy, test: () => void sendTest(),
+      extraBad: !notify.url_set || !!test?.error, testing, why: webhookWhy, quiet: !typing, test: () => void sendTest(),
     },
     {
       id: "browser", icon: <Monitor size={15} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
       sub: "Alerts while this tab is in the background. This device only.",
       extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : "") : PERMISSION_SHORT[permission],
-      extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, test: testBrowser,
+      extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, quiet: true, test: testBrowser,
     },
   ];
 
@@ -275,7 +273,7 @@ export function NotifyPage() {
       {problem("baseField")}
       <Head>Test</Head>
       <div className="nt-line">
-        <TestButton busy={testing} why={webhookWhy} onClick={() => void sendTest()} />
+        <TestButton busy={testing} why={webhookWhy} quiet={!url.trim()} onClick={() => void sendTest()} />
         {webhookActive && <span className="set-hint">{lastTest}</span>}
       </div>
       {problem("test")}
@@ -292,9 +290,11 @@ export function NotifyPage() {
   const browserConfig = (
     <>
       <Head>Permission</Head>
-      <p className="nt-lead">{lead.title}</p>
-      <p className="set-hint">{lead.text}</p>
-      {lead.steps && <ol className="nt-steps">{lead.steps.map((t) => <li key={t}>{t}</li>)}</ol>}
+      <div id="nt-perm">
+        <p className="nt-lead">{lead.title}</p>
+        <p className="set-hint">{lead.text}</p>
+        {lead.steps && <ol className="nt-steps">{lead.steps.map((t) => <li key={t}>{t}</li>)}</ol>}
+      </div>
       {permission === "default" && <div className="nt-gap"><Button onClick={() => void ask()}>{ALLOW}</Button></div>}
       {permission === "denied" && <div className="nt-gap"><Button onClick={recheck}>{CHECK_AGAIN}</Button></div>}
       {permission !== "unsupported" && (
@@ -302,14 +302,14 @@ export function NotifyPage() {
           <Head>Alerts</Head>
           <div className="nt-line">
             <span className="set-event-text"><span>{channelState(browserActive)}</span><span className="set-hint">alerts on this device only</span></span>
-            <BrowserSwitch checked={browserOn} why={permission === "granted" ? null : BROWSER_WHY[permission]} onChange={toggleBrowser} />
+            <Switch label="Alerts on this device" checked={browserOn} disabled={permission !== "granted"} aria-describedby={permission === "granted" ? undefined : "nt-perm"} onChange={toggleBrowser} />
           </div>
           <Head>Notifies</Head>
           {eventRows(browserEvents, toggleBrowserEvent, "this browser")}
           <Note>Independent of the webhook. Kept in this browser, so it saves at once and has no Save button.</Note>
           <Head>Test</Head>
           <div className="nt-line">
-            <TestButton why={browserWhy} onClick={testBrowser} />
+            <TestButton why={browserWhy} describedBy={permission === "granted" ? undefined : "nt-perm"} quiet onClick={testBrowser} />
             {!browserWhy && <span className="set-hint">{browserTestLine}</span>}
           </div>
         </>
@@ -352,7 +352,7 @@ export function NotifyPage() {
                     {c.extra && <span className={`nt-extra${c.extraBad ? " is-bad" : ""}`}>{c.extra}</span>}
                   </span>
                 </button>
-                <TestButton card={c.name} busy={c.testing} why={c.why} onClick={c.test} />
+                <TestButton card={c.name} busy={c.testing} why={c.why} quiet={c.quiet} onClick={c.test} />
               </div>
             ))}
           </div>

@@ -188,8 +188,9 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
           permission === "default"
             ? { label: ALLOW, sub: lead.text, onClick: () => void requestPermission().then(setPermission) }
             : permission === "denied"
-              ? { label: lead.title, sub: `${lead.text} ${lead.steps?.map((t, i) => `${i + 1}. ${t}`).join(" ")}` }
+              ? { label: lead.title, sub: lead.text }
               : { label: lead.title, sub: lead.text },
+          ...(permission === "denied" ? (lead.steps ?? []).map((t, i): RowSpec => ({ label: `${i + 1}. ${t}` })) : []),
           ...(permission === "denied" ? [{ label: CHECK_AGAIN, onClick: () => setPermission(permissionNow()) } as RowSpec] : []),
         ]}
       />
@@ -198,8 +199,8 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
           <Group
             note="Kept in this browser only: another device is its own switch."
             rows={[
-              { label: "Alerts on this device", sw: on, disabled: permission !== "granted", onSwitch: toggle, sub: permission === "granted" ? undefined : BROWSER_WHY[permission] },
-              { label: "Send a test", onClick: testBrowser, disabled: !!off, sub: off ?? "Shows an alert on this device now." },
+              { label: "Alerts on this device", sw: on, disabled: permission !== "granted", onSwitch: toggle },
+              { label: "Send a test", onClick: testBrowser, disabled: !!off, sub: off ? undefined : "Shows an alert on this device now." },
             ]}
           />
           <Group title="Notifies" rows={NOTIFY_EVENTS.map((e): RowSpec => ({ key: e.id, label: eventMeaning(e.label), sub: e.id, sw: events.includes(e.id), onSwitch: () => toggleEvent(e.id) }))} foot={PROGRESS_NOTE} />

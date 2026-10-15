@@ -72,8 +72,8 @@
 .dialog-title { margin: 0 0 12px; font-size: var(--fs-h3); font-weight: 500; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
-/* Bottom-right, clear of the header's actions and the drawer's buttons at the top. */
-.toasts { position: fixed; bottom: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
+/* Bottom-right, clear of the header's actions and the drawer's buttons at the top. A bottom action bar lifts the stack above it by setting --toast-bottom while it is mounted. */
+.toasts { position: fixed; bottom: var(--toast-bottom, 16px); right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
 .toast { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-meta); }
 .toast:has(.toast-action) { display: flex; align-items: center; gap: 14px; }
 .toast-action { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; font-size: var(--fs-label); font-weight: 500; color: var(--accent); cursor: pointer; }

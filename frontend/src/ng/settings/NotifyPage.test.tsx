@@ -86,7 +86,7 @@ describe("ng NotifyPage", () => {
     expect(webhook.getByText("nothing can be sent")).toBeInTheDocument();
     expect(webhook.getByRole("button", { name: /Send a test/ })).toBeDisabled();
     expect(webhook.getByRole("button", { name: /Send a test/ })).toHaveAccessibleDescription("Set a webhook URL first.");
-    expect(webhook.getByText("Set a webhook URL first.")).toBeVisible();
+    expect(webhook.getByText("Set a webhook URL first.")).toHaveClass("is-quiet");
   });
 
   it("says inactive in the pane too, when the switch is on but the channel cannot send", async () => {
@@ -221,7 +221,9 @@ describe("ng NotifyPage", () => {
     const sw = screen.getByRole("switch", { name: "Alerts on this device" });
     expect(allow.compareDocumentPosition(sw) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(sw).toBeDisabled();
-    expect(sw).toHaveAccessibleDescription("Allow notifications first.");
+    expect(sw).toHaveAccessibleDescription(/Allow notifications.*asks? once|has not been asked/);
+    expect(within(screen.getByRole("complementary", { name: "This browser pane" })).queryByText("Allow notifications first.")).toBeNull();
+    expect(within(card("This browser")).getByText("Allow notifications first.")).toHaveClass("is-quiet");
     expect(N.requestPermission).not.toHaveBeenCalled();
     await userEvent.click(allow);
     expect(N.requestPermission).toHaveBeenCalledTimes(1);

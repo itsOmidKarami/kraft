@@ -201,7 +201,9 @@ describe("Browser alerts channel (O.2)", () => {
     expect(await screen.findByRole("button", { name: /^Send a test/ })).toBeDisabled();
     expect(screen.getByText(/1\. Open the site settings/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Allow notifications/ })).toBeNull();
-    expect(screen.getAllByText("Unblock notifications first.").length).toBeGreaterThan(0);
+    expect(screen.getByText(/^1\. Open the site settings/)).toBeInTheDocument();
+    expect(screen.getByText(/^2\. Set Notifications to Allow/)).toBeInTheDocument();
+    expect(screen.queryByText("Unblock notifications first.")).toBeNull();
     N.permission = "granted";
     await userEvent.click(screen.getByRole("button", { name: /^Check again/ }));
     expect(await screen.findByText(/Notifications are allowed/)).toBeInTheDocument();
