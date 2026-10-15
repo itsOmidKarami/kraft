@@ -24,6 +24,7 @@
 .glyph-gate .glyph-box { transform: rotate(45deg); border: 1.5px solid var(--text-muted); background: var(--surface-2); }
 .glyph-gate .glyph-box.is-done { border-color: var(--stroke); background: var(--stroke); }
 .glyph-gate .glyph-box.is-current { border-color: var(--warn); box-shadow: none; }
+.glyph-gate .glyph-box.is-amber { border-color: var(--warn); }
 .glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--stroke); background: var(--bg); }
 .glyph-gate .glyph-box.is-ghost { border: 1.5px dashed var(--stroke); }
 .glyph-gate .glyph-box.mark-add { border: 1.5px dashed var(--ok); }

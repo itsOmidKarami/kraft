@@ -38,6 +38,14 @@ describe("ng CSS", () => {
     expect(bad).toEqual([]);
   });
 
+  it("draws a gate waiting on you amber: the gate's own rule for it comes after the gate's base rule, which resets the border", () => {
+    const css = readFileSync(join(here, "graph/graph.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const base = css.indexOf(".glyph-gate .glyph-box {");
+    const amber = css.search(/\.glyph-gate \.glyph-box\.is-amber\s*{[^}]*border-color:\s*var\(--warn\)/);
+    expect(base).toBeGreaterThan(-1);
+    expect(amber).toBeGreaterThan(base);
+  });
+
   it("shrinks the repo crumb before the work item title", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     const shrink = (sel: string) => Number(new RegExp(`${sel}\\s*{[^}]*flex-shrink:\\s*(\\d+)`).exec(css)?.[1]);
