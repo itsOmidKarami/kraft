@@ -247,8 +247,9 @@ in the stamp pull request, with `dev/stamp_docs_added_in.py VERSION`:
   shipped under a patch label. The script writes nothing and exits 1; the stamp
   step warns, adds a line to the stamp pull request, and still stamps the plugin
   manifests and changelogs. Until someone takes the notes off by hand, or relabels
-  and cuts the release again as a minor, `dev/check_docs_added_in.py` fails
-  `lint` on `main`, because a `next` note now sits on what the release has.
+  and cuts the release again as a minor, `dev/check_docs_added_in.py` warns on
+  `main`, because a `next` note now sits on what the release has; the next minor
+  release stamps them with its own number.
 
 Every release also deletes the `<!-- renamed from: ... -->` and
 `<!-- not new: ... -->` comments, which only excuse a heading from a note until
@@ -257,8 +258,9 @@ the next release is the comparison point.
 The tag is cut before the stamp pull request merges, so the tag's own pages still
 say `next`. `dev/build_docs_site.sh` stamps its copy of the tag's content the same
 way, so the release docs at `/kraft/` show the number from the moment they are
-built. Between the tag and the stamp pull request merging, `lint` fails on `main`
-for the same reason as above; it clears when that pull request merges.
+built. Between the tag and the stamp pull request merging, the check warns on
+`main` for the same reason as above, without failing `lint`; it clears when that
+pull request merges.
 
 ## Verify a release
 

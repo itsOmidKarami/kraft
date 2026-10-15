@@ -182,7 +182,7 @@ cell. Never write a version number, because the release rewrites `next` into
 `_Added in X.Y_` itself. Never put the note in heading text, or anywhere but
 under a heading or at a cell's end. A heading that is an old one under a new
 name gets `<!-- renamed from: Old heading -->` instead, and text newly written
-about something 2.0 already shipped gets `<!-- not new: why -->`.
+about something the latest release already shipped gets `<!-- not new: why -->`.
 `dev/check_docs_added_in.py` fails `lint` on a new heading with neither.
 CONTRIBUTING.md's "User-facing docs" has the details.
 

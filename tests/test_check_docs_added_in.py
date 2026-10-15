@@ -210,8 +210,18 @@ def _release_repo(tmp_path, monkeypatch, ca, content):
         ({"3.guides/1.thing.md": _BASE[_OLD]}, 0, "ok:"),
         ({"3.guides/1.thing.md": _BASE[_OLD] + "\n## New\n"}, 1, "`New` is new since v2.0.0"),
         ({"3.guides/1.thing.md": _BASE[_OLD] + f"\n## New\n\n{NOTE}\n"}, 0, "ok:"),
+        # A missed stamp warns: lint must not go red between a tag and its stamp.
+        (
+            {
+                "3.guides/1.thing.md": _BASE[_OLD].replace(
+                    "## Old part\n", f"## Old part\n\n{NOTE}\n"
+                )
+            },
+            0,
+            "warning: ",
+        ),
     ],
-    ids=["unchanged", "new-heading", "noted"],
+    ids=["unchanged", "new-heading", "noted", "missed-stamp-warns"],
 )
 def test_main_compares_this_checkout_with_the_latest_release_tag(
     ca, tmp_path, monkeypatch, capsys, content, code, printed

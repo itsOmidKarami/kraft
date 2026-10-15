@@ -365,7 +365,7 @@ Page rules:
   words. `dev/check_docs_added_in.py` (the `lint` job) compares `docsite/content`
   with the latest release tag and fails on a new page, heading or verb with no
   note, on a note in the wrong place or naming a release that does not exist,
-  and on a `next` note on something the release already had. A heading
+  and warns on a `next` note on something the release already had. A heading
   is not new if its page moved (`redirects.yml`), or if you say so under it:
   `<!-- renamed from: Old heading -->` for an old heading under a new name
   (`/page#Old heading` from another page, `/old/page` for a page split or

@@ -25,7 +25,9 @@ compares `docsite/content` with the latest release tag's:
      split or renamed. The old name must exist in the tag, so the comment is a
      claim a reviewer can check, not a free pass; a release drops them.
 4. A missed stamp. A `next` note on a page or heading the latest tag already
-   has means the release left it unstamped (or the thing is not new).
+   has means the release left it unstamped (or the thing is not new). Only a
+   warning: between a tag and its stamp pull request merging, every `next` note
+   is one, and a pull request opened then is not to blame.
 
     uv run python dev/check_docs_added_in.py              # this checkout against the latest tag
     uv run python dev/check_docs_added_in.py --ref v2.1.0 # a tag's own content: 1 and 2 only
@@ -254,7 +256,8 @@ def check_new(
             )
         if page.note == "next" and not is_new:
             problems.append(
-                f"{page.name}:{page.note_line}: `Added in next` on a page {latest} already has; "
+                f"warning: {page.name}:{page.note_line}: `Added in next` on a page {latest} "
+                "already has; "
                 "the release left it unstamped, or it is not new"
             )
         stack: list[Heading] = []
@@ -264,7 +267,8 @@ def check_new(
             existing = (page.route, h.text) in headings | credited or h.not_new or page.not_new
             if h.note == "next" and existing:
                 problems.append(
-                    f"{page.name}:{h.line}: `Added in next` on a heading {latest} already has; "
+                    f"warning: {page.name}:{h.line}: `Added in next` on a heading {latest} "
+                    "already has; "
                     "the release left it unstamped, or it is not new"
                 )
             if not (existing or h.note or any(a.note for a in stack) or (is_new and page.note)):
@@ -333,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         problems = check_notes(cur, tags, None) + check_new(load(base_files), cur, entries, latest)
     for problem in problems:
         print(problem)
+    problems = [p for p in problems if not p.startswith("warning: ")]
     if problems:
         print(f"{len(problems)} 'Added in' problem(s)", file=sys.stderr)
         return 1
