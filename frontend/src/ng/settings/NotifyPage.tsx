@@ -233,7 +233,7 @@ export function NotifyPage() {
     <>
       <Head>Status</Head>
       <div className="nt-line">
-        <span className="set-event-text"><span>{notify.enabled ? "Active" : "Inactive"}</span><span className="set-hint">Kraft POSTs to the webhook when a run stops</span></span>
+        <span className="set-event-text"><span>{webhookActive ? "Active" : "Inactive"}</span><span className="set-hint">Kraft POSTs to the webhook when a run stops</span></span>
         <Switch label="Webhook notifications" checked={notify.enabled} onChange={(v) => void put("enabled", { enabled: v })} />
       </div>
       {problem("enabled")}
@@ -267,7 +267,7 @@ export function NotifyPage() {
     <>
       <Head>Status</Head>
       <div className="nt-line">
-        <span className="set-event-text"><span>{browserOn ? "Active" : "Inactive"}</span><span className="set-hint">alerts on this device only</span></span>
+        <span className="set-event-text"><span>{browserActive ? "Active" : "Inactive"}</span><span className="set-hint">alerts on this device only</span></span>
         <Switch label="Alerts on this device" checked={browserOn} disabled={permission === "unsupported"} onChange={toggleBrowser} />
       </div>
       <Note>{PERMISSION_TEXT[permission]} While this tab is in the background.</Note>

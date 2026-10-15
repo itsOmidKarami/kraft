@@ -27,8 +27,8 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 /** `initial`: the floor is for the opening view only; the Fit button then shows the whole chain. */
 /** `reach`: world x's past the focus to bring in on the right, most wanted first; the first that fits beside the whole focus is shown. */
 export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number; reach?: number[] };
-/** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
-export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
+/** The editors' fit (Templates prototype `fit1`): opens no smaller than 80% (Fit shows it all), a chain wider than the view starting 12px in. */
+export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12, initial: true };
 /** An item's fit: node labels (11.5px) and captions (11px) stay at 10px or more, and a chain too wide for it opens on the node that matters (`focus`, a
  *  world x) instead of at a 30% fit nobody can read; the canvas counts the nodes that are left off-screen. `start`, the world x of the chain's first mark's left edge,
  *  is kept `left` px in while the focus still fits beside it. */

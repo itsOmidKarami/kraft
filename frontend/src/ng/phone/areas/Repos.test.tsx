@@ -110,6 +110,15 @@ describe("a repo (M.2)", () => {
     expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["default", "docs_only"]);
   });
 
+  it("a forge outside the list is offered and marked, as the desktop does", async () => {
+    const repos = REPOS.map((r) => (r.name === "product_root" ? { ...r, entry: { ...r.entry, forge: "fake" } } : r));
+    open("product_root", ans(reposView({ resolved: { repos, detected: DETECTED } as never })));
+    await userEvent.click(await screen.findByRole("button", { name: /^forge/ }));
+    const sheet = screen.getByRole("dialog", { name: "forge" });
+    expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["fake", "gitlab", "github", "none"]);
+    expect(within(sheet).getByRole("radio", { name: /fake/ })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("enabled is a switch that patches the entry", async () => {
     const { calls } = open("product_root");
     await userEvent.click(await screen.findByRole("switch", { name: /^enabled/ }));

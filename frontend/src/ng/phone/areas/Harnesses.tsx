@@ -1,6 +1,6 @@
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { detailOf } from "../../http";
-import { ACCESS, ACCESS_WORD, problemsOfHarness, problemsOfProfile, resolvedOf, type Access, type HProblem, type Resolved } from "../../harnesses/model";
+import { ACCESS, ACCESS_WORD, TOOLS_EVERY, TOOLS_RESTRICT, problemsOfHarness, problemsOfProfile, resolvedOf, toolsWord, type Access, type HProblem, type Resolved } from "../../harnesses/model";
 import { entryOp } from "../../harnesses/ops";
 import { useProviders } from "../../harnesses/useProviders";
 import type { Op } from "../../templates/draft/types";
@@ -50,7 +50,7 @@ function HarnessesIndex() {
             title="Defaults"
             rows={[
               { label: "escalation runs on", value: r.escalation.harness ?? `item's harness (${r.escalation_effective.harness})`, changed: changedAt(draft, "escalation"), onEdit: () => edit({ kind: "choice", title: "Escalation runs on", help: "\"item's harness\" follows the one the item's latest agent task used. Harnesses set to Never aren't offered.", value: r.escalation.harness ?? "", options: [{ value: "", label: "item's harness" }, ...r.harnesses.filter((h) => h.state !== "never" || h.id === r.escalation_effective.harness).map((h) => ({ value: h.id, label: h.state === "never" ? `${h.id} (Never)` : h.id }))], set: (v) => send(draft, { op: "set_escalation", harness: v || null, grants: r.escalation.grants }) }) },
-              { label: "allowed tools", value: r.allowed_tools == null ? "every tool" : r.allowed_tools.join(", ") || "none", changed: changedAt(draft, "allowed_tools"), onEdit: () => edit({ kind: "text", title: "Allowed tools", help: "Comma separated. Empty allows no tools; remove the list in YAML to allow every tool.", value: (r.allowed_tools ?? []).join(", "), set: (v) => send(draft, { op: "set_allowed_tools", tools: list(v) }) }) },
+              { label: "allowed tools", value: toolsWord(r.allowed_tools), changed: changedAt(draft, "allowed_tools"), onEdit: () => edit({ kind: "menu", title: "Allowed tools", help: "Every tool is allowed until a list restricts it. An empty list allows no tools.", options: [{ value: "every", label: TOOLS_EVERY }, { value: "list", label: TOOLS_RESTRICT }], pick: (v) => v === "every" ? (r.allowed_tools == null ? Promise.resolve(null) : send(draft, { op: "set_allowed_tools", tools: null })) : { kind: "text", title: "Allowed tools", help: "Comma separated. Empty allows no tools.", value: (r.allowed_tools ?? []).join(", "), set: (t) => send(draft, { op: "set_allowed_tools", tools: list(t) }) } }) },
               { label: "escalation grants", value: (r.escalation.grants ?? []).join(", ") || "none", changed: changedAt(draft, "grants"), onEdit: () => edit({ kind: "text", title: "Escalation grants", help: "Comma separated. What every escalation turn may do on top of its node's own grants.", value: (r.escalation.grants ?? []).join(", "), listed: { choices: draft.view?.result.choices?.grants ?? [], closed: true, multiple: true, noun: "grant" }, set: (v) => send(draft, { op: "set_escalation", harness: r.escalation.harness, grants: list(v) }) }) },
             ]}
           />

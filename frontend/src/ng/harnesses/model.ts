@@ -197,3 +197,9 @@ export function profileLanes(r: Resolved, name: string): Lane[] {
 /** The tasks of a harness or profile, as `chain › path` for names and links. */
 export const taskName = (t: { chain: string; path: string }) => `${t.chain} › ${t.path}`;
 export const taskLeaf = (t: { path: string }) => t.path.split(".").pop() ?? t.path;
+
+/** What the allowed-tools list says, on both trees: `null` is unset and allows every tool, `[]` allows none. */
+export const TOOLS_EVERY = "Every tool";
+export const TOOLS_NONE = "No tools";
+export const TOOLS_RESTRICT = "Restrict to a list";
+export const toolsWord = (tools: string[] | null): string => (tools == null ? TOOLS_EVERY : tools.length ? tools.join(", ") : TOOLS_NONE);

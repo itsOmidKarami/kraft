@@ -37,6 +37,28 @@ describe("area pane Config", () => {
     expect(within(pane).getByText(/Empty allows no tools/)).toBeInTheDocument();
   });
 
+  it("reads an unset list as every tool, and sets nothing until a restriction is chosen", async () => {
+    const server = serve(view(resolved({ allowed_tools: null })));
+    renderPage();
+    const pane = await openConfig();
+    expect(within(pane).getByText(/Every tool/)).toBeInTheDocument();
+    expect(within(pane).queryByText(/Empty allows no tools/)).toBeNull();
+    expect(within(pane).queryByRole("textbox", { name: "Add to allowed tools" })).toBeNull();
+    await userEvent.click(within(pane).getByRole("button", { name: "Restrict to a list" }));
+    expect(within(pane).getByText(/Empty allows no tools/)).toBeInTheDocument();
+    expect(server.ops).toEqual([]);
+    await userEvent.type(within(pane).getByRole("textbox", { name: "Add to allowed tools" }), "git{Enter}");
+    await waitFor(() => expect(server.ops).toEqual([[{ op: "set_allowed_tools", tools: ["git"] }]]));
+  });
+
+  it("goes back to every tool with a null list", async () => {
+    const server = serve(view(resolved()));
+    renderPage();
+    const pane = await openConfig();
+    await userEvent.click(within(pane).getByRole("button", { name: "Allow every tool" }));
+    await waitFor(() => expect(server.ops).toEqual([[{ op: "set_allowed_tools", tools: null }]]));
+  });
+
   it("escalation's runs-on lists the item's harness, then every harness not set to Never", async () => {
     serve(view(resolved()));
     renderPage();

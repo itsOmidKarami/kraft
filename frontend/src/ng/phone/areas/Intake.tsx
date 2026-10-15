@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { subscribeLive } from "../../live";
 import { checkText, hhmm } from "../../settings/intake/checks";
+import { pickup } from "../../settings/intake/pickup";
 import { describeCron } from "../../settings/intake/cron";
 import { intakeOf, problemsOfSchedule, type Check, type IntakeResolved, type Schedule } from "../../settings/intake/types";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "../../settings/intake/units";
@@ -18,12 +19,8 @@ const AREA = "/settings/auto-intake";
 type NamedRepo = { path: string; name?: string | null };
 const repoLabel = (path: string, repos: NamedRepo[]) => repos.find((r) => r.path === path)?.name || path.split("/").filter(Boolean).pop() || path || "no repo";
 
-/** The pickup rule in one line (the prototype's status sentence). */
-export function statusLine(i: IntakeResolved): string {
-  return i.enabled
-    ? `On · checking every ${showMinutes(i.interval_s)}, ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}, P${i.priority_ceiling} or above.`
-    : "Off · nothing is picked up automatically. Ready beads stay in the queue until someone files them.";
-}
+/** The pickup rule in one line: the desktop's sentence, led by whether it is on. */
+export const statusLine = (i: IntakeResolved): string => `${i.enabled ? "On" : "Off"} · ${pickup(i)}`;
 
 const send = async (draft: ConfigDraft, op: Op) => {
   const a = await draft.ops([op], { quiet: true });

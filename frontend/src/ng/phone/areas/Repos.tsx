@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
-import { FIELDS, FORGES, NO_TESTS, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
+import { FIELDS, forgeOptions, NO_TESTS, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
 import { setRepo } from "../../templates/repos/RepoConfig";
 import { harnessChoices, steeringChoices } from "../../templates/choices";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -88,7 +88,7 @@ export function RepoView() {
     const shown = (v === "" && f.empty) || f.show(f.key === "steering" ? repo!.resolved.steering : v) || f.fallback || "not set";
     const base: RowSpec = { key: f.key, label: f.label, value: shown, sub: sourceOf(repo!, f), changed: changed(f.key.replace(/^policy\./, "policy")) };
     if (f.choice) {
-      const options = (f.choice === "chain" ? chains : FORGES).map((x) => ({ value: x, label: x }));
+      const options = (f.choice === "chain" ? chains : forgeOptions(v)).map((x) => ({ value: x, label: x }));
       return { ...base, onEdit: () => edit({ kind: "choice", title: f.label, value: typeof v === "string" ? v : null, options, set: (x) => sendTo(draft, repo!, f)(x) }) };
     }
     const choices = f.choices === "steering" ? steeringChoices(library) : f.choices === "harnesses" ? harnessChoices(typeof opts === "string" ? null : opts.harnesses) : [];
