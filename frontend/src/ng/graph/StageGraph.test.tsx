@@ -94,6 +94,22 @@ describe("StageGraph", () => {
     expect(onBackground).toHaveBeenCalledTimes(1);
   });
 
+  it("folds a passed stage to one pill, one roving stop, that opens in place on Enter or a click and hands focus to its first node", async () => {
+    const user = userEvent.setup();
+    render(<StageGraph name="c" nodes={nodes} fold />);
+    expect(screen.queryByRole("button", { name: /^spec,/ })).toBeNull();
+    const pill = screen.getByRole("button", { name: "approve spec stage, 2 nodes, passed: expand" });
+    expect(pill).toHaveAttribute("data-tip", "spec → approve_spec");
+    await user.tab();
+    expect(btn(/^implement/)).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(pill).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(btn(/^spec,/)).toHaveFocus();
+    expect(btn(/^approve_spec/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /stage, .*expand$/ })).toBeNull();
+  });
+
   describe("with a view narrower than the chain", () => {
     afterEach(() => vi.restoreAllMocks());
     const ten: ChainNode[] = Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, kind: "exec", state: "todo" }));
@@ -106,9 +122,34 @@ describe("StageGraph", () => {
     it("counts the nodes it cuts off at an edge, and a click slides them in", async () => {
       narrow();
       // At 60% from 12px in, n0..n5 end by x = 560; n6..n9 run past 600.
+      // The column the edge cuts is not drawn, so no label shows cut mid-word.
+      expect(btn(/^n6,/)).toHaveClass("is-clipped");
+      expect(btn(/^n5,/)).not.toHaveClass("is-clipped");
       await userEvent.click(screen.getByRole("button", { name: "4 more nodes off-screen" }));
       expect(screen.getByRole("button", { name: "4 earlier nodes off-screen" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /more nodes? off-screen/ })).toBeNull();
+    });
+
+    it("counts a folded stage past the edge by its nodes", () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+      // n0..n2 and a gate end the first stage, the run stands on n3; the last stage, three nodes past the next, folds.
+      const staged: ChainNode[] = [...ten.slice(0, 3).map((n) => ({ ...n, state: "done" as const })), { id: "g1", kind: "gate", state: "done" }, { ...ten[3], state: "current" }, { id: "g2", kind: "gate" }, ten[4], { id: "g3", kind: "gate" }, ...ten.slice(5, 8)];
+      render(<StageGraph name="c" nodes={staged} fit={{ floor: 1, left: 12 }} fold />);
+      expect(screen.getByRole("button", { name: "n7 stage, 3 nodes, not started: expand" })).toHaveClass("is-clipped");
+      // From 12px in at 100%: the first stage's pill (112), n3, g2 and n4 end by x = 582; g3 and the last pill run past 600.
+      expect(screen.getByRole("button", { name: "4 more nodes off-screen" })).toBeInTheDocument();
+    });
+
+    it("opens on the node the run waits at with its next stage whole beside it", () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+      const waiting: ChainNode[] = [...ten.slice(0, 3).map((n) => ({ ...n, state: "done" as const })), { id: "g1", kind: "gate", state: "amber" }, ten[3], ten[4], { id: "g2", kind: "gate", state: "todo" }, ...ten.slice(5, 8)];
+      render(<StageGraph name="c" nodes={waiting} fit={{ floor: 1, left: 12 }} focus="current" fold />);
+      // Centred on g1, the view would cut n4 and g2; it slides left until g2 ends 12px in from the edge.
+      expect(btn(/^g2,/)).not.toHaveClass("is-clipped");
+      expect(btn(/^g1,/)).not.toHaveClass("is-clipped");
+      expect(screen.getByRole("button", { name: "3 more nodes off-screen" })).toBeInTheDocument();
     });
 
     it("ends the canvas where the pane starts, so nothing is drawn under it", () => {

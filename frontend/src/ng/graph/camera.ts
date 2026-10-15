@@ -25,7 +25,8 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 /** How an editor fits (the Templates prototype's `fit1`): never under `floor`,
  *  and a world wider than the view starts `left` px from the left edge, or centred on `focus` when it has one. */
 /** `initial`: the floor is for the opening view only; the Fit button then shows the whole chain. */
-export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number };
+/** `reach`: world x's past the focus to bring in on the right, most wanted first; the first that fits beside the whole focus is shown. */
+export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean; start?: number; reach?: number[] };
 /** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
 /** An item's fit: node labels (11.5px) and captions (11px) stay at 10px or more, and a chain too wide for it opens on the node that matters (`focus`, a
@@ -44,9 +45,13 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
   const wide = rule && world.W * s > view.w - 2 * rule.left;
   let tx = !rule ? mid : Math.max(rule.left, mid);
   if (rule && wide && rule.focus != null) {
-    const centred = Math.max(view.w - world.W * s - rule.left, view.w / 2 - rule.focus * s);
+    const f = rule.focus;
+    const centred = Math.max(view.w - world.W * s - rule.left, view.w / 2 - f * s);
+    // What comes next (the reach), as far as it fits with the focus whole: the view slides left from centred until it shows.
+    const reach = rule.reach?.find((x) => (x - f + FOCUS_HALF) * s <= view.w - 2 * rule.left);
+    const aim = reach == null ? centred : Math.min(centred, Math.max(view.w - rule.left - reach * s, rule.left - (f - FOCUS_HALF) * s));
     const held = rule.start != null ? rule.left - rule.start * s : null;
-    tx = Math.min(rule.left, held != null && held > centred && (rule.focus + FOCUS_HALF) * s + held <= view.w - rule.left ? held : centred);
+    tx = Math.min(rule.left, held != null && held > aim && Math.max(f + FOCUS_HALF, reach ?? 0) * s + held <= view.w - rule.left ? held : aim);
   }
   const ty = (view.h - world.H * s) / 2;
   // The row's middle is a label's depth below the node centre; a world taller than the view stays centred.

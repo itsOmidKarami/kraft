@@ -322,3 +322,11 @@
 .scope-legend .scope-new, .scope-legend .scope-key { flex: none; }
 .scope-key { padding: 0 6px; border: 1px dashed var(--border); border-radius: 6px; font-size: 10.5px; color: var(--text-muted); }
 .scope-key.is-ring { display: block; width: 12px; height: 12px; padding: 0; box-sizing: border-box; border-radius: 50%; align-self: center; }
+
+/* A folded stage (StageGraph `fold`): one pill on the row, its gate's glyph and words, a done mark once passed. */
+.fold-pill { display: flex; align-items: center; gap: 2px; box-sizing: border-box; padding: 0 12px 0 1px; border: 1px solid var(--stroke); border-radius: 17px; background: var(--bg); font: 400 11.5px ui-monospace, Menlo, monospace; white-space: nowrap; color: var(--text-sub); }
+.graph-fold:hover .fold-pill { border-color: var(--text-muted); }
+.graph-fold.is-todo .fold-pill { border-style: dashed; color: var(--text-muted); }
+.fold-done { margin-left: 4px; color: var(--ok); }
+/* A column the view cuts at an edge is not drawn: the edge's cue counts it instead. */
+.graph-node.is-clipped { opacity: 0; pointer-events: none; }
