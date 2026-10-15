@@ -21,6 +21,7 @@
 .ph-tick-done { background: var(--text-muted); }
 .ph-tick-current, .ph-tick-run { background: var(--info); }
 .ph-tick-hot { background: var(--warn); }
+.ph-tick-paused { background: var(--text-sub); }
 .ph-tick-gate { flex: none; width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); }
 .ph-card-tail { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-card-tail.ph-is-hot { color: var(--warn); }

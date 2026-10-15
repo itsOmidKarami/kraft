@@ -47,6 +47,9 @@ describe("the item screen (C)", () => {
   it("shows a paused item's badge in the neutral tone: amber is for what needs a person", async () => {
     mount(item("paused"));
     expect(await screen.findByText("PAUSED")).toHaveClass("ph-tag-muted");
+    const ticks = [...document.querySelectorAll(".ph-ticks .ph-tick")].map((t) => t.className);
+    expect(ticks.some((c) => c.includes("ph-tick-paused"))).toBe(true);
+    expect(ticks.some((c) => c.includes("ph-tick-hot"))).toBe(false);
   });
 
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {

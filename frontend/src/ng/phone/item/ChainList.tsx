@@ -22,7 +22,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
   return (
     <Block title="Chain" aside={`${done.length} of ${nodes.length} nodes`}>
       <div className="ph-ticks ph-ticks-flush" aria-hidden="true">
-        {nodes.map((n) => <span key={n.id} className={`ph-tick ph-tick-${n.state === "done" ? "done" : n.state === "failed" || n.capped ? "failed" : n.state === "current" ? (n.running ? "current" : "hot") : "todo"}${n.kind === "gate" ? " ph-tick-gate" : ""}`} />)}
+        {nodes.map((n) => <span key={n.id} className={`ph-tick ph-tick-${n.state === "done" ? "done" : n.state === "failed" || n.capped ? "failed" : n.state === "current" ? (n.running ? "current" : n.paused ? "paused" : "hot") : "todo"}${n.kind === "gate" ? " ph-tick-gate" : ""}`} />)}
       </div>
       <div className="ph-list">
         {done.length > 0 && (
