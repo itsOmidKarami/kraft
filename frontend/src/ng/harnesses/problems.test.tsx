@@ -10,7 +10,7 @@ describe("problems", () => {
     serve(view(resolved({ access: { claude: "never" } }), { problems: [NEVER] }));
     const { tail } = renderPage();
     const nav = await screen.findByRole("navigation", { name: "Harnesses and profiles" });
-    expect(within(nav).getByRole("button", { name: "claude, Never, has a problem" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "claude, Installed, Never, has a problem" })).toBeInTheDocument();
     expect(screen.getByLabelText("claude", { selector: "section" })).toHaveClass("is-red");
     expect(screen.getAllByRole("link", { name: /implement\.main\.implementer.*has a problem/ }).length).toBeGreaterThan(0);
     const pane = await openAreaPane();
@@ -22,7 +22,7 @@ describe("problems", () => {
     serve(view(resolved({ access: { codex: "never" }, escalation: { harness: "codex", grants: null }, escalation_effective: { harness: "codex", set: true } }), { problems: [problem({ ...ESCALATION, message: "escalation runs on 'codex', which is set to Never" })] }));
     renderPage();
     const nav = await screen.findByRole("navigation", { name: "Harnesses and profiles" });
-    expect(within(nav).getAllByRole("button", { name: /has a problem/ }).map((b) => b.getAttribute("aria-label"))).toEqual(["codex, Never, has a problem"]);
+    expect(within(nav).getAllByRole("button", { name: /has a problem/ }).map((b) => b.getAttribute("aria-label"))).toEqual(["codex, Installed, Never, has a problem"]);
     expect(screen.getByLabelText("codex", { selector: "section" })).toHaveClass("is-red");
   });
 

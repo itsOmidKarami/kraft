@@ -16,6 +16,9 @@ import { useProviders } from "./useProviders";
 import { useRun } from "./ops";
 import "./harnesses.css";
 
+/** Below the wide-desktop breakpoint the open pane costs the lanes too much width: the floor starts on its labelled rail. */
+const narrow = () => typeof matchMedia === "function" && matchMedia("(max-width: 1279px)").matches;
+
 /** Settings › Harnesses (Decisions §11): one draft over harnesses.yaml and policy.yaml.
  *  The selection is in the query (`?harness=` / `?profile=`, `&lane=`), so no id shadows a route. */
 export function HarnessesPage() {
@@ -33,7 +36,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const providers = useProviders();
   const published = usePublishedPolicy(view.draft);
   const [params, setParams] = useSearchParams();
-  const [open, setOpen] = useState(params.has("harness") || params.has("profile"));
+  const [open, setOpen] = useState(params.has("harness") || params.has("profile") || !narrow());
   const [tab, setTab] = useState("overview");
   const { run, error: addError } = useRun(draft);
   const [adding, setAdding] = useState(false);

@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { NodeIcon } from "../icons";
 import { NoMatch } from "../ui/NoMatch";
-import { ACCESS_WORD, type HProblem, type Resolved, problemsOfHarness, problemsOfProfile } from "./model";
+import { ACCESS_WORD, executableWord, type HProblem, type Resolved, problemsOfHarness, problemsOfProfile } from "./model";
 
 export type Pick = { kind: "harness" | "profile"; id: string };
 
@@ -39,20 +39,21 @@ export function List({ r, problems, sel, onPick, onAdd }: {
     <nav className="hn-list" aria-label="Harnesses and profiles" ref={box} onKeyDown={move}>
       <input className="hn-search" type="search" aria-label="Search harnesses" placeholder="Search harnesses" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="hn-list-body">
-        <h3 className="hn-head">Harnesses · {harnesses.length}</h3>
+        <h2 className="hn-head">Harnesses · {harnesses.length}</h2>
         {harnesses.map((h) => {
           const bad = problemsOfHarness(r, problems, h.id).length > 0;
           const p: Pick = { kind: "harness", id: h.id };
           return (
-            <button key={h.id} type="button" aria-label={`${h.id}, ${ACCESS_WORD[h.state]}${bad ? ", has a problem" : ""}`} data-row={keyOf(p)} tabIndex={tab(p)} className={`hn-row${sel && keyOf(sel) === keyOf(p) ? " is-sel" : ""}`} aria-current={sel && keyOf(sel) === keyOf(p) ? "true" : undefined} onClick={() => onPick(p)}>
+            <button key={h.id} type="button" aria-label={`${h.id}, ${executableWord(h.executable_found)}, ${ACCESS_WORD[h.state]}${bad ? ", has a problem" : ""}`} data-row={keyOf(p)} tabIndex={tab(p)} className={`hn-row${sel && keyOf(sel) === keyOf(p) ? " is-sel" : ""}`} aria-current={sel && keyOf(sel) === keyOf(p) ? "true" : undefined} onClick={() => onPick(p)}>
               <NodeIcon name="bot" size={14} />
               <span className="hn-row-name">{h.id}</span>
               {bad && <span className="hn-dot" aria-hidden />}
+              <span className="hn-row-meta" data-found={h.executable_found}>{executableWord(h.executable_found)}</span>
               <span className="hn-row-meta" data-access={h.state}>{ACCESS_WORD[h.state]}</span>
             </button>
           );
         })}
-        <h3 className="hn-head">Profiles · {profiles.length}</h3>
+        <h2 className="hn-head">Profiles · {profiles.length}</h2>
         {profiles.map((id) => {
           const bad = problemsOfProfile(r, problems, id).length > 0;
           const n = r.profiles[id].tasks.length;

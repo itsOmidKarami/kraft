@@ -7,6 +7,13 @@ export const ACCESS: { value: Access; label: string }[] = [
   { value: "never", label: "Never" },
 ];
 export const ACCESS_WORD: Record<Access, string> = { available: "Available", override: "Override", never: "Never" };
+/** The access section's name and what each state means, on both trees; "Access" is Settings › Access (the server's own bind and password). */
+export const ACCESS_SECTION = "Who may use it";
+export const ACCESS_HELP: Record<Access, string> = {
+  available: "Tasks may select it. A repo can still narrow this in Repos.",
+  override: "Nothing selects it by default; an item or a retry override may name it.",
+  never: "No task, repo or override may use it.",
+};
 
 export interface TaskRef {
   chain: string;
@@ -81,6 +88,8 @@ export interface Lane {
   model?: string;
   effort?: string;
   tag?: string;
+  /** Whether the provider's CLI is installed, beside the access tag; only a harness lane has one. */
+  health?: { word: string; ok: boolean };
   right: string;
   tasks: TaskRef[];
   /** More tasks than the lane draws (floor lanes show five). */
@@ -105,6 +114,7 @@ export function floorLanes(r: Resolved, problems: HProblem[]): Lane[] {
       title: h.id,
       icon: "bot",
       tag: ACCESS_WORD[h.state],
+      health: { word: executableWord(h.executable_found), ok: h.executable_found },
       right: `${h.provider ?? "?"} · ${plural(own.length, "task")}`,
       tasks: own.slice(0, FLOOR_TASKS),
       more: Math.max(0, own.length - FLOOR_TASKS),
@@ -209,4 +219,5 @@ export const HARNESS_FIELD = { enabled: "enabled", executable: "executable", pro
 export const defaultLabel = (key: string): string => (HARNESS_FIELD as Record<string, string>)[key] ?? key;
 export const enabledHelp = (enabled: boolean): string => (enabled ? "enabled" : "disabled: a task selecting it stops for a human");
 export const enableLabel = (id: string, enabled: boolean): string => `${enabled ? "Disable" : "Enable"} ${id}`;
-export const executableWord = (found: boolean): string => (found ? "found" : "not on PATH");
+/** Provider health, named apart from the access policy ("Available"): is its CLI there to run. */
+export const executableWord = (found: boolean): string => (found ? "Installed" : "Not on PATH");

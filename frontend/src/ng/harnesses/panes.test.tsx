@@ -14,7 +14,7 @@ describe("harness pane", () => {
     serve(view(resolved()));
     renderPage("?harness=gemini");
     const p = await pane("gemini");
-    expect(within(p).getByText("not on PATH")).toBeInTheDocument();
+    expect(within(p).getByText("Not on PATH")).toBeInTheDocument();
     expect(within(p).getByRole("switch", { name: "Disable gemini" })).toBeChecked();
     expect(within(p).getByRole("textbox", { name: "executable" })).toHaveValue("");
     expect(within(p).getByRole("textbox", { name: "default model" })).toHaveValue("");
@@ -110,6 +110,8 @@ describe("harness pane", () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude");
     const p = await pane("claude");
+    expect(within(p).getByRole("heading", { name: "Who may use it" })).toBeInTheDocument();
+    expect(within(p).queryByRole("heading", { name: "Access" })).toBeNull();
     await userEvent.click(within(p).getByRole("radio", { name: "Never" }));
     await userEvent.click(within(p).getByRole("radio", { name: "Override" }));
     await waitFor(() => expect(server.ops).toHaveLength(2));

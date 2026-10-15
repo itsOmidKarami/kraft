@@ -21,6 +21,7 @@ describe("Harnesses list (M.1)", () => {
     expect(within(hs).getByRole("link", { name: /^claude-sandbox/ })).toHaveTextContent("Override");
     expect(within(hs).getByRole("link", { name: /^cursor/ })).toHaveTextContent("Never");
     expect(within(hs).getByRole("link", { name: /^gemini/ })).toHaveTextContent(executableWord(false));
+    expect(within(hs).getByRole("link", { name: /^claude-sandbox/ })).toHaveTextContent("claude · Installed");
     const ps = screen.getByRole("region", { name: "Profiles" });
     expect(within(ps).getByRole("link", { name: /^strong/ })).toHaveTextContent("claude sonnet · codex gpt-5.6-terra");
     const ts = screen.getByRole("region", { name: "Tasks" });
@@ -91,8 +92,8 @@ describe("a harness (M.1, R65)", () => {
 
   it("edits Access only, with set_access, and shows its own fields read-only", async () => {
     const { calls } = open("claude");
-    await userEvent.click(await screen.findByRole("button", { name: /^access/ }));
-    const sheet = screen.getByRole("dialog", { name: "Access" });
+    await userEvent.click(await screen.findByRole("button", { name: /^who may use it/ }));
+    const sheet = screen.getByRole("dialog", { name: "Who may use it" });
     expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["Available", "Override", "Never"]);
     await userEvent.click(within(sheet).getByRole("radio", { name: "Never" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
