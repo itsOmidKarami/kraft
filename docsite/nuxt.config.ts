@@ -116,7 +116,7 @@ export default defineNuxtConfig({
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/a11y.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
