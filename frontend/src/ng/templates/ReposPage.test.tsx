@@ -55,6 +55,8 @@ describe("Repos page: the table", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/platform", kind: "change", summary: "policy", fields: ["policy"] }, { path: "/src/docs-site", kind: "add", summary: "" }] }, true)));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
+    // With repos listed, neither empty line shows.
+    expect(screen.queryByText(/No repos connected yet/)).toBeNull();
     // Open, not running: the server counts every item not ended, and the board's Running group is only some of them.
     expect(row("platform")).toHaveTextContent("enabled · 1 open");
     expect(row("platform")).not.toHaveTextContent("running");

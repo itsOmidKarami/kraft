@@ -163,7 +163,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       </div>
                     );
                   })}
-                  {!matches.length && repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>}
+                  {!matches.length && (repos.length ? <NoMatch className="rp-empty" query={q} onClear={() => setQ("")} /> : <p className="rp-empty">No repos connected yet. Connect one to start.</p>)}
                 </div>
                 {data.detected.length > 0 && !q.trim() && (
                   <section className="rp-detected" aria-label="Detected, not connected">
