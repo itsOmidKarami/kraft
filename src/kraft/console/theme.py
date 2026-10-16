@@ -11,7 +11,7 @@ DARK = {
     "bg": "#212223",
     "border": "#525254",
     "brand": "#b0adfc",
-    "brand-muted": "#9999c9",
+    "brand-muted": "#9f9fcf",
     "diff-add-plain": "#c7c7c8",
     "diff-add-safe": "#8bbcef",
     "diff-add-theme": "#94c5a4",

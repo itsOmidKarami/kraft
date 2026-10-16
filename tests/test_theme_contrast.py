@@ -131,8 +131,10 @@ def test_the_console_accent_clears_the_text_floor_and_names_no_state(mode, role)
     surface, amount, _ = gen.CONSOLE_LOOK
     t = BLOCKS[surface, mode, amount]
     colour = gen.console_accent(BLOCKS, mode, [])[role]
-    for ground in ("bg", "side", "surface", "surface-2"):
-        assert contrast(colour, t[ground]) >= 4.5, ground
+    # The web's grounds, and the cursor's row, where the repo chip is drawn.
+    cursor = gen.over(t["bg"], t["text"], gen.CURSOR_ALPHA)
+    for ground in (t["bg"], t["side"], t["surface"], t["surface-2"], cursor):
+        assert contrast(colour, ground) >= 4.5, ground
 
     def hue(hx: str) -> float:
         _l, a, b = gen.hex_oklab(hx)
@@ -141,3 +143,19 @@ def test_the_console_accent_clears_the_text_floor_and_names_no_state(mode, role)
     for state in ("ok", "warn", "bad", "info"):
         apart = abs(hue(colour) - hue(t[state]))
         assert min(apart, 360 - apart) > 20, state
+
+
+def test_the_cursor_ground_is_the_one_the_console_draws():
+    """`CURSOR_ALPHA` is the stylesheet's highlighted row, laid over the page
+    as Textual lays it, so the floor above is checked on what is drawn."""
+    from textual.color import Color
+
+    tcss = (Path(gen.__file__).parents[1] / "src/kraft/console/kraft.tcss").read_text()
+    shown = re.search(
+        r"#rows > \.option-list--option-highlighted,[^{]*\{[^}]*background: \$primary (\d+)%", tcss
+    )
+    assert int(shown[1]) / 100 == gen.CURSOR_ALPHA
+    for mode in gen.MODES:
+        t = BLOCKS[gen.CONSOLE_LOOK[0], mode, gen.CONSOLE_LOOK[1]]
+        drawn = Color.parse(t["bg"]) + Color.parse(t["text"]).with_alpha(gen.CURSOR_ALPHA)
+        assert gen.over(t["bg"], t["text"], gen.CURSOR_ALPHA) == drawn.hex.lower()

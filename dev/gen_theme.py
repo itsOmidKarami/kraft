@@ -299,13 +299,30 @@ def render(blocks: dict, accents: dict, code: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+#: The console's cursor row: the text colour at this much over the page
+#: (`kraft.tcss`, a highlighted option's `$primary 12%`).
+CURSOR_ALPHA = 0.12
+
+
+def over(ground: str, colour: str, alpha: float) -> str:
+    """`colour` at `alpha` laid over `ground`, channel by channel in sRGB, as
+    Textual composites a translucent background."""
+    a, b = ([int(hx[i : i + 2], 16) for i in (1, 3, 5)] for hx in (ground, colour))
+    return "#" + "".join(f"{int(x + (y - x) * alpha):02x}" for x, y in zip(a, b, strict=True))
+
+
+def console_grounds(t: dict[str, str]) -> list[str]:
+    """Every ground the console draws text on: the web's, and its cursor row."""
+    return [*(t[g] for g in (*TEXT_ON, "surface-2")), over(t["bg"], t["text"], CURSOR_ALPHA)]
+
+
 def console_accent(blocks: dict, mode: str, log: list[str]) -> dict[str, str]:
     """`brand` and `brand-muted` for one mode: text on every ground the console
     draws on, so each clears the text floor on all of them."""
     surface, amount, _ = CONSOLE_LOOK
     name, strength = CONSOLE_ACCENT
     t, hue, dark = blocks[surface, mode, amount], ACCENTS[name], mode == "dark"
-    grounds = [t[g] for g in (*TEXT_ON, "surface-2")]
+    grounds = console_grounds(t)
     where = f"console {name}/{mode}"
     brand = oklch(0.78 if dark else 0.45, ACCENT_C * K[strength], hue)
     muted = oklch(0.7 if dark else 0.47, ACCENT_C, hue)
