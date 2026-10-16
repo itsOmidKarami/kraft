@@ -16,14 +16,14 @@ from textual.containers import Horizontal
 from textual.content import Content
 from textual.widgets import ContentSwitcher, RichLog, Static
 
-from kraft import answers, client, render
+from kraft import answers, client, logs, render
 from kraft.console import acts, words
 from kraft.console.dialogs import Reject
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 
 #: The Item's tabs, in `[` and `]` order, with their names.
-TABS = (("overview", "Overview"), ("activity", "Activity"))
+TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"))
 #: How many events the Activity reads at a time, newest first.
 PAGE = 50
 #: A `before_seq` past every event: SQLite's largest integer.
@@ -81,6 +81,7 @@ class Item(View):
         Binding("r", "reject", "reject"),
         Binding("p", "pause_or_resume", "pause/resume"),
         Binding("t", "retry", "retry"),
+        Binding("s", "session", "session"),
     ]
 
     def __init__(self, **kwargs) -> None:
@@ -102,6 +103,8 @@ class Item(View):
         #: The Activity's events, newest first, and whether older ones remain.
         self.events: list[dict] = []
         self.more = False
+        #: The session the Log shows; None picks as `kraft view logs -f` does.
+        self.session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="item-top"):
@@ -121,6 +124,9 @@ class Item(View):
             activity = RichLog(id="activity", wrap=True, min_width=1)
             activity.can_focus = False
             yield activity
+            log = RichLog(id="log", wrap=True, min_width=1, max_lines=2000)
+            log.can_focus = False
+            yield log
         yield Static(Content(GONE), id="item-gone")
 
     def on_mount(self) -> None:
@@ -129,7 +135,7 @@ class Item(View):
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
         # The read still answering for the item shown before must not draw it.
-        for group in ("read", "tab", "older"):
+        for group in ("read", "tab", "older", "log"):
             self.workers.cancel_group(self, group)
         self.work_item_id, self.item, self._key = work_item_id, None, None
         self._dead = False
@@ -139,6 +145,7 @@ class Item(View):
         self.crumb = VIEWS[self.app._last_top].label
         self.read_gate = self.digest = None
         self.events, self.more = [], False
+        self.session_id = None
         self.query_one("#item-gone").display = False
         self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
@@ -161,6 +168,14 @@ class Item(View):
             self.call_after_refresh(
                 self.run_worker, self._activity_first, group="tab", exclusive=True
             )
+
+        if tab == "log" and self.work_item_id is not None and not self._dead:
+            self.call_after_refresh(self.run_worker, self._follow, group="log", exclusive=True)
+        else:  # a log nobody sees is not followed
+            self.workers.cancel_group(self, "log")
+
+    def on_hide(self) -> None:
+        self.workers.cancel_group(self, "log")
 
     def _read(self) -> None:
         # Exclusive: a read still answering for an older state is dropped.
@@ -365,6 +380,54 @@ class Item(View):
             log.write(Text("End loads earlier events.", style=muted), scroll_end=False)
         log.scroll_to(y=scrolled, animate=False, immediate=True)
 
+    def _sessions(self) -> list[dict]:
+        """The item's sessions, newest first."""
+        return list(reversed((self.item or {}).get("worker_sessions") or []))
+
+    async def _follow(self) -> None:
+        """The Log (spec §7.2): the session picked, else the newest, followed
+        to its end; while the reader is scrolled up, writes leave them there."""
+        log = self.query_one("#log", RichLog)
+        log.clear()
+        sessions = self._sessions()
+        session = next((s for s in sessions if s["id"] == self.session_id), None)
+        passed_over = None
+        if session is None and self.item is not None:
+            session, passed_over = logs.pick_session(self.item, follow=True)
+        muted = self.app.theme_variables["kraft-muted"]
+        if session is None:
+            log.write(Text("No session has run yet.", style=muted))
+            return
+        self.session_id = session["id"]
+        k = next(n for n, s in enumerate(sessions, 1) if s["id"] == session["id"])
+        head = f"{session['hook_point']} · {session['status']} · session {k} of {len(sessions)}"
+        heads = [Text(head, style=f"bold {muted}")]
+        heads += [Text(passed_over, style=muted)] if passed_over else []
+        for line in [*heads, Text("waiting for output", style=muted)]:
+            log.write(line)
+        fresh = True
+        try:
+            async for entry in client.stream_log(self.work_item_id, session["id"]):
+                if fresh:  # the placeholder goes once output comes
+                    log.clear()
+                    for line in heads:
+                        log.write(line)
+                    fresh = False
+                # As `kraft view logs` reads a line: its summary, else its text.
+                text = str(entry.get("summary") or entry.get("text") or "")
+                log.write(text, scroll_end=log.is_vertical_scroll_end)
+        except client.ClientError as exc:
+            log.write(client.reason_of(str(exc)))
+            return
+        log.write(Text("session ended", style=muted), scroll_end=log.is_vertical_scroll_end)
+
+    def action_session(self) -> None:
+        """`s` on the Log: the next older session, round to the newest."""
+        ids = [s["id"] for s in self._sessions()]
+        at = ids.index(self.session_id) if self.session_id in ids else -1
+        self.session_id = ids[(at + 1) % len(ids)]
+        self.run_worker(self._follow, group="log", exclusive=True)
+
     def _pane(self) -> RichLog:
         return self.query_one(f"#{self.tab}", RichLog)
 
@@ -378,6 +441,8 @@ class Item(View):
             )
         if action in acts.DOORS:
             return acts.opens(action, self.item)
+        if action == "session":
+            return self.tab == "log" and len(self._sessions()) > 1
         return True
 
     def action_scroll(self, how: str) -> None:

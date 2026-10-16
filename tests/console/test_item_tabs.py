@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
-from support.console_board import GATE, _detail, _iso, _opened, _serve
+from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _serve
 from textual.widgets import RichLog
 
 from kraft import client
@@ -136,3 +138,82 @@ def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, r
     after, first = console.run(scenario)
     assert after == [0, 5][:reads]
     assert first == (top or "    12m  spec_approval · rejected: vague [/]")
+
+
+SESSIONS = [
+    {"id": "s1", "node_id": "implement", "hook_point": "implement.main.author", "status": "done"},
+    {
+        "id": "s2",
+        "node_id": "verification",
+        "hook_point": "verification.review.code_review",
+        "status": "running",
+    },
+]
+LONG = "reviewing [/] " + "word " * 20
+
+
+def _log(app) -> list[str]:
+    return [line.text.rstrip() for line in app.query_one("#log", RichLog).lines]
+
+
+def test_the_log_follows_the_newest_session_and_s_steps_to_older_ones(board, monkeypatch):
+    """Spec §7.2: the newest session, followed to its end; `s` the next older
+    one, offered only with more than one. A long line wraps at the window."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=SESSIONS), calls=[])
+    _serve_events(monkeypatch, [])
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        yield {"n": 0, "text": LONG.strip() if session_id == "s2" else "wrote code"}
+
+    monkeypatch.setattr(client, "stream_log", stream_log)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        offered = app.view.check_action("session", ())
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        await console.until(pilot, lambda: _log(app)[-1:] == ["session ended"])
+        newest = _log(app)
+        await pilot.press("s")
+        await console.until(pilot, lambda: "wrote code" in _log(app))
+        await console.until(pilot, lambda: _log(app)[-1:] == ["session ended"])
+        return offered, app.view.check_action("session", ()), newest, _log(app)
+
+    offered, on_log, newest, older = console.run(scenario, size=(60, 30))
+    assert (offered, on_log) == (False, True)
+    head = "verification.review.code_review · running · session 1 of 2"
+    assert " ".join(" ".join(newest[:-1]).split()) == f"{head} {LONG.strip()}"
+    assert max(len(line) for line in newest) <= 60
+    assert older == ["implement.main.author · done · session 2 of 2", "wrote code", "session ended"]
+
+
+def test_a_log_nobody_sees_is_not_followed(board, monkeypatch):
+    """Leaving the Log tab, or the Item, stops following the session."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=SESSIONS[1:]), calls=[])
+    _serve_events(monkeypatch, [])
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        yield {"n": 0, "text": "first"}
+        await asyncio.Event().wait()  # a session that never ends
+        yield {}
+
+    monkeypatch.setattr(client, "stream_log", stream_log)
+    console = board([RUNNING])
+
+    def live(app) -> list:
+        return [w for w in app.view.workers if w.group == "log" and w.is_running]
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        seen = []
+        for leave in (["left_square_bracket"], ["1"]):  # another tab; the Board
+            app.view.show_tab("log")
+            await console.until(pilot, lambda: live(app) and "first" in _log(app))
+            await pilot.press(*leave)
+            await pilot.pause()
+            seen.append(live(app))
+            app.show("item")
+            await pilot.pause()
+        return seen
+
+    assert console.run(scenario) == [[], []]
