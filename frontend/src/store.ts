@@ -2,6 +2,7 @@ import { create } from "zustand";
 import * as api from "./api";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 import { REREAD_EVENTS } from "./rereadEvents";
+import { bindOffline } from "./writeGuard";
 
 export type Connection = "connecting" | "open" | "reconnecting";
 
@@ -114,6 +115,9 @@ async function fetchRounds(id: string): Promise<void> {
   }
   // Nothing applied: the store keeps its reducer-patched state, and the next event's re-read tries again.
 }
+
+/** The one definition of offline, over the store's two fields. */
+export const offlineIn = (s: { loadError: string | null; connection: Connection }) => s.loadError !== null || s.connection === "reconnecting";
 
 export const useStore = create<State>((set, get) => ({
   workItems: {},
@@ -447,3 +451,5 @@ function upsert(rows: WorkerSession[], row: WorkerSession): WorkerSession[] {
   copy[i] = { ...copy[i], ...row };
   return copy;
 }
+
+bindOffline(() => offlineIn(useStore.getState()));

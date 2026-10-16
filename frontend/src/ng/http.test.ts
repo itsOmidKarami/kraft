@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../store";
+import { OFFLINE_REFUSAL } from "../writeGuard";
 import { request } from "./http";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  useStore.setState({ connection: "connecting", loadError: null });
+  vi.unstubAllGlobals();
+});
 
 const reply = (status: number, body: unknown) => vi.stubGlobal("fetch", vi.fn(async () => new Response(body === undefined ? null : JSON.stringify(body), { status })));
 
@@ -31,5 +36,16 @@ describe("ng request", () => {
     const a = await request("/drafts");
     expect(a.status).toBe(0);
     expect((a.body as { detail: string }).detail).toMatch(/could not reach the Kraft server/);
+  });
+
+  it.each([
+    ["the live connection dropped", { connection: "reconnecting" as const, loadError: null }],
+    ["the list read failed", { connection: "open" as const, loadError: "down" }],
+  ])("answers a write with the offline words, sending nothing, when %s", async (_, state) => {
+    useStore.setState(state);
+    reply(200, {});
+    expect(await request("/work-items/w1/retry", { method: "POST" })).toEqual({ status: 0, body: { detail: OFFLINE_REFUSAL } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await request("/drafts")).status).toBe(200);
   });
 });

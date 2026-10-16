@@ -1,3 +1,5 @@
+import { OFFLINE_REFUSAL, refusesWrite } from "../writeGuard";
+
 /** A JSON call that keeps the status and the body, for pages that act on a
  *  refusal's body (a draft's 409 diff, a 422's op index). `api.ts`'s `req`
  *  throws a bare `Error(detail)` instead.
@@ -8,6 +10,7 @@
 export type Answer<T = unknown> = { status: number; body: T };
 
 export async function request<T = unknown>(path: string, init?: RequestInit): Promise<Answer<T>> {
+  if (refusesWrite(init)) return { status: 0, body: { detail: OFFLINE_REFUSAL } as T };
   let res: Response;
   try {
     res = await fetch(`/api${path}`, { credentials: "same-origin", ...init, headers: { accept: "application/json", ...init?.headers } });

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import "./ui.css";
 import { tip } from "./Tooltip";
@@ -29,8 +29,10 @@ export interface MenuItem {
  *  hands focus back to the button. With `triggerClass` the trigger is a text
  *  button named by its own text (the list keeps `label`); `note` is a line
  *  under the items, `heading` a small title above them, `triggerLabel` the
- *  text trigger's accessible name when its own text is not enough. */
-export function Menu({ label, trigger, items, triggerClass, note, heading, triggerLabel }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string; heading?: string; triggerLabel?: string }) {
+ *  text trigger's accessible name when its own text is not enough;
+ *  `description` describes the trigger and shows as the line under the items. */
+export function Menu({ label, trigger, items, triggerClass, note, heading, triggerLabel, description }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string; heading?: string; triggerLabel?: string; description?: string }) {
+  const descId = useId();
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -50,9 +52,10 @@ export function Menu({ label, trigger, items, triggerClass, note, heading, trigg
 
   return (
     <>
-      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : tip(label))} {...(triggerLabel ? { "aria-label": triggerLabel } : {})} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : tip(label))} {...(triggerLabel ? { "aria-label": triggerLabel } : {})} {...(description ? { "aria-describedby": descId } : {})} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
+      {description && <span id={descId} hidden>{description}</span>}
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>
         <div className="menu">
           {heading && <span className="menu-heading" aria-hidden="true">{heading}</span>}
@@ -87,7 +90,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading, trigg
             </button>
             </Fragment>
           ))}
-          {note && <p className="menu-note">{note}</p>}
+          {(description ?? note) && <p className="menu-note">{description ?? note}</p>}
         </div>
       </Popover>
     </>

@@ -1,6 +1,6 @@
 /* The Repos area (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .rp-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
-.rp-body > * { max-width: 1180px; }
+.rp-body > * { box-sizing: border-box; width: 100%; max-width: 1180px; margin-inline: auto; }
 .rp-loading { display: flex; flex-direction: column; gap: 8px; }
 .rp-skel { height: 34px; border-radius: 8px; background: var(--surface); }
 .rp-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
