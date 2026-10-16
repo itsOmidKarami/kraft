@@ -4,6 +4,7 @@ windows, the no-server state, and `kraft console`'s own refusals."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
@@ -746,19 +747,40 @@ def test_the_top_line_leads_with_the_brand_and_lights_the_dot_one_beat(board):
     )
 
 
-@pytest.mark.parametrize("gone", ["#where", "#tabs", "#since"])
-def test_the_top_line_draws_nothing_once_its_frame_is_coming_down(board, gone):
+_EVENT = [{"seq": 9, "type": "node_started"}]
+
+
+@pytest.mark.parametrize(
+    ("gone", "lands"),
+    [
+        pytest.param("#where", lambda app: app._unlight_dot(), id="dot-where"),
+        pytest.param("#tabs", lambda app: app._unlight_dot(), id="dot-tabs"),
+        pytest.param("#since", lambda app: app._unlight_dot(), id="dot-since"),
+        pytest.param("#status", lambda app: app._live_event([GATE], _EVENT), id="event-status"),
+        pytest.param("#tabs", lambda app: app._live_event([GATE], _EVENT), id="event-tabs"),
+        pytest.param("#down", lambda app: app._live_link(Link.DOWN, None), id="link-down"),
+        pytest.param("#board", lambda app: app._resolve_scope(), id="scope-board"),
+        pytest.param("#server", lambda app: app.check_update(), id="update-server"),
+    ],
+)
+def test_nothing_that_lands_while_the_frame_comes_down_raises(board, monkeypatch, gone, lands):
     """Quitting takes the frame down a widget at a time while a lit dot's timer,
-    an event or a beat can still land: a draw then must not raise (one in a
-    handler ends the app with a traceback)."""
+    the server's events and answers can still land: none of them may raise
+    then (one in a handler ends the app with a traceback)."""
     console = board([GATE])
+
+    async def update_available(channel=None):
+        return {"behind": 1}
+
+    monkeypatch.setattr(client, "update_available", update_available)
 
     async def scenario(app, pilot):
         await _settled(console, app, pilot)
         app.default_screen.add_class("-since")
         app.seen = moments.Seen(at=0.0, done=frozenset())
         await app.query_one(gone).remove()
-        app._unlight_dot()
+        if inspect.isawaitable(landed := lands(app)):  # a worker's coroutine
+            await landed
         app._draw_top()
         return True
 
