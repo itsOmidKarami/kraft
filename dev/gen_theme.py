@@ -26,6 +26,12 @@ OUT = Path(__file__).resolve().parents[1] / "frontend" / "src" / "ng" / "theme" 
 #: `ng/theme/applyTheme.ts`), surface, amount and accent, in both modes.
 CONSOLE_OUT = Path(__file__).resolve().parents[1] / "src" / "kraft" / "console" / "theme.py"
 CONSOLE_LOOK = ("graphite", "subtle", "none")
+#: The console's own accent, `brand` and `brand-muted` in `theme.py`: the
+#: brand mark, panel titles, the focused frame, the prompt's mark and the
+#: active tab. The default look's accent is the text colour, which names
+#: nothing, and blue is the info colour, so it is violet at the full amount:
+#: a hue no state colour uses. `brand-muted` is quieter, for secondary chips.
+CONSOLE_ACCENT = ("violet", "full")
 
 MODES = ("dark", "light")
 AMOUNTS = ("mono", "subtle", "full")
@@ -293,6 +299,22 @@ def render(blocks: dict, accents: dict, code: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+def console_accent(blocks: dict, mode: str, log: list[str]) -> dict[str, str]:
+    """`brand` and `brand-muted` for one mode: text on every ground the console
+    draws on, so each clears the text floor on all of them."""
+    surface, amount, _ = CONSOLE_LOOK
+    name, strength = CONSOLE_ACCENT
+    t, hue, dark = blocks[surface, mode, amount], ACCENTS[name], mode == "dark"
+    grounds = [t[g] for g in (*TEXT_ON, "surface-2")]
+    where = f"console {name}/{mode}"
+    brand = oklch(0.78 if dark else 0.45, ACCENT_C * K[strength], hue)
+    muted = oklch(0.7 if dark else 0.47, ACCENT_C, hue)
+    return {
+        "brand": nudge(brand, grounds, ACCENT_FLOOR[0], dark, f"{where} brand", log),
+        "brand-muted": nudge(muted, grounds, ACCENT_FLOOR[0], dark, f"{where} brand-muted", log),
+    }
+
+
 def render_console(blocks: dict, accents: dict) -> str:
     """`console/theme.py`: one dict per mode, the accent resolved to a colour
     (`none` is the text colour, which a terminal cannot read as `var(--text)`)."""
@@ -309,6 +331,7 @@ def render_console(blocks: dict, accents: dict) -> str:
         tokens = dict(blocks[surface, mode, amount])
         chosen = accents[accent_name, mode, amount]
         tokens["accent"] = tokens["text"] if chosen == "var(--text)" else chosen
+        tokens |= console_accent(blocks, mode, [])
         out += ["", f"{mode.upper()} = {{"]
         out += [f'    "{role}": "{colour}",' for role, colour in sorted(tokens.items())]
         out.append("}")

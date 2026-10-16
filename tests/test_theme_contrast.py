@@ -6,6 +6,7 @@ same floors on the file itself."""
 from __future__ import annotations
 
 import importlib.util
+import math
 import re
 import sys
 from pathlib import Path
@@ -119,3 +120,24 @@ def test_the_console_look_is_the_webs_default_look(field, index):
     ts = (Path(gen.__file__).parents[1] / "frontend/src/ng/theme/applyTheme.ts").read_text()
     default = re.search(r"DEFAULT_LOOK: Look = \{([^}]*)\}", ts)[1]
     assert re.search(rf'\b{field}: "([^"]+)"', default)[1] == gen.CONSOLE_LOOK[index]
+
+
+@pytest.mark.parametrize("mode", gen.MODES)
+@pytest.mark.parametrize("role", ["brand", "brand-muted"])
+def test_the_console_accent_clears_the_text_floor_and_names_no_state(mode, role):
+    """The console's accent and its muted variant are text on every ground the
+    console draws on, and a hue apart from the state colours, which carry
+    meaning (`CONSOLE_ACCENT`)."""
+    surface, amount, _ = gen.CONSOLE_LOOK
+    t = BLOCKS[surface, mode, amount]
+    colour = gen.console_accent(BLOCKS, mode, [])[role]
+    for ground in ("bg", "side", "surface", "surface-2"):
+        assert contrast(colour, t[ground]) >= 4.5, ground
+
+    def hue(hx: str) -> float:
+        _l, a, b = gen.hex_oklab(hx)
+        return math.degrees(math.atan2(b, a)) % 360
+
+    for state in ("ok", "warn", "bad", "info"):
+        apart = abs(hue(colour) - hue(t[state]))
+        assert min(apart, 360 - apart) > 20, state
