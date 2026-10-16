@@ -2,6 +2,16 @@ import { Link, useLocation } from "react-router-dom";
 import { nearestPage } from "../../shell/pageName";
 import { ScreenHeader } from "./ScreenHeader";
 
+/** A work item's address whose item does not exist: the header keeps Back, the tab bar stays. */
+export function ItemMissing() {
+  return (
+    <>
+      <ScreenHeader />
+      <div className="ph-content"><h1 className="ph-title">Not found</h1><p className="ph-empty">This work item does not exist.</p></div>
+    </>
+  );
+}
+
 /** An address no phone screen answers. The tab bar stays, and the way up is the area's list, or More when only the section is known. */
 export function NotFound() {
   const { pathname } = useLocation();

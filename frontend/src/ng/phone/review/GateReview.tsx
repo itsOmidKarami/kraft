@@ -21,7 +21,8 @@ import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { capitalise, gateName, nameOf } from "../../board/rowText";
-import { ScreenHeader } from "../nav/ScreenHeader";
+import { ItemMissing } from "../nav/NotFound";
+import { ComposerHeader, ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
 import "./review.css";
@@ -55,13 +56,7 @@ export function GateReviewRoute() {
         <div className="ph-content ph-skeleton" aria-busy="true"><span /><span /></div>
       </>
     );
-  if (loaded.state === "missing")
-    return (
-      <>
-        <ScreenHeader />
-        <div className="ph-content"><h1 className="ph-title">Not found</h1><p className="ph-empty">This work item does not exist.</p></div>
-      </>
-    );
+  if (loaded.state === "missing") return <ItemMissing />;
   return <GateReview item={loaded.item} events={events} />;
 }
 
@@ -262,21 +257,17 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
   };
   return (
     <>
-      <header className="ph-composer-head">
-        <button type="button" className="ph-back" onClick={() => (text.trim() ? sheet.open("discard") : back.go())}>Cancel</button>
-        <h1 className="ph-composer-title">{REQUEST_CHANGES}</h1>
-        <span className="ph-composer-pad" />
-      </header>
+      <ComposerHeader title={REQUEST_CHANGES} onCancel={() => (text.trim() ? sheet.open("discard") : back.go())} />
       <div className="ph-content">
         <p className="ph-help">{`${sendsBack(false)}${target ?? "the previous node"}, with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" {...noNote.attrs} placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       {sheet.is("discard") && <ConfirmSheet title="Discard your note?" text="Your note has not been sent." confirm={{ label: "Discard", danger: true, run: back.go }} onClose={sheet.close} />}
-      <div className="ph-actionbar">
+      <ActionBar>
         {noNote.note}
         <Button className="ph-btn ph-btn-primary" variant="primary" disabled={busy} onClick={send}>{REQUEST_CHANGES}</Button>
-      </div>
+      </ActionBar>
     </>
   );
 }

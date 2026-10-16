@@ -50,7 +50,7 @@ export function TabStrip<T extends string>({ tabs, value, onChange, label }: { t
   );
 }
 
-/** The bottom bar of a screen: a pair of 48px buttons, or one. */
-export function ActionBar({ children }: { children: ReactNode }) {
-  return <div className="ph-actionbar">{children}</div>;
+/** The bottom bar of a screen: a pair of 48px buttons, or one (`className` only re-weights them). */
+export function ActionBar({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={className ? `ph-actionbar ${className}` : "ph-actionbar"}>{children}</div>;
 }
