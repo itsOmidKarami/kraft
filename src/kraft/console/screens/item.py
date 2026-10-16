@@ -13,17 +13,18 @@ from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.widgets import ContentSwitcher, RichLog, Static
 
 from kraft import answers, client, logs, render
 from kraft.console import acts, words
 from kraft.console.dialogs import Reject, reject_asks
+from kraft.console.pulse import Working
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 from kraft.console.screens.item_menu import MenuActions
-from kraft.console.words import usd
+from kraft.console.words import status_words, usd
 
 #: The Item's tabs, in `[` and `]` order, with their names.
 TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"), ("diff", "Diff"))
@@ -51,14 +52,6 @@ LIT_S = 1.5
 LOG_POINTER = "The Log tab holds the session it failed in."
 #: A chain node's mark in the Overview's list, by its state.
 MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
-
-
-def status_words(item: dict) -> str:
-    """The header's status, as the web's badge says it (`headerState`), in
-    sentence case: an item filed paused and never started is "Not started"."""
-    if item.get("display_status") == "paused" and not item.get("current_node_id"):
-        return "Not started"
-    return (item.get("display_status") or "running").replace("_", " ", 1).capitalize()
 
 
 class Item(MenuActions, View):
@@ -116,15 +109,17 @@ class Item(MenuActions, View):
         self._lit = False
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="item-top"):
-            yield Static(id="item-title")
-            yield Static(id="item-where")
-        with Horizontal(id="item-state"):
-            yield Static(id="item-status")
-            yield Static(id="item-spent")
-        yield Static(id="item-banner")
-        yield Static(id="item-chain")
-        yield Static(id="item-tabs")
+        with Vertical(id="item-head"):
+            with Horizontal(id="item-top"):
+                yield Static(id="item-title")
+                yield Static(id="item-where")
+            with Horizontal(id="item-state"):
+                yield Static(id="item-status")
+                yield Static(id="item-spent")
+            yield Working(id="item-work")
+            yield Static(id="item-banner")
+            yield Static(id="item-chain")
+            yield Static(id="item-tabs")
         with ContentSwitcher(initial=self.tab, id="item-panes"):
             # Focus stays with the view, which scrolls these by its keys.
             overview = RichLog(id="overview", wrap=True, min_width=1)
@@ -143,6 +138,8 @@ class Item(MenuActions, View):
 
     def on_mount(self) -> None:
         self.query_one("#item-gone").display = False
+        # The tabs' keys, on the panel's edge beside them.
+        self.query_one("#item-head").border_subtitle = "← → tabs"
 
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
@@ -164,6 +161,7 @@ class Item(MenuActions, View):
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
             self.query_one(part, Static).update("")
         self.query_one("#item-banner").display = False
+        self.query_one("#item-work", Working).show_item(None)
         for pane in self.query("#item-panes > RichLog").results(RichLog):
             pane.clear()
         self.show_tab(TABS[0][0])
@@ -297,6 +295,7 @@ class Item(MenuActions, View):
             money = f"{usd(cap['spent_usd'])}{of} · "
         age = words.ago(item.get("updated_at"), now).removesuffix(" ago")
         self.query_one("#item-spent", Static).update(Content.styled(money + age, "$kraft-muted"))
+        self.query_one("#item-work", Working).show_item(item)
         said = words.banner_line(item)
         banner = self.query_one("#item-banner", Static)
         banner.display = said is not None
@@ -309,7 +308,10 @@ class Item(MenuActions, View):
         # The frame's width: this view fills it, and may not be laid out yet.
         if self.item is not None:
             marks = words.chain_marks(self.item)
-            line = chain_line(marks, self.app.size.width - 2, lit=self._lit)
+            chain = self.query_one("#item-chain")
+            # Inside the header's panel: its own width once laid out.
+            width = chain.content_region.width or self.app.size.width - 4
+            line = chain_line(marks, width, lit=self._lit)
             self.query_one("#item-chain", Static).update(line)
 
     def _light(self) -> None:
@@ -330,7 +332,9 @@ class Item(MenuActions, View):
     def _draw_tabs(self) -> None:
         parts: list[str | tuple[str, str]] = []
         for key, name in TABS:
-            parts += [(f" {name} ", "bold $primary" if key == self.tab else "$kraft-muted"), " "]
+            # The tab shown is a pill in the accent, as the top line's view is.
+            pill = "bold $background on $kraft-accent" if key == self.tab else "$kraft-muted"
+            parts += [(f" {name} ", pill), " "]
         self.query_one("#item-tabs", Static).update(Content.assemble(*parts))
 
     async def _overview(self, item: dict) -> None:
@@ -370,8 +374,8 @@ class Item(MenuActions, View):
         lines.append(Text("Chain", style=f"bold {muted}"))
         styles = {
             "done": muted,
-            "current": f"bold {self.app.theme_variables['primary']}",
-            "hot": f"bold {self.app.theme_variables['primary']}",
+            "current": f"bold {self.app.theme_variables['kraft-accent']}",
+            "hot": f"bold {self.app.theme_variables['kraft-accent']}",
             "todo": "",
         }
         for mark in words.chain_marks(item):

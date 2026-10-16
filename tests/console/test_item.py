@@ -166,7 +166,7 @@ def test_the_header_says_where_the_item_stands(
         spent,
         where,
         chain,
-        "bold $primary" if "●" in chain else None,
+        "bold $kraft-accent" if "●" in chain else None,
     )
 
 
