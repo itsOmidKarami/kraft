@@ -6,9 +6,12 @@ import { useStore } from "../store";
  *  socket is reconnecting. Nothing page-specific, so every page can say it. */
 export function useOffline() {
   const loadError = useStore((s) => s.loadError);
-  const connection = useStore((s) => s.connection);
-  return { offline: loadError !== null || connection === "reconnecting", loadError };
+  const offline = useStore(offlineIn);
+  return { offline, loadError };
 }
+
+/** The one definition of offline, over the store's two fields. */
+const offlineIn = (s: { loadError: string | null; connection: Connection }) => s.loadError !== null || s.connection === "reconnecting";
 
 /** The sidebar's cue: "live" only while the socket is open and the last list read worked. */
 export const connectionWord = (c: Connection, loadError: string | null) =>
@@ -20,6 +23,12 @@ const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [
 /** The banner's words, desktop and phone alike. */
 export const offlineWords = (loadError: string | null) =>
   `Offline: ${loadError ? bannerError(loadError) : "the live connection dropped"}. What is shown may be out of date; changes are off until it reconnects.`;
+
+/** What a write answers while offline: the banner's promise, kept by the call itself. */
+export const OFFLINE_REFUSAL = "Offline: changes are off until it reconnects.";
+
+/** Whether the app is offline right now, for a write that has no hook to read it with. */
+export const isOffline = () => offlineIn(useStore.getState());
 
 /** Reads the list again. */
 export const reload = () => useStore.getState().bootstrap();

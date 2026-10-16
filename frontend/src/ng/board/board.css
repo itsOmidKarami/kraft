@@ -197,6 +197,7 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-tag.is-ok { color: var(--text); }
 .draft-title { flex: none; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 var(--fs-h1)/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 .draft-brief { flex: none; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); }
+.draft-title, .draft-brief { max-width: 860px; }
 .draft-title:focus-visible, .draft-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-chips { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-meta); color: var(--text-muted); }
 .draft-gap { width: 6px; }

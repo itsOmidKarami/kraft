@@ -98,6 +98,7 @@
 .item-card.is-muted { border-color: var(--border); background: var(--surface); }
 .item-card.is-muted .item-card-title { color: var(--text-sub); }
 .item-card .item-facts dt { color: var(--text-sub); }
+.item-card .item-input { max-width: 860px; }
 .item-card-text { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); }
 .item-card-fix code { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .item-card-open { margin-left: auto; }
