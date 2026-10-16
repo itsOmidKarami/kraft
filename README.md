@@ -182,7 +182,7 @@ Lead time, cost, and where both go — by node and by repo, over a Range you pic
 7 days, 30 days, 8 weeks (the default) or 90 days, the same menu on a desktop and a phone. Built from the same events the
 board renders live, not a separate pipeline.
 
-![The Analytics view over 8 weeks, with Range, Repo and Chain menus: completed count, median lead time, cost and repairs per item; merged items per week; a Waiting at each gate table with waits, median, total and rejected for each gate; the top of the By node cost table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
+![The Analytics view over 8 weeks, with Range, Repo and Chain menus: the five overview figures (completed count, median lead time, the share waiting on you, cost and repairs per item); merged items per week; a Waiting at each gate table with waits, median, total and rejected for each gate; the top of the By node cost table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
 
 ## Where to go next
 

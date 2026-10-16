@@ -244,7 +244,7 @@ Retake the ones whose screen changed, and all of them when a release is cut:
 | `search.png` | 1440×700 | Ctrl/⌘K with `caching` typed: an item and two documents, over the board |
 | `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: a Review and decide banner, the chain as a graph beside the inspector, named by node ("approve spec") with the chain overview above it (one glyph per node, a frame on the part in view), and the inspector with the gate's files, open thread, what it decides on, and Read spec.md, Review changes, Approve and Request changes… |
 | `review.png` | 1440×700 | the review page of that item on `calc.py`, with a comment being written on the removed line and its replacement (the composer reads "Old 2 – new 2"), Must fix selected, over the Your review bar with Request changes, Approve and Finish review |
-| `analytics.png` | 1440×660 | the Analytics page: the Range, Repo and Chain menus, the four overview figures, Throughput by week, the Waiting at each gate table and the top of By node (times under a minute read `<1 min`) |
+| `analytics.png` | 1440×660 | the Analytics page: the Range, Repo and Chain menus, the five overview figures, Throughput by week, the Waiting at each gate table and the top of By node (times under a minute read `<1 min`) |
 | `chains.png` | 1440×700 | Templates › Chains on the `default` chain, published, under the chain overview, with the `spec_approval` gate selected and its Overview, Config and YAML tabs in the inspector |
 | `policy.png` | 1440×700 | Settings › Policy on its Limits tab, beside the Loops and Housekeeping tabs |
 | `setup.png` | 1440×700 | the setup wizard's first step, on a home with no repo connected; its intro says the first work item is created paused |
