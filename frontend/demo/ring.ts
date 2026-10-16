@@ -54,26 +54,33 @@ function inView(el: Element): boolean {
   return r.bottom > 0 && r.right > 0 && r.top < win.innerHeight && r.left < win.innerWidth;
 }
 
-/** The first laid-out control with this role and name, outside `skip` (the list's own controls). */
-export function findByRole(doc: Document, role: string, name: string | RegExp, skip?: Element | null): HTMLElement | null {
-  for (const el of doc.querySelectorAll<HTMLElement>("button, a[href], textarea, input, [role]")) {
-    if (skip?.contains(el) || roleOf(el) !== role) continue;
+/** Every laid-out control with this role and name, outside `skip` (the list's own controls), in page order. */
+export function findAllByRole(doc: Document, role: string, name: string | RegExp, skip?: Element | null): HTMLElement[] {
+  return [...doc.querySelectorAll<HTMLElement>("button, a[href], textarea, input, [role]")].filter((el) => {
+    if (skip?.contains(el) || roleOf(el) !== role) return false;
     const n = nameOf(el);
-    if ((typeof name === "string" ? n === name : name.test(n)) && laidOut(el)) return el;
-  }
-  return null;
+    return (typeof name === "string" ? n === name : name.test(n)) && laidOut(el);
+  });
 }
 
-/** How long a ring stays, and how long a Show me waits for its target to be drawn. */
+/** The first laid-out control with this role and name, outside `skip`, that is not one of `except`. */
+export function findByRole(doc: Document, role: string, name: string | RegExp, skip?: Element | null, except?: ReadonlySet<Element>): HTMLElement | null {
+  return findAllByRole(doc, role, name, skip).find((el) => !except?.has(el)) ?? null;
+}
+
+/** How long a ring stays, how long a Show me waits for its target to be drawn, and how long it passes over
+ *  the controls the page it left still showed (after that, one still there is the new page's, kept by React). */
 export const RING_MS = 6000;
 export const WAIT_MS = 4000;
+export const STALE_MS = 600;
 
 /**
  * A ring around `target`, kept on it frame by frame (so it follows scroll, resize and the page moving
  * under it), hidden while the target is scrolled out of the window, until RING_MS pass, the target
- * goes, or the person presses anywhere. Returns its remover.
+ * goes, or the person presses anywhere. Returns its remover. `lost` hears the target go (not the timeout,
+ * a press, or the remover).
  */
-export function ring(target: HTMLElement): () => void {
+export function ring(target: HTMLElement, lost?: () => void): () => void {
   const doc = target.ownerDocument;
   const win = doc.defaultView!;
   const el = doc.createElement("div");
@@ -82,7 +89,10 @@ export function ring(target: HTMLElement): () => void {
   doc.body.append(el);
   let frame = 0;
   const place = () => {
-    if (!target.isConnected || !laidOut(target)) return stop();
+    if (!target.isConnected || !laidOut(target)) {
+      stop();
+      return lost?.();
+    }
     el.style.visibility = inView(target) ? "" : "hidden";
     const r = target.getBoundingClientRect();
     Object.assign(el.style, { left: `${r.left - 4}px`, top: `${r.top - 4}px`, width: `${r.width + 8}px`, height: `${r.height + 8}px` });
@@ -102,21 +112,26 @@ export function ring(target: HTMLElement): () => void {
 
 /**
  * Wait for the target to be drawn, scroll it into view if it is not, then ring it. One that is never
- * laid out (the phone layout draws another page) gets no ring. Returns a cancel, which also takes a
- * ring already drawn away.
+ * laid out (the phone layout draws another page) gets no ring. `stale` are the matches the page that was
+ * left still showed: the router draws the new page in a transition, so for a moment both are there, and
+ * the old one's (a board row's Review) is passed over for STALE_MS. A target that goes while WAIT_MS
+ * lasts (its page drawn again) is looked for again. Returns a cancel, which also takes a ring away.
  */
-export function ringWhenFound(doc: Document, role: string, name: string | RegExp, skip?: Element | null): () => void {
+export function ringWhenFound(doc: Document, role: string, name: string | RegExp, skip?: Element | null, stale: ReadonlySet<Element> = new Set()): () => void {
   const win = doc.defaultView!;
-  const until = Date.now() + WAIT_MS;
+  const start = Date.now();
+  const until = start + WAIT_MS;
   let off: (() => void) | null = null;
   let timer = 0;
+  const again = () => {
+    if (Date.now() < until) timer = win.setTimeout(look, 100);
+  };
   const look = () => {
-    const el = findByRole(doc, role, name, skip);
+    const el = findByRole(doc, role, name, skip, Date.now() - start < STALE_MS ? stale : undefined);
     if (el) {
       el.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      off = ring(el);
-    }
-    else if (Date.now() < until) timer = win.setTimeout(look, 100);
+      off = ring(el, again);
+    } else again();
   };
   // Not at once: the router draws the new page after the popstate that asked for it, and the old one may hold a match.
   timer = win.setTimeout(look, 100);

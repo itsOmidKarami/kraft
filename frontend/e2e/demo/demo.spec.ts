@@ -17,12 +17,26 @@ const SHOW_ME: [string, RegExp, "button" | "textbox", string | RegExp][] = [
   ["Shape the process", /\/templates\/chains(\/[^/]+)?$/, "button", "Add a node or gate here"],
 ];
 
-/** The ring sits around the target: its box holds the target's. */
+/** The ring sits around the target: its box holds the target's, once the page and the ring have settled. */
 const ringsAround = async (page: Page, target: Locator) => {
   const ring = page.locator(".kd-ring");
   await expect(ring).toBeVisible();
-  const [r, t] = [await ring.boundingBox(), await target.boundingBox()];
-  expect(r && t && r.x <= t.x && r.y <= t.y && r.x + r.width >= t.x + t.width && r.y + r.height >= t.y + t.height).toBe(true);
+  await expect.poll(async () => {
+    const [r, t] = [await ring.boundingBox(), await target.boundingBox()];
+    return !!(r && t && r.x <= t.x && r.y <= t.y && r.x + r.width >= t.x + t.width && r.y + r.height >= t.y + t.height);
+  }).toBe(true);
+};
+
+/** Approve the board's one gate, from its Show me, the way a visitor would. The phone asks to confirm. */
+const approveTheGate = async (page: Page, phone = false) => {
+  const list = page.locator(".kd-tries");
+  if (await list.isHidden()) await page.getByRole("button", { name: /^Things to try/ }).click();
+  await page.getByRole("link", { name: "Show me: Approve a gate" }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Approve", exact: true }).first().click();
+  if (phone) await page.getByRole("dialog").getByRole("button", { name: "Approve", exact: true }).click();
+  // The approve, and the review at the gate it was: two of the five.
+  await expect(page.getByRole("button", { name: `Things to try, 2 of ${SHOW_ME.length} done` })).toBeVisible();
 };
 
 const boot = async (page: Page) => {
@@ -60,23 +74,31 @@ for (const [entry, url, role, name] of SHOW_ME) {
   });
 }
 
-test("once the only gate is approved, Open and Review still ring a real target, or say none is there", async ({ page }) => {
+test("once the only gate is approved, the gate says one is on its way, and Open and Review go to the running item", async ({ page }) => {
   const errors = await boot(page);
-  await page.getByRole("link", { name: "Show me: Approve a gate" }).click();
-  await page.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByRole("button", { name: "Approve", exact: true }).first().click();
-  await expect(page.getByRole("button", { name: /^Things to try, [2-5] of/ })).toBeVisible();
+  await approveTheGate(page);
+  const list = page.getByRole("region", { name: "Things to try" });
+  await expect(list.getByRole("link", { name: /^Show me: / })).toHaveText(["Show me", "Show me", "Show me", "Show me"]);
+  await expect(list.getByRole("link", { name: "Show me: Approve a gate" })).toBeHidden();
+  await expect(page.locator('[data-try="gate"] .kd-try-none')).toHaveText("No item waits at a gate right now; one is on its way.");
+  await page.getByRole("link", { name: "Show me: Open a running item" }).click();
+  await expect(page).toHaveURL(/\/work-items\/[0-9a-f]{32}$/);
+  const running = new URL(page.url()).pathname;
+  await ringsAround(page, page.getByRole("button", { name: /, node, running\b/ }).first());
+  // No gate waits, so Review goes to that running item's diff, where a comment is what there is to do.
+  await page.getByRole("link", { name: "Show me: Review the changes" }).click();
+  await expect(page).toHaveURL(new RegExp(`${running}/review$`));
+  await ringsAround(page, page.getByRole("button", { name: "Comment on this file", exact: true }).first());
+  expect(errors).toEqual([]);
+});
+
+test("on a phone, once the gate is approved, its Show me is gone from the list, not just covered", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = await boot(page);
+  await approveTheGate(page, true);
+  await page.getByRole("button", { name: /^Things to try/ }).click();
   await expect(page.locator('[data-try="gate"] .kd-try-none')).toBeVisible();
-  for (const [entry, name] of [["Open a running item", /, node, running\b/], ["Review the changes", /^(Request changes|Comment on this file)$/]] as const) {
-    const li = page.locator(`[data-try="${entry === "Open a running item" ? "open" : "review"}"]`);
-    const go = li.getByRole("link", { name: `Show me: ${entry}` });
-    if (await go.isHidden()) {
-      await expect(li.locator(".kd-try-none")).toBeVisible();
-      continue;
-    }
-    await go.click();
-    await ringsAround(page, page.getByRole("button", { name }).first());
-  }
+  await expect(page.getByRole("link", { name: "Show me: Approve a gate" })).toBeHidden();
   expect(errors).toEqual([]);
 });
 

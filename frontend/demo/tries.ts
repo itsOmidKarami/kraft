@@ -15,7 +15,7 @@ export interface Spot { path: string; role: string; name: string | RegExp }
 /** What the entries read to find their item: the board's rows, and one item's detail. */
 export interface Look { list(): Promise<{ id: string }[]>; item(id: string): Promise<Item | null> }
 type Item = {
-  id: string; status?: string; display_status?: string; pending_gate?: string | null; current_node_id?: string | null;
+  id: string; status?: string; display_status?: string; pending_gate?: string | null; current_node_id?: string | null; updated_at?: string;
   chain_definition?: { nodes?: { id: string; kind?: string }[] };
   worker_sessions?: { node_id?: string | null; status?: string }[];
 };
@@ -45,10 +45,16 @@ export function lookIn(serve: MockServer, origin = location.origin): Look {
 /** How an entry picks its item: by the board's row, which is the item as it is now, less its sessions. */
 type Test = (row: Item, look: Look) => boolean | Promise<boolean>;
 
-/** The first board row that passes the first test any row passes. */
-async function first(look: Look, ...tests: Test[]): Promise<Item | null> {
+/** The first board row that passes the first test any row passes; with `newest`, the latest-moved such row. */
+async function first(look: Look, ...tests: (Test | { newest: Test })[]): Promise<Item | null> {
   const rows = (await look.list()) as Item[];
-  for (const test of tests) for (const row of rows) if (await test(row, look)) return row;
+  for (const t of tests) {
+    const test = typeof t === "function" ? t : t.newest;
+    const passed: Item[] = [];
+    for (const row of rows) if (await test(row, look)) passed.push(row);
+    if (typeof t !== "function") passed.sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? ""));
+    if (passed.length) return passed[0];
+  }
   return null;
 }
 
@@ -98,7 +104,8 @@ export const TRIES: Try[] = [
     id: "steer", title: "Steer an agent", detail: "Pause it, then resume with a steer.", none: `Nothing is running right now; ${ON_ITS_WAY}.`,
     // A running one first, as the entry says: Pause, then the paused card's steer box. Else one already paused.
     where: async (look) => {
-      const i = await first(look, runningRow, begunPause);
+      // Of the paused ones, the one last moved: the item the visitor has just paused, not the sample's.
+      const i = await first(look, runningRow, { newest: begunPause });
       if (!i) return null;
       return begunPause(i) ? { path: page(i), role: "textbox", name: "Steer" } : { path: page(i), role: "button", name: "Pause" };
     },
@@ -137,6 +144,8 @@ export function tickOf(req: MockRequest, reply: Reply, here: { pathname: string;
   if (req.method !== "POST") return [];
   const body = req.json() ?? {};
   if (/^\/work-items\/[^/]+\/gates\/[^/]+\/approve$/.test(p)) return ["gate"];
+  // Request changes from the gate pane (and the phone's) rejects the gate: a review of the changes.
+  if (/^\/work-items\/[^/]+\/gates\/[^/]+\/reject$/.test(p)) return ["review"];
   if ((m = p.match(/^\/work-items\/[^/]+(\/gates\/[^/]+)?\/review$/))) return m[1] && body.outcome === "approve" ? ["gate", "review"] : ["review"];
   if (/^\/work-items\/[^/]+\/threads$/.test(p) || /^\/threads\/[^/]+\/comments$/.test(p)) return ["review"];
   if (/^\/work-items\/[^/]+\/resume$/.test(p) && (said(body.steer) || Object.values(body.steers ?? {}).some(said))) return ["steer"];

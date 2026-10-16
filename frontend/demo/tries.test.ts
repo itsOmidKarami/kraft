@@ -35,6 +35,7 @@ describe("tickOf", () => {
     ["a resume with no steer", req("POST", "/work-items/w1/resume", { steer: null }), answer(), BOARD, []],
     ["a resume with a blank steer", req("POST", "/work-items/w1/resume", { steer: "  " }), answer(), BOARD, []],
     ["a pause", req("POST", "/work-items/w1/pause"), answer(), BOARD, []],
+    ["Request changes from the gate pane (a reject)", req("POST", "/work-items/w1/gates/final_review/reject", { note: "bound the cache" }), answer(), BOARD, ["review"]],
     ["a running item's page reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w1"), ["open"]],
     ["a running item's node page reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w1/nodes/verification"), ["open"]],
     ["its peek on the board reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/", "?sel=w1"), ["open"]],
@@ -81,6 +82,13 @@ describe("TRIES' Show me", () => {
     await serve(req("POST", `${spot!.path}/gates/final_review/approve`));
     expect(await where("gate", look)).toBeNull();
     expect(TRIES.find((t) => t.id === "gate")!.none).toMatch(/one is on its way/);
+  });
+
+  it("once the visitor pauses the running item, Steer goes to that item's steer box, not the sample's paused one", async () => {
+    const { serve, look } = sample();
+    const running = (await where("steer", look))!;
+    await serve(req("POST", `${running.path}/pause`));
+    expect([running.name, await where("steer", look)]).toEqual(["Pause", { path: running.path, role: "textbox", name: "Steer" }]);
   });
 
   it("once the gate is approved, Open and Review go to an item that is really running, not the one still on its gate", async () => {

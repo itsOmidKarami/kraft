@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PHONE_QUERY } from "../src/ng/phone/usePhone";
 import { showBadge } from "./badge";
 import { RING_MS, WAIT_MS } from "./ring";
+import { layOut } from "./testkit";
 import { Tries, type Look } from "./tries";
 
 /** A board of one item, `w1`: its row and its detail are both `item`. */
@@ -15,8 +16,8 @@ const movable = () => {
   const look: Look = { list: async () => (board.reads++, [{ id: board.at, pending_gate: "spec_approval" }]), item: async (id) => ({ id, pending_gate: "spec_approval" }) };
   return { board, look };
 };
-const boxed = (el: HTMLElement, top = 50) =>
-  (el.getBoundingClientRect = () => ({ x: 40, y: top, left: 40, top, width: 120, height: 30, right: 160, bottom: top + 30, toJSON: () => ({}) }));
+/** A control the page draws, named `name`, laid out at `top`. */
+const drawn = (name: string, top = 50) => layOut(document.body.appendChild(Object.assign(document.createElement("button"), { textContent: name })), { left: 40, top, width: 120, height: 30 });
 
 const width = (phone: boolean) =>
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === PHONE_QUERY, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
@@ -145,8 +146,7 @@ describe("Show me", () => {
     window.addEventListener("popstate", popped);
     vi.useFakeTimers();
     go("gate").click();
-    const target = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Review" }));
-    boxed(target);
+    drawn("Review");
     vi.advanceTimersByTime(150);
     window.removeEventListener("popstate", popped);
     expect([window.history.length - length, popped.mock.calls.length, window.history.state, !!document.querySelector(".kd-ring")]).toEqual([0, 0, { idx: 2 }, true]);
@@ -164,28 +164,44 @@ describe("Show me", () => {
     const reads = board.reads;
     board.at = "w2";
     tries.see(post("/work-items/w9/pause"), { status: 200 });
-    await new Promise((r) => setTimeout(r, 20));
-    expect([go("gate").getAttribute("href"), board.reads > reads]).toEqual([href, state === "open"]);
+    // A read starts in the call itself (where() asks the board at once), and the open list's href follows it.
+    const read = board.reads > reads;
+    if (state === "open") await vi.waitFor(() => expect(go("gate").getAttribute("href")).toBe(href));
+    expect([go("gate").getAttribute("href"), read]).toEqual([href, state === "open"]);
   });
 
   it.each([
     ["rings its target once the page draws it, then lets it go", true],
     ["draws no ring when the page never lays it out (the phone layout)", false],
-  ])("%s", async (_, drawn) => {
+  ])("%s", async (_, laid) => {
     width(false);
     const { go } = show();
     await ready(go("gate"));
     vi.useFakeTimers();
     go("gate").click();
     // jsdom lays nothing out: a target left as it is has no box, as one display:none'd on a phone has none.
-    const target = Object.assign(document.createElement("button"), { textContent: "Review" });
-    if (drawn) target.getBoundingClientRect = () => ({ x: 40, y: 50, left: 40, top: 50, width: 120, height: 30, right: 160, bottom: 80, toJSON: () => ({}) });
-    document.body.append(target);
+    if (laid) drawn("Review");
+    else document.body.append(Object.assign(document.createElement("button"), { textContent: "Review" }));
     vi.advanceTimersByTime(150);
     const ring = document.querySelector<HTMLElement>(".kd-ring");
     const placed = ring && [ring.style.left, ring.style.top, ring.style.width];
     vi.advanceTimersByTime(Math.max(RING_MS, WAIT_MS));
-    expect([placed, document.querySelector(".kd-ring")]).toEqual([drawn ? ["36px", "46px", "128px"] : null, null]);
+    expect([placed, document.querySelector(".kd-ring")]).toEqual([laid ? ["36px", "46px", "128px"] : null, null]);
+  });
+
+  it("passes over the page it leaves, still drawn as the router draws the next, and rings the next one's", async () => {
+    width(false);
+    const { go } = show();
+    await ready(go("gate"));
+    const boardRow = drawn("Review", 40);
+    vi.useFakeTimers();
+    go("gate").click();
+    vi.advanceTimersByTime(150);
+    const early = document.querySelector(".kd-ring");
+    boardRow.remove();
+    drawn("Review", 300);
+    vi.advanceTimersByTime(100);
+    expect([early, document.querySelector<HTMLElement>(".kd-ring")?.style.top]).toEqual([null, "296px"]);
   });
 
   it.each([

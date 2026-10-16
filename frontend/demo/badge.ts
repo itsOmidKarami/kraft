@@ -1,6 +1,6 @@
 import { withBase } from "../src/ng/base";
 import { PHONE_QUERY } from "../src/ng/phone/usePhone";
-import { ringWhenFound } from "./ring";
+import { findAllByRole, ringWhenFound } from "./ring";
 import { TRIES, type Look, type Spot, type Tries, type TryId } from "./tries";
 
 /**
@@ -39,7 +39,8 @@ const CSS = `
 .kd-toggle[aria-expanded="true"] .kd-chev { transform: rotate(180deg); }
 .kd-tries { width: 340px; max-width: 100%; max-height: calc(100vh - var(--toast-bottom, 16px) - 64px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); box-shadow: 0 10px 32px rgb(0 0 0 / 0.32); }
-.kd-tries[hidden] { display: none; }
+/* Every hidden part stays hidden, whatever display a layout gives it (the phone's Show me is a flex box). */
+.kd-badge [hidden] { display: none !important; }
 .kd-tries h2 { margin: 0 0 4px; color: var(--text); font-size: 13px; font-weight: 600; }
 .kd-tries p { margin: 0 0 10px; }
 .kd-tries ol { margin: 0; padding: 0; list-style: none; }
@@ -59,9 +60,14 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) { .kd-ring { animation: none; } .kd-toggle .kd-chev { transition: none; } }
 @media (max-width: 767px) {
   .kd-badge { right: 8px; left: 8px; max-width: none; align-items: flex-end; bottom: calc(72px + env(safe-area-inset-bottom)); }
-  .kd-tries { width: 100%; max-height: calc(100vh - 160px - env(safe-area-inset-bottom)); }
+  .kd-tries { width: 100%; max-height: calc(100vh - 180px - env(safe-area-inset-bottom)); }
   .kd-pill .kd-note { display: none; }
-  .kd-try-go { grid-row: 1 / 3; display: inline-flex; align-items: center; min-height: 32px; padding: 0 4px; }
+  /* The phone's tap targets are 44px, as the app's are. */
+  .kd-pill { gap: 4px; padding: 2px 2px 2px 12px; }
+  .kd-toggle { height: 44px; padding: 0 12px; }
+  .kd-badge .kd-x { width: 44px; height: 44px; }
+  .kd-pill a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
+  .kd-try-go { grid-row: 1 / 3; display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
 }
 @media (min-width: 768px) { .kd-tries .kd-phone { display: none; } }
 `;
@@ -101,14 +107,17 @@ export function showMe(e: MouseEvent, a: HTMLAnchorElement, spot: Spot | undefin
   const win = a.ownerDocument.defaultView!;
   const url = new URL(a.href);
   const to = url.pathname + url.search;
+  // What the page being left shows that matches: it may still be drawn when the first look comes.
+  const stale = new Set<Element>();
   if (to !== win.location.pathname + win.location.search) {
+    if (spot) for (const el of findAllByRole(a.ownerDocument, spot.role, spot.name, skip)) stale.add(el);
     // The router's own entry shape, so its index (and Back) stays right.
     const idx = (win.history.state?.idx ?? 0) + 1;
     win.history.pushState({ usr: null, key: Math.random().toString(36).slice(2, 10), idx }, "", to);
     win.dispatchEvent(new PopStateEvent("popstate", { state: win.history.state }));
   }
   // Not read yet (a click before the first look answered): the address it holds, the board, and no ring.
-  return spot ? ringWhenFound(a.ownerDocument, spot.role, spot.name, skip) : null;
+  return spot ? ringWhenFound(a.ownerDocument, spot.role, spot.name, skip, stale) : null;
 }
 
 export function showBadge(installUrl: string, tries: Tries, look: Look, doc: Document = document) {
