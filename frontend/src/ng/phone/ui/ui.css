@@ -38,4 +38,6 @@
 
 .ph-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 .ph-chip.ph-is-set { border-color: var(--text-muted); color: var(--text); }
+.ph-chip:focus-visible { outline-offset: -2px; }
 .ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.ph-badge-tag.ph-tone-change { background: color-mix(in oklab, var(--mark-change) 9%, transparent); color: var(--mark-change); }

@@ -33,4 +33,3 @@
 .ph-skeleton { display: flex; flex-direction: column; gap: 10px; }
 .ph-skeleton > span { height: 96px; border-radius: 12px; background: var(--surface); }
 .ph-restart { margin: 8px 2px 0; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent); border-radius: 10px; background: color-mix(in oklab, var(--warn) 10%, var(--bg)); font-size: var(--fs-meta); line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
-.ph-chips .ph-chip:focus-visible { outline-offset: -2px; }

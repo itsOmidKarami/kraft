@@ -60,7 +60,7 @@ function RowBody({ r }: { r: RowSpec }) {
         {r.error && <span className="ph-row-error" role="alert">{r.error}</span>}
       </span>
       {r.selected && <span className="ph-row-check" aria-hidden="true">✓</span>}
-      {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <Badge key={c.label} tone={c.tone === "change" ? "info" : c.tone}>{c.label}</Badge>)}</span>}
+      {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <Badge key={c.label} tone={c.tone}>{c.label}</Badge>)}</span>}
       {r.value != null && r.value !== "" && (
         <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono || r.figure ? " ph-mono" : ""}${r.figure ? " ph-row-figure" : ""}`}>
           {r.mono ? breakable(r.value) : r.value}

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import "./ui.css";
 
-export type BadgeTone = "neutral" | "info" | "warn" | "bad" | "ok" | "muted";
+export type BadgeTone = "neutral" | "info" | "warn" | "bad" | "ok" | "muted" | "change";
 
 /** A read-only label: a status, a kind, a count. A thing you press is a Chip. */
 export function Badge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
