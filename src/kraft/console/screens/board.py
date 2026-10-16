@@ -399,8 +399,12 @@ class Board(View):
         asked = None
         if (row.get("stop") or {}).get("kind") == "question":
             asked = Note("Answer the agent", [words.reason_tail(row, time.time())], required=True)
-        elif "steer" in (row.get("actions") or []) and await self._may_steer(row):
-            asked = Note(f"Resume {row['id'][:8]}", [STEER], required=False)
+        elif "steer" in (row.get("actions") or []):
+            may = await self._may_steer(row)
+            if may is None:  # the read failed and was said: send nothing
+                return
+            if may:
+                asked = Note(f"Resume {row['id'][:8]}", [STEER], required=False)
         steer = await self.app.push_screen_wait(asked) if asked else ""
         if steer is not None:
             said = answers.item_action("resumed {id}", small=answers.resumed)
@@ -408,7 +412,10 @@ class Board(View):
 
     async def _retry(self, row: dict) -> None:
         steer = ""
-        if await self._may_steer(row):
+        may = await self._may_steer(row)
+        if may is None:  # the read failed and was said: send nothing
+            return
+        if may:
             steer = await self.app.push_screen_wait(
                 Note(f"Retry {row['id'][:8]}", [STEER], required=False)
             )
@@ -416,15 +423,16 @@ class Board(View):
             said = answers.item_action("retried {id}", small=answers.retried)
             await self._act(client.retry(steer or None, row["id"]), said)
 
-    async def _may_steer(self, row: dict) -> bool:
+    async def _may_steer(self, row: dict) -> bool | None:
         """Whether the server would place a steer for this item. It answers a
         steer with nowhere to go with a 409, and says so on the detail's
-        `steerable`: where it does not, no dialog is offered."""
+        `steerable`: where it does not, no dialog is offered. None when the
+        detail could not be read (said in a toast): nothing is sent then."""
         try:
             item = await client.get_work_item(row["id"], full=True)
         except client.ClientError as exc:
             self.app.notify_refusal(exc)
-            return False
+            return None
         return item.get("steerable") is not False
 
     async def _act(self, call, said) -> None:

@@ -263,3 +263,39 @@ def test_a_steer_the_server_cannot_place_is_not_asked_for(board, monkeypatch, ro
         return calls, isinstance(app.screen, Note)
 
     assert board([row]).run(scenario) == ([(name, args)], False)
+
+
+@pytest.mark.parametrize(
+    ("row", "key", "name"),
+    [(FAILED, "t", "retry"), (PAUSED | {"actions": ["resume", "steer"]}, "p", "resume")],
+    ids=["retry-read-fails", "resume-read-fails"],
+)
+def test_an_action_is_not_sent_when_the_item_cannot_be_read(board, monkeypatch, row, key, name):
+    """The steer check reads the item: a failed read says so and sends nothing,
+    rather than going on as if the item took no steer."""
+    calls: list[str] = []
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        raise client.status_error(404, "no such work item [/]")
+
+    async def call(*sent):
+        calls.append(name)
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(client, name, call)
+
+    async def scenario(app, pilot):
+        await _settled(board([row]), app, pilot)
+        await pilot.press(key)
+
+        def toasts() -> list[str]:
+            return [str(toast.render()) for toast in app.screen.query("Toast")]
+
+        await board([row]).until(pilot, toasts)
+        return calls, toasts(), isinstance(app.screen, Note)
+
+    assert board([row]).run(scenario, notifications=True) == (
+        [],
+        [client.reason_of(str(client.status_error(404, "no such work item [/]")))],
+        False,
+    )
