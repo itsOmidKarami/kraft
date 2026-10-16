@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail } from "../item/testkit";
-import { admittedRowAction, displayName, gateName, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
+import { admittedRowAction, displayName, gateName, gateWords, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -143,6 +143,8 @@ describe("displayName", () => {
     expect(nameOf(nodes, "open_draft")).toBe("open draft");
     expect(gateName(nodes, "plan_approval")).toBe("approve plan");
     expect(gateName(nodes, "spec_approval")).toBe("approve spec");
+    // The VS Code extension knows only a gate's id.
+    expect(gateWords("plan_approval")).toBe("plan");
   });
 });
 
