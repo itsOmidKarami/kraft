@@ -129,9 +129,8 @@ describe("draft and changed marks", () => {
   it.each([
     ["library/library.css", /^\.lib-(draft|filter-dot|mark\.is-change)\b/],
     ["harnesses/harnesses.css", /^\.hn-(draft|field-help\.is-changed|input\.is-changed)\b/],
-    ["settings/policy/policy.css", /^\.pol-chip\.is-changed\b/],
-    ["settings/intake/intake.css", /^\.ink-chip\.is-changed\b/],
-    ["templates/panes/panes.css", /^\.cfg-(chip|dot)\.is-draft\b/],
+    ["ui/ui.css", /^\.(chip\.is-changed|badge\.is-change)\b/],
+    ["templates/panes/panes.css", /^\.cfg-dot\.is-draft\b/],
     ["shell/shell.css", /^\.ng-side-dot\.is-draft\b/],
   ])("%s draft rules do not use --warn", (file, rule) => {
     const lines = readFileSync(join(here, "..", file), "utf-8").split("\n").filter((l) => rule.test(l));

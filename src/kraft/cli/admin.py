@@ -23,7 +23,7 @@ import httpx
 import uvicorn
 import yaml
 
-from kraft import client, config, permission_hooks, pidfile, render
+from kraft import answers, client, config, permission_hooks, pidfile, render
 from kraft.cli import addon, common, templates
 from kraft.paths import (
     BUNDLED,
@@ -1180,22 +1180,10 @@ def _confirm_running_agents(
         return
     except Exception:
         return
-    if not items:
+    lines = answers.running_agents_warning(doing, items)
+    if not lines:
         return
-    print(
-        f"kraft: {doing} the server ends the agent of any active item ({len(items)}):",
-        file=sys.stderr,
-    )
-    for item in items:
-        print(
-            f"  {item['id']}  {item.get('current_node_id') or '-'}  {item['title']}",
-            file=sys.stderr,
-        )
-    print(
-        "  each one stops when Kraft starts again; retry it then. To avoid that, "
-        "pause them first (kraft item pause ID) and resume them after.",
-        file=sys.stderr,
-    )
+    print(f"kraft: {lines[0]}", *lines[1:], sep="\n", file=sys.stderr)
     if not ask or getattr(ns, "yes", False) or not sys.stdin.isatty():
         return
     if _ask("Go on? [y/N] ").strip().lower() not in ("y", "yes"):
@@ -1350,32 +1338,10 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.reindex(ns.repo)), _render_reindex, ns.json)
 
 
-def _render_reload(result: dict) -> str:
-    refused = result.get("refused_policy")
-    refused_intake = result.get("refused_intake")
-    files = [n for n, bad in (("policy.yaml", refused), ("intake.yaml", refused_intake)) if not bad]
-    also = f" and {' and '.join(files)}" if files else ""
-    lines = [f"reloaded {len(result.get('valid', []))} template(s){also}"]
-    for name, reason in (result.get("invalid_templates") or {}).items():
-        lines.append(f"  invalid: {name}: {reason}")
-    if refused:
-        lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
-    if refused_intake:
-        # `ConfigError` names the file itself.
-        lines.append(
-            f"  refused: {refused_intake} (the running auto-intake and schedules are kept)"
-        )
-    return "\n".join(lines)
-
-
 def _cmd_reload(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.reload_templates())
-    common.emit(payload, _render_reload, ns.json)
-    if (
-        payload.get("invalid_templates")
-        or payload.get("refused_policy")
-        or payload.get("refused_intake")
-    ):
+    common.emit(payload, answers.reload_summary, ns.json)
+    if answers.reload_refused(payload):
         # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
         raise SystemExit(1)
 

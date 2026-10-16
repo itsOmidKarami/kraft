@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+from pathlib import Path
 
 import httpx
 import pytest
@@ -96,6 +98,15 @@ HOSTILE = "../../etc/passwd"
 ENCODED = "..%2F..%2Fetc%2Fpasswd"
 
 
+def _serve(monkeypatch, handler) -> None:
+    """Point the client at `handler` instead of a server."""
+    monkeypatch.setattr(
+        client.transport,
+        "http",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://k"),
+    )
+
+
 @pytest.fixture
 def sent(monkeypatch):
     """Every request path the client puts on the wire, as sent, each one
@@ -108,11 +119,7 @@ def sent(monkeypatch):
 
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
     monkeypatch.setenv("KRAFT_CLIENT", "cli")
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(transport=httpx.MockTransport(answer), base_url="http://k"),
-    )
+    _serve(monkeypatch, answer)
     return paths
 
 
@@ -130,8 +137,22 @@ def sent(monkeypatch):
         (lambda: client.resolve_thread(".."), "/api/threads/%2E%2E/resolve"),
         (lambda: client.document("attachment:w1:spec"), "/api/documents/attachment%3Aw1%3Aspec"),
         (lambda: client.harness(HOSTILE), f"/api/harnesses/profiles/{ENCODED}"),
+        (
+            lambda: client.cancel_preview(HOSTILE),
+            f"/api/work-items/{ENCODED}/cancel-preview",
+        ),
     ],
-    ids=["item", "action", "events", "gate", "thread", "dot-segment", "doc", "profile"],
+    ids=[
+        "item",
+        "action",
+        "events",
+        "gate",
+        "thread",
+        "dot-segment",
+        "doc",
+        "profile",
+        "cancel-preview",
+    ],
 )
 def test_an_id_is_one_path_segment_whatever_it_holds(sent, call, path):
     """Unencoded, httpx resolved the dot segments before sending: MCP's
@@ -139,3 +160,145 @@ def test_an_id_is_one_path_segment_whatever_it_holds(sent, call, path):
     `x/../<other>` reached another item's route."""
     asyncio.run(call())
     assert sent[0].split("?")[0] == path
+
+
+@pytest.mark.parametrize(
+    ("status", "kind"),
+    [
+        (401, client.Failure.UNAUTHORIZED),
+        (404, client.Failure.NOT_FOUND),
+        (409, client.Failure.REFUSED),
+        (422, client.Failure.REFUSED),
+        (500, client.Failure.SERVER_ERROR),
+    ],
+    ids=["401", "404", "409", "422", "500"],
+)
+def test_a_refused_call_says_what_kind_of_refusal_it_is(monkeypatch, status, kind):
+    """The console tells gone from refused from broken by kind, never by
+    parsing the sentence; the sentence is the one the CLI always printed."""
+    _serve(monkeypatch, lambda request: httpx.Response(status, json={"detail": "no"}))
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.get_work_item("w1"))
+    assert (caught.value.kind, caught.value.status, str(caught.value)) == (
+        kind,
+        status,
+        f"kraft {status}: no",
+    )
+
+
+def _raising(exc_type):
+    def handler(request):
+        raise exc_type("down", request=request)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("handler", "kind", "said"),
+    [
+        (_raising(httpx.ConnectError), client.Failure.UNREACHABLE, "no Kraft server at "),
+        (
+            _raising(httpx.ReadTimeout),
+            client.Failure.INTERRUPTED,
+            "Kraft did not answer GET /work-items/w1 in time; it may still finish it",
+        ),
+        (
+            _raising(httpx.ReadError),
+            client.Failure.INTERRUPTED,
+            "lost the connection to Kraft during GET /work-items/w1; it may still finish it",
+        ),
+        (
+            _raising(httpx.RemoteProtocolError),
+            client.Failure.INTERRUPTED,
+            "lost the connection to Kraft during GET /work-items/w1; it may still finish it",
+        ),
+        (
+            lambda request: httpx.Response(200, text="<html>proxy</html>"),
+            client.Failure.BAD_RESPONSE,
+            "kraft 200: the answer was not JSON",
+        ),
+    ],
+    ids=["connect", "timeout", "dropped", "protocol", "not-json"],
+)
+def test_a_call_with_no_usable_answer_is_one_sentence(monkeypatch, handler, kind, said):
+    """A server restarting under a call, or a proxy answering for it, reached
+    the CLI and MCP as an httpx or JSON traceback."""
+    _serve(monkeypatch, handler)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.get_work_item("w1"))
+    assert caught.value.kind == kind
+    assert said in str(caught.value)
+
+
+def test_the_client_raises_no_bare_value_error():
+    """The console catches `ClientError` and lets anything else crash as a
+    bug, so a refusal raised as a plain ValueError would crash it. It pins
+    literal raises only; an implicit ValueError from json parsing is not caught."""
+    bare = [
+        f"{path.name}:{node.lineno}"
+        for path in sorted(Path(client.__file__).parent.glob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Raise)
+        and isinstance(node.exc, ast.Call)
+        and getattr(node.exc.func, "id", None) == "ValueError"
+    ]
+    assert bare == []
+
+
+_ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
+
+
+@pytest.mark.parametrize(
+    ("call", "kind", "answer"),
+    [
+        (lambda: client.health(), client.Failure.OTHER_INSTANCE, _ELSEWHERE),
+        (
+            lambda: client.reject_gate("  ", "spec_approval", "w1"),
+            client.Failure.REFUSED,
+            _ELSEWHERE,
+        ),
+        (lambda: client.get_work_item(), client.Failure.REFUSED, _ELSEWHERE),
+        (
+            lambda: client.update_repo("/r", {}),
+            client.Failure.SERVER_ERROR,
+            httpx.Response(500, text="Internal Server Error"),
+        ),
+        (
+            lambda: client.pause(work_item_id="w1"),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, text="<html>proxy</html>"),
+        ),
+        (
+            lambda: client.update_available(),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, json=["not", "an", "object"]),
+        ),
+    ],
+    ids=[
+        "other-instance",
+        "blank-note",
+        "no-item",
+        "text-500",
+        "text-200-post",
+        "update-not-object",
+    ],
+)
+def test_a_refusal_the_client_makes_itself_is_a_client_error(
+    monkeypatch, tmp_path, call, kind, answer
+):
+    """The client's own checks refuse before or after a request; the console
+    tells them from a crash the same way it does a server's refusal."""
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    monkeypatch.chdir(tmp_path)  # not a Kraft worktree, so no item to default to
+    _serve(monkeypatch, lambda request: answer)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(call())
+    assert caught.value.kind == kind
+
+
+def test_update_available_asks_for_the_channel_given(sent):
+    """The console's top line names a waiting release; with no channel the
+    server answers for the installed one's."""
+    asyncio.run(client.update_available())
+    asyncio.run(client.update_available("beta"))
+    assert sent == ["/api/update", "/api/update?channel=beta"]

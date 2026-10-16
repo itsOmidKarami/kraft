@@ -62,9 +62,8 @@
 .lib-use-chain { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .lib-use-path { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
-.lib-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--fs-label); color: var(--text-sub); white-space: nowrap; }
 /* In the list the name already carries the namespace: the badge gives way first, whole in its title. */
-.lib-row .lib-chip { flex: 0 100 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.lib-row .addon-badge { flex: 0 100 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
 .lib-row > svg { flex: none; }
 
 /* A task on the canvas: its one glyph, centred in what the pane leaves. */

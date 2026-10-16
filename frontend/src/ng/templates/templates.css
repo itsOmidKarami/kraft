@@ -55,7 +55,7 @@
 .tpl-empty-node p { margin: 0; }
 .tpl-phrase { padding: 0; border: 0; background: none; font: inherit; color: var(--ok); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .tpl-phrase:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-.tpl-extends-pill { position: absolute; left: 16px; bottom: 12px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); background: var(--surface); }
+.tpl-extends { position: absolute; left: 16px; bottom: 12px; background: var(--surface); }
 
 /* The bottom pane (Decisions §9 Bottom pane): docked under the node canvas, up to the side pane. */
 .bp { position: absolute; left: 0; bottom: 0; z-index: 5; display: flex; flex-direction: column; box-sizing: border-box; border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -10px 24px color-mix(in srgb, var(--bg) 50%, transparent); }

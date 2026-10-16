@@ -17,9 +17,6 @@
 .ph-path-step { display: flex; flex-direction: column; gap: 3px; padding-left: 14px; border-left: 1.5px solid var(--border); }
 .ph-path-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); font-weight: 500; }
 .ph-path-text { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); }
-.ph-chip-word { padding: 2px 7px; border-radius: 5px; font-size: var(--fs-label); font-weight: 400; background: var(--line); }
-.ph-chip-word.ph-tone-ok { color: var(--ok); }
-.ph-chip-word.ph-tone-bad { color: var(--bad); }
 .ph-attempts { display: flex; gap: 8px; overflow-x: auto; }
 .ph-attempt { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--text-muted); cursor: pointer; }
 .ph-attempt.ph-is-on { background: var(--border); color: var(--text); }

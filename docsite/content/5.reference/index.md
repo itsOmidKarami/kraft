@@ -2,7 +2,7 @@
 title: Reference
 navigation:
   title: Overview
-description: Look-up pages for the web UI, the CLI, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
+description: Look-up pages for the web UI, the CLI, the console, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
 ---
 
 Look up a command, field, endpoint, tool, status or event. The sidebar groups these pages under the three headings below.
@@ -13,6 +13,7 @@ Look up a command, field, endpoint, tool, status or event. The sidebar groups th
 
 - [Web UI](/reference/web-ui): when you want a screen explained: the sidebar, search and keyboard shortcuts, the board, an item's page, the review page, Templates and Settings, and Analytics.
 - [CLI](/reference/cli): when you want the verb for a task, or a verb's flags and output.
+- [Console](/reference/console): when you use the terminal UI and want its screens, keys and messages.
 - [Work item statuses](/reference/statuses): when you want to know what a status means and what moves an item to the next.
 
 **Configure Kraft**

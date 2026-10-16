@@ -8,6 +8,7 @@ import { LOOP_WINS } from "./sections";
 import { parse, raw, show, sourceWord } from "./units";
 import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK, FINDINGS_BURN_A_FIX_CYCLE } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
+import { Chip } from "../../ui/Chip";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -104,7 +105,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
           <span className="pol-k">burns a cycle</span>
           <span className="pol-chips" role="group" aria-label={FINDINGS_BURN_A_FIX_CYCLE}>
             {SEVERITIES.map((s) => (
-              <button key={s} type="button" className={`pol-chip${sev.includes(s) ? " is-on" : ""}${sevChange ? " is-changed" : ""}`} aria-pressed={sev.includes(s)} onClick={() => toggleSeverity(s)}>{s}</button>
+              <Chip key={s} pressed={sev.includes(s)} changed={!!sevChange} onClick={() => toggleSeverity(s)}>{s}</Chip>
             ))}
             {sevChange && <s className="pol-was">{was(sevChange)}</s>}
           </span>
@@ -118,7 +119,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
           <span className="pol-k">auto-escalate</span>
           <span className="pol-chips" role="group" aria-label="Auto-escalate on stuck">
             {[true, false].map((on) => (
-              <button key={String(on)} type="button" className={`pol-chip${stuck === on ? " is-on" : ""}${changes.has(STUCK_KEY.key) ? " is-changed" : ""}`} aria-pressed={stuck === on} onClick={() => void setValue(draft, STUCK_KEY, on)}>{on ? "on" : "off"}</button>
+              <Chip key={String(on)} pressed={stuck === on} changed={changes.has(STUCK_KEY.key)} onClick={() => void setValue(draft, STUCK_KEY, on)}>{on ? "on" : "off"}</Chip>
             ))}
           </span>
           <span className="pol-help">{stuck ? "An item that reports no progress escalates to a person on its own. A chain or an item override can turn this off or retune it for one node." : STUCK_ITEM_OFF}</span>

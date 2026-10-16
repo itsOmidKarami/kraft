@@ -12,6 +12,7 @@ import { RootHeader } from "../nav/ScreenHeader";
 import { Block } from "../ui/Rows";
 import "./analytics.css";
 import { REPAIRS_PER_ITEM, WAITING_AT_EACH_GATE, WHY_STOPPED_FOR_PERSON } from "../../analytics/sharedWords";
+import { Chip } from "../ui/Chip";
 
 /** `/analytics` (W17 brief J): four tiles, each read from one field of the report, and the gate, node, repo and stop lists. The range, repo and chain choices are the desktop's. What the API cannot feed is not drawn: no spend per day, no spend delta (R66). */
 export function Analytics() {
@@ -40,9 +41,9 @@ export function Analytics() {
     <>
       <RootHeader title="Analytics" />
       <div className="ph-chips" role="group" aria-label="Filters">
-        <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{rangeLabel}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className="ph-pill" onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <Chip onClick={() => sheet.open("range")}>{rangeLabel}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></Chip>
       </div>
       <div className="ph-content" tabIndex={0} role="region" aria-label="Analytics figures">
         {error && <p className="ph-error" role="alert">{error}</p>}

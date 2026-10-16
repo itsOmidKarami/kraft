@@ -30,6 +30,7 @@ Two ways, and neither is `python -m kraft` by hand.
 ```bash
 just dev        # dev instance: state in .dev/, agents faked, UI on :5173
 just dev-seed   # fill a running dev instance with work items in every state
+just dev-console  # the console against the dev instance
 just dev-reset  # throw .dev/ away
 
 just install    # build the SPA, install the `kraft` command; then run `kraft`
@@ -45,13 +46,14 @@ item title (or description) containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its o
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
 non-MCP agent gets the same surface; `item abandon`, `item archive` and
 `item restore` are the `item` verbs with no tool. `--json` prints the raw API
-payload on every verb except `view watch`, `repo path`, and the `admin` ones
+payload on every verb except `console`, `view watch`, `repo path`, and the `admin` ones
 that manage the server process (`start`, `stop`, `restart`, the service verbs,
 `update`, `mcp`, `permission-hook`), `admin addon enable` and `disable`, and
 `admin init` (it accepts `--json` and
 ignores it).
 
 ```bash
+kraft console                               # the terminal UI; needs a terminal, refused in a worker
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
 kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
@@ -116,7 +118,8 @@ kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook,
 
 Verbs live in four groups: `item` acts, `view` reads, `repo` is repositories and
 their worktrees, `admin` is this machine's server. Typing an old flat verb
-(`kraft list`) prints where it moved.
+(`kraft list`) prints where it moved. `kraft console`, beside the groups, opens
+the terminal UI.
 
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
 databases, logs and worktrees, `config/` for the YAML the Templates and

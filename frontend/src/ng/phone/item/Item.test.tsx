@@ -48,7 +48,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("the item screen (C)", () => {
   it("shows a paused item's badge in the neutral tone: amber is for what needs a person", async () => {
     mount(item("paused"));
-    expect(await screen.findByText("PAUSED")).toHaveClass("ph-tag-muted");
+    expect(await screen.findByText("PAUSED")).toHaveClass("ph-tone-muted");
     const ticks = [...document.querySelectorAll(".ph-ticks .ph-tick")].map((t) => t.className);
     expect(ticks.some((c) => c.includes("ph-tick-paused"))).toBe(true);
     expect(ticks.some((c) => c.includes("ph-tick-hot"))).toBe(false);

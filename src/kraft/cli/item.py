@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import client, render
+from kraft import answers, client, render
 from kraft.cli import common
 from kraft.vocab import DiffSide, ReplyClaim, ReviewOutcome, ThreadLabel, WorkItemStatus
 
@@ -53,24 +53,14 @@ def _node_overrides(pairs: list[str]) -> dict | None:
 
 def _budget(raw: str) -> float | None:
     """`--budget`: dollars, or `none` for an explicit no-cap."""
-    if raw.lower() == "none":
-        return None
     try:
-        return float(raw)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"dollars or `none`, not {raw!r}") from None
+        return answers.dollars(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _cmd_create(ns: argparse.Namespace) -> None:
-    # Resolved here rather than sent as typed: the server joins the path onto a
-    # candidate root (the repo, or the worktree we are standing in), never onto
-    # the cwd, so `--spec specs/x.md` from a subdirectory of either would miss
-    # both. Absolute, it is still accepted only if it lands inside one of them.
-    attachments = [
-        {"kind": kind, "path": str(Path(value).expanduser().resolve())}
-        for kind, value in (("spec", ns.spec), ("plan", ns.plan))
-        if value
-    ]
+    attachments = client.attachment_paths(ns.spec, ns.plan)
     common.emit(
         asyncio.run(
             client.create_work_item(
@@ -78,7 +68,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 common.repo_scope(ns),
                 ns.chain,
                 ns.description,
-                attachments or None,
+                attachments,
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
                 depends_on=ns.after or None,
@@ -98,16 +88,9 @@ def _cmd_create(ns: argparse.Namespace) -> None:
 def _render_created(result: dict) -> str:
     """The created item, and, when an --autostart found every slot busy, why:
     what the board's composer says too."""
-    slots = result.get("slots")
     shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
-    if not slots:
-        return shown
-    if queued := _held(result):
-        return f"{shown}\n{queued}"
-    return (
-        f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
-        f"Start it when one frees: kraft item resume {result['id']}"
-    )
+    said = answers.filed(result)
+    return f"{shown}\n{said}" if said else shown
 
 
 async def _gate_of(ns: argparse.Namespace) -> str:
@@ -141,30 +124,16 @@ def _cmd_reject(ns: argparse.Namespace) -> None:
     common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
-def _paused(result: dict) -> str:
-    stopped = len(result.get("paused_sessions") or [])
-    how = f", stopping {stopped} running session{'s' if stopped != 1 else ''}" if stopped else ""
-    return f"paused {result['id']}{how}; kraft item resume {result['id']} carries on"
-
-
 def _cmd_pause(ns: argparse.Namespace) -> None:
     common.emit(
-        asyncio.run(client.pause(ns.id)), common.item_action("paused {id}", small=_paused), ns.json
+        asyncio.run(client.pause(ns.id)),
+        common.item_action("paused {id}", small=answers.paused),
+        ns.json,
     )
 
 
-def _unblocked(result: dict) -> str:
-    dropped = result.get("dropped") or []
-    if not dropped:
-        return f"{result['id']} comes after nothing unfinished: nothing was dropped"
-    line = f"{result['id']} no longer comes after {', '.join(dropped)}"
-    if left := result.get("waiting_on"):
-        line += f"; it still waits on {', '.join(d['id'] for d in left)}"
-    return line
-
-
 def _cmd_unblock(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), _unblocked, ns.json)
+    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), answers.unblocked, ns.json)
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -273,80 +242,22 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
         steers[path] = text
     common.emit(
         asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
-        common.item_action("resumed {id}", small=_resumed),
+        common.item_action("resumed {id}", small=answers.resumed),
         ns.json,
     )
-
-
-def _queued(result: dict) -> str | None:
-    """A start the board had no slot for, or None for any other answer."""
-    if result.get("status") != WorkItemStatus.QUEUED:
-        return None
-    slots = result.get("slots") or {}
-    return (
-        f"queued {result['id']}: {slots.get('busy')} of {slots.get('limit')} slots are busy. "
-        f"It starts when one frees; kraft item pause {result['id']} takes it out of the queue"
-    )
-
-
-def _blocked(result: dict) -> str | None:
-    """A start held behind unfinished items, or None for any other answer."""
-    if result.get("status") != WorkItemStatus.BLOCKED:
-        return None
-    on = ", ".join(f"{d['id']} ({d['status']})" for d in result.get("waiting_on") or [])
-    return (
-        f"blocked {result['id']}: it comes after {on}. It starts when they complete; "
-        f"kraft item unblock {result['id']} drops them"
-    )
-
-
-def _held(result: dict) -> str | None:
-    """A start that did not start: queued for a slot, or blocked."""
-    return _queued(result) or _blocked(result)
-
-
-def _resumed(result: dict) -> str:
-    """resume's usual answer: the node it went on from, and the agent tasks
-    a steer reached. No node is an item that had never started."""
-    if queued := _held(result):
-        return queued
-    node = result.get("node_id")
-    line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
-    if steered := result.get("steered"):
-        line += f"; steered {', '.join(steered)}"
-    return line
-
-
-def _rerun_at(result: dict) -> str:
-    """Where a retry's run starts, from its usual answer, and its attempt."""
-    where = result.get("path") or result.get("node_id") or "its first node"
-    attempt = result.get("attempt")
-    return f"{where}, attempt {attempt}" if attempt else str(where)
 
 
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action(
-            "retried {id}",
-            small=lambda r: _held(r) or f"retried {r['id']} at {_rerun_at(r)}",
-        ),
+        common.item_action("retried {id}", small=answers.retried),
         ns.json,
     )
 
 
 def _cmd_raise_budget(ns: argparse.Namespace) -> None:
-    cap = "no cap" if ns.usd is None else f"${ns.usd:g}"
     common.emit(
-        asyncio.run(client.raise_budget(ns.usd, ns.id)),
-        common.item_action(
-            f"raised the cap on {{id}} to {cap} and retried it",
-            small=lambda r: (
-                f"raised the cap on {r['id']} to {cap}; "
-                + (_held(r) or f"retried at {_rerun_at(r)}")
-            ),
-        ),
-        ns.json,
+        asyncio.run(client.raise_budget(ns.usd, ns.id)), answers.raised_budget(ns.usd), ns.json
     )
 
 
@@ -367,7 +278,7 @@ def _cmd_skip(ns: argparse.Namespace) -> None:
     what = "" if ns.json else _skipping(ns)
     common.emit(
         asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
-        common.item_action(f"skipped {what} on {{id}}"),
+        common.item_action(answers.skipped(what)),
         ns.json,
     )
 
@@ -376,8 +287,7 @@ def _cmd_complete(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.complete(ns.reason, ns.id, close_beads=ns.close_beads)),
         common.item_action(
-            "marked {id} complete" + ("; its beads are closed" if ns.close_beads else ""),
-            status=False,
+            answers.COMPLETED + ("; its beads are closed" if ns.close_beads else ""), status=False
         ),
         ns.json,
     )
@@ -386,11 +296,7 @@ def _cmd_complete(ns: argparse.Namespace) -> None:
 def _cmd_cancel(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.cancel(ns.reason, ns.id)),
-        common.item_action(
-            "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes "
-            "deletes them)",
-            status=False,
-        ),
+        common.item_action(answers.CANCELLED, status=False),
         ns.json,
     )
 
@@ -410,12 +316,7 @@ def _cmd_reply(ns: argparse.Namespace) -> None:
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
-        common.item_action(
-            "asked an agent about {id}",
-            small=lambda r: (
-                f"asked an agent about {r['id']}'s stop; kraft view show {r['id']} follows it"
-            ),
-        ),
+        common.item_action(answers.ESCALATED, small=answers.escalated),
         ns.json,
     )
 

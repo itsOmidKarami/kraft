@@ -102,7 +102,7 @@ describe("SearchOverlay", () => {
     await screen.findByTitle("Caching spec");
     expect(document.querySelector(".ng-search-filters")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Filters" }));
-    const chips = [...document.querySelectorAll(".ng-search-fchip")];
+    const chips = [...document.querySelectorAll(".ng-search-filters .chip")];
     expect(chips.map((c) => c.firstElementChild!.textContent)).toEqual(["source", "kind"]);
     expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
     await user.selectOptions(screen.getByRole("combobox", { name: "source" }), "artifact");
@@ -112,7 +112,7 @@ describe("SearchOverlay", () => {
     await waitFor(() => expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ source_kind: "artifact", kind: "spec" })));
     // Folded, the chips of filters that are on stay in view.
     await user.click(button);
-    expect(document.querySelectorAll(".ng-search-fchip")).toHaveLength(2);
+    expect(document.querySelectorAll(".ng-search-filters .chip")).toHaveLength(2);
   });
 
   it("says what the board says of an item, and puts a failed one under Needs you with the gates", async () => {
@@ -150,7 +150,7 @@ describe("SearchOverlay", () => {
     const row = (name: string) => within(screen.getByRole("listbox")).getByText(name).closest("[role=option]")!;
     const parts = (name: string) => {
       const o = row(name);
-      return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
+      return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".badge")?.textContent, o.querySelector(".ng-search-where")?.textContent];
     };
     expect(parts("Gated work")).toEqual(["lucide-diamond", "NEEDS YOU", undefined]);
     expect(parts("Plain work")).toEqual(["lucide-box", "RUNNING", "beta"]);

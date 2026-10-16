@@ -16,6 +16,7 @@ import { ScreenHeader } from "../nav/ScreenHeader";
 import { Block, Facts, TabStrip } from "../ui/Rows";
 import type { PlaceProps } from "./NodeScreen";
 import "./node.css";
+import { Chip } from "../ui/Chip";
 
 type TaskTab = "overview" | "log" | "config" | "thread";
 const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
@@ -181,7 +182,7 @@ export function TaskLog({ workItemId, session }: { workItemId: string; session?:
   return (
     <>
       <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
-        {SOURCES.map((s) => <button key={s} type="button" className={`ph-chip${src === s ? " ph-is-on" : ""}`} aria-pressed={src === s} onClick={() => setSrc(s)}>{s}</button>)}
+        {SOURCES.map((s) => <Chip key={s} pressed={src === s} onClick={() => setSrc(s)}>{s}</Chip>)}
         <span className="ph-spacer" />
         <span className="ph-count">{lines ? `${lineCount(lines.length)}${running ? " · following" : ""}` : session ? "Reading…" : lineCount(0)}</span>
       </div>

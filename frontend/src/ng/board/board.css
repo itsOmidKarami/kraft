@@ -22,9 +22,6 @@
 .board-crumb-menu { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; margin: -1px 0; border: 0; border-radius: 5px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .board-crumb-menu:is(:hover, :focus-visible), .board-crumb-menu[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
 .board-caret { font-size: var(--fs-label); color: var(--text-muted); }
-.board-tag { padding: 2px 8px; border-radius: 5px; font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; background: var(--surface-2); }
-.board-tag.is-warn { color: var(--warn); }
-.board-tag.is-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 10%, transparent); }
 
 /* Filter bar (AreaBoard 24–33). */
 .board-filters { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
@@ -155,12 +152,10 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .composer-indent { padding-left: 42px; }
 .composer-brief { width: 100%; box-sizing: border-box; min-height: 38px; resize: vertical; padding: 0; border: none; background: transparent; font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); border-radius: 4px; }
 .composer-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.composer-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text); cursor: pointer; white-space: nowrap; }
-.composer-chip:is(:hover, :focus-visible), .composer-chip[aria-expanded="true"] { background: var(--surface-2); }
-.composer-chip:focus-visible, .composer-add:focus-visible, .composer-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.composer-mono { font-family: ui-monospace, Menlo, monospace; }
+.composer-add:focus-visible, .composer-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.composer-mono, .composer-chips .composer-mono, .draft-chips .composer-mono { font-family: ui-monospace, Menlo, monospace; }
 .composer-muted { color: var(--text-muted); }
-.composer-attached { cursor: default; font-size: var(--fs-meta); max-width: min(340px, 100%); box-sizing: border-box; }
+.composer-chips .composer-attached, .draft-chips .composer-attached { display: inline-flex; align-items: center; gap: 6px; cursor: default; font-size: var(--fs-meta); max-width: min(340px, 100%); box-sizing: border-box; }
 .composer-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-x { padding: 0 2px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
 .composer-x:hover { color: var(--text); }
@@ -185,8 +180,6 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 /* The draft item page (NewItemDraft.dc.html): the item page for an item that does not exist yet. */
 body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; padding: 18px 24px 20px; }
-.draft-tag { flex: none; font: 600 var(--fs-label) ui-monospace, Menlo, monospace; letter-spacing: .06em; white-space: nowrap; color: var(--mark-change); }
-.draft-tag.is-ok { color: var(--text); }
 .draft-title { flex: none; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 var(--fs-h1)/1.25 var(--font-sans); letter-spacing: -.01em; color: var(--text); }
 .draft-brief { flex: none; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: var(--fs-meta)/1.55 var(--font-sans); color: var(--text-sub); }
 .draft-title, .draft-brief { max-width: 860px; }

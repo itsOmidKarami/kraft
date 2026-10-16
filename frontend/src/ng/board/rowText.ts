@@ -208,13 +208,23 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
  *  `run` is the composer's preview: a node that will run. */
 export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" | "run" };
 
-export function ticksOf(i: Row): Tick[] {
+/** A chain's nodes as the board marks them: done, the one it stands on (`hot`
+ *  when it needs you), or still to run. The tick strip draws them, and so does
+ *  the console's chain line (`tests/console/wording_cases.json`). */
+export type ChainMark = { node: string; gate: boolean; state: "done" | "current" | "hot" | "todo" };
+
+export function chainMarks(i: Row): ChainMark[] {
   const nodes = i.chain_definition?.nodes ?? [];
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
   const hot = (groupOf(i) === "needs" && i.display_status !== "paused") || i.display_status === "escalated";
   return nodes.map((n, k) => ({
+    node: n.id,
     gate: n.kind === "gate",
     state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",
   }));
+}
+
+export function ticksOf(i: Row): Tick[] {
+  return chainMarks(i).map(({ gate, state }) => ({ gate, state }));
 }

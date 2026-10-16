@@ -10,11 +10,6 @@
 .ph-row:has(> .ph-chips-end):has(> .ph-row-value) { flex-wrap: wrap; row-gap: 6px; }
 .ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-row-text { flex-basis: 100%; }
 .ph-row:has(> .ph-chips-end):has(> .ph-row-value) > .ph-chips-end { margin-right: auto; justify-content: flex-start; max-width: none; }
-.ph-chipword { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
-.ph-chipword.ph-tone-ok { color: var(--ok); }
-.ph-chipword.ph-tone-warn { color: var(--warn); }
-.ph-chipword.ph-tone-change { color: var(--mark-change); }
-.ph-chipword.ph-tone-bad { color: var(--bad); }
 .ph-switch.ph-is-changed { outline: 2px solid var(--mark-change-line); outline-offset: 1px; }
 .ph-add-btn { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 10px; border: 1px dashed var(--stroke); border-radius: 8px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 

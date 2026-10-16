@@ -5,6 +5,7 @@ import { Combobox } from "../../ui/Combobox";
 import { IconButton } from "../../ui/IconButton";
 import type { Given } from "../chainValues";
 import { Select } from "../../ui/Select";
+import { Badge } from "../../ui/Badge";
 
 type Props = {
   label: string;
@@ -89,7 +90,7 @@ export function OverrideRow({ label, hint, kind, own: set, given, options, sugge
         <span className={`cfg-v${own || given ? "" : " is-unset"}${kind === "long" ? " is-prose" : ""}`}>{own ? word(set, kind) : given?.value ?? "as the chain gives it"}</span>
       )}
       {own && <span className={`cfg-dot${scope === "draft" ? " is-draft" : ""}`} aria-label={SCOPES[scope]} />}
-      {own ? <span className={`cfg-chip is-own${scope === "draft" ? " is-draft" : ""}`} title={SCOPES[scope]}>{scope}</span> : given && !editing && <span className="cfg-chip" title={SOURCES[given.source] ?? given.source}>{given.source}</span>}
+      {own ? <Badge tone={scope === "draft" ? "change" : "muted"} title={SCOPES[scope]}>{scope}</Badge> : given && !editing && <Badge title={SOURCES[given.source] ?? given.source}>{given.source}</Badge>}
       {!editing && (
         <>
           <IconButton ref={pencil} label={`Override ${label}`} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden /></IconButton>

@@ -629,14 +629,9 @@ def client(request, tmp_path, monkeypatch, templates_dir):
         yield test_client
 
 
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    """The app wired to client.transport.http(), with its lifespan entered per call.
-
-    cli.main() runs asyncio.run() itself, so — unlike test_client_read.py, where
-    one coroutine owns the loop — the lifespan cannot stay open across the call.
-    Each handler opens and closes its own loop, so each gets its own lifespan.
-    """
+def _hermetic_api(tmp_path, monkeypatch):
+    """The app module, with its run dir, bd workspace and templates under
+    `tmp_path`: what `app` and `wired` both point `client.transport.http()` at."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
@@ -644,8 +639,21 @@ def app(tmp_path, monkeypatch):
         "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
     )
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    monkeypatch.delenv("NO_COLOR", raising=False)
     import kraft.api as api
+
+    return api
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    """The app wired to client.transport.http(), with its lifespan entered per call.
+
+    cli.main() runs asyncio.run() itself, so — unlike `wired`, where one
+    coroutine owns the loop — the lifespan cannot stay open across the call.
+    Each handler opens and closes its own loop, so each gets its own lifespan.
+    """
+    api = _hermetic_api(tmp_path, monkeypatch)
+    monkeypatch.delenv("NO_COLOR", raising=False)
 
     class Lifespan(httpx.AsyncClient):
         """An AsyncClient that enters the app lifespan for the life of the client."""
@@ -663,6 +671,37 @@ def app(tmp_path, monkeypatch):
         kraft_client.transport,
         "http",
         lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"),
+    )
+    return api
+
+
+@pytest.fixture
+def wired(tmp_path, monkeypatch):
+    """The app module, with `client.transport.http()` pointed at it over ASGI,
+    hermetic under `tmp_path` (its own run dir, bd workspace and templates).
+
+    `httpx.ASGITransport` does not run the app's lifespan, so a test runs its
+    whole scenario in one coroutine under `support.api.run_with_app`, which
+    enters it:
+
+        def test_x(wired, tmp_path):
+            async def scenario():
+                return await client.list_work_items()
+
+            assert run_with_app(wired, scenario) == []
+
+    Unlike `app`, which enters the lifespan per client for `cli.main()`'s own
+    `asyncio.run`, the lifespan here stays open across the scenario, because
+    the Database it opens is bound to that one loop. The client tests and the
+    console's use it.
+    """
+    api = _hermetic_api(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        kraft_client.transport,
+        "http",
+        lambda: httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
+        ),
     )
     return api
 

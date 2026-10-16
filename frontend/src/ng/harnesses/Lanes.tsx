@@ -3,6 +3,7 @@ import { NodeGlyph } from "../graph/NodeGlyph";
 import { NodeIcon, TriangleAlert } from "../icons";
 import { type HProblem, type Lane, type TaskRef, problemsOfTask, taskName, taskTile } from "./model";
 import { Empty } from "../ui/Empty";
+import { Badge } from "../ui/Badge";
 
 const nodeOf = (path: string) => path.split(".")[0];
 export const chainLink = (t: TaskRef) => `/templates/chains/${encodeURIComponent(t.chain)}/nodes/${encodeURIComponent(nodeOf(t.path))}`;
@@ -43,7 +44,7 @@ export function Lanes({ lanes, pill, selected, empty, problems, onOpen }: {
 }) {
   return (
     <>
-      <span className="hn-pill">{pill}</span>
+      <Badge className="hn-lanes-label">{pill}</Badge>
       {lanes.length === 0 && <Empty className="hn-empty">{empty}</Empty>}
       {lanes.map((l) => (
         <section
@@ -79,15 +80,17 @@ export function Lanes({ lanes, pill, selected, empty, problems, onOpen }: {
   );
 }
 
+const ACCESS_TONE: Record<string, "ok" | "neutral"> = { available: "ok", override: "neutral" };
+
 function LaneHead({ l }: { l: Lane }) {
   return (
     <>
       <span className="hn-lane-icon">{l.icon === "triangle-alert" ? <TriangleAlert size={14} aria-hidden /> : <NodeIcon name={l.icon} size={14} />}</span>
       <span className="hn-lane-title">{l.title}</span>
       {l.model && <><span className="hn-lane-arrow" aria-hidden>→</span><span className="hn-lane-model">{l.model}</span></>}
-      {l.effort && <span className="hn-lane-chip">{l.effort}</span>}
-      {l.health && <span className="hn-lane-tag" data-found={l.health.ok}>{l.health.word}</span>}
-      {l.tag && <span className="hn-lane-tag" data-access={l.tag.toLowerCase()}>{l.tag}</span>}
+      {l.effort && <Badge tone="muted">{l.effort}</Badge>}
+      {l.health && <Badge tone={l.health.ok ? undefined : "bad"}>{l.health.word}</Badge>}
+      {l.tag && <Badge tone={ACCESS_TONE[l.tag.toLowerCase()]}>{l.tag}</Badge>}
       <span className="hn-lane-gap" />
       <span className="hn-lane-right">{l.right}</span>
     </>

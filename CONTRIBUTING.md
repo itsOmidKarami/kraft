@@ -399,6 +399,7 @@ Page rules:
 | Source | Docs page |
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/5.reference/01.cli/` |
+| The console (`src/kraft/console/`) | `docsite/content/5.reference/01.console.md` |
 | A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `src/kraft/templates/library.py`, `src/kraft/config.py`, `src/kraft/policy.py`) | `docsite/content/5.reference/03.configuration/` |
 | A chain template's node fields | `docsite/content/5.reference/04.chain-nodes/index.md` |
 | How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/5.reference/04.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |

@@ -28,7 +28,7 @@ describe("Composer", () => {
     // The chosen label is filled and checked, not only tinted; Preview is a toggle, not a label.
     expect(screen.getByRole("radio", { name: "Must fix" }).querySelector("svg")).not.toBeNull();
     expect(screen.getByRole("radio", { name: "Nit" }).querySelector("svg")).toBeNull();
-    expect(screen.getByRole("button", { name: "Preview" })).not.toHaveClass("rv-chip");
+    expect(screen.getByRole("button", { name: "Preview" })).not.toHaveClass("chip");
     fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
     expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue(LINES.join("\n"));
     fireEvent.change(screen.getByRole("textbox", { name: "Suggested change" }), { target: { value: "x" } });

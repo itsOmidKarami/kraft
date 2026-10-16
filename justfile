@@ -92,6 +92,10 @@ dev: _dev-home
 dev-seed *args: _dev-home
     {{dev_env}} uv run python dev/seed.py {{args}}
 
+# The console against the dev instance (127.0.0.1:8766): start `just dev` or `just api` first
+dev-console: _dev-home
+    {{dev_env}} uv run python -m kraft console
+
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
 dev-reset:
     rm -rf .dev

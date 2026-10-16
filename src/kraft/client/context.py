@@ -23,6 +23,21 @@ def absolute_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
 
 
+def attachment_paths(spec: str | None, plan: str | None) -> list[dict] | None:
+    """A spec and a plan to attach, as `create_work_item` takes them, each
+    made absolute against the caller's cwd. The server joins a relative path
+    onto a candidate root (the repo, or the worktree the call is made from),
+    never onto the cwd, so `specs/x.md` from a subdirectory of either would
+    miss both; absolute, it is still accepted only if it lands inside one of
+    them. None for neither."""
+    found = [
+        {"kind": kind, "path": str(Path(value).expanduser().resolve())}
+        for kind, value in (("spec", spec), ("plan", plan))
+        if value
+    ]
+    return found or None
+
+
 def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
     """`(work_item_id, origin)` for the session calling us.
 
@@ -104,7 +119,9 @@ def _forbid_self_action(work_item_id: str | None) -> str:
     resolved, origin = resolve_context()
     target = work_item_id or resolved
     if target is None:
-        raise ValueError("no work item: pass an id, or run from a Kraft worktree")
+        raise transport.ClientError(
+            "no work item: pass an id, or run from a Kraft worktree", kind=transport.Failure.REFUSED
+        )
     own = target == resolved or (
         resolved is not None and len(target) >= _MIN_PREFIX and resolved.startswith(target)
     )
@@ -129,5 +146,7 @@ async def resolve_work_item(work_item_id: str | None) -> str:
         return work_item_id
     resolved, _origin = resolve_context()
     if resolved is None:
-        raise ValueError("no work item: pass an id, or run from a Kraft worktree")
+        raise transport.ClientError(
+            "no work item: pass an id, or run from a Kraft worktree", kind=transport.Failure.REFUSED
+        )
     return resolved

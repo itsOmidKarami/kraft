@@ -17,6 +17,7 @@ import { ChoiceSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { useSearch, type Filters, type Load } from "./useSearch";
 import "./search.css";
+import { Chip } from "../ui/Chip";
 
 const has = (hay: string, q: string) => hay.toLowerCase().includes(q.toLowerCase());
 type Section = "needs" | "items" | "docs" | "beads" | "goto";
@@ -97,7 +98,7 @@ export function Search() {
   const failed = (what: string, load: Load) => load === "error" && <p className="ph-note ph-error" role="status">{what} could not be searched.</p>;
   const nothing = query && !rows.length && docs.load !== "loading" && beads.load !== "loading" && docs.load !== "error";
   const chip = (id: string, label: string, on: boolean) => (
-    <button key={id} type="button" className={`ph-chip${on ? " ph-is-on" : ""}`} onClick={() => sheet.open(id)}>{label}</button>
+    <Chip key={id} set={on} onClick={() => sheet.open(id)}>{label}</Chip>
   );
 
   return (

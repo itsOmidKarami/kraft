@@ -1,0 +1,518 @@
+{
+  "_doc": "The web's wording and the console's, held to one set of cases (spec §4.5). tests/console/test_words.py runs them against src/kraft/console/words.py; frontend/src/ng/board/wording.test.ts against model.ts, rowText.ts and format.ts, and frontend/src/ng/item/wording.test.ts against bannerWords.ts and events.ts. Each case is a real row shape cut to the fields the function reads, one per branch. A change to either side changes a case here, or the other suite fails.",
+  "now": "2026-10-15T12:00:00Z",
+  "chain": {
+    "template_id": "default",
+    "nodes": [
+      { "id": "spec", "kind": "exec" },
+      { "id": "spec_approval", "kind": "gate" },
+      { "id": "plan", "kind": "exec" },
+      { "id": "implement", "kind": "exec" },
+      { "id": "sign_off", "kind": "gate", "artifact": "plan" }
+    ]
+  },
+  "rows": [
+    {
+      "name": "gate",
+      "row": { "display_status": "needs_you", "current_node_id": "spec_approval", "pending_gate": "spec_approval", "stop": { "kind": "gate", "node": "spec_approval", "reason": null } },
+      "group": "needs",
+      "tail": "approve spec",
+      "marks": ["done", "hot", "todo", "todo", "todo"]
+    },
+    {
+      "name": "gate-named-by-its-document",
+      "row": { "display_status": "needs_you", "current_node_id": "sign_off", "pending_gate": "sign_off", "stop": { "kind": "gate", "node": "sign_off", "reason": null } },
+      "group": "needs",
+      "tail": "approve plan",
+      "marks": ["done", "done", "done", "done", "hot"]
+    },
+    {
+      "name": "failed-at-a-gate-the-chain-lists",
+      "row": { "display_status": "failed", "current_node_id": "spec_approval", "stop": { "kind": "failed", "node": "spec_approval", "reason": "the gate's check failed" } },
+      "group": "needs",
+      "tail": "failed at approve spec"
+    },
+    {
+      "name": "gate-without-pending-gate",
+      "row": { "display_status": "needs_you", "current_node_id": "plan_review", "pending_gate": null, "stop": { "kind": "gate", "node": "plan_review", "reason": null } },
+      "group": "needs",
+      "tail": "approve plan review"
+    },
+    {
+      "name": "question",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "question", "node": "implement", "reason": "needs_context: which database?" } },
+      "group": "needs",
+      "tail": "agent asks: which database?"
+    },
+    {
+      "name": "question-without-words",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "question", "node": "implement", "reason": null } },
+      "group": "needs",
+      "tail": "agent asks:"
+    },
+    {
+      "name": "cap",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "cap", "node": "implement", "reason": "Spent $0.04 of a $0.03 cap on implement. The other tasks were not interrupted." } },
+      "group": "needs",
+      "tail": "Spent $0.04 of a $0.03 cap on implement"
+    },
+    {
+      "name": "budget-without-reason",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "budget", "node": "implement", "reason": null } },
+      "group": "needs",
+      "tail": "waiting for you at implement"
+    },
+    {
+      "name": "other-stop",
+      "row": { "display_status": "needs_you", "current_node_id": "verification", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "group": "needs",
+      "tail": "the fix loop made no progress in 3 rounds"
+    },
+    {
+      "name": "other-stop-without-reason",
+      "row": { "display_status": "needs_you", "current_node_id": "merge_request", "stop": { "kind": "other", "node": "merge_request", "reason": null } },
+      "group": "needs",
+      "tail": "waiting for you at merge request"
+    },
+    {
+      "name": "failed",
+      "row": { "display_status": "failed", "current_node_id": "verification", "stop": { "kind": "failed", "node": "verification", "reason": "tests failed" } },
+      "group": "needs",
+      "tail": "failed at verification"
+    },
+    {
+      "name": "paused-mid-chain",
+      "row": { "display_status": "paused", "current_node_id": "implement" },
+      "group": "needs",
+      "tail": "paused at implement",
+      "marks": ["done", "done", "done", "current", "todo"]
+    },
+    {
+      "name": "filed-paused",
+      "row": { "display_status": "paused", "current_node_id": null },
+      "group": "not_started",
+      "tail": "created paused",
+      "marks": ["todo", "todo", "todo", "todo", "todo"]
+    },
+    {
+      "name": "blocked-mid-chain",
+      "row": { "display_status": "blocked", "current_node_id": "plan" },
+      "group": "running",
+      "tail": "waiting on another item"
+    },
+    {
+      "name": "blocked-before-start",
+      "row": { "display_status": "blocked", "current_node_id": null },
+      "group": "not_started",
+      "tail": "waiting on another item"
+    },
+    {
+      "name": "running-step-with-task",
+      "row": { "display_status": "running", "current_node_id": "implement", "step": { "index": 2, "count": 3, "name": "main", "task": "author" } },
+      "group": "running",
+      "tail": "2 of 3 · main › author",
+      "marks": ["done", "done", "done", "current", "todo"]
+    },
+    {
+      "name": "running-step",
+      "row": { "display_status": "running", "current_node_id": "implement", "step": { "index": 2, "count": 3, "name": null, "task": null } },
+      "group": "running",
+      "tail": "implement · step 2 of 3"
+    },
+    {
+      "name": "running-plan-task",
+      "row": { "display_status": "running", "current_node_id": "implement", "progress": { "current": 3, "total": 5, "tasks": [{ "state": "done" }, { "state": "running" }] } },
+      "group": "running",
+      "tail": "implement · task 3 of 5"
+    },
+    {
+      "name": "running-plan-finished",
+      "row": { "display_status": "running", "current_node_id": "implement", "progress": { "current": 5, "total": 5, "tasks": [{ "state": "done" }, { "state": "done" }] } },
+      "group": "running",
+      "tail": "implement"
+    },
+    {
+      "name": "running-on-a-fallback-model",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": { "harness": "codex", "model": "gpt-5", "effort": null } } },
+      "group": "running",
+      "tail": "plan · on gpt-5"
+    },
+    {
+      "name": "running-on-a-fallback-harness",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": { "harness": "codex", "model": "" } } },
+      "group": "running",
+      "tail": "plan · on codex"
+    },
+    {
+      "name": "running-on-a-named-fallback",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": "sonnet" } },
+      "group": "running",
+      "tail": "plan · on sonnet"
+    },
+    {
+      "name": "waiting-for-ci",
+      "row": { "display_status": "waiting", "current_node_id": "merge_request", "stop": { "kind": "wait", "node": "merge_request", "resume_at": "2026-10-15T12:05:00+00:00" } },
+      "group": "running",
+      "tail": "merge request · next check in 5m"
+    },
+    {
+      "name": "waiting-on-a-rate-limit",
+      "row": { "display_status": "waiting", "current_node_id": "implement", "stop": null, "retry_at": "2026-10-15T15:00:00+00:00" },
+      "group": "running",
+      "tail": "implement · retry in 3h"
+    },
+    {
+      "name": "waiting-for-nothing-known",
+      "row": { "display_status": "waiting", "current_node_id": "implement", "stop": null, "retry_at": null },
+      "group": "running",
+      "tail": "waiting at implement"
+    },
+    {
+      "name": "queued",
+      "row": { "display_status": "queued", "current_node_id": null },
+      "group": "running",
+      "tail": "waiting to start"
+    },
+    {
+      "name": "escalated",
+      "row": { "display_status": "escalated", "current_node_id": "plan" },
+      "group": "running",
+      "tail": "escalation running",
+      "marks": ["done", "done", "hot", "todo", "todo"]
+    },
+    {
+      "name": "merged",
+      "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 42, "url": "https://example.com/mr/42" } },
+      "group": "done",
+      "tail": "merged !42",
+      "marks": ["done", "done", "done", "done", "done"]
+    },
+    {
+      "name": "completed",
+      "row": { "display_status": "done", "current_node_id": null, "mr_ref": null },
+      "group": "done",
+      "tail": "completed"
+    },
+    {
+      "name": "cancelled",
+      "row": { "display_status": "cancelled", "current_node_id": "plan" },
+      "group": "done",
+      "tail": "cancelled"
+    },
+    {
+      "name": "archived",
+      "row": { "display_status": "archived", "current_node_id": "plan" },
+      "group": "done",
+      "tail": ""
+    },
+    {
+      "name": "a-status-from-a-newer-server",
+      "row": { "display_status": "pondering", "current_node_id": "plan" },
+      "group": "running",
+      "tail": ""
+    },
+    {
+      "name": "on-a-node-the-chain-lacks",
+      "row": { "display_status": "running", "current_node_id": "gone" },
+      "group": "running",
+      "tail": "gone",
+      "marks": ["todo", "todo", "todo", "todo", "todo"]
+    },
+    {
+      "name": "no-status",
+      "row": {"current_node_id": "plan"},
+      "group": "running",
+      "tail": ""
+    },
+    {
+      "name": "null-status",
+      "row": {"display_status": null, "current_node_id": "plan"},
+      "group": "running",
+      "tail": ""
+    },
+    {
+      "name": "stop-node-beats-current-node",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"kind": "stuck", "node": "verification", "reason": null}},
+      "group": "needs",
+      "tail": "waiting for you at verification"
+    },
+    {
+      "name": "failed-with-no-node-at-all",
+      "row": {"display_status": "failed", "stop": null},
+      "group": "needs",
+      "tail": "failed at "
+    },
+    {
+      "name": "needs-you-with-no-stop",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": null},
+      "group": "needs",
+      "tail": "waiting for you at implement"
+    },
+    {
+      "name": "needs-you-with-a-stop-of-no-kind",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"node": "implement", "reason": "look at this"}},
+      "group": "needs",
+      "tail": "look at this"
+    },
+    {
+      "name": "question-without-the-prefix",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"kind": "question", "node": "implement", "reason": "which database?"}},
+      "group": "needs",
+      "tail": "agent asks: which database?"
+    },
+    {
+      "name": "progress-without-tasks",
+      "row": {"display_status": "running", "current_node_id": "implement", "progress": {"current": 1, "total": 3}},
+      "group": "running",
+      "tail": "implement \u00b7 task 1 of 3"
+    },
+    {
+      "name": "progress-with-empty-tasks",
+      "row": {"display_status": "running", "current_node_id": "implement", "progress": {"current": 1, "total": 3, "tasks": []}},
+      "group": "running",
+      "tail": "implement \u00b7 task 1 of 3"
+    },
+    {
+      "name": "fallback-to-nothing-usable",
+      "row": {"display_status": "running", "current_node_id": "plan", "fallback": {"to": 5}},
+      "group": "running",
+      "tail": "plan"
+    },
+    {
+      "name": "fallback-to-an-empty-object",
+      "row": {"display_status": "running", "current_node_id": "plan", "fallback": {"to": {}}},
+      "group": "running",
+      "tail": "plan"
+    },
+    {
+      "name": "waiting-with-both-times",
+      "row": {"display_status": "waiting", "current_node_id": "merge_request", "stop": {"kind": "wait", "node": "merge_request", "resume_at": "2026-10-15T12:05:00+00:00"}, "retry_at": "2026-10-15T15:00:00+00:00"},
+      "group": "running",
+      "tail": "merge request \u00b7 next check in 5m"
+    }
+  ],
+  "order": {
+    "rows": [
+      { "id": "old-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T09:00:00+00:00" },
+      { "id": "new-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T11:00:00+00:00" },
+      { "id": "old-gate", "display_status": "needs_you", "current_node_id": "spec_approval", "updated_at": "2026-10-15T08:00:00+00:00" },
+      { "id": "paused-mid-chain", "display_status": "paused", "current_node_id": "plan", "updated_at": "2026-10-15T10:00:00+00:00" },
+      { "id": "done", "display_status": "done", "current_node_id": "plan", "updated_at": "2026-10-15T11:30:00+00:00" }
+    ],
+    "sorted": ["paused-mid-chain", "old-gate", "done", "new-running", "old-running"]
+  },
+  "ago": [
+    [null, ""],
+    ["not a time", ""],
+    ["2026-10-15T11:59:30+00:00", "just now"],
+    ["2026-10-15T11:48:00.123456+00:00", "11m ago"],
+    ["2026-10-15T09:00:00+00:00", "3h ago"],
+    ["2026-10-11T12:00:00+00:00", "4d ago"],
+    ["2026-10-15T11:01:00+00:00", "59m ago"],
+    ["2026-10-15T11:00:00+00:00", "1h ago"],
+    ["2026-10-14T13:00:00+00:00", "23h ago"],
+    ["2026-10-14T12:00:00+00:00", "1d ago"]
+  ],
+  "until": [
+    [null, ""],
+    ["not a time", ""],
+    ["2026-10-15T11:59:00+00:00", "expired"],
+    ["2026-10-15T12:00:30+00:00", "in 1m"],
+    ["2026-10-15T12:05:00+00:00", "in 5m"],
+    ["2026-10-15T15:00:00+00:00", "in 3h"],
+    ["2026-10-17T12:00:00+00:00", "in 2d"],
+    ["2026-10-15T12:59:00+00:00", "in 59m"],
+    ["2026-10-15T13:00:00+00:00", "in 1h"],
+    ["2026-10-16T11:00:00+00:00", "in 23h"],
+    ["2026-10-16T12:00:00+00:00", "in 1d"]
+  ],
+  "banners": [
+    { "name": "running", "item": { "display_status": "running", "stop": null }, "banner": null },
+    { "name": "needs-you-without-a-stop", "item": { "display_status": "needs_you", "stop": null }, "banner": null },
+    {
+      "name": "gate",
+      "item": { "display_status": "needs_you", "pending_gate": "spec_approval", "stop": { "kind": "gate", "node": "spec", "reason": null } },
+      "banner": { "kind": "gate", "node": "spec_approval", "name": "approve spec", "text": "", "way": "" }
+    },
+    {
+      "name": "gate-named-by-its-document",
+      "item": { "display_status": "needs_you", "pending_gate": "sign_off", "stop": { "kind": "gate", "node": "sign_off", "reason": null }, "chain_definition": { "nodes": [{ "id": "sign_off", "kind": "gate", "artifact": "plan" }] } },
+      "banner": { "kind": "gate", "node": "sign_off", "name": "approve plan", "text": "", "way": "" }
+    },
+    {
+      "name": "failed-at-a-gate-the-chain-lists",
+      "item": { "display_status": "failed", "stop": { "kind": "failed", "node": "spec_approval", "reason": null }, "chain_definition": { "nodes": [{ "id": "spec_approval", "kind": "gate" }] } },
+      "banner": { "kind": "failed", "node": "spec_approval", "name": "approve spec", "text": "", "way": "" }
+    },
+    {
+      "name": "gate-without-pending-gate",
+      "item": { "display_status": "needs_you", "pending_gate": null, "stop": { "kind": "gate", "node": "plan_review", "reason": null } },
+      "banner": { "kind": "gate", "node": "plan_review", "name": "approve plan review", "text": "", "way": "" }
+    },
+    {
+      "name": "question",
+      "item": { "display_status": "needs_you", "needs_context_question": "Keep [/] in titles?", "stop": { "kind": "question", "node": "implement", "reason": "needs_context: keep [/] in titles?" } },
+      "banner": { "kind": "question", "node": "implement", "name": "implement", "text": "Keep [/] in titles?", "way": "" }
+    },
+    {
+      "name": "question-without-its-text",
+      "item": { "display_status": "needs_you", "needs_context_question": null, "stop": { "kind": "question", "node": "implement", "reason": "needs_context: which database?" } },
+      "banner": { "kind": "question", "node": "implement", "name": "implement", "text": "which database?", "way": "" }
+    },
+    {
+      "name": "budget-the-item-raises",
+      "item": { "display_status": "needs_you", "actions": ["retry", "raise_budget"], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached: $0.035 spent on this work item, cap $0.030...", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget cap reached: $0.035 spent on this work item, cap $0.030.", "way": "" }
+    },
+    {
+      "name": "budget-without-a-reason",
+      "item": { "display_status": "needs_you", "actions": ["raise_budget"], "stop": { "kind": "budget", "node": "plan", "reason": null, "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "The budget ran out.", "way": "" }
+    },
+    {
+      "name": "budget-raise-not-taken-now",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget cap reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "budget-with-no-doors-listed",
+      "item": { "display_status": "needs_you", "actions": [], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget cap reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "budget-from-an-older-server",
+      "item": { "display_status": "needs_you", "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget cap reached.", "way": "" }
+    },
+    {
+      "name": "budget-the-item-cannot-raise",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": null, "reason": "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", "scope": "daily" } },
+      "banner": { "kind": "limit", "node": "", "name": "", "text": "Budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", "way": "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap." }
+    },
+    {
+      "name": "budget-on-a-policy-limit",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": "plan", "reason": "budget_usd reached", "limit": { "path": "", "key": "budget_usd", "value": 5, "maximum": null } } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget_usd reached.", "way": "" }
+    },
+    {
+      "name": "policy-limit-without-retry-listed",
+      "item": { "display_status": "needs_you", "actions": ["escalate"], "stop": { "kind": "budget", "node": "plan", "reason": "budget_usd reached", "limit": { "path": "", "key": "budget_usd", "value": 5, "maximum": null } } },
+      "banner": { "kind": "limit", "node": "plan", "name": "plan", "text": "Budget_usd reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "cap-without-a-reason",
+      "item": { "display_status": "needs_you", "stop": { "kind": "cap", "node": "verification", "reason": null } },
+      "banner": { "kind": "limit", "node": "verification", "name": "verification", "text": "A limit was reached.", "way": "" }
+    },
+    {
+      "name": "failed",
+      "item": { "display_status": "failed", "stop": { "kind": "failed", "node": "verification", "reason": "tests failed: 3 of 120" } },
+      "banner": { "kind": "failed", "node": "verification", "name": "verification", "text": "Tests failed: 3 of 120.", "way": "" }
+    },
+    {
+      "name": "failed-on-a-forge-login",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: authentication failed", "facts": { "cause": "forge_auth" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: authentication failed.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
+    },
+    {
+      "name": "failed-stranded",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": null, "facts": { "cause": "stranded" } } },
+      "banner": { "kind": "failed", "node": "implement", "name": "implement", "text": "", "way": "" }
+    },
+    {
+      "name": "failed-in-the-repo",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": "the worktree could not be made" } },
+      "banner": { "kind": "failed", "node": "implement", "name": "implement", "text": "The worktree could not be made.", "way": "Check the repo settings." }
+    },
+    {
+      "name": "a-stop-on-a-paused-item",
+      "item": { "display_status": "paused", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "banner": null
+    },
+    {
+      "name": "stuck",
+      "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "banner": { "kind": "stop", "node": "verification", "name": "verification", "text": "The fix loop made no progress in 3 rounds.", "way": "" }
+    }
+  ],
+  "events": [
+    { "name": "quiet", "event": { "type": "plan_progress", "node_id": "implement", "payload": {} }, "line": null },
+    { "name": "quiet-worker-session-created", "event": { "type": "worker_session_created", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-worker-session-exited", "event": { "type": "worker_session_exited", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-chain-loaded", "event": { "type": "chain_loaded", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-worktree-prepared", "event": { "type": "worktree_prepared", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-steer-context-set", "event": { "type": "steer_context_set", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-permission-decision", "event": { "type": "permission_decision", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-external-wait-observed", "event": { "type": "external_wait_observed", "node_id": null, "payload": {} }, "line": null },
+    { "name": "quiet-findings-measured", "event": { "type": "findings_measured", "node_id": null, "payload": {} }, "line": null },
+    { "name": "fix-round-not-a-number", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": "soon" } }, "line": "verification · fix loop round NaN" },
+    { "name": "fix-round-finished-not-a-number", "event": { "type": "fix_cycle_finished", "node_id": "verification", "payload": { "cycle": "soon", "committed": true } }, "line": "verification · fix loop round NaN · the fix committed a change" },
+    { "name": "fix-round-blank", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": "" } }, "line": "verification · fix loop round 1" },
+    { "name": "fix-round-infinite", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": "Infinity" } }, "line": "verification · fix loop round Infinity" },
+    { "name": "fix-round-python-only-inf", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": "inf" } }, "line": "verification · fix loop round NaN" },
+    { "name": "fix-round-as-text", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": "2" } }, "line": "verification · fix loop round 3" },
+    { "name": "unknown", "event": { "type": "sandbox_oom_killed", "node_id": null, "payload": {} }, "line": "sandbox oom killed" },
+    { "name": "created", "event": { "type": "work_item_created", "node_id": null, "payload": {} }, "line": "filed" },
+    { "name": "node-started", "event": { "type": "node_started", "node_id": "plan", "payload": {} }, "line": "plan started" },
+    { "name": "node-from-payload", "event": { "type": "node_completed", "node_id": null, "payload": { "node_id": "plan" } }, "line": "plan finished" },
+    { "name": "node-skipped", "event": { "type": "node_skipped", "node_id": "plan", "payload": {} }, "line": "plan skipped" },
+    { "name": "session-started", "event": { "type": "worker_session_started", "node_id": "verification", "payload": { "hook_point": "verification.review.code_review" } }, "line": "code_review started on verification" },
+    { "name": "session-without-a-task", "event": { "type": "worker_session_started", "node_id": "verification", "payload": {} }, "line": "a session started on verification" },
+    { "name": "gate-requested", "event": { "type": "gate_requested", "node_id": "spec_approval", "payload": { "gate": "spec_approval" } }, "line": "approve spec is waiting for you" },
+    { "name": "approved-by-you", "event": { "type": "gate_approved", "node_id": "plan_approval", "payload": { "gate": "plan_approval", "by": "human" } }, "line": "approve plan · approved by you" },
+    { "name": "passed-on-its-own", "event": { "type": "gate_approved", "node_id": null, "payload": { "gate": "chain_revision_approval", "by": "agent" } }, "line": "approve chain revision · passed on its own" },
+    { "name": "rejected-with-a-long-note", "event": { "type": "gate_rejected", "node_id": "spec_approval", "payload": { "gate": "spec_approval", "note": "the goal says [/] eleven findings but lists only ten of them" } }, "line": "approve spec · rejected: the goal says [/] eleven findings but lists only …" },
+    { "name": "gate-named-by-its-document", "event": { "type": "gate_approved", "node_id": "sign_off", "payload": { "gate": "sign_off", "by": "human" } }, "line": "approve plan · approved by you" },
+    { "name": "a-gate-node-named-from-the-chain", "event": { "type": "node_skipped", "node_id": "spec_approval", "payload": {} }, "line": "approve spec skipped" },
+    { "name": "rejected-without-a-note", "event": { "type": "gate_rejected", "node_id": "spec_approval", "payload": {} }, "line": "approve spec · rejected" },
+    { "name": "fix-round", "event": { "type": "fix_cycle_started", "node_id": "verification", "payload": { "cycle": 1 } }, "line": "verification · fix loop round 2" },
+    { "name": "fix-round-committed", "event": { "type": "fix_cycle_finished", "node_id": "verification", "payload": { "cycle": 1, "committed": true } }, "line": "verification · fix loop round 2 · the fix committed a change" },
+    { "name": "fix-round-changed-nothing", "event": { "type": "fix_cycle_finished", "node_id": "verification", "payload": { "cycle": 0, "committed": false } }, "line": "verification · fix loop round 1 · the fix changed nothing" },
+    { "name": "fix-round-git-could-not-say", "event": { "type": "fix_cycle_finished", "node_id": "verification", "payload": { "committed": null } }, "line": "verification · fix loop round 1" },
+    { "name": "needs-you", "event": { "type": "work_item_needs_human", "node_id": "verification", "payload": { "reason": "needs_context: Allow it?" } }, "line": "stopped at verification: Allow it?" },
+    { "name": "needs-you-nowhere", "event": { "type": "work_item_needs_human", "node_id": null, "payload": { "reason": null } }, "line": "stopped: " },
+    { "name": "escalation", "event": { "type": "escalation_message", "node_id": "verification", "payload": { "message": "look at the flaky test" } }, "line": "escalation on verification: look at the flaky test" },
+    { "name": "escalation-nowhere", "event": { "type": "escalation_message", "node_id": null, "payload": { "message": "hello" } }, "line": "escalation: hello" },
+    { "name": "paused", "event": { "type": "pause_requested", "node_id": "implement", "payload": {} }, "line": "paused" },
+    { "name": "resumed", "event": { "type": "work_item_resumed", "node_id": "implement", "payload": {} }, "line": "resumed" },
+    { "name": "retried", "event": { "type": "work_item_retried", "node_id": "implement", "payload": {} }, "line": "retried implement" },
+    { "name": "retried-nowhere", "event": { "type": "work_item_retried", "node_id": null, "payload": {} }, "line": "retried" },
+    { "name": "rate-limited", "event": { "type": "work_item_rate_limited", "node_id": "plan", "payload": {} }, "line": "plan hit a rate limit" },
+    { "name": "waiting", "event": { "type": "work_item_waiting", "node_id": "merge_request_feedback", "payload": {} }, "line": "merge request feedback is waiting" },
+    { "name": "cancelled", "event": { "type": "work_item_cancelled", "node_id": null, "payload": {} }, "line": "cancelled" },
+    { "name": "completed", "event": { "type": "work_item_completed", "node_id": null, "payload": {} }, "line": "finished" },
+    { "name": "archived", "event": { "type": "work_item_archived", "node_id": null, "payload": { "by": "auto" } }, "line": "archived" },
+    { "name": "archived-kept-one", "event": { "type": "work_item_archived", "node_id": null, "payload": { "kept_branch": "kraft/x", "unpushed_commits": 1 } }, "line": "archived · kept kraft/x: 1 unpushed commit" },
+    { "name": "archived-kept-three", "event": { "type": "work_item_archived", "node_id": null, "payload": { "kept_branch": "kraft/x", "unpushed_commits": 3 } }, "line": "archived · kept kraft/x: 3 unpushed commits" },
+    { "name": "restored", "event": { "type": "work_item_restored", "node_id": null, "payload": {} }, "line": "restored" },
+    { "name": "mr-opened", "event": { "type": "mr_opened", "node_id": "draft_merge_request", "payload": { "number": 142 } }, "line": "MR !142 opened" },
+    { "name": "mr-closed-by", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "by": "mara" } }, "line": "MR !142 closed by mara" },
+    { "name": "mr-closed-by-cancel", "event": { "type": "mr_closed", "node_id": null, "payload": { "ref": 142, "by": "cancel" } }, "line": "MR !142 closed" },
+    { "name": "mr-reopened", "event": { "type": "mr_reopened", "node_id": null, "payload": { "ref": 142 } }, "line": "MR !142 reopened" },
+    { "name": "budget-raised", "event": { "type": "budget_raised", "node_id": null, "payload": { "budget_usd": 5.0 } }, "line": "budget set to $5" },
+    { "name": "budget-changed", "event": { "type": "budget_changed", "node_id": null, "payload": { "budget_usd": 7.5 } }, "line": "budget set to $7.5" },
+    { "name": "title-edited", "event": { "type": "work_item_title_edited", "node_id": null, "payload": {} }, "line": "title edited" },
+    { "name": "brief-edited", "event": { "type": "work_item_description_edited", "node_id": null, "payload": {} }, "line": "brief edited" }
+  ],
+  "event_ages": [
+    [null, "now"],
+    ["2026-10-15T11:59:30+00:00", "now"],
+    ["2026-10-15T12:05:00+00:00", "now"],
+    ["2026-10-15T11:54:00+00:00", "6m"],
+    ["2026-10-15T11:00:00+00:00", "1h"],
+    ["2026-10-15T10:55:00+00:00", "1h 05m"],
+    ["2026-10-14T10:00:00+00:00", "26h"]
+  ],
+  "elapsed": [
+    [0, "0s"],
+    [0.5, "1s"],
+    [-5, "0s"],
+    [59, "59s"],
+    [60, "1m"],
+    [3599, "59m"],
+    [3600, "1h"],
+    [11520, "3h 12m"],
+    [86400, "1d"],
+    [90000, "1d 1h"]
+  ]
+}

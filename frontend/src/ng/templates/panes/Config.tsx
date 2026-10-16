@@ -14,6 +14,7 @@ import { useProviders } from "../../harnesses/useProviders";
 import { useLibrary } from "../useLibrary";
 import { ReadOnly } from "../addon";
 import { Select } from "../../ui/Select";
+import { Badge } from "../../ui/Badge";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
 export type Row = { field: string; value: unknown; source?: string; locked?: string; recovery?: boolean };
@@ -104,7 +105,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
         <Editor meta={meta} field={row.field} value={editing} ctx={ctx} onSave={save} onRefuse={(m) => setErr(`${label}: ${m}`)} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
       )}
       {own && row.source !== undefined && <span className="cfg-dot" aria-label="overridden here" />}
-      {row.source !== undefined && <span className={`cfg-chip${own ? " is-own" : ""}`} title={row.source}>{sourceWord(row.source)}</span>}
+      {row.source !== undefined && <Badge tone={own ? "muted" : undefined} title={row.source}>{sourceWord(row.source)}</Badge>}
       {readOnly ? null : row.locked ? (
         <span className="cfg-lock" title={row.locked}>locked</span>
       ) : meta.elsewhere ? (

@@ -22,6 +22,7 @@ import "./notify.css";
 import "./settings.css";
 import { usePane } from "../shell/usePane";
 import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN, ALERTS_IN_BACKGROUND } from "./sharedWords";
+import { Badge } from "../ui/Badge";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -366,7 +367,7 @@ export function NotifyPage() {
                   <span className="nt-text">
                     <span className="nt-name">{c.name}</span>
                     <span className="nt-sub">{c.sub}</span>
-                    <span className="nt-chips">{c.events.map((id) => <span key={id} className="nt-chip">{eventWords(id)}</span>)}</span>
+                    <span className="nt-chips">{c.events.map((id) => <Badge key={id}>{eventWords(id)}</Badge>)}</span>
                   </span>
                   <span className="nt-state">
                     <span className="nt-status"><span className="nt-dot" aria-hidden />{channelState(c.active)}</span>
