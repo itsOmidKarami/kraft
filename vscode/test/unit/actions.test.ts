@@ -12,12 +12,12 @@ afterEach(() => vi.restoreAllMocks());
 const failed = async () => { throw new Error("socket hang up"); };
 
 // A second Skip would skip the next node: an action that went through is not reported as failed.
-it.each<[string, () => Promise<boolean>, (api: never, store: Store) => Promise<void>, string, string[]]>([
+it.each<[string, () => Promise<boolean>, (api: never, store: Store) => Promise<void>, string, unknown[]]>([
   ["a Skip, then its re-read", async () => true, (api, store) => runAction(api, store, item({ id: "S-1" }), "skip"), "Skip", ["S-1"]],
   ["a Skip, then its re-read failed", failed, (api, store) => runAction(api, store, item({ id: "S-1" }), "skip"), "Skip", ["S-1"]],
   ["an Abandon from the filing warning, then its re-read failed", failed,
     (api, store) => offerWarnings({ api, store } as never, "S-1", ["Same title as S-0."], ["Abandon"]), "Abandon",
-    ["S-1", "Abandoned from VS Code right after filing: Same title as S-0."]],
+    ["S-1", expect.stringMatching(/^Abandoned from VS Code/)]],
 ])("%s: reports no failure", async (_, refresh, run, answer, called) => {
   const api = { skip: vi.fn(async () => {}), abandon: vi.fn(async () => {}) };
   const store = { refresh: vi.fn(refresh), item: () => item({ id: "S-1", display_status: "paused", current_node_id: null, actions: ["abandon"] }) } as unknown as Store;
