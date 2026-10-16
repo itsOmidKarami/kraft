@@ -140,8 +140,15 @@ async def _read_done(console, app, pilot) -> None:
             "spec → spec_approval → plan → implement",
         ),
     ],
-    ids=["gate", "budget-it-cannot-raise", "running", "failed", "stuck", "stopped-saying-nothing"]
-    + ["not-started"],
+    ids=[
+        "gate",
+        "budget-it-cannot-raise",
+        "running",
+        "failed",
+        "stuck",
+        "stopped-saying-nothing",
+        "not-started",
+    ],
 )
 def test_the_header_says_where_the_item_stands(
     board, monkeypatch, row, title, status, banner, tone, spent, where, chain

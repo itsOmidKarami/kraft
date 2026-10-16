@@ -351,8 +351,14 @@ def test_a_cancel_preview_that_fails_says_so_and_reads_the_item_again(board, mon
             "implement (0s). That attempt's work is lost.",
         ),
     ],
-    ids=["attempt-only", "node-only", "node-and-attempt", "nothing"]
-    + ["running-for", "unreadable-start"],
+    ids=[
+        "attempt-only",
+        "node-only",
+        "node-and-attempt",
+        "nothing",
+        "running-for",
+        "unreadable-start",
+    ],
 )
 def test_cancel_lines_join_what_runs_as_the_web_does(monkeypatch, running, stops):
     """`stopsNow` joins the parts it has with ", ": no leading comma; the
