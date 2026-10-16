@@ -20,6 +20,17 @@ export function ScreenHeader({ id, trailing, children }: { id?: ReactNode; trail
   );
 }
 
+/** The header of a compose screen (new item, a note, a reason): Cancel in place of Back, the title centred, nothing trailing. */
+export function ComposerHeader({ title, onCancel }: { title: string; onCancel: () => void }) {
+  return (
+    <header className="ph-composer-head">
+      <button type="button" className="ph-back" onClick={onCancel}>Cancel</button>
+      <h1 className="ph-composer-title">{title}</h1>
+      <span className="ph-composer-pad" />
+    </header>
+  );
+}
+
 /** A root's title: the 26px page title in place of Back. */
 export function RootHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (

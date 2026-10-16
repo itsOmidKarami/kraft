@@ -9,6 +9,7 @@ import { problemText } from "../../templates/problems";
 import { Button } from "../../ui/Button";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { ActionBar } from "../ui/Rows";
 import "./areas.css";
 
 /** What an area screen is made of (W17 brief K.2): the Back header with the YAML toggle, the title with its status chip, the content, and, when the area has a draft with changes, the bar that reviews and publishes it. */
@@ -99,10 +100,10 @@ export function AreaScreen({ title, sub, draft, status, yaml = true, children }:
         ) : children}
       </div>
       {dirty && (
-        <div className="ph-dirtybar">
+        <ActionBar className="ph-dirtybar">
           <Button className="ph-btn" onClick={() => sheet.open("discard")}>Discard</Button>
           <Button className="ph-btn ph-btn-primary" variant="primary" onClick={() => sheet.open("review")}>Review &amp; publish</Button>
-        </div>
+        </ActionBar>
       )}
       {sheet.is("review") && view && (
         <ConfirmSheet

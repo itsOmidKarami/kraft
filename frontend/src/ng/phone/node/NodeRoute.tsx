@@ -8,6 +8,7 @@ import { asOfPass, FIX_LOOP } from "../../item/nodeGraph";
 import { isScopeTask } from "../../item/scopeView";
 import { placeUrl, readPlace, selPath, type Place } from "../../item/url";
 import { Doc } from "../doc/Doc";
+import { ItemMissing } from "../nav/NotFound";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { NodeScreen } from "./NodeScreen";
 import { ScopeScreen } from "./ScopeScreen";
@@ -40,13 +41,7 @@ export function NodeRoute() {
         <div className="ph-content ph-skeleton" aria-busy="true"><span /><span /></div>
       </>
     );
-  if (loaded.state === "missing")
-    return (
-      <>
-        <ScreenHeader />
-        <div className="ph-content"><h1 className="ph-title">Not found</h1><p className="ph-empty">This work item does not exist.</p></div>
-      </>
-    );
+  if (loaded.state === "missing") return <ItemMissing />;
   if (!place.node) return <Navigate to={`/work-items/${encodeURIComponent(id)}`} replace />;
   // A fix loop's own step is the desktop canvas's frame of its tasks: the phone has no screen for it, so its address opens the node.
   if (place.sel.kind === "task" && place.sel.step === FIX_LOOP && loopStepPaths(materialized(loaded.item), place.node, place.sel.task).length)

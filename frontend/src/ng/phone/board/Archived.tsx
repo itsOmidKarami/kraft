@@ -4,7 +4,7 @@ import { ago, repoName } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { AreaScreen } from "../areas/AreaScreen";
 import { Group, type RowSpec } from "../areas/kit";
-import { archivedLede, ARCHIVED_READ_ERROR } from "../../ui/archivedWords";
+import { archivedLede, ARCHIVED_READ_ERROR, NOTHING_ARCHIVED } from "../../ui/archivedWords";
 import { itemPath } from "./actions";
 
 /** `/archived`: the desktop's archived list as rows, newest first, so its
@@ -21,7 +21,7 @@ export function Archived() {
   return (
     <AreaScreen title="Archived" sub={archivedLede(days)} yaml={false}>
       {error && <p className="ph-error" role="alert">{ARCHIVED_READ_ERROR(error)}</p>}
-      {items && items.length === 0 && <p className="ph-empty">Nothing is archived.</p>}
+      {items && items.length === 0 && <p className="ph-empty">{NOTHING_ARCHIVED}</p>}
       {shown.length > 0 && (
         <Group rows={shown.map((i): RowSpec => ({ key: i.id, label: i.title, sub: [repoName(i.repo), i.archived_at ? `archived ${ago(i.archived_at)}` : null].filter(Boolean).join(" · "), to: itemPath(i.id) }))} />
       )}

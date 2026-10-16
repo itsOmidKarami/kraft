@@ -7,7 +7,7 @@ import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { Menu } from "../ui/Menu";
 import { NoMatch } from "../ui/NoMatch";
-import { archivedLede, ARCHIVED_READ_ERROR } from "../ui/archivedWords";
+import { archivedLede, ARCHIVED_READ_ERROR, NOTHING_ARCHIVED } from "../ui/archivedWords";
 import { BulkBar } from "./BulkBar";
 import { sendBulk } from "./bulk";
 import { Row } from "./Row";
@@ -86,7 +86,7 @@ export function ArchivedPage() {
         <div className="board-list">
           <div className="board-list-inner">
             {error && <p className="item-error board-empty board-empty-solo" role="alert">{ARCHIVED_READ_ERROR(error)}</p>}
-            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <p className="board-empty board-empty-solo">Nothing is archived.</p>)}
+            {items && !shown.length && (q.trim() ? <NoMatch className="board-empty board-empty-solo" query={q} onClear={() => set("q", "")} /> : <p className="board-empty board-empty-solo">{NOTHING_ARCHIVED}</p>)}
             {shown.length > 0 && (
               <section className="board-group" aria-label="Archived">
                 <h2 className="board-group-head"><span>Archived</span><span className="board-count">{shown.length}</span></h2>
