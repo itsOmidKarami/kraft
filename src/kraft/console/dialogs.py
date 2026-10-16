@@ -174,6 +174,8 @@ class Connect(Dialog[list[str] | None]):
         self.path = path
         #: The test and setup commands the probe proposed, as the fields show them.
         self.proposed = ("", "")
+        #: The path `proposed` is for; None while no proposal is shown.
+        self.probed: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="connect"):
@@ -208,7 +210,7 @@ class Connect(Dialog[list[str] | None]):
     def _probe(self) -> None:
         """Read what connecting the path would propose. The last path's
         commands are no proposal for this one, so the fields start empty."""
-        self.proposed = ("", "")
+        self.proposed, self.probed = ("", ""), None
         self._box("test").value = self._box("setup").value = ""
         self._say("Reading the repo…")
         path = self._box("path").value.strip()
@@ -221,6 +223,8 @@ class Connect(Dialog[list[str] | None]):
             if path == self._box("path").value.strip():
                 # The server echoes the typed path: written out, never obeyed.
                 self._say(render.printable(client.reason_of(str(exc))), "$error")
+            else:
+                self._say("Enter reads the new path")
             return
         if path != self._box("path").value.strip():
             # An answer for a path no longer in the box; the box holds a new one.
@@ -230,7 +234,7 @@ class Connect(Dialog[list[str] | None]):
         proposal = [
             render.printable(probed.get(k) or "") for k in ("test_command", "setup_command")
         ]
-        self.proposed = (proposal[0], proposal[1])
+        self.proposed, self.probed = (proposal[0], proposal[1]), path
         for name, text in zip(("test", "setup"), proposal, strict=True):
             box = self._box(name)
             # Only a field still empty: one typed into while the probe ran is the person's.
@@ -240,11 +244,23 @@ class Connect(Dialog[list[str] | None]):
             f"Kraft proposes these for {render.printable(probed['path'])}. Keep or change them."
         )
 
+    @on(Input.Changed, "#connect-path")
+    def _path_edited(self, event: Input.Changed) -> None:
+        """The box no longer holds the path the fields were proposed for: those
+        commands are another repo's, so they go, and only what is typed is sent."""
+        if self.probed is None or event.value.strip() == self.probed:
+            return
+        for name, was in zip(("test", "setup"), self.proposed, strict=True):
+            if self._box(name).value == was:
+                self._box(name).value = ""
+        self.proposed, self.probed = ("", ""), None
+        self._say("Enter reads the new path")
+
     @on(Input.Submitted, "#connect-test, #connect-setup")
     @on(Button.Pressed, "#connect-go")
     def _go(self) -> None:
         path = self._box("path").value.strip()
-        argv = ["repo", "connect", client.absolute_path(path or os.getcwd())]
+        argv = ["repo", "connect"]
         for flag, name, was in (
             ("--test-command", "test", self.proposed[0]),
             ("--setup-command", "setup", self.proposed[1]),
@@ -255,7 +271,8 @@ class Connect(Dialog[list[str] | None]):
                 argv.append(f"{flag}={value}")
         if self.query_one(Checkbox).value:
             argv.append("--verify")
-        self._answer(argv)
+        # Flags first, then `--`: the path is never read as one.
+        self._answer([*argv, "--", client.absolute_path(path or os.getcwd())])
 
     def action_cancel(self) -> None:
         self._answer(None)

@@ -119,7 +119,9 @@ class Repos(View):
         getattr(self.query_one("#repo-rows", OptionList), f"action_{name}")()
 
     def action_connect(self) -> None:
-        self.run_worker(self._connect, group="act")
+        # Before the form: a connect refused after it would throw away what was typed.
+        if not self.app.busy():
+            self.run_worker(self._connect, group="act")
 
     async def _connect(self) -> None:
         argv = await self.app.push_screen_wait(Connect(os.getcwd()))
@@ -132,5 +134,6 @@ class Repos(View):
             self.run_worker(partial(self._disconnect, repo["path"]), group="act")
 
     async def _disconnect(self, path: str) -> None:
-        await self.app.run_asking(["repo", "disconnect", path])
+        # `--`: a path is never read as a flag.
+        await self.app.run_asking(["repo", "disconnect", "--", path])
         self._read()

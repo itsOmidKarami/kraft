@@ -10,11 +10,12 @@ import os
 import shlex
 
 import pytest
-from support.console_board import _settled
+from support.console_board import _settled, _text
 from textual.widgets import Button, Checkbox, Input, OptionList
 
 from kraft import client
 from kraft.console.dialogs import Confirm, Connect
+from kraft.console.prompt import Prompt
 from kraft.console.screens import repos as repos_view
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
@@ -28,8 +29,8 @@ REPOS = [
         "enabled": False,
     },
     {
-        "name": "mono",
-        "path": "/src/mono",
+        "name": "mono\x1b",
+        "path": "/src/mono\x1b",
         "test_command": None,
         "test_scopes": [{"dir": "a"}, {"dir": "b"}],
         "setup_command": "make\x1b[2K",
@@ -61,7 +62,7 @@ def _said(app) -> str:
             [
                 "* kraft  /r\n    test: just test [/] · setup: just setup",
                 "  web  /src/web · disabled\n    test: not set · setup: none",
-                "  mono  /src/mono · detected, not managed\n"
+                "  mono\\x1b  /src/mono\\x1b · detected, not managed\n"
                 "    test: 2 scopes · setup: make\\x1b[2K",
             ],
         ),
@@ -153,6 +154,10 @@ def test_c_connects_through_a_form_the_probe_fills(
         else:
             # A short path: the panel wraps the echo of a temp directory's.
             dialog.query_one("#connect-path", Input).value = "/p"
+            await pilot.press("enter")  # read it, so its proposal is what the fields show
+            await console.until(
+                pilot, lambda: len(asked) == 2 and _said(app) != "Reading the repo…"
+            )
             for name, value in edits.items():
                 if name == "verify":
                     dialog.query_one(Checkbox).value = value
@@ -164,9 +169,9 @@ def test_c_connects_through_a_form_the_probe_fills(
         await pilot.pause()
         return asked, shown, console.output(app)
 
-    argv = None if flags is None else ["repo", "connect", "/p", *flags]
+    argv = None if flags is None else ["repo", "connect", *flags, "--", "/p"]
     ran = [f"kraft {shlex.join(argv)}", " ".join(argv), "exit 0"] if argv else []
-    assert console.run(scenario) == ([here], said, ran)
+    assert console.run(scenario) == ([here] if flags is None else [here, "/p"], said, ran)
 
 
 @pytest.mark.parametrize(
@@ -195,12 +200,15 @@ def test_each_probe_starts_from_empty_fields_and_writes_out_what_it_shows(
     """Reading a second path first empties both command fields, and what the
     probe answers or refuses with is written out, never obeyed."""
 
+    asked: list[None] = []
+
     async def probe_repo(path=None, *, detect=True, test_command=None):
-        if path == "/other":
-            if isinstance(second, Exception):
-                raise second
-            return second
-        return PROBED
+        asked.append(None)
+        if len(asked) == 1:
+            return PROBED
+        if isinstance(second, Exception):
+            raise second
+        return second
 
     async def repos():
         return []
@@ -213,8 +221,7 @@ def test_each_probe_starts_from_empty_fields_and_writes_out_what_it_shows(
         await _settled(console, app, pilot)
         await pilot.press("4", "c")
         await console.until(pilot, lambda: _said(app) == PROPOSED)
-        app.screen.query_one("#connect-path", Input).value = "/other"
-        await pilot.press("enter")
+        await pilot.press("enter")  # the path box has the focus: read the same path again
         await console.until(pilot, lambda: _said(app) == said)
         return tuple(app.screen.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
 
@@ -222,21 +229,23 @@ def test_each_probe_starts_from_empty_fields_and_writes_out_what_it_shows(
 
 
 @pytest.mark.parametrize(
-    ("edit", "fields", "said", "argv"),
+    ("edit", "refused", "fields", "said", "flags"),
     [
         # The box holds another path by the time the answer lands: dropped.
-        ("path", ("", ""), "Enter reads the new path", ["repo", "connect", "/other"]),
+        ("path", False, ("", ""), "Enter reads the new path", []),
+        # ... and so is a refusal for the old path.
+        ("path", True, ("", ""), "Enter reads the new path", []),
         # A command typed meanwhile is the person's: kept, and passed.
-        ("test", ("mine", "uv sync"), PROPOSED, ["--test-command=mine"]),
+        ("test", False, ("mine", "uv sync"), PROPOSED, ["--test-command=mine"]),
     ],
-    ids=["stale-answer-dropped", "typed-command-kept"],
+    ids=["stale-answer-dropped", "stale-refusal-dropped", "typed-command-kept"],
 )
 def test_an_answer_that_lands_late_never_overwrites_what_the_person_did(
-    board, monkeypatch, tmp_path, edit, fields, said, argv
+    board, monkeypatch, tmp_path, edit, refused, fields, said, flags
 ):
     """A probe can run for minutes. The person edits the path (without Enter)
-    or a command meanwhile: the old path's answer is dropped, and a typed
-    command stays."""
+    or a command meanwhile: the old path's answer or refusal is dropped, and a
+    typed command stays."""
     monkeypatch.chdir(tmp_path)
     release = asyncio.Event()
     first_asked = asyncio.Event()
@@ -245,6 +254,8 @@ def test_an_answer_that_lands_late_never_overwrites_what_the_person_did(
     async def probe_repo(path=None, *, detect=True, test_command=None):
         first_asked.set()
         await release.wait()
+        if refused:
+            raise NOT_GIT
         return PROBED
 
     async def repos():
@@ -264,6 +275,7 @@ def test_an_answer_that_lands_late_never_overwrites_what_the_person_did(
         await console.until(pilot, lambda: isinstance(app.screen, Connect) and first_asked.is_set())
         dialog = app.screen
         dialog.query_one(f"#connect-{edit}", Input).value = "/other" if edit == "path" else "mine"
+        await pilot.pause()
         release.set()
         await console.until(pilot, lambda: _said(app) == said)
         got = tuple(dialog.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
@@ -271,10 +283,80 @@ def test_an_answer_that_lands_late_never_overwrites_what_the_person_did(
         await console.until(pilot, lambda: ran)
         return got, ran[0]
 
-    got, words = console.run(scenario)
-    assert got == fields
-    assert words == (argv if edit == "path" else ["repo", "connect", os.getcwd(), *argv])
-    # words[2] for "path" is made absolute against the root: "/other" already is.
+    path = "/other" if edit == "path" else os.getcwd()
+    assert console.run(scenario) == (fields, ["repo", "connect", *flags, "--", path])
+
+
+@pytest.mark.parametrize(
+    ("typed", "fields", "flags"),
+    [
+        (None, ("", ""), []),
+        ("mine", ("mine", ""), ["--test-command=mine"]),
+    ],
+    ids=["untouched", "typed"],
+)
+def test_editing_the_path_drops_the_old_paths_proposal_and_sends_only_what_was_typed(
+    board, monkeypatch, tmp_path, typed, fields, flags
+):
+    """The fields show `/a`'s commands; the path becomes `/b` without Enter.
+    `/a`'s proposal is no longer shown, and never passed for `/b`."""
+    monkeypatch.chdir(tmp_path)
+    ran: list[list[str]] = []
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        return PROBED
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        async def run_command(words):
+            ran.append(words)
+
+        app.run_command = run_command
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await console.until(pilot, lambda: _said(app) == PROPOSED)
+        dialog = app.screen
+        dialog.query_one("#connect-path", Input).value = "/b"
+        await console.until(pilot, lambda: _said(app) == "Enter reads the new path")
+        if typed:
+            dialog.query_one("#connect-test", Input).value = typed
+        got = tuple(dialog.query_one(f"#connect-{n}", Input).value for n in ("test", "setup"))
+        dialog.query_one("#connect-go", Button).press()
+        await console.until(pilot, lambda: ran)
+        return got, ran[0]
+
+    assert console.run(scenario) == (fields, ["repo", "connect", *flags, "--", "/b"])
+
+
+def test_c_while_a_command_runs_says_so_and_opens_no_form(board, monkeypatch):
+    """A connect refused after the form would throw away what was typed: the
+    form does not open while another command runs."""
+
+    async def repos():
+        return []
+
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        app.command = object()  # what `run_command` checks
+        await _settled(console, app, pilot)
+        await pilot.press("4", "c")
+        await pilot.pause(0.2)
+        toasts = [str(t.render()) for t in app.screen.query("Toast")]
+        app.command = None
+        return isinstance(app.screen, Connect), toasts
+
+    assert console.run(scenario, notifications=True) == (
+        False,
+        ["A command is still running: Ctrl+O shows it, x stops it."],
+    )
 
 
 @pytest.mark.parametrize("typed", ["-x", "sub dir"], ids=["leading-dash", "space"])
@@ -309,16 +391,19 @@ def test_a_typed_path_reaches_the_runner_absolute_never_as_a_flag(
         await console.until(pilot, lambda: ran)
         return ran[0]
 
-    assert console.run(scenario) == ["repo", "connect", os.path.join(os.getcwd(), typed)]
+    assert console.run(scenario) == ["repo", "connect", "--", os.path.join(os.getcwd(), typed)]
 
 
 @pytest.mark.parametrize(
-    ("size", "tabs"),
-    [((80, 24), 0), ((60, 16), 4)],
+    ("size", "tabs", "buttons", "focus"),
+    [
+        ((80, 24), 0, ("go", "no"), "connect-path"),
+        ((60, 16), 4, ("go",), "connect-go"),
+    ],
     ids=["whole-at-80x24", "reachable-at-60x16"],
 )
 def test_the_connect_form_fits_a_window_or_scrolls_to_the_focused_button(
-    board, monkeypatch, size, tabs
+    board, monkeypatch, size, tabs, buttons, focus
 ):
     """At 80x24 both buttons are on screen; in a small window, Tab to Connect
     brings it into view."""
@@ -344,13 +429,11 @@ def test_the_connect_form_fits_a_window_or_scrolls_to_the_focused_button(
             b: app.screen.region.contains_region(
                 app.screen.query_one(f"#connect-{b}", Button).region
             )
-            for b in ("go", "no")
+            for b in buttons
         }
         return inside, app.focused.id
 
-    inside, focus = console.run(scenario, size=size)
-    assert inside["go"] and (inside["no"] or tabs)  # at 80x24 both, at 60x16 the focused one
-    assert focus == ("connect-path" if tabs == 0 else "connect-go")
+    assert console.run(scenario, size=size) == ({b: True for b in buttons}, focus)
 
 
 def test_a_hidden_repos_view_stops_a_read_in_flight(board, monkeypatch):
@@ -373,10 +456,10 @@ def test_a_hidden_repos_view_stops_a_read_in_flight(board, monkeypatch):
         await pilot.press("4")
         await console.until(pilot, started.is_set)
         await pilot.press("1")
-        await console.until(pilot, stopped.is_set)
-        return True
+        await console.until(pilot, stopped.is_set)  # bounded: it fails if never cancelled
+        return stopped.is_set()
 
-    assert console.run(scenario)
+    assert console.run(scenario) is True
 
 
 @pytest.mark.parametrize(
@@ -384,7 +467,11 @@ def test_a_hidden_repos_view_stops_a_read_in_flight(board, monkeypatch):
     [
         (
             ["shift+tab", "enter"],
-            ["kraft repo disconnect /src/web", "repo disconnect /src/web", "exit 0"],
+            [
+                "kraft repo disconnect -- /src/web",
+                "repo disconnect -- /src/web",
+                "exit 0",
+            ],
             ["/r"],
         ),
         (["escape"], [], ["/r", "/src/web"]),
@@ -424,7 +511,7 @@ def test_d_disconnects_the_selected_repo_after_the_consoles_confirm(
         return question, console.output(app)
 
     assert console.run(scenario) == (
-        ("kraft repo disconnect /src/web", "This disconnects the repo from Kraft."),
+        ("kraft repo disconnect -- /src/web", "This disconnects the repo from Kraft."),
         ran,
     )
 
@@ -454,3 +541,63 @@ def test_a_hidden_repos_view_reads_nothing(board, monkeypatch):
         return [*seen, len(reads)]
 
     assert console.run(scenario) == [0, 2]
+
+
+@pytest.mark.parametrize("how", ["form-connect", "typed-disconnect"])
+def test_connecting_or_disconnecting_the_consoles_own_repo_moves_its_scope(
+    board, kraft_is, monkeypatch, tmp_path, how
+):
+    """Whoever runs `repo connect` or `repo disconnect`, the directory's repo is
+    resolved again: the top line, the Board's scope and Repos' `*` follow."""
+    done = tmp_path / "done"
+    kraft_is(f"import pathlib, sys; pathlib.Path({str(done)!r}).touch(); {ECHO}")
+    connecting = how == "form-connect"
+
+    def connected() -> bool:
+        return done.exists() == connecting
+
+    async def resolve_repo(cwd=None):
+        return "/r" if connected() else None
+
+    async def repos():
+        return [REPOS[0]] if connected() else []
+
+    async def probe_repo(path=None, *, detect=True, test_command=None):
+        return PROBED
+
+    console = board([], repo=None if connecting else "/r")
+    monkeypatch.setattr(client, "resolve_repo", resolve_repo)
+    monkeypatch.setattr(client, "repos", repos)
+    monkeypatch.setattr(client, "probe_repo", probe_repo)
+
+    def top(app) -> str:
+        return _text(app, "#where")
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        await pilot.press("4")
+        await console.until(
+            pilot, lambda: len(_rows(app)) == (0 if connecting else 1) or _rows(app)
+        )
+        if connecting:
+            await pilot.press("c")
+            await console.until(pilot, lambda: _said(app) == PROPOSED)
+            app.screen.query_one("#connect-go", Button).press()
+        else:
+            await pilot.press("slash")
+            app.query_one(Prompt).value = "/repo disconnect /r"
+            await pilot.press("enter")
+            await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+            await pilot.press("shift+tab", "enter")
+        await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
+        want = "/r" if connecting else None
+        await console.until(
+            pilot,
+            lambda: (
+                app.scope == want and (_rows(app) or [""])[0][:2] == ("* " if connecting else "No")
+            ),
+        )
+        return app.scope, top(app), _rows(app)[0][:2]
+
+    got = console.run(scenario)
+    assert got == (("/r", "/r", "* ") if connecting else (None, "all repos", "No"))
