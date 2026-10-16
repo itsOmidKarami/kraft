@@ -286,6 +286,11 @@ ui-contract *args:
     cd frontend && npx playwright install chromium
     cd frontend && npx playwright test -c e2e/contract/playwright.config.ts {{args}}
 
+# The dashboard demo: the web UI on the UI contract's mocked API, no server or agents (http://localhost:5174/demo/)
+demo:
+    cd frontend && [ -d node_modules ] || npm ci
+    cd frontend && npm run demo
+
 # Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:
     cd frontend && npm run e2e
@@ -397,12 +402,14 @@ docs:
     cd docsite && npm run dev
 
 # Build the published site (latest release at /, older majors at /vN/, main at
-# /next/) and serve it at http://localhost:8000/. python's server lists a page's
-# folder and 404s the page itself (/next/guides/x is guides/x.html), so the
-# deep pages need a server that maps /a/b to a/b.html, as GitHub Pages does.
+# /next/, the dashboard demo at /demo/) and serve it at http://localhost:8000/.
+# python's server lists a page's folder and 404s the page itself
+# (/next/guides/x is guides/x.html), so the deep pages need a server that maps
+# /a/b to a/b.html, as GitHub Pages does.
 [doc("Build every docs version and serve them at http://localhost:8000/")]
 docs-site:
     cd docsite && [ -d node_modules ] || npm ci
+    cd frontend && [ -d node_modules ] || npm ci
     rm -rf docsite/dist-site
     dev/build_docs_site.sh docsite/dist-site
     python3 dev/check_llm_docs.py docsite/dist-site

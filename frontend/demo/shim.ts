@@ -1,0 +1,142 @@
+import { ABORT, HANG, type Answer, type MockServer } from "../e2e/contract/mocks/mockApi";
+
+/**
+ * What puts the mocked API (e2e/contract/mocks/mockApi.ts) under the page, so the
+ * dashboard runs with no Kraft server: `fetch` and the events socket answered in the
+ * page, the clock moved to the scenario's moment, and the two `<a href="/api/...">`
+ * log links (a download, a new tab) served from the mock too.
+ */
+
+/** A request the shim answers: same origin, under /api/, as every call in src/api.ts is. */
+const isApi = (u: URL) => u.origin === location.origin && u.pathname.startsWith("/api/");
+
+const toResponse = (a: Answer) =>
+  new Response(a.status === 204 || a.status === 304 ? null : (a.body ?? null), {
+    status: a.status,
+    headers: { ...(a.contentType ? { "content-type": a.contentType } : {}), ...a.headers },
+  });
+
+/** `fetch` for /api/** answered by `serve`; anything else goes to the network. */
+export function patchFetch(serve: MockServer, win: Window & typeof globalThis = window) {
+  const real = win.fetch.bind(win);
+  win.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input instanceof Request ? input : new URL(String(input), location.href), init);
+    if (!isApi(new URL(request.url))) return real(input, init);
+    const text = request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
+    const reply = await serve({
+      method: request.method,
+      url: request.url,
+      json: () => {
+        try { return text ? JSON.parse(text) : null; } catch { return null; }
+      },
+    });
+    // What a refused connection rejects with, so api.ts says the server is unreachable as it would.
+    if (reply === ABORT) throw new TypeError("Failed to fetch");
+    if (reply === HANG) return new Promise<Response>((_, reject) => request.signal.addEventListener("abort", () => reject(request.signal.reason)));
+    return toResponse(reply);
+  };
+}
+
+/** The events socket with no server behind it: it opens, stays silent, and closes when asked, so the shell reads "live". */
+export class DemoSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = DemoSocket.CONNECTING;
+  readonly protocol = "";
+  readonly extensions = "";
+  readonly bufferedAmount = 0;
+  binaryType: BinaryType = "blob";
+  onopen: ((e: Event) => void) | null = null;
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onclose: ((e: CloseEvent) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+
+  constructor(readonly url: string) {
+    super();
+    setTimeout(() => {
+      if (this.readyState !== DemoSocket.CONNECTING) return;
+      this.readyState = DemoSocket.OPEN;
+      this.fire(new Event("open"));
+    }, 0);
+  }
+
+  send() {}
+
+  close() {
+    if (this.readyState >= DemoSocket.CLOSING) return;
+    this.readyState = DemoSocket.CLOSING;
+    setTimeout(() => {
+      this.readyState = DemoSocket.CLOSED;
+      this.fire(new CloseEvent("close", { code: 1000, wasClean: true }));
+    }, 0);
+  }
+
+  private fire(e: Event) {
+    this.dispatchEvent(e);
+    (this[`on${e.type}` as "onopen"] as ((e: Event) => void) | null)?.(e);
+  }
+}
+
+/** `new WebSocket(...)` for /api/** makes a DemoSocket; any other (Vite's dev reload socket) is the real one. */
+export function patchWebSocket(win: Window & typeof globalThis = window) {
+  win.WebSocket = new Proxy(win.WebSocket, {
+    construct(target, args, newTarget) {
+      const url = new URL(String(args[0]), location.href);
+      if (url.host === location.host && url.pathname.startsWith("/api/")) return new DemoSocket(url.href);
+      return Reflect.construct(target, args, newTarget);
+    },
+  });
+}
+
+/**
+ * `Date` running from `to` instead of today, so the scenario's timestamps read as the
+ * contract suite reads them ("17d 10h", "2 min ago"). The clock still advances, so a
+ * running item's elapsed time ticks on.
+ */
+export function shiftClock(to: number, win: typeof globalThis = globalThis) {
+  const Real = win.Date;
+  const offset = to - Real.now();
+  class DemoDate extends Real {
+    constructor(...args: unknown[]) {
+      if (args.length) super(...(args as [number]));
+      else super(Real.now() + offset);
+    }
+    static now() {
+      return Real.now() + offset;
+    }
+  }
+  win.Date = DemoDate as DateConstructor;
+}
+
+/**
+ * A plain link into /api/ (the log's Download, a red test's log) is a navigation, which
+ * no fetch shim sees: answer it from the mock and hand the browser the result.
+ */
+export function serveApiLinks(doc: Document = document) {
+  doc.addEventListener("click", async (e) => {
+    const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!a || e.defaultPrevented || !isApi(new URL(a.href))) return;
+    e.preventDefault();
+    const res = await fetch(a.href);
+    const href = URL.createObjectURL(await res.blob());
+    if (a.hasAttribute("download")) {
+      const save = doc.createElement("a");
+      save.href = href;
+      save.download = a.download;
+      save.click();
+    } else window.open(href, a.target || "_self", "noopener");
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  });
+}
+
+/**
+ * GitHub Pages answers any address it has no file for with the site's 404 page, which
+ * sends an address under the demo back to the demo's own page as `?to=` (see
+ * docsite/nuxt.config.ts). Put it back before the router reads it.
+ */
+export function restoreAddress(base: string) {
+  const to = new URLSearchParams(location.search).get("to");
+  if (to?.startsWith("/") && !to.startsWith("//")) history.replaceState(null, "", base.replace(/\/$/, "") + to);
+}

@@ -53,6 +53,15 @@ describe("ng App", () => {
     vi.restoreAllMocks();
   });
 
+  it("routes under the build's base path, as the docs site serves the demo at /demo/", async () => {
+    vi.stubEnv("BASE_URL", "/demo/");
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    window.history.pushState({}, "", "/demo/settings/storage");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Storage" })).toBeInTheDocument();
+    vi.unstubAllEnvs();
+  });
+
   it("routes /settings/storage to the Storage page, not the placeholder", async () => {
     stubFetch({ "GET /storage": [200, storageUsage()] });
     window.history.pushState({}, "", "/settings/storage");

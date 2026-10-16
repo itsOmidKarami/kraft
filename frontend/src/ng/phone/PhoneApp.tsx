@@ -52,7 +52,7 @@ function Frame() {
  *  shares the desktop's URLs, so a place survives a resize (A.1). */
 export function PhoneApp() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ShippedHash />
       <Routes>
         <Route element={<Frame />}>

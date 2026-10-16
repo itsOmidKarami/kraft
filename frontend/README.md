@@ -49,6 +49,22 @@ components) and `/_tokens` (every colour token, in the current look). The dev
 server has them; a release build does not, because `ng/App.tsx` drops their
 imports unless `VITE_DEV_PAGES=1` is set.
 
+### The dashboard demo
+
+`demo/` runs this UI with no Kraft server: the UI contract's scenario
+(`e2e/contract/mocks/`), answered in the page instead of by Playwright. `just
+demo` serves it at <http://localhost:5174/demo/>, and `npm run build:demo`
+writes `dist-demo/`, which `dev/build_docs_site.sh` puts at the docs site's
+`/demo/`.
+
+`demo/main.ts` builds the scenario and hands it to `mocks/mockApi.ts`, the same
+answers the contract suite gets. `demo/shim.ts` puts them under the page:
+`fetch` and the events socket for `/api/**`, the clock moved to the scenario's
+moment, and the two `<a href="/api/...">` log links. The routers take the
+build's base (`import.meta.env.BASE_URL`), `/` everywhere but here. A change to
+what the demo shows is a change to the contract's mocks, so it is checked
+there.
+
 ## Layout of `src/`
 
 ```text
