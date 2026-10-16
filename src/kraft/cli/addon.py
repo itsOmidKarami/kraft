@@ -28,7 +28,7 @@ from pydantic import ValidationError
 from kraft import client, harness, update
 from kraft.addons import fetch, flow, load, manifest, review
 from kraft.addons import update as addon_update
-from kraft.addons.config import AddonEntry, AddonsConfig, AddonsLock
+from kraft.addons.config import AddonsConfig, AddonsLock
 from kraft.addons.load import InstalledAddon
 from kraft.cli import common
 from kraft.config import ConfigError, first_error, read_yaml, write_yaml
@@ -249,15 +249,11 @@ def _reload() -> None:
     """Ask a running server to load the new lock. With none running, the next
     start reads it."""
     try:
-        answer = asyncio.run(client.reload_addons())
+        answer, error = asyncio.run(client.reload_addons()), None
     except ValueError as exc:
-        if "no Kraft server" not in str(exc):
-            print(f"warning: the running server did not reload: {exc}", file=sys.stderr)
-        return
-    # A reload that answers 200 can still have left an add-on out.
-    for what, why in ((answer or {}).get("invalid_templates") or {}).items():
-        if what == "addons.yaml" or what.startswith("add-on "):
-            print(f"warning: the running server did not load {what}: {why}", file=sys.stderr)
+        answer, error = None, exc
+    for line in flow.reload_warnings(answer, error):
+        print(line, file=sys.stderr)
 
 
 def _edit(
@@ -470,33 +466,6 @@ def _cmd_collection_remove(ns: argparse.Namespace) -> None:
     common.emit({"removed": ns.name}, lambda v: f"removed collection {ns.name}", ns.json)
 
 
-def _result_view(result: addon_update.Result) -> dict:
-    reviewed = result.review
-    return {
-        "addon": result.addon_id,
-        "outcome": result.outcome,
-        "kind": result.kind,
-        "problems": [review.escape(fetch.redact(p)) for p in result.problems],
-        "note": result.note,
-        "review": None
-        if reviewed is None
-        else {
-            "old_version": reviewed.old_version,
-            "new_version": reviewed.new_version,
-            "reach": [review.escape(line) for line in reviewed.reach],
-            "content": [review.escape(line) for line in reviewed.content],
-        },
-    }
-
-
-def _render_results(views: list[dict]) -> str:
-    lines = []
-    for view in views:
-        said = "; ".join(view["problems"]) or view["note"] or ""
-        lines.append(f"{view['addon']}: {view['outcome']}{': ' + said if said else ''}")
-    return "\n".join(lines) or "no add-ons installed"
-
-
 def _run_update(
     ns: argparse.Namespace, ids: list[str] | None, *, check: bool = False, **kw
 ) -> list[addon_update.Result]:
@@ -515,51 +484,26 @@ def _run_update(
             return False
         return input(f"Apply {reviewed.addon_id}? [y/N] ").strip().lower() in ("y", "yes")
 
-    config_dir, addons_dir = flow.home()
-    try:
-        results = addon_update.update(
-            ids, accept=accept, config_dir=config_dir, addons_root=addons_dir, **kw
-        )
-    except addon_update.Refused as exc:
-        raise _refuse("; ".join(exc.problems)) from exc
-    except (ConfigError, PolicyError) as exc:
-        raise _refuse(str(exc)) from exc
+    with _as_cli():
+        results = flow.update(ids, accept, **kw)
     if declined_blind:
         print(
             f"declined {', '.join(declined_blind)}: no terminal to ask at; pass -y to accept",
             file=sys.stderr,
         )
-    if any(r.outcome == "applied" for r in results):
+    if flow.applied(results):
         _reload()
     return results
 
 
 def _cmd_install(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, _addons_dir = flow.home()
-    try:
-        locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons
-        config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
-    except ConfigError as exc:
-        raise _refuse(str(exc)) from exc
-    if ns.addon in locked and not ns.re_install:
-        raise _refuse(
-            f"{ns.addon} is already installed; `update` it, or pass --re-install to take the "
-            "newest commit"
+    with _as_cli():
+        entries = flow.install_entries(
+            ns.addon, alias=ns.alias, auto_update=ns.auto_update, re_install=ns.re_install
         )
-    entries = None
-    if ns.addon not in config.addons or ns.alias or ns.auto_update:
-        was = config.entry(ns.addon) if ns.addon in config.addons else AddonEntry()
-        entry = AddonEntry(
-            **{
-                "as": ns.alias or was.as_,
-                "enabled": was.enabled,
-                "auto_update": True if ns.auto_update else was.auto_update,
-            }
-        )
-        entries = {ns.addon: entry}
     results = _run_update(ns, [ns.addon], re_install=ns.re_install, entries=entries)
-    common.emit([_result_view(r) for r in results], _render_results, ns.json)
+    common.emit([flow.result_view(r) for r in results], flow.render_results, ns.json)
     if results[0].outcome != "applied":
         raise SystemExit(1)
 
@@ -573,12 +517,12 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if not ns.check:
         _not_a_worker()
     results = _run_update(ns, ns.addons or None, check=ns.check)
-    views = [_result_view(r) for r in results]
+    views = [flow.result_view(r) for r in results]
     # Nobody was asked under `--check`: "declined" is an update that is waiting.
     waiting = {"declined": "update waiting"} if ns.check else {}
     common.emit(
         views,
-        lambda v: _render_results(
+        lambda v: flow.render_results(
             [{**x, "outcome": waiting.get(x["outcome"], x["outcome"])} for x in v]
         ),
         ns.json,
