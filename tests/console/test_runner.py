@@ -41,6 +41,10 @@ from kraft.console import runner
         ("/admin update --ye --restart", ("run", ["admin", "update", "--restart"])),
         ("/view logs a91c --fol", ("say", runner.FOLLOW_LATER)),
         ("/admin start --det", ("run", ["admin", "start", "--det"])),
+        ("/view logs x -fn 5", ("say", runner.FOLLOW_LATER)),
+        ("/view logs x -fn5", ("say", runner.FOLLOW_LATER)),
+        ("/admin update -yy --restart", ("run", ["admin", "update", "--restart"])),
+        ("/admin start -dd", ("run", ["admin", "start", "-dd"])),
     ],
     ids=[
         "slash",
@@ -68,6 +72,10 @@ from kraft.console import runner
         "update-yes-abbrev",
         "follow-abbrev",
         "detach-abbrev",
+        "follow-bundled",
+        "follow-bundled-attached",
+        "update-yes-bundled",
+        "detach-bundled",
     ],
 )
 def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):

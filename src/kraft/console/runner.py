@@ -56,6 +56,17 @@ CONFIRMS = {
 }
 
 
+def _without_yes(word: str) -> str:
+    """`word` with `-y` (also bundled: `-yy`, `-yh`) and `--yes` or any
+    abbreviation of it taken out; empty when nothing is left."""
+    if _given([word], "--yes"):
+        return ""
+    if word.startswith("-") and not word.startswith("--"):
+        word = ("-" + word[1:].replace("y", "")).rstrip("-") if "y" in word else word
+        return word if len(word) > 1 else ""
+    return word
+
+
 def _given(words: list[str], long: str, short: str | None = None) -> bool:
     """Whether `words` pass the flag `long` (or `short`). argparse takes any
     unambiguous prefix of a long flag (`--ye` is `--yes`) and `--flag=value`;
@@ -63,6 +74,9 @@ def _given(words: list[str], long: str, short: str | None = None) -> bool:
     for word in words:
         flag = word.partition("=")[0]
         if word == short or flag == long:
+            return True
+        # Bundled short flags (`-fn5`, `-yy`): over-matches, which only asks or refuses more.
+        if short and word.startswith("-") and not word.startswith("--") and short[1] in word:
             return True
         if flag.startswith("--") and len(flag) > 2 and long.startswith(flag):
             return True
@@ -96,7 +110,7 @@ def route(line: str) -> tuple[str, str | list[str]]:
         return "say", FOLLOW_LATER
     if head == ("admin", "update"):
         # Never `-y`: its own refusals (add-ons it would drop, a 0.x config) still show.
-        words = [w for w in words if not _given([w], "--yes", "-y")]
+        words = [w for w in map(_without_yes, words) if w]
     return "run", words
 
 
