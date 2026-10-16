@@ -46,6 +46,16 @@ export function escalationThreads(sessions: any[]) {
     thread, session_id: ss.at(-1).id, turns: ss.length, started_at: ss[0].created_at, ended_at: ss.at(-1).exited_at ?? null, status: ss.at(-1).status,
   }));
 }
+/** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
+ *  `rewind_cancelled` came after it. Resume and retry start there; the demo's walk (motion.ts) goes back there
+ *  once the node it stands on completes, as `walk.run_once` does. */
+export function pendingRewind(b: ItemBundle): { target: string; note: string | null } | null {
+  const at = b.events.map((e) => e.type).lastIndexOf("rewind_requested");
+  if (at < 0) return null;
+  const p = b.events[at].payload as { review_id: string; target: string; note: string | null };
+  const spent = b.events.slice(at + 1).some((e) => (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id));
+  return spent ? null : p;
+}
 const ENDED = (s: string) => WORK_ITEM_TRAITS[s as WorkItemStatus]?.ended ?? false;
 /** `kraft.vocab.work_item.TRAITS[...].admits_status`, the status half of each door (never exported to TS). */
 const ADMITS: Record<string, readonly string[]> = {
@@ -166,15 +176,6 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     const ids = stopSessions(b);
     if (ids.length && pauseItem) append(b.item.id, "pause_requested", { sessions: ids });
     paused(b, ids);
-  };
-  /** `store.pending_rewind`: the newest `rewind_requested`, unless its target's `node_started` or its own
-   *  `rewind_cancelled` came after it. */
-  const pendingRewind = (b: ItemBundle): { target: string; note: string | null } | null => {
-    const at = b.events.map((e) => e.type).lastIndexOf("rewind_requested");
-    if (at < 0) return null;
-    const p = b.events[at].payload as { review_id: string; target: string; note: string | null };
-    const spent = b.events.slice(at + 1).some((e) => (e.type === "node_started" && e.payload.node_id === p.target) || (e.type === "rewind_cancelled" && e.payload.review_id === p.review_id));
-    return spent ? null : p;
   };
   const joined = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join("\n\n") || null;
   const run = (it: any) => Object.assign(it, { status: "active", stop: null, pending_gate: null, gate_artifact: null, needs_context_question: null, retry_at: null });

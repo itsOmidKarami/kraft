@@ -1,6 +1,6 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { Scenario } from "./fixtures";
-import type { Transitions } from "./transitions";
+import { pendingRewind, type Transitions } from "./transitions";
 
 /**
  * Live motion for the dashboard demo (`MockOptions.motion`): the board's running items walk their chains on
@@ -13,7 +13,8 @@ import type { Transitions } from "./transitions";
  * `node_completed`), entering the next node at once; a node with no agent task starts and completes in one
  * tick, with no session; a gate is requested and the item stops there for a person. Loops run once, in chain
  * order. Past the last node the item completes. Where an item stands is read from its own events, so whatever
- * the visitor did meanwhile (approve, reject, skip, retry, resume) is where it goes on from.
+ * the visitor did meanwhile (approve, reject, skip, retry, resume, a review's request for changes) is where it
+ * goes on from.
  *
  * When nothing on the board is active and no gate waits, a tick files a fresh item and starts it, so a gate
  * always comes round again; a new one is filed only once everything else has stopped or finished.
@@ -66,16 +67,21 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     return null;
   };
 
-  /** Where the item goes from the node it stands on, by its newest positional event: on past a node done or
-   *  skipped, else (a rejection's target, a retry, a resume, a node left mid-way) the node it stands on again. */
+  /** Where the item goes from the node it stands on, by its newest positional event: past a node done or skipped,
+   *  back to a pending rewind's target at or before it (`walk.run_once`), else on to the next; otherwise (a
+   *  rejection's target, a retry, a resume, a node never started or left mid-way) the node it stands on. */
   const nextNode = (id: string): any | undefined => {
-    const { item: it, events } = S.bundles[id];
+    const b = S.bundles[id];
+    const it = b.item;
     const nodes: any[] = it.chain_definition?.nodes ?? [];
     const at = nodes.findIndex((n) => n.id === it.current_node_id);
     if (at < 0) return nodes[0];
-    const last = [...events].reverse().find((e) => WHERE.has(e.type));
+    const last = [...b.events].reverse().find((e) => WHERE.has(e.type));
     const passed = (last?.type === "node_completed" || last?.type === "node_skipped") && last.payload.node_id === it.current_node_id;
-    return passed ? nodes[at + 1] : nodes[at];
+    if (!passed) return nodes[at];
+    const rewind = pendingRewind(b);
+    const back = rewind ? nodes.findIndex((n) => n.id === rewind.target) : -1;
+    return back >= 0 && back <= at ? nodes[back] : nodes[at + 1];
   };
 
   /** The walk entering `node`: an agent's session starts, a node with no agent task runs through, a gate opens. */

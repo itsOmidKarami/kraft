@@ -30,8 +30,10 @@ const board = (S: Scenario, bead: string) => S.ngBoard.find((id) => S.bundles[id
 const RUNNING = "kraft-91bc";
 const GATED = "kraft-cb59";
 const FAILED = "kraft-b108";
-/** The other board item that is active at the start (the escalated row: its turn is done, so it runs). */
-const ALSO_ACTIVE = "kraft-2c77";
+/** The escalated row: stopped, an escalation turn running on it, so it is not active. */
+const ESCALATED = "kraft-2c77";
+/** Filed paused and never started. */
+const NEVER_STARTED = "kraft-f5d3";
 const types = (evs: readonly (readonly [string, unknown])[]) => evs.map(([t]) => t);
 
 beforeEach(() => { vi.useFakeTimers(); });
@@ -133,17 +135,36 @@ describe("after the visitor", () => {
     expect(ticks(1, id)).toEqual([["worker_session_started", expect.objectContaining({ session_id: queued.id, node_id: "verification" })]]);
     expect(types(ticks(1, id))).toEqual(["worker_session_exited", "node_completed", "node_started", "worker_session_created", "worker_session_started"]);
   });
+
+  it("Start on an item never started runs its first node", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, NEVER_STARTED);
+    expect(ticks(2, id)).toEqual([]);
+    expect((await call("POST", `/work-items/${id}/resume`, {})).status).toBe(200);
+    expect(ticks(1, id).slice(0, 2)).toEqual([["node_started", { node_id: "spec" }], ["worker_session_created", expect.objectContaining({ node_id: "spec", hook_point: "spec.write.spec" })]]);
+  });
+
+  it("a request for changes made while it runs takes it back to that node once the one it is on completes", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, RUNNING);
+    const r = await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "implementation", summary: "the cache is unbounded" });
+    expect(r.body.action).toBe("queued");
+    expect(ticks(1, id).slice(1, 3)).toEqual([["node_completed", { node_id: "verification" }], ["node_started", { node_id: "implementation" }]]);
+    // Spent by its target's node_started: on from there, not back again.
+    expect(types(ticks(1, id)).slice(2)).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
+    expect(S.bundles[id].item.current_node_id).toBe("verification");
+  });
 });
 
 describe("when the board goes quiet", () => {
-  /** Pause both running items; `gate` also ends the one waiting at a gate. */
+  /** Pause the running item; `gate` also ends the one waiting at a gate. */
   const quiet = async (call: ReturnType<typeof started>["call"], S: Scenario, gate: boolean) => {
-    for (const bead of [RUNNING, ALSO_ACTIVE]) expect((await call("POST", `/work-items/${board(S, bead)}/pause`)).status).toBe(200);
+    for (const bead of [RUNNING]) expect((await call("POST", `/work-items/${board(S, bead)}/pause`)).status).toBe(200);
     if (gate) expect((await call("POST", `/work-items/${board(S, GATED)}/cancel`, { reason: "superseded" })).status).toBe(200);
   };
 
   it.each([
-    // No gate waits once the gated item is cancelled: only the running items hold it back.
+    // No gate waits once the gated item is cancelled: only the running item holds it back.
     ["while an item is active", async (call: ReturnType<typeof started>["call"], S: Scenario) => {
       expect((await call("POST", `/work-items/${board(S, GATED)}/cancel`, { reason: "superseded" })).status).toBe(200);
     }],
@@ -187,6 +208,15 @@ describe("what never moves", () => {
     const before = JSON.stringify(S.bundles);
     expect([serve.motion, ticks(20)]).toEqual([null, []]);
     expect(JSON.stringify(S.bundles)).toBe(before);
+  });
+
+  it("a board item that is not active: the escalated row, its turn running", () => {
+    const { S, ticks } = started();
+    const b = S.bundles[board(S, ESCALATED)];
+    expect([b.item.status, b.item.display_status]).toEqual(["needs_human", "escalated"]);
+    const before = JSON.stringify(b);
+    ticks(6);
+    expect(JSON.stringify(b)).toBe(before);
   });
 
   it("the item page's scenario bundles, which are not on the board", () => {
