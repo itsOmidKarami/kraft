@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _serve
+from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _serve, _settled
 from textual.widgets import RichLog
 
 from kraft import client, render
@@ -32,11 +32,14 @@ HISTORY = [
 ]
 
 
-def _serve_events(monkeypatch, history: list[dict]) -> list[dict]:
-    """`client.events` over `history`, as the server pages it; returns the reads."""
+def _serve_events(monkeypatch, history: list[dict], hold=None) -> list[dict]:
+    """`client.events` over `history`, as the server pages it; returns the reads.
+    `hold` maps a `before_seq` to an Event its read waits for."""
     reads: list[dict] = []
 
     async def events(work_item_id=None, after_seq=0, *, limit=None, before_seq=None):
+        if before_seq in (hold or {}):
+            await hold[before_seq].wait()
         reads.append({"after_seq": after_seq, "limit": limit, "before_seq": before_seq})
         if before_seq is not None:
             return [e for e in history if e["seq"] < before_seq][-limit:]
@@ -177,9 +180,14 @@ def test_the_log_follows_the_newest_session_and_s_steps_to_older_ones(board, mon
         await pilot.press("s")
         await console.until(pilot, lambda: "wrote code" in _log(app))
         await console.until(pilot, lambda: _log(app)[-1:] == ["session ended"])
-        return offered, app.view.check_action("session", ()), newest, _log(app)
+        older = _log(app)
+        await pilot.press("s")  # at the oldest: round to the newest
+        await console.until(pilot, lambda: _log(app)[0].startswith("verification"))
+        await console.until(pilot, lambda: _log(app)[-1:] == ["session ended"])
+        return offered, app.view.check_action("session", ()), newest, older, _log(app) == newest
 
-    offered, on_log, newest, older = console.run(scenario, size=(60, 30))
+    offered, on_log, newest, older, round_again = console.run(scenario, size=(60, 30))
+    assert round_again
     assert (offered, on_log) == (False, True)
     head = "verification.review.code_review · running · session 1 of 2"
     assert " ".join(" ".join(newest[:-1]).split()) == f"{head} {LONG.strip()}"
@@ -262,7 +270,7 @@ def _diff(app) -> list[tuple[str, str]]:
                 # Wrapped at the window's width, as every long line is.
                 (
                     "WARNING: diff truncated by the server at 100 bytes — this is not the whole",
-                    "warning",
+                    WARN,
                 ),
                 ("change. Read the rest in /w.", WARN),
             ],
@@ -340,3 +348,207 @@ def test_the_diff_reads_again_only_when_shown_and_its_row_changed(board, monkeyp
         return same, hidden
 
     assert console.run(scenario) == (1, 1)
+
+
+def _paged_back(board, monkeypatch, then):
+    """Two events a page, a read of the page before seq 5 held, a live event 7,
+    and `then` done to the Item before the held read is released; returns the
+    seqs the Activity ends up holding."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    history = [_event(n, "node_started", 10 - n, node=f"n{n}") for n in range(1, 7)]
+    release = asyncio.Event()
+    _serve_events(monkeypatch, history, hold={5: release})
+    monkeypatch.setattr(item_view, "PAGE", 2)
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press("right_square_bracket")
+        await console.until(pilot, lambda: [e["seq"] for e in app.view.events] == [6, 5])
+        await pilot.press("end")  # asks for the page before seq 5, which is held
+        await pilot.pause()
+        live = _event(7, "node_started", 0, node="n7")
+        history.append(live)
+        app.view.rows_changed([GATE], [live])
+        await console.until(pilot, lambda: [e["seq"] for e in app.view.events][:1] == [7])
+        if then:
+            await then(app, pilot)
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        return [e["seq"] for e in app.view.events]
+
+    return console.run(scenario)
+
+
+async def _away_and_back(app, pilot) -> None:
+    await pilot.press("left_square_bracket", "right_square_bracket")
+    await pilot.pause()
+
+
+@pytest.mark.parametrize(
+    ("then", "seqs"),
+    [(None, [7, 6, 5, 4, 3]), (_away_and_back, [7, 6])],
+    ids=["a-live-event-does-not-cancel-the-older-page", "leaving-the-tab-drops-it"],
+)
+def test_an_older_page_in_flight_is_neither_lost_nor_misplaced(board, monkeypatch, then, seqs):
+    """End asks for the page before the oldest shown. A live event meanwhile
+    leaves that read alone (nothing lost or doubled); leaving the tab drops it,
+    since the visit rereads the newest page and the boundary moved."""
+    assert _paged_back(board, monkeypatch, then) == seqs
+
+
+def test_another_items_activity_answer_is_dropped(board, monkeypatch):
+    """An Activity read still answering for the item shown before must not
+    draw into the one opened since."""
+    other = RUNNING
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def events(work_item_id=None, after_seq=0, *, limit=None, before_seq=None):
+        asked.append(work_item_id)
+        if work_item_id == GATE["id"]:
+            await release.wait()
+            return [_event(1, "work_item_created", 5)]
+        return []
+
+    monkeypatch.setattr(client, "events", events)
+    console = board([GATE, other])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press("right_square_bracket")
+        await console.until(pilot, lambda: asked)
+        app.open_item(other["id"])
+        await pilot.pause()
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        return app.view.events, _activity(app)
+
+    assert console.run(scenario) == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("error", "gone", "said"),
+    [
+        (client.status_error(404, "no such item [/]"), True, []),
+        (
+            client.status_error(409, "refused [/]"),
+            False,
+            [client.reason_of(str(client.status_error(409, "refused [/]")))],
+        ),
+    ],
+    ids=["not-found-says-gone", "refusal-is-toasted"],
+)
+def test_an_activity_read_that_fails_says_so(board, monkeypatch, error, gone, said):
+    """A 404 is the gone notice; any other refusal is said in the server's words."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+
+    async def events(work_item_id=None, after_seq=0, *, limit=None, before_seq=None):
+        raise error
+
+    monkeypatch.setattr(client, "events", events)
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        toasts = []
+        app.notify_refusal = lambda exc: toasts.append(client.reason_of(str(exc)))
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press("right_square_bracket")
+        await console.until(pilot, lambda: app.view._dead or toasts)
+        return app.view._dead, toasts
+
+    assert console.run(scenario) == (gone, said)
+
+
+@pytest.mark.parametrize("late", ["read-lands", "first-session-starts"])
+def test_a_log_with_no_session_yet_follows_once_one_is_known(board, monkeypatch, late):
+    """A Log shown before the item was read, or before its first session
+    started, says so; when the read lands, or the item's row changes, it
+    follows the session."""
+    box = [_detail(RUNNING, worker_sessions=SESSIONS[1:] if late == "read-lands" else [])]
+    _serve(monkeypatch, box[0], calls=[])
+    _serve_events(monkeypatch, [])
+    hold = asyncio.Event()
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        if late == "read-lands":
+            await hold.wait()
+        return box[0]
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        yield {"n": 0, "text": "output"}
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(client, "stream_log", stream_log)
+    console = board([RUNNING])
+    moved = RUNNING | {"updated_at": "2026-10-16T00:00:00+00:00"}
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.open_item(RUNNING["id"])
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        await console.until(pilot, lambda: _log(app) == ["No session has run yet."])
+        if late == "read-lands":
+            hold.set()
+        else:
+            await console.until(pilot, lambda: app.view.item is not None)
+            box[0] = _detail(moved, worker_sessions=SESSIONS[1:])
+            app.view.rows_changed([moved], [{"seq": 1}])
+        await console.until(pilot, lambda: "output" in _log(app))
+        return _log(app)
+
+    assert console.run(scenario)[-1] == "session ended"
+
+
+@pytest.mark.parametrize(
+    ("sessions", "failure", "lines", "offered"),
+    [
+        (
+            SESSIONS[1:],
+            client.status_error(409, "the log is gone [/]"),
+            [
+                "verification.review.code_review · running · session 1 of 1",
+                "waiting for output",
+                client.reason_of(str(client.status_error(409, "the log is gone [/]"))),
+            ],
+            False,
+        ),
+        (
+            SESSIONS[1:],
+            None,
+            [
+                "verification.review.code_review · running · session 1 of 1",
+                "waiting for output",
+                "session ended",
+            ],
+            False,
+        ),
+        ([], None, ["No session has run yet."], False),
+    ],
+    ids=["stream-refused", "one-session-offers-no-s", "no-session"],
+)
+def test_the_log_says_what_it_cannot_follow(board, monkeypatch, sessions, failure, lines, offered):
+    """A refused stream is said in the server's words (`[/]` as typed); with one
+    session, or none, `s` is not offered."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=sessions), calls=[])
+    _serve_events(monkeypatch, [])
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        if failure:
+            raise failure
+        return
+        yield {}
+
+    monkeypatch.setattr(client, "stream_log", stream_log)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        await console.until(pilot, lambda: _log(app) == lines)
+        return app.view.check_action("session", ())
+
+    assert console.run(scenario) is offered

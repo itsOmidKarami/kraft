@@ -342,6 +342,15 @@ def _cut(text: str, n: int = 70) -> str:
     return f"{text[: n - 1]}…" if len(text) > n else text
 
 
+def _round(value: object) -> str:
+    """`Number(cycle ?? 0) + 1`: a cycle that is no number reads "NaN", as on the web."""
+    try:
+        n = float(0 if value is None else value)
+    except (TypeError, ValueError):
+        return "NaN"
+    return "NaN" if n != n else _s(n + 1)
+
+
 def task_name(path: str) -> str:
     """`taskName`: a task path's last part, `verification.review.code_review` → `code_review`."""
     return path.split(".")[-1]
@@ -379,7 +388,7 @@ def event_line(event: dict) -> str | None:
             note = f": {_cut(_s(p.get('note')), 50)}" if p.get("note") else ""
             return f"{gate} · rejected{note}"
         case "fix_cycle_started":
-            return f"{node} · fix loop round {int(_or(p.get('cycle'), 0)) + 1}"
+            return f"{node} · fix loop round {_round(p.get('cycle'))}"
         case "fix_cycle_finished":
             # `=== true` and `=== false`: None means git could not say.
             committed = p.get("committed")
@@ -388,7 +397,7 @@ def event_line(event: dict) -> str | None:
                 did = " · the fix committed a change"
             elif committed is False:
                 did = " · the fix changed nothing"
-            return f"{node} · fix loop round {int(_or(p.get('cycle'), 0)) + 1}{did}"
+            return f"{node} · fix loop round {_round(p.get('cycle'))}{did}"
         case "work_item_needs_human":
             reason = re.sub(r"^needs_context:\s*", "", _s(p.get("reason")))
             return f"stopped{' at ' + node if node else ''}: {_cut(reason, 240)}"

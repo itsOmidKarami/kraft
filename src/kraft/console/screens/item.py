@@ -177,11 +177,13 @@ class Item(View):
         self.query_one("#item-panes", ContentSwitcher).current = tab
         self._draw_tabs()
         self.refresh_bindings()
+        # An older page asked for before the tab was left must not land on the
+        # list this visit rereads: its boundary is gone.
+        self.workers.cancel_group(self, "older")
         if tab == "activity" and self.work_item_id is not None and not self._dead:
             self.call_after_refresh(
                 self.run_worker, self._activity_first, group="tab", exclusive=True
             )
-
         if tab == "diff" and self.work_item_id is not None and not self._dead:
             self.call_after_refresh(self.run_worker, self._diff, group="tab", exclusive=True)
         if tab == "log" and self.work_item_id is not None and not self._dead:
@@ -234,6 +236,9 @@ class Item(View):
             log.clear()  # one copy of the error, not one per failed read
             log.write(client.reason_of(str(exc)))
         self.refresh_bindings()
+        # A Log opened before this read had no session to pick; now it has.
+        if self.tab == "log" and self.session_id is None and not self._dead:
+            self.run_worker(self._follow, group="log", exclusive=True)
 
     def _gone(self) -> None:
         """Archived or abandoned while open (spec §7.2): say so; nothing acts."""
@@ -372,8 +377,11 @@ class Item(View):
             self._draw_activity()
 
     async def _events(self, **since) -> list[dict] | None:
+        asked = self.work_item_id
         try:
-            return await client.events(self.work_item_id, **since)
+            page = await client.events(asked, **since)
+            # An answer for an item no longer open is dropped.
+            return page if asked == self.work_item_id else None
         except client.ClientError as exc:
             if exc.kind == client.Failure.NOT_FOUND:
                 self._gone()
