@@ -73,7 +73,7 @@ keyboard shortcuts.
 </td>
 <td width="40%">
 
-![The board at a 390px phone viewport, with bottom tab navigation, filter chips and Chain, Gate and Stop reason menus, and cards for a paused item with Resume, a failed one with Retry, and gate-waiting items whose Review to approve button opens the review](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
+![The board at a 390px phone viewport, with bottom tab navigation, filter chips and Chain, Gate and Stop reason menus, and cards for a paused item with Resume, a failed one with Retry, and gate-waiting items whose Review button opens the review](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
 </td>
 </tr>
