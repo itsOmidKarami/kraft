@@ -92,13 +92,8 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     chain = words.chain_of(row)
     repo = os.path.basename(row.get("repo", "").rstrip("/")) if everywhere else ""
     meta = chips(repo, "" if chain == "default" else chain)
-    # A row whose work is happening reads its time at the node, to the second.
-    start = pulse.since(row) if pulse.spins(row) else None
-    age = (
-        pulse.clock(now - start)
-        if start is not None
-        else words.ago(row.get("updated_at"), now).removesuffix(" ago")
-    )
+    # The list gives no session's start: the age is since the row last changed, as on the web.
+    age = words.ago(row.get("updated_at"), now).removesuffix(" ago")
     tail_style = colour if words.group_of(row) == "needs" else "$kraft-muted"
     parts: list[str | Content | tuple[str, str]] = [
         ("▌", colour),
@@ -111,7 +106,7 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     ]
     if not narrow:
         parts += ["  ", meta.truncate(meta_width, ellipsis=True, pad=True), " "]
-        parts.append((age.rjust(AGE_WIDTH), "$kraft-muted" if start else "$kraft-faint"))
+        parts.append((age.rjust(AGE_WIDTH), "$kraft-faint"))
     return Content.assemble(*parts)
 
 
@@ -224,7 +219,7 @@ class Board(View):
         yield rows
         with Vertical(id="peek"):
             yield Static(id="peek-head")
-            yield Working(id="peek-work")
+            yield Working(id="peek-work", spend=True)
             yield Static(id="peek-chain")
             # Focus stays with the Board and the prompt, never the peek.
             body = RichLog(id="peek-body", wrap=True, max_lines=500, min_width=1)
@@ -267,12 +262,10 @@ class Board(View):
             and self._matches(row)
         ]
         rows.framed = not self.screen.has_class("-compact")
-        narrow = self.screen.has_class("-narrow")
-        rows.age_width = 0 if narrow else AGE_WIDTH
         self._expanded = None
         options = self._options(shown, rows.inner)
         rows.live = {
-            k: pulse.since(self._by_id[o.id])
+            k
             for k, o in enumerate(options)
             if o.id in self._by_id and pulse.spins(self._by_id[o.id])
         }

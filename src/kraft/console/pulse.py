@@ -1,5 +1,5 @@
-"""Life where work runs: Claude Code's spinner beside running work, the time
-it has been at its node, and the one clock that moves them all.
+"""Life where work runs: Claude Code's spinner beside running work, how long
+its session has run, and the one clock that moves them all.
 
 Motion is only ever for work that is happening: an item whose agent (or an
 escalation turn) is at work. Nothing else spins, and nothing is staged."""
@@ -24,9 +24,6 @@ FRAMES = "·✢✳✶✻✽"
 FPS = 8
 #: The display statuses whose work is happening now.
 SPINS = frozenset({"running", "escalated"})
-#: Past this many hours a clock reads in days and hours (`words.elapsed`):
-#: `h:mm:ss` would outgrow the age column.
-CLOCK_HOURS = 100
 
 #: `beat(tick)` draws its frame and says whether it still has running work
 #: on screen; the clock stops once none does.
@@ -34,7 +31,7 @@ Beat = Callable[[int], bool]
 
 
 def spins(row: dict | None) -> bool:
-    """Whether `row`'s work is happening now: it spins and its clock ticks."""
+    """Whether `row`'s work is happening now: it spins."""
     return (row or {}).get("display_status") in SPINS
 
 
@@ -42,20 +39,12 @@ def frame(tick: int) -> str:
     return FRAMES[tick % len(FRAMES)]
 
 
-def since(row: dict) -> float | None:
-    """When the row's current run began, as the list gives it: `updated_at`,
-    which a node's start, a resume and a retry each set. None for no time."""
-    return words._seconds(row.get("updated_at"))
-
-
-def clock(seconds: float) -> str:
-    """A running row's age column: `0:48`, `4:12`, `1:04:12`."""
-    s = max(0, int(seconds))
-    hours, rest = divmod(s, 3600)
-    if hours >= CLOCK_HOURS:
-        return words.elapsed(s)
-    minutes, s = divmod(rest, 60)
-    return f"{hours}:{minutes:02d}:{s:02d}" if hours else f"{minutes}:{s:02d}"
+def started(item: dict) -> float | None:
+    """When the item's running session started (`worker_sessions[].started_at`
+    in the detail read), as the web's item page times a running node. None
+    with no session running: no time is better than one the server cannot back."""
+    running = [s for s in item.get("worker_sessions") or [] if s.get("status") == "running"]
+    return words._seconds(running[-1].get("started_at")) if running else None
 
 
 def took(seconds: float) -> str:
@@ -156,21 +145,22 @@ class Words(Widget):
         self.refresh()
 
 
-def working_words(item: dict, now: float) -> str:
-    """`implement · task 3 of 5 · 4m 12s · $0.42`: where a running item is,
-    how long it has been at it, and what it has spent (`budget_cap`)."""
+def working_words(item: dict, now: float, *, spend: bool) -> str:
+    """`implement · task 3 of 5 · 4m 12s`: where a running item is and how long
+    its session has run; with `spend`, what it has spent (`budget_cap`)."""
     parts = [words.reason_tail(item, now)]
-    if (start := since(item)) is not None:
+    if (start := started(item)) is not None:
         parts.append(took(now - start))
     spent = (item.get("budget_cap") or {}).get("spent_usd")
-    if spent is not None:
+    if spend and isinstance(spent, int | float):
         parts.append(words.usd(spent))
     return " · ".join(part for part in parts if part)
 
 
 class Working(Horizontal):
     """A running item's working line, in the peek and on the Item: the
-    spinner, then `working_words`, its time moving each second."""
+    spinner, then `working_words`, its time moving each second. The Item's
+    header says the spend already, so only the peek's line names it."""
 
     DEFAULT_CSS = """
     Working { height: 1; width: 1fr; }
@@ -178,8 +168,9 @@ class Working(Horizontal):
         text-overflow: ellipsis; }
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, *, spend: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.spend = spend
         self.item: dict | None = None
         self._second: int | None = None
 
@@ -208,5 +199,5 @@ class Working(Horizontal):
 
     def _draw(self, now: int) -> None:
         self._second = now
-        said = working_words(self.item, now) if self.item else ""
+        said = working_words(self.item, now, spend=self.spend) if self.item else ""
         self.query_one(".working-words", Words).update(Content(said))

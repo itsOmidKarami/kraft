@@ -6,8 +6,6 @@ their top and bottom edges, so a title becomes a rule."""
 
 from __future__ import annotations
 
-import time
-
 from rich.segment import Segment
 from rich.style import Style
 from textual.content import Content
@@ -69,18 +67,15 @@ class Rows(OptionList):
     """The Board's list in its panel. Each line sits between the panel's
     sides, a heading is a titled separator, `END` is the bottom edge, and the
     right side carries the scroll position. Rows whose work is happening have
-    their bar cell and age column drawn over a beat at a time (`live`), so a
-    spinner redraws its own cells, never the list."""
+    their bar cell drawn over a beat at a time (`live`), so a spinner redraws
+    its own cell, never the list."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         #: Drawn in a panel; off in a compact window, where titles are rules.
         self.framed = True
-        #: Option index -> when its run began (`pulse.since`), for each row that spins.
-        self.live: dict[int, float | None] = {}
-        #: The age column's width, or 0 where the row has none (narrow).
-        self.age_width = 0
-        self._second: int | None = None
+        #: The option index of each row that spins.
+        self.live: set[int] = set()
 
     def on_mount(self) -> None:
         self.app.pulse.add(self.beat)
@@ -94,16 +89,12 @@ class Rows(OptionList):
     def beat(self, tick: int) -> bool:
         if not self.live or not pulse.shown(self):
             return False
-        second = int(time.time())
-        ticked, self._second = second != self._second, second
         top, height = self.scroll_offset.y, self.size.height
         x = SIDE if self.framed else 0
         for index in self.live:
             y = self._index_to_line.get(index, -1) - top
             if 0 <= y < height:
                 self.refresh(Region(x, y, 1, 1))
-                if ticked and self.age_width:
-                    self.refresh(Region(x + self.inner - self.age_width, y, self.age_width, 1))
         return True
 
     def render_line(self, y: int) -> Strip:
@@ -115,7 +106,8 @@ class Rows(OptionList):
         index, offset = lines[line]
         option = self.options[index]
         if offset == 0 and index in self.live:
-            strip = self._live(strip, index)
+            # The spinner's frame on the bar cell.
+            strip = _put(strip, 0, pulse.frame(self.app.pulse.tick))
         if not self.framed:
             if option.id and option.id.startswith(GROUP):
                 return self._heading(strip, option.prompt, "─", "─")
@@ -135,15 +127,6 @@ class Rows(OptionList):
                 Strip([Segment(" " + right, frame)], SIDE),
             ]
         )
-
-    def _live(self, strip: Strip, index: int) -> Strip:
-        """The spinner's frame on the bar cell; the run's time in the age column."""
-        strip = _put(strip, 0, pulse.frame(self.app.pulse.tick))
-        start = self.live[index]
-        if self.age_width and start is not None:
-            ticking = pulse.clock(time.time() - start).rjust(self.age_width)
-            strip = _put(strip, self.inner - self.age_width, ticking[-self.age_width :])
-        return strip
 
     def _frame_style(self) -> Style:
         return self.rich_style + Style(color=self.app.theme_variables["kraft-frame"])

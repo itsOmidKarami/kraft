@@ -45,7 +45,7 @@ from kraft.console.screens import board as board_view
                 "▌ a91c03fe  Board critique fixe…  approve spec                              12m",
                 "▌ m03d77b1  item m03d77b1         failed at verification                     1h",
                 "Running 1",
-                "▌ k7f2e9a0  Docs per major        implement                   docs         4:00",
+                "▌ k7f2e9a0  Docs per major        implement                   docs           4m",
                 "Not started 1",
                 "▌ n0n0n0n0  item n0n0n0n0         created paused                            30m",
                 "Done 1 ›",
@@ -59,8 +59,8 @@ from kraft.console.screens import board as board_view
                 "▌ a91c03fe  Board critique fi…  approve spec            r                   12m",
                 "▌ m03d77b1  item m03d77b1       failed at verification  r                    1h",
                 "Running 2",
-                "▌ e1e1e1e1  item e1e1e1e1       implement               other              2:00",
-                "▌ k7f2e9a0  Docs per major      implement               r · docs           4:00",
+                "▌ e1e1e1e1  item e1e1e1e1       implement               other                2m",
+                "▌ k7f2e9a0  Docs per major      implement               r · docs             4m",
                 "Not started 1",
                 "▌ n0n0n0n0  item n0n0n0n0       created paused          r                   30m",
                 "Done 1 ›",
@@ -88,7 +88,7 @@ def test_the_board_draws_the_webs_groups_in_a_fixed_grid(board, size, repo, line
     that a long title or tail cuts with "…" rather than pushes; the repo only
     with every repo shown, a chain only when it is not the default; archived
     items never; Done folded to its count. Narrow drops the chain and age. A
-    running row's age is its time at the node, to the second."""
+    running row's age is since it last changed, as every other row's."""
 
     async def scenario(app, pilot):
         await _settled(board(BOARD, repo), app, pilot)

@@ -6,27 +6,21 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from support.console_board import GATE, NOW, RUNNING, _detail, _opened, _serve, _settled
+from support.console_board import GATE, NOW, RUNNING, _detail, _iso, _opened, _serve, _settled
 
+from kraft import client
 from kraft.console import panels, pulse
+from kraft.console.screens import board as board_view
 
 
 @pytest.mark.parametrize(
-    ("seconds", "clock", "took"),
-    [
-        (0, "0:00", "0s"),
-        (48.9, "0:48", "48s"),
-        (252, "4:12", "4m 12s"),
-        (3852, "1:04:12", "1h 4m"),
-        (100 * 3600, "4d 4h", "100h 0m"),
-        (-5, "0:00", "0s"),
-    ],
-    ids=["none", "seconds", "minutes", "hours", "past-the-column", "clock-skew"],
+    ("seconds", "took"),
+    [(0, "0s"), (48.9, "48s"), (252, "4m 12s"), (3852, "1h 4m"), (-5, "0s")],
+    ids=["none", "seconds", "minutes", "hours", "clock-skew"],
 )
-def test_a_running_time_reads_to_the_second(seconds, clock, took):
-    """The age column's `m:ss` and `h:mm:ss`, days past what fits it; the
-    working line's `4m 12s`. A server clock ahead of this one reads 0."""
-    assert (pulse.clock(seconds), pulse.took(seconds)) == (clock, took)
+def test_a_working_line_reads_its_time_to_the_second(seconds, took):
+    """`4m 12s`; a server clock ahead of this one reads 0."""
+    assert pulse.took(seconds) == took
 
 
 @pytest.mark.parametrize(
@@ -54,7 +48,7 @@ class Recorded:
 
 @pytest.fixture
 def stepped(monkeypatch):
-    """The app's pulse on a `Recorded` timer, and `panels`' clock at `NOW + 5`."""
+    """The app's pulse on a `Recorded` timer, and its clock at `NOW + 5`."""
 
     def wake(self) -> None:
         if self._timer is None:
@@ -62,7 +56,7 @@ def stepped(monkeypatch):
         self._timer.resume()
 
     monkeypatch.setattr(pulse.Pulse, "wake", wake)
-    monkeypatch.setattr(panels, "time", SimpleNamespace(time=lambda: NOW + 5))
+    monkeypatch.setattr(pulse, "time", SimpleNamespace(time=lambda: NOW + 5))
 
 
 def _cells(app, wid: str) -> tuple[str, str]:
@@ -71,13 +65,14 @@ def _cells(app, wid: str) -> tuple[str, str]:
     index = next(k for k, o in enumerate(rows.options) if o.id == wid)
     line = rows.render_line(rows._index_to_line[index] - rows.scroll_offset.y).text
     x = panels.SIDE if rows.framed else 0
-    return line[x], line[x + rows.inner - rows.age_width : x + rows.inner].strip()
+    return line[x], line[x + rows.inner - board_view.AGE_WIDTH : x + rows.inner].strip()
 
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)], ids=["compact", "framed"])
-def test_a_running_rows_spinner_and_clock_move_by_the_pulse(board, stepped, size):
-    """Each step draws the next of Claude Code's frames on the bar cell, and
-    the age column reads the time at the node now, not when it was drawn."""
+def test_a_running_rows_spinner_moves_by_the_pulse_and_its_age_stays_relative(board, stepped, size):
+    """Each step draws the next of Claude Code's frames on the bar cell. The
+    list gives no session's start, so the age reads as every row's does
+    (`4m`), never a clock that could pass for a time of day."""
     console = board([RUNNING, GATE])
 
     async def scenario(app, pilot):
@@ -91,13 +86,12 @@ def test_a_running_rows_spinner_and_clock_move_by_the_pulse(board, stepped, size
         return seen, _cells(app, GATE["id"])
 
     seen, still = console.run(scenario, size=size)
-    assert seen == [("·", "4:05"), ("✢", "4:05"), ("✳", "4:05")]
+    assert seen == [("·", "4m"), ("✢", "4m"), ("✳", "4m")]
     assert still == ("▌", "12m")
 
 
-def test_a_beat_repaints_the_spinner_cell_and_the_clock_never_the_list(board, stepped):
-    """Brief rule: a spinner redraws its own cells. One cell a beat, and the
-    age column once its second has moved."""
+def test_a_beat_repaints_the_spinner_cell_never_the_list(board, stepped):
+    """Brief rule: a spinner redraws its own cell, one cell a beat."""
     console = board([RUNNING, GATE])
 
     async def scenario(app, pilot):
@@ -106,16 +100,11 @@ def test_a_beat_repaints_the_spinner_cell_and_the_clock_never_the_list(board, st
         rows = app.query_one("#rows", panels.Rows)
         painted = []
         rows.refresh = lambda *regions, **kw: painted.append(regions)
-        rows._second = None
         rows.beat(1)
-        first = list(painted)
-        painted.clear()
-        rows.beat(2)  # the same second
-        return first, list(painted), rows.age_width
+        rows.beat(2)
+        return list(painted)
 
-    first, second, age = console.run(scenario)
-    assert [r.size for (r,) in first] == [(1, 1), (age, 1)]
-    assert [r.size for (r,) in second] == [(1, 1)]
+    assert [r.size for (r,) in console.run(scenario)] == [(1, 1), (1, 1)]
 
 
 @pytest.mark.parametrize(
@@ -160,21 +149,75 @@ def test_the_clock_stops_once_nothing_running_is_on_screen(board, stepped):
     assert console.run(scenario) == (True, False)
 
 
-def test_a_running_items_working_line_says_where_how_long_and_what_it_spent(
-    board, stepped, monkeypatch
+#: A session at work since 4 minutes before `NOW`, the clock 5 seconds later.
+SESSION = {"id": "s1", "status": "running", "started_at": _iso(4), "node_id": "implement"}
+
+
+@pytest.mark.parametrize(
+    ("where", "hide", "beats"),
+    [
+        ("#item-work", None, True),
+        ("#item-work", "board", False),
+        ("#status-spin", None, True),
+        ("#status-spin", "tiny", False),
+    ],
+    ids=["item-shown", "item-hidden", "status-shown", "status-hidden"],
+)
+def test_a_working_line_and_the_status_spinner_beat_only_on_screen(
+    board, stepped, monkeypatch, where, hide, beats
 ):
-    """`✻ implement · task 3 of 5 · 4m 5s · $0.42`, in the peek and on the
-    Item; none for an item whose work is not happening."""
-    running = RUNNING | {"progress": {"current": 3, "total": 5, "tasks": []}}
-    monkeypatch.setattr(pulse, "time", SimpleNamespace(time=lambda: NOW + 5))
-    _serve(monkeypatch, _detail(running, budget_cap={"spent_usd": 0.42}), calls=[])
+    """Left for the Board, the Item's working line does no work; a window too
+    small to draw hides the status line, whose spinner then stops too."""
+    _serve(monkeypatch, _detail(RUNNING, worker_sessions=[SESSION]), calls=[])
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        if hide == "board":
+            app.show("board")
+        elif hide == "tiny":
+            await pilot.resize_terminal(50, 10)
+        await pilot.pause()
+        return app.query_one(where).beat(1)
+
+    assert console.run(scenario, size=(120, 40)) is beats
+
+
+@pytest.mark.parametrize(
+    ("sessions", "where", "said"),
+    [
+        ([SESSION], "#item-work", "implement · task 3 of 5 · 4m 5s"),
+        ([SESSION], "#peek-work", "implement · task 3 of 5 · 4m 5s · $0.420"),
+        ([SESSION | {"status": "done"}], "#item-work", "implement · task 3 of 5"),
+        ([], "#peek-work", "implement · task 3 of 5 · $0.420"),
+        ([SESSION | {"started_at": _iso(1)}], "#item-work", "implement · task 3 of 5 · 1m 5s"),
+    ],
+    ids=["item", "peek-names-the-spend", "no-session-running", "no-session", "session-not-row"],
+)
+def test_a_running_items_working_line_is_timed_by_its_running_session(
+    board, stepped, monkeypatch, sessions, where, said
+):
+    """`✻ implement · task 3 of 5 · 4m 5s`, timed from the running session's
+    `started_at` as the web's item page times it, never from `updated_at`;
+    no session running, no time. The Item's header already says the spend."""
+    running = RUNNING | {"progress": {"current": 3, "total": 5, "tasks": []}, "updated_at": _iso(0)}
+    detail = _detail(running, budget_cap={"spent_usd": 0.42}, worker_sessions=sessions)
+    _serve(monkeypatch, detail, calls=[])
+    monkeypatch.setattr(client, "stream_log", _no_log)
     console = board([running])
 
     async def scenario(app, pilot):
-        await _opened(console, app, pilot, running["id"])
-        work = app.query_one("#item-work", pulse.Working)
+        await _settled(console, app, pilot)
+        if where == "#item-work":
+            await _opened(console, app, pilot, running["id"])
+        else:
+            await console.until(pilot, lambda: app.query_one(where).display)
+        work = app.query_one(where, pulse.Working)
         return work.display, str(work.query_one(".working-words").render())
 
-    said = "implement · task 3 of 5 · 4m 5s · $0.420"
     assert console.run(scenario, size=(120, 40)) == (True, said)
-    assert pulse.working_words(GATE, NOW) == "approve spec · 12m 0s"
+
+
+async def _no_log(*args, **kwargs):
+    return
+    yield
