@@ -389,9 +389,11 @@ class Item(View):
                     lines += ["", Text(warning, style=self.app.theme_variables["warning"])]
                 self.digest = document.get("digest")
             self.read_gate = gate
-        else:
+        elif words.banner_of(item) is None:  # a stopped item's banner already says why
             lines.append(words.reason_tail(item, time.time()))
-        lines += ["", Text("Chain", style=f"bold {muted}")]
+        if lines:
+            lines.append("")
+        lines.append(Text("Chain", style=f"bold {muted}"))
         styles = {
             "done": muted,
             "current": f"bold {self.app.theme_variables['primary']}",

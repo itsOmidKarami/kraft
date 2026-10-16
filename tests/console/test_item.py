@@ -12,6 +12,7 @@ from support.console_board import (
     FAILED,
     FILED,
     GATE,
+    QUESTION,
     RUNNING,
     _detail,
     _opened,
@@ -164,6 +165,24 @@ def test_the_header_says_where_the_item_stands(
         chain,
         "bold $primary" if "●" in chain else None,
     )
+
+
+@pytest.mark.parametrize(
+    ("row", "first"),
+    [(QUESTION, "Chain"), (FAILED, "Chain"), (RUNNING, "implement")],
+    ids=["question", "failed", "running-keeps-its-line"],
+)
+def test_the_overview_does_not_repeat_the_stop_banner(board, monkeypatch, row, first):
+    """The banner says why a stopped item stopped, whole; the body starts at
+    the chain. An item with no banner keeps its one line of where it stands."""
+    _serve(monkeypatch, _detail(row), calls=[])
+    console = board([row])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, row["id"])
+        return _overview(app)[0]
+
+    assert console.run(scenario).startswith(first)
 
 
 @pytest.mark.parametrize("keys", [["enter"], ["a"]], ids=["enter", "a"])
