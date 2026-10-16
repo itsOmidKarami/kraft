@@ -1,0 +1,213 @@
+{
+  "_doc": "The web's wording and the console's, held to one set of cases (spec §4.5). tests/console/test_words.py runs them against src/kraft/console/words.py; frontend/src/ng/board/wording.test.ts against model.ts, rowText.ts and format.ts. Each case is a real row shape cut to the fields the function reads, one per branch. A change to either side changes a case here, or the other suite fails.",
+  "now": "2026-10-15T12:00:00Z",
+  "rows": [
+    {
+      "name": "gate",
+      "row": { "display_status": "needs_you", "current_node_id": "spec_approval", "pending_gate": "spec_approval", "stop": { "kind": "gate", "node": "spec_approval", "reason": null } },
+      "group": "needs",
+      "tail": "approve spec"
+    },
+    {
+      "name": "gate-without-pending-gate",
+      "row": { "display_status": "needs_you", "current_node_id": "plan_review", "pending_gate": null, "stop": { "kind": "gate", "node": "plan_review", "reason": null } },
+      "group": "needs",
+      "tail": "approve plan review"
+    },
+    {
+      "name": "question",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "question", "node": "implement", "reason": "needs_context: which database?" } },
+      "group": "needs",
+      "tail": "agent asks: which database?"
+    },
+    {
+      "name": "question-without-words",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "question", "node": "implement", "reason": null } },
+      "group": "needs",
+      "tail": "agent asks:"
+    },
+    {
+      "name": "cap",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "cap", "node": "implement", "reason": "Spent $0.04 of a $0.03 cap on implement. The other tasks were not interrupted." } },
+      "group": "needs",
+      "tail": "Spent $0.04 of a $0.03 cap on implement"
+    },
+    {
+      "name": "budget-without-reason",
+      "row": { "display_status": "needs_you", "current_node_id": "implement", "stop": { "kind": "budget", "node": "implement", "reason": null } },
+      "group": "needs",
+      "tail": "waiting for you at implement"
+    },
+    {
+      "name": "other-stop",
+      "row": { "display_status": "needs_you", "current_node_id": "verification", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "group": "needs",
+      "tail": "the fix loop made no progress in 3 rounds"
+    },
+    {
+      "name": "other-stop-without-reason",
+      "row": { "display_status": "needs_you", "current_node_id": "merge_request", "stop": { "kind": "other", "node": "merge_request", "reason": null } },
+      "group": "needs",
+      "tail": "waiting for you at merge request"
+    },
+    {
+      "name": "failed",
+      "row": { "display_status": "failed", "current_node_id": "verification", "stop": { "kind": "failed", "node": "verification", "reason": "tests failed" } },
+      "group": "needs",
+      "tail": "failed at verification"
+    },
+    {
+      "name": "paused-mid-chain",
+      "row": { "display_status": "paused", "current_node_id": "implement" },
+      "group": "needs",
+      "tail": "paused at implement"
+    },
+    {
+      "name": "filed-paused",
+      "row": { "display_status": "paused", "current_node_id": null },
+      "group": "not_started",
+      "tail": "created paused"
+    },
+    {
+      "name": "blocked-mid-chain",
+      "row": { "display_status": "blocked", "current_node_id": "plan" },
+      "group": "running",
+      "tail": "waiting on another item"
+    },
+    {
+      "name": "blocked-before-start",
+      "row": { "display_status": "blocked", "current_node_id": null },
+      "group": "not_started",
+      "tail": "waiting on another item"
+    },
+    {
+      "name": "running-step-with-task",
+      "row": { "display_status": "running", "current_node_id": "implement", "step": { "index": 2, "count": 3, "name": "main", "task": "author" } },
+      "group": "running",
+      "tail": "2 of 3 · main › author"
+    },
+    {
+      "name": "running-step",
+      "row": { "display_status": "running", "current_node_id": "implement", "step": { "index": 2, "count": 3, "name": null, "task": null } },
+      "group": "running",
+      "tail": "implement · step 2 of 3"
+    },
+    {
+      "name": "running-plan-task",
+      "row": { "display_status": "running", "current_node_id": "implement", "progress": { "current": 3, "total": 5, "tasks": [{ "state": "done" }, { "state": "running" }] } },
+      "group": "running",
+      "tail": "implement · task 3 of 5"
+    },
+    {
+      "name": "running-plan-finished",
+      "row": { "display_status": "running", "current_node_id": "implement", "progress": { "current": 5, "total": 5, "tasks": [{ "state": "done" }, { "state": "done" }] } },
+      "group": "running",
+      "tail": "implement"
+    },
+    {
+      "name": "running-on-a-fallback-model",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": { "harness": "codex", "model": "gpt-5", "effort": null } } },
+      "group": "running",
+      "tail": "plan · on gpt-5"
+    },
+    {
+      "name": "running-on-a-fallback-harness",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": { "harness": "codex", "model": "" } } },
+      "group": "running",
+      "tail": "plan · on codex"
+    },
+    {
+      "name": "running-on-a-named-fallback",
+      "row": { "display_status": "running", "current_node_id": "plan", "fallback": { "to": "sonnet" } },
+      "group": "running",
+      "tail": "plan · on sonnet"
+    },
+    {
+      "name": "waiting-for-ci",
+      "row": { "display_status": "waiting", "current_node_id": "merge_request", "stop": { "kind": "wait", "node": "merge_request", "resume_at": "2026-10-15T12:05:00+00:00" } },
+      "group": "running",
+      "tail": "merge request · next check in 5m"
+    },
+    {
+      "name": "waiting-on-a-rate-limit",
+      "row": { "display_status": "waiting", "current_node_id": "implement", "stop": null, "retry_at": "2026-10-15T15:00:00+00:00" },
+      "group": "running",
+      "tail": "implement · retry in 3h"
+    },
+    {
+      "name": "waiting-for-nothing-known",
+      "row": { "display_status": "waiting", "current_node_id": "implement", "stop": null, "retry_at": null },
+      "group": "running",
+      "tail": "waiting at implement"
+    },
+    {
+      "name": "queued",
+      "row": { "display_status": "queued", "current_node_id": null },
+      "group": "running",
+      "tail": "waiting to start"
+    },
+    {
+      "name": "escalated",
+      "row": { "display_status": "escalated", "current_node_id": "plan" },
+      "group": "running",
+      "tail": "escalation running"
+    },
+    {
+      "name": "merged",
+      "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 42, "url": "https://example.com/mr/42" } },
+      "group": "done",
+      "tail": "merged !42"
+    },
+    {
+      "name": "completed",
+      "row": { "display_status": "done", "current_node_id": null, "mr_ref": null },
+      "group": "done",
+      "tail": "completed"
+    },
+    {
+      "name": "cancelled",
+      "row": { "display_status": "cancelled", "current_node_id": "plan" },
+      "group": "done",
+      "tail": "cancelled"
+    },
+    {
+      "name": "archived",
+      "row": { "display_status": "archived", "current_node_id": "plan" },
+      "group": "done",
+      "tail": ""
+    },
+    {
+      "name": "a-status-from-a-newer-server",
+      "row": { "display_status": "pondering", "current_node_id": "plan" },
+      "group": "running",
+      "tail": ""
+    }
+  ],
+  "order": {
+    "rows": [
+      { "id": "old-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T09:00:00+00:00" },
+      { "id": "new-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T11:00:00+00:00" },
+      { "id": "old-gate", "display_status": "needs_you", "current_node_id": "spec_approval", "updated_at": "2026-10-15T08:00:00+00:00" },
+      { "id": "paused-mid-chain", "display_status": "paused", "current_node_id": "plan", "updated_at": "2026-10-15T10:00:00+00:00" },
+      { "id": "done", "display_status": "done", "current_node_id": "plan", "updated_at": "2026-10-15T11:30:00+00:00" }
+    ],
+    "sorted": ["paused-mid-chain", "old-gate", "done", "new-running", "old-running"]
+  },
+  "ago": [
+    [null, ""],
+    ["not a time", ""],
+    ["2026-10-15T11:59:30+00:00", "just now"],
+    ["2026-10-15T11:48:00.123456+00:00", "11m ago"],
+    ["2026-10-15T09:00:00+00:00", "3h ago"],
+    ["2026-10-11T12:00:00+00:00", "4d ago"]
+  ],
+  "until": [
+    [null, ""],
+    ["not a time", ""],
+    ["2026-10-15T11:59:00+00:00", "expired"],
+    ["2026-10-15T12:00:30+00:00", "in 1m"],
+    ["2026-10-15T12:05:00+00:00", "in 5m"],
+    ["2026-10-15T15:00:00+00:00", "in 3h"],
+    ["2026-10-17T12:00:00+00:00", "in 2d"]
+  ]
+}
