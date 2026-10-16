@@ -7,6 +7,7 @@ import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
+import { APPLY_AND_START } from "../sharedWords";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -101,7 +102,7 @@ function Review() {
           {/* Focus opens on the primary, or on Back to editing while it is blocked; never on Discard draft (R10b-05). */}
           <Button data-autofocus={blocked ? true : undefined} onClick={close}>Back to editing</Button>
           {start && <Button disabled={busy} onClick={startWithout}>Start without them</Button>}
-          <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
+          <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? APPLY_AND_START : "Apply"}</Button>
         </>
       )}>
       <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain itself and the other items stay as they are.</p>

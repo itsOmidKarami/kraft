@@ -21,6 +21,7 @@ import "../templates/templates.css";
 import "./notify.css";
 import "./settings.css";
 import { usePane } from "../shell/usePane";
+import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN } from "./sharedWords";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -166,7 +167,7 @@ export function NotifyPage() {
       const text = notificationText(NOTIFY_EVENTS[0], "Test alert");
       new Notification(text.title, { body: text.body, icon: "/icon.svg" });
       setBrowserTest({ at: new Date().toISOString(), error: null });
-      showToast("Test alert shown on this device");
+      showToast(TEST_ALERT_SHOWN);
     } catch (e) {
       setBrowserTest({ at: new Date().toISOString(), error: message(e) });
     }
@@ -209,7 +210,7 @@ export function NotifyPage() {
 
   const sample = (events: string[]) => {
     const event = NOTIFY_EVENTS.find((e) => events.includes(e.id)) ?? NOTIFY_EVENTS[0];
-    const text = notificationText(event, "Add retry budget to the intake poller");
+    const text = notificationText(event, SAMPLE_INTAKE_TITLE);
     return (
       <div className="set-notice" role="img" aria-label={`Preview: ${text.title}. ${text.body}`}>
         <span className="set-notice-icon" aria-hidden>K</span>
@@ -322,7 +323,7 @@ export function NotifyPage() {
           <Head>Alerts</Head>
           <div className="nt-line">
             <span className="set-event-text"><span>{channelState(browserActive)}</span><span className="set-hint">alerts on this device only</span></span>
-            <Switch label="Alerts on this device" checked={browserOn} disabled={permission !== "granted"} aria-describedby={permission === "granted" ? undefined : "nt-perm"} onChange={toggleBrowser} />
+            <Switch label={ALERTS_ON_THIS_DEVICE} checked={browserOn} disabled={permission !== "granted"} aria-describedby={permission === "granted" ? undefined : "nt-perm"} onChange={toggleBrowser} />
           </div>
           <Head>Notifies</Head>
           {eventRows(browserEvents, toggleBrowserEvent, "this browser")}

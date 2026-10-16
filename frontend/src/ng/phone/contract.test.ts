@@ -97,6 +97,15 @@ const ALLOWED = [
   "shell/routes", // the list of pages, as data: Search's Go to rows
   "board/cue", // the stop-kind icon of a Needs you reason, drawn the same on the card and the row
   "offline", // the offline state and its words: one banner text, both layouts
+  "item/sharedWords", // wording both layouts show, one source
+  "board/sharedWords", // wording both layouts show, one source
+  "settings/sharedWords", // wording both layouts show, one source
+  "library/sharedWords", // wording both layouts show, one source
+  "shell/sharedWords", // wording both layouts show, one source
+  "graph/sharedWords", // wording both layouts show, one source
+  "apply/sharedWords", // wording both layouts show, one source
+  "review/sharedWords", // wording both layouts show, one source
+  "analytics/sharedWords", // wording both layouts show, one source
   "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
 ];
 

@@ -7,6 +7,7 @@ import { Popover } from "../../ui/Popover";
 import { act, cancelPreview } from "../actions";
 import { EndFacts, stopsNow } from "./EndFacts";
 import { sendOnModEnter } from "../../keys";
+import { CANCEL_THIS_ITEM } from "../sharedWords";
 
 /** Cancel… (Decisions §14, prototype lines 43–48): what stops, what is kept,
  *  what the spend does, the MR option, a reason, then `POST /cancel`. The
@@ -44,7 +45,7 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
     : [];
 
   return (
-    <Popover anchor={anchor} open notch onClose={onClose} role="dialog" label="Cancel this item?" dirty={!!reason.trim()}>
+    <Popover anchor={anchor} open notch onClose={onClose} role="dialog" label={CANCEL_THIS_ITEM} dirty={!!reason.trim()}>
       <div className="item-card-pop">
         <h2 className="item-pop-title">Cancel this item?</h2>
         {preview ? (

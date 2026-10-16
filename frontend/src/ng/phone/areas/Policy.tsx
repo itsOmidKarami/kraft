@@ -13,6 +13,7 @@ import { problemText } from "../../templates/problems";
 import { TabStrip } from "../ui/Rows";
 import { AreaScreen } from "./AreaScreen";
 import { Group, repairElsewhere, useEditor, type Edit, type RowSpec } from "./kit";
+import { LOOP_VALUE_BLANK, BOARD_AND_FORGE, EVERY_FIX_LOOP, STUCK_ITEM_OFF, POLICY_SECTION, WHEN_STUCK } from "../../settings/sharedWords";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] : undefined);
@@ -46,7 +47,7 @@ export function PolicyScreen() {
 
   return (
     <AreaScreen title="Policy" sub={SECTIONS.find((s) => s.id === section)!.sub} draft={draft}>
-      <TabStrip label="Policy section" value={section} onChange={(id) => navigate(`/settings/policy/${id}`, { replace: true })} tabs={SECTIONS.map((s) => ({ id: s.id, label: s.label }))} />
+      <TabStrip label={POLICY_SECTION} value={section} onChange={(id) => navigate(`/settings/policy/${id}`, { replace: true })} tabs={SECTIONS.map((s) => ({ id: s.id, label: s.label }))} />
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">The policy could not be read.</p>}
       {r && !ctx && <p className="ph-error" role="alert">policy.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. {repairElsewhere("policy.yaml")}</p>}
       {here.length > 0 && <Group title="Problems" rows={here.map((x, i): RowSpec => ({ key: `p${i}`, label: problemText(x), sub: x.field ?? x.path ?? undefined, chips: [{ label: "problem", tone: "bad" }] }))} />}
@@ -185,7 +186,7 @@ function Loops(e: Edits) {
   const setLoop = async (key: string, field: "max_attempts" | "wall_clock_s", unit: "count" | "s-as-min", t: string): Promise<string | null> => {
     const v = parse(unit, t);
     if ("error" in v) return v.error;
-    if (v.value === null) return "A loop's own value cannot be blank: remove its entry instead.";
+    if (v.value === null) return LOOP_VALUE_BLANK;
     const a = await draft.ops([{ op: "set_loop", key, [field]: v.value }], { quiet: true });
     return a.status === 200 ? null : detailOf(a.body);
   };
@@ -200,7 +201,7 @@ function Loops(e: Edits) {
         pair(e, "attempts", KEYS.attemptsDefault, p.limits.max_attempts.default.value, KEYS.attemptsMax, p.limits.max_attempts.maximum.value),
         pair(e, "wall clock", KEYS.wallDefault, p.limits.timeout_minutes.default.value, KEYS.wallMax, p.limits.timeout_minutes.maximum.value),
       ]} />
-      <Group title="Every fix loop" note={`The loops in published chains, and the numbers each one runs on. ${LOOP_WINS}`} rows={[
+      <Group title={EVERY_FIX_LOOP} note={`The loops in published chains, and the numbers each one runs on. ${LOOP_WINS}`} rows={[
         single(e, KEYS.loopAttempts, "loops without their own: attempts", p.loops.default.attempts),
         single(e, KEYS.loopWall, "loops without their own: wall clock", p.loops.default.wall_clock_s),
         ...p.loops.live.map((l): RowSpec => ({
@@ -233,8 +234,8 @@ function Loops(e: Edits) {
         onSwitch: () => void sendValue(draft, SEVERITY_KEY, SEVERITIES.filter((x) => (x === s ? !sev.includes(x) : sev.includes(x)))),
       }))} />
       <Group
-        title="When an item is stuck"
-        foot={stuck ? "An item that reports no progress escalates to a person on its own." : "Off: a stuck item waits until a person escalates it."}
+        title={WHEN_STUCK}
+        foot={stuck ? "An item that reports no progress escalates to a person on its own." : STUCK_ITEM_OFF}
         rows={[
           { label: "auto-escalate", sw: stuck, changed: stuckCh, onSwitch: (on) => void sendValue(draft, STUCK_KEY, on) },
           ...(stuck ? [
@@ -260,7 +261,7 @@ function Housekeeping(e: Edits) {
         single(e, KEYS.concurrent, "max active items", max, { sub: `${ctx.active != null ? `${ctx.active} of ${max ?? "—"} slots in use now. ` : ""}Auto-intake only fills free slots.` }),
         single(e, KEYS.relaunch, "rate-limit relaunches", num(p.retries.rate_limit_retries?.value), { sub: "before the item stops for a person" }),
       ]} />
-      <Group title="Board and forge" rows={[
+      <Group title={BOARD_AND_FORGE} rows={[
         single(e, KEYS.archive, "archive after", p.housekeeping.archive_after_days.value, { never: "never", sub: "completed and abandoned items; empty never archives" }),
         single(e, KEYS.forge, "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), { sub: "read at startup" }),
       ]} />

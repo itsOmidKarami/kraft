@@ -1,0 +1,14 @@
+/** Wording that the desktop and phone trees both show: one source, imported by each. */
+export const LIMIT_REACHED = "A limit was reached";
+export const APPLY_AND_START = "Apply and start";
+export const BUDGET_IN_DOLLARS = "Budget in dollars";
+export const CANCEL_THIS_ITEM = "Cancel this item?";
+export const CHECK_REPO_SETTINGS = "Check the repo settings";
+export const MR_SYNC_STOPPED = "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.";
+export const MARK_COMPLETE = "Mark complete…";
+export const NO_LOG_YET = "No log for this attempt yet.";
+export const REBASE_NEEDS_YOU = "Rebase needs you";
+export const REVIEW_THE_CONFLICTS = "Review the conflicts";
+export const BUDGET_RAN_OUT = "The budget ran out";
+export const LOG_UNREADABLE = "The log could not be read.";
+export const WAITING_ON_THE_PROVIDER = "Waiting on the provider";

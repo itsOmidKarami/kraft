@@ -14,6 +14,7 @@ import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, repairElsewhere, useEditor, type RowSpec } from "./kit";
+import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "../../settings/sharedWords";
 
 const CHECKS_EVERY_MS = 30_000;
 const AREA = "/settings/auto-intake";
@@ -70,7 +71,7 @@ export function IntakeScreen() {
   const set = (patch: Record<string, unknown>) => send(draft, { op: "set_intake", patch });
 
   const addSchedule = async () => {
-    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo: repos[0]?.path ?? "", chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: "Scheduled item" }], { quiet: true });
+    const a = await draft.ops([{ op: "add_schedule", cron: "0 9 * * 1", repo: repos[0]?.path ?? "", chain: chains.includes("default") ? "default" : chains[0] ?? "default", title: SCHEDULED_ITEM }], { quiet: true });
     if (a.status !== 200) return showToast(detailOf(a.body));
     const now = intakeOf((a.body as unknown as { result: NonNullable<typeof r> }).result);
     navigate(`${AREA}/schedules/${(now?.schedules.length ?? 1) - 1}`);
@@ -142,7 +143,7 @@ export function ScheduleScreen() {
   const textRow = (field: "title" | "description", label: string, o: { multiline?: boolean; sub?: string } = {}): RowSpec => ({
     key: field, label, value: s![field] || "not set", changed: changed(field),
     sub: bad(field) ?? o.sub, chips: bad(field) ? [{ label: "problem", tone: "bad" }] : undefined,
-    onEdit: () => edit({ kind: "text", title: label, value: s![field], multiline: o.multiline, set: async (t) => (t || field === "description" ? patch({ [field]: t }) : "This cannot be empty.") }),
+    onEdit: () => edit({ kind: "text", title: label, value: s![field], multiline: o.multiline, set: async (t) => (t || field === "description" ? patch({ [field]: t }) : CANNOT_BE_EMPTY) }),
   });
   const pickRow = (field: "repo" | "chain", label: string, values: string[], show: (v: string) => string): RowSpec => ({
     key: field, label, value: show(s![field]), mono: true, changed: changed(field), sub: bad(field), chips: bad(field) ? [{ label: "problem", tone: "bad" }] : undefined,

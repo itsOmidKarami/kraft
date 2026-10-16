@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { LogLine } from "../../types";
 import { logUrl } from "../../api";
 import { request } from "../http";
+import { NO_LOG_YET, LOG_UNREADABLE } from "./sharedWords";
 
 export const POLL_MS = 3000;
 
@@ -17,7 +18,7 @@ export function useLogLines(workItemId: string, sessionId: string, running: bool
         if (!live) return;
         // A pending attempt has no log yet: once it runs, a read that succeeds clears the note.
         if (r.status === 200) { setLines(r.body.lines); setError(null); }
-        else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
+        else setError(r.status === 404 ? NO_LOG_YET : LOG_UNREADABLE);
       });
     read();
     const t = running ? setInterval(read, POLL_MS) : undefined;

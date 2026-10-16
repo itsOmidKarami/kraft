@@ -15,6 +15,7 @@ import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar, Facts, SwitchRow } from "../ui/Rows";
 import { running, steerDoor, stopped } from "./steer";
+import { CANCEL_THIS_ITEM } from "../../item/sharedWords";
 
 export type ComposeKind = "steer" | "reject" | "answer" | "escalate" | "cancel" | "complete";
 export const COMPOSE_KINDS: ComposeKind[] = ["steer", "reject", "answer", "escalate", "cancel", "complete"];
@@ -85,7 +86,7 @@ const SPEC: Record<ComposeKind, Spec> = {
     label: "Escalate",
   },
   cancel: {
-    title: "Cancel this item?",
+    title: CANCEL_THIS_ITEM,
     help: () => "The run stops where it is. Everything it produced is kept, and a cancelled item stays cancelled.",
     placeholder: "Why? It goes in the run log.",
     label: "Cancel item",

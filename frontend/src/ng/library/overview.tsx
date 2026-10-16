@@ -4,6 +4,7 @@ import { authoredAt, normalise, valueAt, type NodeA, type Step, type Task } from
 import type { LibDescription } from "./describe";
 import { UsedBy } from "./UsedBy";
 import type { Use } from "./types";
+import { STEPS_IN_ORDER } from "./sharedWords";
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -28,7 +29,7 @@ export function LibraryOverview({ d, ctx, uses }: { d: LibDescription; ctx: Pane
         return (
           <>
             {typeof own?.extends === "string" && <Kv k="extends" v={own.extends} mono onClick={() => goTo(`nodes.${own.extends}`)} />}
-            <Head>{steps.length ? "Steps, in order" : "Steps"}</Head>
+            <Head>{steps.length ? STEPS_IN_ORDER : "Steps"}</Head>
             {!steps.length && <Note>No steps yet. Open the node to add the first one.</Note>}
             {steps.map((s) => (
               <Kv key={s.id} k={lone ? s.tasks.map((t) => t.id).join(", ") || "main" : s.id} v={s.tasks.length > 1 ? `${s.tasks.length} tasks · parallel` : plural(s.tasks.length, "task")} onClick={() => goTo(`${path}.${s.id}`)} />

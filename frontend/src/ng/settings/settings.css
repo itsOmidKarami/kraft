@@ -115,7 +115,6 @@
   .set-session > .set-hint { display: none; }
 }
 
-.set-input.is-wide { flex: 1 1 260px; max-width: 420px; }
 .set-events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 420px; }
 .set-event { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
 .set-event-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -134,13 +133,11 @@
 .set-verdict.is-ok { color: var(--ok); }
 .set-verdict.is-warn { color: var(--warn); }
 .set-verdict.is-muted { color: var(--text-muted); }
-.set-ok { color: var(--ok); }
 .set-command { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .set-command code { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
 .set-command .btn { flex: none; border-color: transparent; }
 .set-textlink { text-decoration: underline; text-underline-offset: 3px; }
 .set-textlink:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-.set-links { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .ys-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
 .ys-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }

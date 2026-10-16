@@ -23,6 +23,7 @@ import { coveredText } from "../../item/chainName";
 import "../../item/item.css";
 import { sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
+import { DISCARD_THIS_DRAFT } from "../sharedWords";
 
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
@@ -300,7 +301,7 @@ export function DraftItemPage() {
         </Inspector>
       </div>
       {ask && (
-        <div className="draft-ask" role="alertdialog" aria-label="Discard this draft?">
+        <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>
           <b>Discard this draft?</b>
           <span>Nothing has been created. The title, brief and settings you entered are lost.</span>
           <div className="item-actions">

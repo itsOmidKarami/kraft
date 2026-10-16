@@ -6,6 +6,7 @@ import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { authoredAt } from "../templates/draft/view";
 import type { Row } from "./rows";
 import type { Use } from "./types";
+import { STEERING_NOTE } from "./sharedWords";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
@@ -20,7 +21,7 @@ export function Instructions({ draft, path }: { draft: ConfigDraft; path: string
       value={text}
       required
       bad={!text.trim()}
-      sub={!text.trim() ? "Required." : "Added to what an agent task reads at launch, after the repository's own steering."}
+      sub={!text.trim() ? "Required." : STEERING_NOTE}
       onText={(t) => draft.field(path, "instructions", t, true)}
       onBlur={draft.flush}
     />

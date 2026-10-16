@@ -2,6 +2,7 @@ import { KEYS } from "./keys";
 import { PolicyCell } from "./PolicyCell";
 import { SectionHead } from "./SectionHead";
 import { problemAt, type Ctx } from "./ctx";
+import { BOARD_AND_FORGE } from "../sharedWords";
 
 /** Housekeeping (Decisions §12): how this install runs: instance-wide, no repo, chain or item can change these. */
 export function Housekeeping({ ctx }: { ctx: Ctx }) {
@@ -24,7 +25,7 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
         {row("concurrent", "max active items", max, `${ctx.active != null ? `${ctx.active} of ${max ?? "—"} slots in use now. ` : ""}Counts every active item, however it was started. Starting past it is refused; Auto-intake only fills free slots.`)}
         {row("relaunch", "rate-limit relaunches", num(p.retries.rate_limit_retries?.value), "Relaunches after a rate limit before the item stops for a person.")}
       </section>
-      <section className="pol-card" aria-label="Board and forge">
+      <section className="pol-card" aria-label={BOARD_AND_FORGE}>
         <h3 className="pol-h2">Board and forge</h3>
         {row("archive", "archive after", p.housekeeping.archive_after_days.value, "Completed and abandoned items older than this are archived. Blank never archives. The board's Done group states this number.")}
         {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error. Read at startup.")}

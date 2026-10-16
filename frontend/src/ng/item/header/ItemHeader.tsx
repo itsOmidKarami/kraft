@@ -16,6 +16,7 @@ import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
+import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -185,7 +186,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         <Menu label="Item menu" trigger={<EllipsisVertical size={16} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
-      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}

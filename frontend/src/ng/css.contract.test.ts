@@ -57,13 +57,13 @@ describe("ng CSS", () => {
   it("takes an unpinned sidebar to no width, and keeps its overlay 180ms after the pointer leaves", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     expect(css).toMatch(/:root\[data-sidebar="rail"\]\s*{\s*--ng-side-w:\s*0px;/);
-    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*\b180ms\b/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*(?:\.18s|180ms)/);
   });
 
   it("shades a revealed sidebar with a ring and a soft drop, fading in with the slide, and none when pinned", () => {
     const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
     expect(css).toMatch(/\.ng-side:is\([^{]*\) \.ng-sidebar\s*{[^}]*box-shadow:\s*0 0 0 1px var\(--border\), 16px 0 40px var\(--side-shade\)/);
-    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*box-shadow 160ms/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*box-shadow (?:\.16s|160ms)/);
     expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain('[data-mode="light"] { --side-shade: rgb(0 0 0 / 18%); }');
   });
 
@@ -109,6 +109,12 @@ describe("ng CSS", () => {
     expect(z("\\.popover")).toBeLessThan(z("\\.toasts"));
   });
 
+  it.each([["shell/shell.css", ".ng-sidebar"], ["ui/ui.css", ".switch-knob"]])("stops the %s slide for %s under reduced motion", (file, sel) => {
+    const css = readFileSync(join(here, file), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const block = /@media \(prefers-reduced-motion: reduce\) {([^\n]*)}\s*(?:\n|$)/g;
+    expect([...css.matchAll(block)].some((m) => m[1].includes(sel) && /transition:\s*none/.test(m[1]))).toBe(true);
+  });
+
   // R12b-07 (fixed by #502's header): a fixed 118px wrapped "Raise cap", "Review conflicts" and "Reopen MR" and clipped them.
   it("lets the item header's main button grow with its label, on one line", () => {
     const css = readFileSync(join(here, "item/item.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -120,8 +126,8 @@ describe("ng CSS", () => {
 
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
   // shipped css.contract.test.ts, which the cutover deletes.
-  it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
-    const allowed = new Set(["(max-width: 767px)", "(max-width: 1023px)", "(max-width: 1279px)", "(max-height: 719px)"]);
+  it("uses only the 767 / 1023 / 1279 max-width queries, the 719 max-height query and reduced motion", () => {
+    const allowed = new Set(["(max-width: 767px)", "(max-width: 1023px)", "(max-width: 1279px)", "(max-height: 719px)", "(prefers-reduced-motion: reduce)"]);
     const bad: string[] = [];
     for (const file of cssFiles(here)) {
       const css = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");

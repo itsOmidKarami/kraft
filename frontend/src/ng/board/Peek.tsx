@@ -26,6 +26,7 @@ import { Popover } from "../ui/Popover";
 import { groupOf } from "./model";
 import { capitalise, gateName, reasonTail } from "./rowText";
 import "../item/item.css";
+import { PAUSE_THIS_ITEM } from "./sharedWords";
 
 export type PeekTab = "overview" | "activity" | "config";
 
@@ -237,7 +238,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
       )}
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}
-      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={PAUSE_THIS_ITEM}>
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
       </Popover>
     </>

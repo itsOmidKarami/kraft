@@ -1,5 +1,4 @@
 import type { Authored } from "../templates/draft/types";
-import { idError } from "../templates/ids";
 
 /** The handler and slot segments a canonical path passes through: what lives in one is not moved (R47). */
 const HANDLER = new Set(["on_failure", "fix_loop", "escalation", "judge", "auto_review", "on_base_changed", "on_conflict"]);
@@ -25,6 +24,3 @@ export function moveLines(chain: string, section: "nodes" | "tasks", name: strin
     keeps: `${chain} keeps { id: ${id}, extends: ${name} }.`,
   };
 }
-
-/** The card's id check: the id rule, then the section's names (the published library's and the draft's own). */
-export const nameError = (name: string, taken: string[]) => idError(name, taken);

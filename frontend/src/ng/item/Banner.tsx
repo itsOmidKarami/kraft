@@ -10,6 +10,7 @@ import { gateName, nameOf } from "../board/rowText";
 import { admits, budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
+import { LIMIT_REACHED, BUDGET_RAN_OUT } from "./sharedWords";
 
 /** A stop's reason as a sentence of its own: a capital first letter and a full stop. */
 const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replace(/\.*$/, "")}.`;
@@ -39,7 +40,7 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
         <span className="item-banner-text">
           {/* Where first: the reason can be two sentences, and a node tacked on after them read as part of the last. */}
           {stop.node && <>Stopped at {nameOf(item.chain_definition.nodes, stop.node)}. </>}
-          {sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"))}
+          {sentence(stop.reason ?? (stop.kind === "budget" ? BUDGET_RAN_OUT : LIMIT_REACHED))}
           {stop.kind === "budget" && !offersRaise(item) && <> {budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE}</>}
         </span>
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,

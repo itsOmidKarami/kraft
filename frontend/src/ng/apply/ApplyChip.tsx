@@ -5,6 +5,7 @@ import { Popover } from "../ui/Popover";
 import { RefreshCw, RotateCw, TriangleAlert, ExternalLink } from "../icons";
 import { restartNote, SELF_RESTART, useApply } from "./store";
 import "./apply.css";
+import { RESTARTING_KRAFT, RESTART_KRAFT, RESTART_NEEDED } from "./sharedWords";
 
 /** Waiting to apply (UX V2 W16 A): config saved but not yet running. Reload
  *  rereads files and interrupts nothing; restart is its own button, behind a
@@ -19,7 +20,7 @@ export function ApplyChip() {
   const nL = reload.length;
   if (nR + nL === 0 && phase !== "restarting") return null;
   const bad = reload.some((i) => i.problem);
-  const label = bad ? "Reload found a problem" : nR && nL ? "Waiting to apply" : nR ? "Restart needed" : "Changed on disk";
+  const label = bad ? "Reload found a problem" : nR && nL ? "Waiting to apply" : nR ? RESTART_NEEDED : "Changed on disk";
   const Icon = bad ? TriangleAlert : nR && !nL ? RotateCw : RefreshCw;
   const close = () => {
     setOpen(false);
@@ -35,7 +36,7 @@ export function ApplyChip() {
       <Popover anchor={button} open={open} onClose={close} role="dialog" label="Waiting to apply">
         <div className="apply-pop">
           {nR > 0 && (
-            <section className="apply-block" aria-label="Restart needed">
+            <section className="apply-block" aria-label={RESTART_NEEDED}>
               <div className="apply-block-head"><span>Restart needed</span><span className="apply-muted">interrupts running work</span></div>
               {restart.map((i) => <div key={i.id} className="apply-row"><span className="apply-src">{i.file}</span><span>{i.text}</span></div>)}
               <div className="apply-actions">
@@ -78,7 +79,7 @@ export function ApplyDialogs() {
   if (confirming)
     return (
       <Dialog
-        title="Restart Kraft?"
+        title={RESTART_KRAFT}
         onClose={cancel}
         footer={<><Button onClick={cancel}>Cancel</Button><Button variant="primary" onClick={() => void restart()}><RotateCw size={14} aria-hidden />Restart</Button></>}
       >
@@ -88,7 +89,7 @@ export function ApplyDialogs() {
     );
   if (phase === "restarting" || phase === "stuck")
     return (
-      <Dialog title={phase === "stuck" ? "Kraft did not come back" : "Restarting Kraft…"} onClose={() => useApply.setState({ phase: "idle" })}>
+      <Dialog title={phase === "stuck" ? "Kraft did not come back" : RESTARTING_KRAFT} onClose={() => useApply.setState({ phase: "idle" })}>
         <p>{phase === "stuck" ? error : <>Waiting for <code>{address}</code>. This page follows as soon as it answers.</>}</p>
         {phase === "restarting" && address && address !== location.origin && <a className="btn btn-secondary" href={address}><ExternalLink size={14} aria-hidden />Open the new address</a>}
       </Dialog>

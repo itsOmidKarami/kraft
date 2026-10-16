@@ -4,6 +4,7 @@ import { Popover } from "../../ui/Popover";
 import { useLibrary } from "../useLibrary";
 import { focusSoon } from "./focus";
 import { PickList } from "./PickList";
+import { SEARCH_LIBRARY } from "../../library/sharedWords";
 
 export type TaskChoice = { kind: TaskKind } | { extends: string };
 const KINDS: TaskKind[] = ["agent", "builtin", "subprocess", "forge"];
@@ -24,7 +25,7 @@ export function TaskMenu({ anchor, title, agentOnly, onPick, onClose }: { anchor
         {lib ? (
           library === "failed" ? <p className="picklist-empty">Couldn't load the library.</p> : (
             <PickList
-              placeholder="Search the library"
+              placeholder={SEARCH_LIBRARY}
               empty={library === "loading" ? "Loading…" : "No library task matches."}
               items={tasks.map((c) => {
                 const k = String(c.definition.kind ?? "agent") as TaskKind;

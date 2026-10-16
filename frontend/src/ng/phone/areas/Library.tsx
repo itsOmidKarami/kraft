@@ -10,6 +10,7 @@ import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { TabStrip } from "../ui/Rows";
 import { NoMatch } from "../../ui/NoMatch";
+import { STEERING_NOTE, SEARCH_LIBRARY, STEPS_IN_ORDER } from "../../library/sharedWords";
 
 /** The published library, for who uses what (`GET /templates/library`); read once per screen. */
 function usePublished() {
@@ -57,7 +58,7 @@ export function LibraryList() {
   return (
     <AreaScreen title="Library" sub="Nodes, steps, tasks and steering that chains and repos reuse." draft={draft}>
       <label className="ph-search-field ph-area-search">
-        <input type="search" className="ph-search-input" aria-label="Search the library" placeholder="Search the library" value={q} onChange={(e) => set({ q: e.target.value })} />
+        <input type="search" className="ph-search-input" aria-label={SEARCH_LIBRARY} placeholder={SEARCH_LIBRARY} value={q} onChange={(e) => set({ q: e.target.value })} />
       </label>
       <TabStrip label="Library" value={kind} onChange={(k) => set({ kind: k === "nodes" ? "" : k })} tabs={SECTIONS.map((s) => ({ id: s, label: SECTION_LABEL[s] }))} />
       {draft.status === "error" && <p className="ph-error" role="alert">The library could not be read.</p>}
@@ -132,9 +133,9 @@ export function LibraryComponentView() {
       {draft.view && !own && <p className="ph-empty">There is no component {path}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problems.map((p, i): RowSpec => ({ key: `p${i}`, label: p.message.replace(/^Value error, /, ""), sub: [p.chain && `breaks ${p.chain}`, p.repo && `repo ${p.repo}`].filter(Boolean).join(" · ") || undefined }))} />}
       {own && <Group rows={[{ label: "kind", value: typeof own.kind === "string" ? own.kind : parsed?.section ?? "", mono: true }, ...(typeof own.extends === "string" ? [{ label: "extends", value: own.extends, mono: true } as RowSpec] : []), ...(route ? [{ label: "route", value: route, mono: true } as RowSpec] : []), ...settings]} />}
-      {structure.length > 0 && <Group title={parsed?.section === "nodes" ? "Steps, in order" : "Tasks"} rows={structure} />}
+      {structure.length > 0 && <Group title={parsed?.section === "nodes" ? STEPS_IN_ORDER : "Tasks"} rows={structure} />}
       {instructions !== null && (
-        <Group title="Instructions" rows={[{ label: instructions.trim() ? instructions : "Required.", mono: false, onEdit: shipped ? undefined : () => edit({ kind: "text", title: "Instructions", value: instructions, set: (v) => (v.trim() ? setField("instructions", v) : Promise.resolve("Instructions can't be empty.")) }) }]} note="Added to what an agent task reads at launch, after the repository's own steering." />
+        <Group title="Instructions" rows={[{ label: instructions.trim() ? instructions : "Required.", mono: false, onEdit: shipped ? undefined : () => edit({ kind: "text", title: "Instructions", value: instructions, set: (v) => (v.trim() ? setField("instructions", v) : Promise.resolve("Instructions can't be empty.")) }) }]} note={STEERING_NOTE} />
       )}
       {parsed && own && <Group title="Used in" rows={uses.length ? uses.map((u, i): RowSpec => ({ key: `${u.chain}:${u.path}:${i}`, label: u.chain, mono: true, sub: `${u.path}${u.via ? ` via ${u.via}` : ""}`, to: `/templates/chains/${encodeURIComponent(u.chain)}` })) : [{ label: published ? "Not used by any chain." : "Reading…" }]} />}
       {sheet}

@@ -8,6 +8,7 @@ import type { PatchFile } from "./patch";
 import { isMixed, isOneLine, lineIndex, quoteOf, rangeName, startSideOf, type LineRange } from "./range";
 import type { Anchor } from "./rows";
 import { Thread, threadRange } from "./Thread";
+import { ON_THE_WHOLE_CHANGE } from "./sharedWords";
 
 /** At most this many lines are quoted with a comment. */
 const QUOTE_LINES = 200;
@@ -163,7 +164,7 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   return {
     after: (path: string, a: Anchor) => slot(`${path}|${a.side}|${a.line}`),
     top: (path: string) => slot(`${path}|top`),
-    whole: whole.length ? <section className="rv-elsewhere rv-whole" aria-label="On the whole change"><h2>On the whole change</h2>{whole.map(card)}</section> : null,
+    whole: whole.length ? <section className="rv-elsewhere rv-whole" aria-label={ON_THE_WHOLE_CHANGE}><h2>On the whole change</h2>{whole.map(card)}</section> : null,
     elsewhere: elsewhere.length ? <section className="rv-elsewhere" aria-label="Threads on files not in this comparison"><h2>Threads on files not in this comparison</h2>{elsewhere.map(card)}</section> : null,
     /** The pick the composer was opened on was edited (a handle, Shift-click, Shift+arrows): the composer follows, with its text. */
     retargetTo: (p: Pick, from: Pick | null) => {

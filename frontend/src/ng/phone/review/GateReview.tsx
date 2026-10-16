@@ -26,6 +26,7 @@ import { ComposerHeader, ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
 import "./review.css";
+import { LINES_COMMENTED_ON, ON_THE_WHOLE_CHANGE } from "../../review/sharedWords";
 
 /** The agent reviewer's verdict at a gate, from its own event (never invented). */
 function autoVerdict(events: KraftEvent[], gate: string) {
@@ -148,7 +149,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         )}
         {compare.state === "error" && !hasDoc && <p className="ph-error" role="alert">{compare.error}</p>}
         {whole.length > 0 && (
-          <section aria-label="On the whole change" className="ph-list">
+          <section aria-label={ON_THE_WHOLE_CHANGE} className="ph-list">
             <h2 className="ph-review-group">On the whole change</h2>
             {whole.map((t) => <ThreadNote key={t.id} thread={t} />)}
           </section>
@@ -223,7 +224,7 @@ function ThreadNote({ thread }: { thread: ReviewThread }) {
     <div className={`ph-thread${thread.state === "resolved" ? " ph-is-resolved" : ""}`}>
       <b className="ph-thread-head">{agent ? "agent" : "you"}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
       {quote.length > 0 && (
-        <div className="ph-thread-quote" role="group" aria-label="Lines commented on">
+        <div className="ph-thread-quote" role="group" aria-label={LINES_COMMENTED_ON}>
           {quote.map((l, i) => <div key={i} className={`ph-diff-line${l[0] === "+" ? " ph-diff-add" : l[0] === "-" ? " ph-diff-del" : ""}`}>{l}</div>)}
         </div>
       )}

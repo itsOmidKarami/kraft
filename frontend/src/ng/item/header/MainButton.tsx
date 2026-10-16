@@ -3,11 +3,12 @@ import { Archive, ArchiveRestore, ChevronDown, ChevronUp, CircleAlert, CircleChe
 import { Popover } from "../../ui/Popover";
 import { MAIN_LABEL, type Main, type PanelItem } from "../status";
 import { tip } from "../../ui/Tooltip";
+import { MARK_COMPLETE } from "../sharedWords";
 
 const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw };
 const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string }> = {
   escalate: { label: "Escalate…", icon: Siren, tone: "warn" },
-  complete: { label: "Mark complete…", icon: CircleCheck },
+  complete: { label: MARK_COMPLETE, icon: CircleCheck },
   archive: { label: "Archive", icon: Archive },
   cancel: { label: "Cancel…", icon: X, tone: "bad" },
 };
