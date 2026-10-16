@@ -9,13 +9,14 @@ import collections
 from functools import partial
 from typing import ClassVar
 
+from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.content import Content
 from textual.widgets import Input, RichLog, Static
 
 from kraft import answers, client, render
-from kraft.console import words
+from kraft.console import tail, words
 from kraft.console.screens import View
 
 #: Lines of `server.log` kept, for the pane and for the filter to search.
@@ -107,11 +108,19 @@ def summary(health: dict, release: dict | None, *, answered: bool = True) -> Con
 class Server(View):
     label = "Server"
     BINDINGS: ClassVar[list[BindingType]] = [
+        # The view keeps the focus, so its letters act; the log scrolls by keys.
+        Binding("down,j", "scroll('down')", "down", show=False),
+        Binding("up,k", "scroll('up')", "up", show=False),
+        Binding("pagedown", "scroll('page_down')", "page down", show=False),
+        Binding("pageup", "scroll('page_up')", "page up", show=False),
+        Binding("home", "scroll('home')", "top", show=False),
+        Binding("end", "scroll('end')", "follow", show=False),
         Binding("d", "doctor", "doctor"),
         Binding("l", "reload", "reload"),
         # Both names: kitty-protocol terminals report Shift+R as `shift+r` (spec §6).
         Binding("R,shift+r", "restart", "restart"),
         Binding("U,shift+u", "update", "update"),
+        Binding("f", "filter", "filter"),
     ]
 
     def __init__(self, **kwargs) -> None:
@@ -135,6 +144,8 @@ class Server(View):
 
     def on_mount(self) -> None:
         self.query_one("#server-filter").display = False
+        # The rule says whether the log follows: whenever it scrolls, by key, wheel or write.
+        self.watch(self.query_one("#server-log", RichLog), "scroll_y", self._draw_rule, init=False)
 
     def health_changed(self, health: dict | None) -> None:
         self.answered = health is not None
@@ -152,8 +163,12 @@ class Server(View):
 
     def on_show(self) -> None:
         self.draw()
+        self._draw_rule()
         if self.app.release is None:  # the read at start failed: the feed may answer now
             self.run_worker(self._release, group="release", exclusive=True)
+        # After the refresh: a log just shown has no width until it is laid out,
+        # and would wrap what it is given then at one cell.
+        self.call_after_refresh(self.run_worker, self._follow, group="tail", exclusive=True)
 
     def on_hide(self) -> None:
         """Another view is shown (this one stays mounted): read nothing."""
@@ -164,6 +179,66 @@ class Server(View):
         await self.app.check_update()
         if self.display:
             self.draw()
+
+    async def _follow(self) -> None:
+        """`server.log`'s last lines, then each one as the server writes it.
+        Shown again, it starts over: the last lines hold what came meanwhile."""
+        if not self.display:  # hidden again before the refresh came
+            return
+        log = self.query_one("#server-log", RichLog)
+        log.clear()
+        self.lines.clear()
+        async for line in tail.follow(tail.server_log()):
+            self.lines.append(line)
+            if self._shows(line):
+                # To the end only from the end: a reader scrolled up stays there.
+                log.write(line, scroll_end=log.is_vertical_scroll_end)
+
+    def _shows(self, line: str) -> bool:
+        return self.filter_text.strip().lower() in line.lower()
+
+    def _draw_rule(self) -> None:
+        log = self.query_one("#server-log", RichLog)
+        state = FOLLOWING if log.is_vertical_scroll_end else HELD
+        text = self.filter_text.strip()
+        shown = f" · filter: {text}" if text else ""
+        self.query_one("#server-rule", Static).update(
+            Content.styled(f"server.log{shown} · {state}", "$kraft-muted")
+        )
+
+    def _redraw(self) -> None:
+        """The kept lines again, through the filter, followed from the end."""
+        log = self.query_one("#server-log", RichLog)
+        log.clear()
+        for line in self.lines:
+            if self._shows(line):
+                log.write(line)
+        self._draw_rule()
+
+    def back(self) -> bool:
+        box = self.query_one("#server-filter", Input)
+        if not (self.filter_text or box.display):
+            return False
+        self.filter_text, box.value, box.display = "", "", False
+        self.focus()  # clearing the box redraws, through _filtered
+        return True
+
+    def action_filter(self) -> None:
+        box = self.query_one("#server-filter", Input)
+        box.display = True
+        box.focus()
+
+    @on(Input.Changed, "#server-filter")
+    def _filtered(self, event: Input.Changed) -> None:
+        self.filter_text = event.value
+        self._redraw()
+
+    @on(Input.Submitted, "#server-filter")
+    def _filter_done(self) -> None:
+        self.focus()
+
+    def action_scroll(self, how: str) -> None:
+        getattr(self.query_one("#server-log", RichLog), f"scroll_{how}")(animate=False)
 
     def action_doctor(self) -> None:
         self.run_worker(partial(self.app.run_command, ["admin", "doctor"]), group="act")

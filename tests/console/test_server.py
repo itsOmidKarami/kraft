@@ -10,8 +10,10 @@ import asyncio
 
 import pytest
 from support.console_board import _text
+from textual.widgets import RichLog
 
 from kraft import client, update
+from kraft.console import tail
 from kraft.console.dialogs import Confirm
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
@@ -285,3 +287,121 @@ def test_a_hidden_server_draws_nothing(console, monkeypatch):
         return hidden, _text(app, "#server-summary").startswith("Server ● ok")
 
     assert console.run(scenario) == ("", True)
+
+
+def _log(app) -> list[str]:
+    return [line.text.rstrip() for line in app.query_one("#server-log", RichLog).lines]
+
+
+def _write(*lines: str) -> None:
+    """Lines the server wrote to its `server.log`, in the test's run dir."""
+    path = tail.server_log()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as log:
+        log.write("".join(f"{line}\n" for line in lines))
+
+
+def test_the_log_follows_until_scrolled_up_and_end_follows_again(console, monkeypatch):
+    """Spec §7.3: a line moves the log to its end only while it is at its end,
+    so a reader scrolled up stays where they are; End follows again."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write(*(f"line {n} [/]" for n in range(60)))
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await console.until(pilot, lambda: _log(app)[-1:] == ["line 59 [/]"])
+        log = app.query_one("#server-log", RichLog)
+        following = _text(app, "#server-rule")
+        await pilot.press("pageup")
+        await console.until(pilot, lambda: "End follows" in _text(app, "#server-rule"))
+        held_at = log.scroll_y
+        _write("late")
+        await console.until(pilot, lambda: _log(app)[-1:] == ["late"])
+        await pilot.pause()
+        stayed = log.scroll_y == held_at
+        await pilot.press("end")
+        await console.until(pilot, lambda: "following" in _text(app, "#server-rule"))
+        _write("later")
+        await console.until(pilot, lambda: _log(app)[-1:] == ["later"])
+        await pilot.pause()
+        return following, stayed, log.is_vertical_scroll_end
+
+    assert console.run(scenario) == ("server.log · following · f filter", True, True)
+
+
+def test_f_filters_the_log_and_esc_brings_every_line_back(console, monkeypatch):
+    """`f` keeps the lines holding the text, any case, as they come too;
+    Esc clears it, shows every kept line again and gives the keys back."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write("boot ok", "error: disk [/]", "listening", "Error again")
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await console.until(pilot, lambda: len(_log(app)) == 4)
+        await pilot.press("f", *"error")
+        await console.until(pilot, lambda: len(_log(app)) == 2)
+        filtered, rule = _log(app), _text(app, "#server-rule")
+        _write("error late", "fine late")
+        await console.until(pilot, lambda: "fine late" in app.view.lines)
+        late = _log(app)
+        await pilot.press("escape")
+        await console.until(pilot, lambda: len(_log(app)) == 6)
+        return filtered, rule, late, _log(app)[-1], app.focused is app.view
+
+    assert console.run(scenario) == (
+        ["error: disk [/]", "Error again"],
+        "server.log · filter: error · following · f filter",
+        ["error: disk [/]", "Error again", "error late"],
+        "fine late",
+        True,
+    )
+
+
+def test_a_hidden_server_reads_no_log(console, monkeypatch):
+    """The view stays mounted behind the others: hidden, it stops following
+    `server.log`; shown again, it starts over from the last lines."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write("first")
+
+    def following(app) -> bool:
+        return any(w.group == "tail" and w.is_running for w in app.workers)
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await console.until(pilot, lambda: following(app) and _log(app) == ["first"])
+        await pilot.press("1")
+        await pilot.pause()
+        hidden = following(app)
+        _write("second")
+        await pilot.press("2")
+        await console.until(pilot, lambda: _log(app) == ["first", "second"])
+        return hidden
+
+    assert console.run(scenario) is False
+
+
+def test_a_hidden_server_follows_nothing(console, monkeypatch):
+    """`_follow` asked to run while the view is hidden (the refresh it waited
+    for came after another view was shown) opens no tail; shown, it starts over."""
+    _quiet(monkeypatch)
+    opened = []
+
+    async def follow(path, *, backlog=200):
+        opened.append(backlog)
+        return
+        yield
+
+    monkeypatch.setattr(tail, "follow", follow)
+
+    async def scenario(app, pilot):
+        server = app.query_one("#server")
+        await server._follow()
+        hidden = list(opened)
+        await pilot.press("2")
+        await console.until(pilot, lambda: opened)
+        return hidden, opened[0]
+
+    assert console.run(scenario) == ([], 200)
