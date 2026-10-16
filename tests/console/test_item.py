@@ -71,7 +71,7 @@ async def _read_done(console, app, pilot) -> None:
             GATE,
             "Board › a91c03fe  Board critique fixes [/]",
             "● Needs you · approve spec",
-            "▌ Waiting for your approval at spec_approval.",
+            "▌ Waiting for you to approve spec.",
             "$warning",
             "12m",
             "r · default",

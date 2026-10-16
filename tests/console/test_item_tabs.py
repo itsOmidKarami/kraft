@@ -100,8 +100,8 @@ def test_the_activity_reads_newest_first_and_end_reads_earlier(board, monkeypatc
 
     first, then, reads = console.run(scenario)
     assert first == [
-        "    12m  spec_approval · rejected: vague [/]",
-        " 1h 05m  spec_approval is waiting for you",
+        "    12m  approve spec · rejected: vague [/]",
+        " 1h 05m  approve spec is waiting for you",
         " 1h 10m  spec started",
         "End loads earlier events.",
     ]
@@ -116,9 +116,11 @@ def test_the_activity_reads_newest_first_and_end_reads_earlier(board, monkeypatc
     ("event", "reads", "top"),
     [
         (_event(6, "node_completed", 0, node="spec"), 2, "    now  spec finished"),
+        # Named from the item's chain, where spec_approval is a gate.
+        (_event(6, "node_skipped", 0, node="spec_approval"), 2, "    now  approve spec skipped"),
         (_event(6, "node_started", 0, node="x") | {"work_item_id": "elsewhere"}, 1, None),
     ],
-    ids=["its-own", "another-items"],
+    ids=["its-own", "named-from-its-chain", "another-items"],
 )
 def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, reads, top):
     """A live event about this item reads only what came after the newest
@@ -140,7 +142,7 @@ def test_a_live_event_adds_its_line_to_the_activity(board, monkeypatch, event, r
 
     after, first = console.run(scenario)
     assert after == [0, 5][:reads]
-    assert first == (top or "    12m  spec_approval · rejected: vague [/]")
+    assert first == (top or "    12m  approve spec · rejected: vague [/]")
 
 
 SESSIONS = [

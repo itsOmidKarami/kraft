@@ -70,9 +70,37 @@ def node_words(node: str) -> str:
     return re.sub(r"[_-]+", " ", node)
 
 
-def gate_words(gate: str) -> str:
-    """`gateWords`: `spec_approval` reads "spec", so the row says "approve spec"."""
-    return node_words(re.sub(r"[_-]approval$", "", gate))
+def gate_words(gate: dict | str) -> str:
+    """`gateWords`: what a gate decides, its document's kind ("spec"), else
+    its id without a trailing "approval"."""
+    n = {"id": gate} if isinstance(gate, str) else gate
+    return node_words(n.get("artifact") or re.sub(r"[_-]approval$", "", n["id"]))
+
+
+def display_name(node: dict) -> str:
+    """`displayName`: a gate by what it decides ("approve spec"), any other
+    node in words."""
+    return f"approve {gate_words(node)}" if node.get("kind") == "gate" else node_words(node["id"])
+
+
+def _named(nodes: list[dict] | None, node_id: str) -> dict:
+    return next((n for n in nodes or [] if n.get("id") == node_id), {"id": node_id})
+
+
+def name_of(nodes: list[dict] | None, node_id: str) -> str:
+    """`nameOf`: `display_name` for a node known by id, found in the chain
+    for its kind and artifact, else its id in words."""
+    return display_name(_named(nodes, node_id))
+
+
+def gate_name(nodes: list[dict] | None, node_id: str) -> str:
+    """`gateName`: `name_of` for an id known to be a gate, whether or not the
+    chain lists it as one."""
+    return display_name({**_named(nodes, node_id), "kind": "gate"})
+
+
+def _nodes(item: dict) -> list[dict] | None:
+    return (item.get("chain_definition") or {}).get("nodes")
 
 
 def _node_of(row: dict) -> str:
@@ -104,7 +132,7 @@ def _fallback_name(to: object) -> str:
 def reason_tail(row: dict, now: float) -> str:
     """`reasonTail`: the row's one short line, per status and stop kind.
     `now` is seconds since the epoch."""
-    node = node_words(_node_of(row))
+    node = name_of(_nodes(row), _node_of(row))
     stop = row.get("stop") or {}
     tail = _tail(row, stop, node, now)
     on = _fallback_name((row.get("fallback") or {}).get("to"))
@@ -117,7 +145,7 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
             reason = stop.get("reason")
             match stop.get("kind"):
                 case "gate":
-                    return f"approve {gate_words(_or(row.get('pending_gate'), _node_of(row)))}"
+                    return gate_name(_nodes(row), _or(row.get("pending_gate"), _node_of(row)))
                 case "question":
                     asked = re.sub(r"^needs_context:\s*", "", _or(reason, ""))
                     return f"agent asks: {asked}".strip()
@@ -169,7 +197,9 @@ def chain_marks(row: dict) -> list[dict]:
     nodes = (row.get("chain_definition") or {}).get("nodes") or []
     ended = row.get("display_status") in ("done", "cancelled", "archived")
     at = next((k for k, n in enumerate(nodes) if n.get("id") == row.get("current_node_id")), -1)
-    hot = group_of(row) == "needs" or row.get("display_status") == "escalated"
+    # A paused item waits on nobody: it stands on its node, not hot.
+    status = row.get("display_status")
+    hot = (group_of(row) == "needs" and status != "paused") or status == "escalated"
 
     def state(k: int) -> str:
         if ended or 0 <= at and k < at:
@@ -294,8 +324,18 @@ def sentence(text: str) -> str:
 
 
 def banner_of(item: dict) -> dict | None:
-    """`bannerOf`: a failed or needs-you item's banner as `{kind, node, text,
-    way}` (`""` for none), or None for any other item."""
+    """`bannerOf`: a failed or needs-you item's banner as `{kind, node, name,
+    text, way}` (`""` for none), or None for any other item. `name` is the
+    node as a reader calls it (`gate_name`, `name_of`)."""
+    words = _banner_words(item)
+    if words is None:
+        return None
+    node, nodes = words["node"], _nodes(item)
+    named = gate_name if words["kind"] == "gate" else name_of
+    return {**words, "name": named(nodes, node) if node else ""}
+
+
+def _banner_words(item: dict) -> dict | None:
     stop = item.get("stop")
     if not stop or item.get("display_status") not in ("needs_you", "failed"):
         return None
@@ -383,16 +423,19 @@ def task_name(path: str) -> str:
     return path.split(".")[-1]
 
 
-def event_line(event: dict) -> str | None:
-    """`eventLine`: one event as one line, or None for bookkeeping. A type
-    not listed reads as its own name."""
+def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
+    """`eventLine`: one event as one line, or None for bookkeeping, each node
+    named as `name_of` names it from the item's chain `nodes`. A type not
+    listed reads as its own name."""
     kind = event.get("type") or ""
     if kind in QUIET:
         return None
     p = event.get("payload") or {}
-    node = _s(_or(event.get("node_id"), p.get("node_id")))
+    node_id = _s(_or(event.get("node_id"), p.get("node_id")))
+    node = name_of(nodes, node_id) if node_id else ""
     on = f" on {node}" if node else ""
-    gate = _s(p.get("gate")) or node
+    # A gate the event names, else the node it is on, each as a reader names it.
+    gate = gate_name(nodes, _s(p["gate"])) if p.get("gate") else node
     match kind:
         case "work_item_created":
             return "filed"

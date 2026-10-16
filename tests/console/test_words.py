@@ -47,7 +47,7 @@ def test_a_stop_banner_reads_as_on_the_web(case):
 
 @pytest.mark.parametrize("case", CASES["events"], ids=[case["name"] for case in CASES["events"]])
 def test_an_event_reads_as_on_the_web(case):
-    assert words.event_line(case["event"]) == case["line"]
+    assert words.event_line(case["event"], NODES) == case["line"]
 
 
 def test_an_events_age_reads_as_on_the_web():

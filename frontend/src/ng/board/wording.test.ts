@@ -10,7 +10,7 @@ import { chainMarks, reasonTail } from "./rowText";
  *  console ports (`src/kraft/console/words.py`, whose test runs the same cases). */
 type Cases = {
   now: string;
-  chain: { nodes: { id: string; kind: string }[] };
+  chain: { nodes: { id: string; kind: string; artifact?: string }[] };
   rows: { name: string; row: Partial<WorkItem>; group: string; tail: string; marks?: string[] }[];
   order: { rows: Partial<WorkItem>[]; sorted: string[] };
   ago: [string | null, string][];

@@ -107,10 +107,10 @@ def banner_line(item: dict) -> str | None:
     banner = words.banner_of(item)
     if banner is None:
         return None
-    node, text, way = banner["node"], banner["text"], banner["way"]
+    node, text, way = banner["name"], banner["text"], banner["way"]
     at = f"Stopped at {node}. " if node else ""
     said = {
-        "gate": f"Waiting for your approval at {node}.",
+        "gate": f"Waiting for you to {node}.",
         "question": f"The agent asks: {text}",
         "failed": f"Failed at {node}. {text}" if node else f"Failed. {text}",
         "limit": at + text,
@@ -518,9 +518,10 @@ class Item(View):
         scrolled = log.scroll_y
         muted = self.app.theme_variables["kraft-muted"]
         now = time.time()
+        nodes = ((self.item or {}).get("chain_definition") or {}).get("nodes")
         log.clear()
         for event in self.events:
-            if (line := words.event_line(event)) is not None:
+            if (line := words.event_line(event, nodes)) is not None:
                 age = words.event_age(event.get("created_at"), now).rjust(7)
                 log.write(Text.assemble((age, muted), "  ", line), scroll_end=False)
         if self.more:
