@@ -6,11 +6,17 @@ from pydantic import BaseModel
 from kraft import events, executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
-from kraft.api.routes.lifecycle import _stop_live_sessions, chain_or_409, held_refusal
+from kraft.api.routes.lifecycle import (
+    _stop_live_sessions,
+    chain_or_409,
+    held_refusal,
+    refresh_base,
+)
+from kraft.config import git_read
 from kraft.executor import stops
 from kraft.templates import revision
-from kraft.templates.models import GateNode
-from kraft.vocab import GateEvent, StopKind
+from kraft.templates.models import ForgeTask, GateNode
+from kraft.vocab import ChainEvent, GateEvent, StopKind
 
 
 def gate_nodes(st, row) -> tuple:
@@ -209,6 +215,61 @@ def _decided_by(request: Request) -> str:
     return "human"
 
 
+def _before_any_push(nodes, gate: str) -> bool:
+    """Whether nothing of the item can have been pushed when `gate` is
+    approved: no node up to and including it has a forge task, the only
+    tasks that publish the branch. A gate after the merge request opened
+    (the final review) is not: its branch is somewhere a reviewer reads it."""
+    for node in nodes[: executor.gate_node_index(nodes, gate) + 1]:
+        if any(isinstance(t.task, ForgeTask) for t in node.tasks()):
+            return False
+    return True
+
+
+async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> None:
+    """Bring the branch up to date with its base, as a resume does, before the
+    chain goes on from `gate`: an item that sat there for days would otherwise
+    implement and verify against the code it forked from. The approval has
+    landed whatever this finds: a base that cannot be refreshed cleanly leaves
+    the item on its old one and says so (`worktree_refresh_skipped`), and a
+    stop that came meanwhile has already stopped the item, so the walk is not
+    started over it."""
+    st = request.app.state
+    node = row["current_node_id"]
+    reason = None
+    try:
+        new_base = await refresh_base(request, wid, row, gate)
+    except HTTPException:
+        # Stopped (paused, cancelled, a walk already there): not a refusal of
+        # the approval, and not ours to continue after.
+        raise
+    except RuntimeError as exc:
+        new_base, reason = None, str(exc).splitlines()[0] if str(exc) else repr(exc)
+    if reason is not None:
+        await st.db.write(
+            lambda c: events.append(
+                c,
+                wid,
+                ChainEvent.WORKTREE_REFRESH_SKIPPED,
+                {"gate": gate, "reason": reason},
+                node_id=node,
+            )
+        )
+    elif new_base and new_base != row["base_ref"]:
+        worktree = st.run_dirs.worktrees / wid
+        head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+        await st.db.write(
+            lambda c: events.append(
+                c,
+                wid,
+                ChainEvent.WORKTREE_REBASE_VERIFIED,
+                {"reported_head": new_base, "worktree_head": head},
+                node_id=node,
+            )
+        )
+        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+
+
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove | None = None):
     st = request.app.state
@@ -281,6 +342,8 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     ):
         await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
         start = board._gate_node_index(nodes, gate) + 1
+        if _before_any_push(nodes, gate) and (st.run_dirs.worktrees / wid).is_dir():
+            await _refresh_base_at_gate(request, wid, row, gate)
         try:
             deps.spawn(
                 request.app,

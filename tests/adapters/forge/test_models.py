@@ -21,6 +21,18 @@ from kraft.adapters import forge
         # A credential the forge refused wins over text that also reads as unreachable.
         ("Authentication failed; Connection timed out", "forge_auth"),
         ("rebase conflict: could not apply abc123", None),
+        ("fatal: unable to access 'x': The requested URL returned error: 403", "forge_auth"),
+        ("remote: Invalid username or password.", "forge_auth"),
+        ("remote: HTTP Basic: Access denied", "forge_auth"),
+        # git's own rebase and checkout, not a forge: a timeout is not an unreachable host, a
+        # file name is not a refused credential.
+        ("git rebase timed out after 600s for /x/wt/abc", None),
+        (
+            "untracked 403 forbidden.txt would be overwritten by the base branch; move it\n"
+            "git rebase could not start in /x/wt/abc, so nothing was rebased",
+            None,
+        ),
+        ("git worktree add timed out after 600s for /x/wt/abc", None),
         ("", None),
     ],
 )

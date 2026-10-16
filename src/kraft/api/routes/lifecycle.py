@@ -14,7 +14,17 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, item_paths, node_runs, start_queue, storage, store
+from kraft import (
+    caps,
+    escalate,
+    events,
+    executor,
+    item_paths,
+    node_runs,
+    start_queue,
+    storage,
+    store,
+)
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge.git import PUSHED_REFS
@@ -1147,12 +1157,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             new_base = (
                 None
                 if walk.rebases_itself(row, start)
-                else await builtins_mod.refresh_worktree_base(
-                    worktree,
-                    Path(row["repo"]),
-                    store.branch_for(row),
-                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
-                )
+                else await refresh_base(request, wid, row, start)
             )
         except builtins_mod.RebaseConflict as exc:
             # Handed to the walk, which gives it to the node's `on_conflict`
@@ -1234,6 +1239,58 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             "steer": steer,
             "steered": sorted(targets or {}),
         }
+
+
+_STOPPED_DURING_REFRESH = (
+    "the work item was stopped while its branch was being brought up to date; nothing was resumed"
+)
+
+
+async def refresh_base(request: Request, wid: str, row, node_id: str | None) -> str | None:
+    """`builtins_mod.refresh_worktree_base` for `wid`'s worktree, run as the
+    item's own task (`deps.run_stoppable`) under the tightest time cap its item
+    and node carry, so a pause, a cancel or a server stop ends the rebase
+    instead of waiting behind it, and a hung checkout filter cannot hold the
+    request forever. Answers 409 when the item was paused or ended meanwhile -- a stop
+    that landed between the claim and here is not a reason to rebase."""
+    st = request.app.state
+    repo = Path(row["repo"])
+    base = await builtins_mod.base_branch(st.db, wid, repo)
+    hit = st.db.read(lambda c: caps.for_turn(c, row, node_id)) if node_id else None
+    # A spent cap is the walk's to refuse, not a rebase that dies at once.
+    timeout = hit.remaining_s if hit is not None and hit.remaining_s > 0 else None
+
+    def active() -> None:
+        # Paused or ended: what pause, cancel and abandon write. Not any other
+        # status, so a stop the claim's own bracket wrote over a racing 409
+        # (and the resume then undoes) stays what it was.
+        status = deps._work_item_row(st, wid)["status"]
+        if status == WorkItemStatus.PAUSED or status in ENDED:
+            raise HTTPException(409, _STOPPED_DURING_REFRESH)
+
+    # No await between this read and the spawn: a stop from here on finds the task.
+    active()
+    try:
+        moved = await deps.run_stoppable(
+            request.app,
+            wid,
+            builtins_mod.refresh_worktree_base(
+                st.run_dirs.worktrees / wid,
+                repo,
+                store.branch_for(row),
+                base=base,
+                timeout=timeout,
+            ),
+            stopped=_STOPPED_DURING_REFRESH,
+        )
+    except RuntimeError:
+        # A conflict or a failure of an item stopped meanwhile is not the
+        # walk's to be handed.
+        active()
+        raise
+    # A stop that came after the rebase ended found no task to cancel.
+    active()
+    return moved
 
 
 # Design 4b, handoff spec §8.
@@ -1496,12 +1553,7 @@ async def _retry(wid: str, body: Retry, request: Request):
             new_base = (
                 None
                 if walk.rebases_itself(row, node_id)
-                else await builtins_mod.refresh_worktree_base(
-                    worktree,
-                    Path(row["repo"]),
-                    store.branch_for(row),
-                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
-                )
+                else await refresh_base(request, wid, row, node_id)
             )
         except builtins_mod.RebaseConflict as exc:
             # The retry still forks; the walk hands the conflict to the
