@@ -7,10 +7,10 @@ import type { ItemDetail } from "./useItem";
  *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
 export type FailedFix = "forge_login" | "retry" | "repo";
 
-export const causeOf = (item: ItemDetail): unknown => (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
+export const causeOf = (item: Pick<ItemDetail, "stop">): unknown => (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
 
 /** What the failed card offers besides Retry and Escalate (a forge task's failure carries its cause on a `failed` stop too). */
-export function failedFix(item: ItemDetail): FailedFix {
+export function failedFix(item: Pick<ItemDetail, "stop">): FailedFix {
   const cause = causeOf(item);
   if (cause === "forge_auth") return "forge_login";
   if (item.stop?.kind !== "infra" || cause === "stranded") return "retry";

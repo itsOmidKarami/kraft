@@ -1,5 +1,6 @@
-"""The console's half of `wording_cases.json`: the web's board wording, ported.
-`frontend/src/ng/board/wording.test.ts` runs the same cases against the web."""
+"""The console's half of `wording_cases.json`: the web's wording, ported.
+`frontend/src/ng/board/wording.test.ts` and `frontend/src/ng/item/wording.test.ts`
+run the same cases against the web."""
 
 from __future__ import annotations
 
@@ -37,3 +38,8 @@ def test_the_board_sorts_as_the_web_does():
 def test_a_time_reads_as_on_the_web(scale):
     said = getattr(words, scale)
     assert [said(iso, NOW) for iso, _ in CASES[scale]] == [want for _, want in CASES[scale]]
+
+
+@pytest.mark.parametrize("case", CASES["banners"], ids=[case["name"] for case in CASES["banners"]])
+def test_a_stop_banner_reads_as_on_the_web(case):
+    assert words.banner_of(case["item"]) == case["banner"]

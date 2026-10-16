@@ -219,3 +219,89 @@ def until(iso: str | None, now: float) -> str:
         return f"in {max(minutes, 1)}m"
     hours = minutes // 60
     return f"in {hours}h" if hours < 24 else f"in {hours // 24}d"
+
+
+#: `status.ts`: a budget stop the item could raise, but not now.
+RAISE_REFUSED = "Kraft takes no raise for it right now."
+#: `status.ts`: a budget stop the item cannot raise.
+NOT_RAISABLE = (
+    "The item can't raise this cap: the policy or the chain sets it. Retry once it is "
+    "raised there, or after local midnight for the daily cap."
+)
+#: `cause.tsx`: a refused forge credential, fixed where the server runs.
+FORGE_LOGIN_HINT = (
+    "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` "
+    "for GitLab. If git itself can't authenticate, check its credentials there too "
+    "(`gh auth setup-git`, your SSH key or credential helper). Then Retry."
+)
+#: `bannerWords.ts`: a failure the repo's settings can answer.
+REPO_FIX = "Check the repo settings."
+
+
+def _admits(item: dict, verb: str, rule: bool) -> bool:
+    """`admits`: the server's `actions` when it sends them (an empty list
+    too), else `rule`, for a server older than them."""
+    actions = item.get("actions")
+    return verb in actions if actions is not None else rule
+
+
+def _budget_raise(stop: dict) -> str | None:
+    """`budgetRaise`, from the stop: `limit`, `item`, or None."""
+    if stop.get("kind") != "budget":
+        return None
+    if stop.get("limit"):
+        return "limit"
+    return "item" if stop.get("scope") == "work_item" else None
+
+
+def _offers_raise(item: dict) -> bool:
+    """`offersRaise`: the item can raise the cap and the server admits the door."""
+    how = _budget_raise(item.get("stop") or {})
+    if how == "item":
+        return _admits(item, "raise_budget", True)
+    return _admits(item, "retry", True) if how == "limit" else False
+
+
+def _failed_fix(stop: dict) -> str:
+    """`failedFix`: `forge_login`, `retry` or `repo`."""
+    cause = (stop.get("facts") or {}).get("cause")
+    if cause == "forge_auth":
+        return "forge_login"
+    if stop.get("kind") != "infra" or cause == "stranded":
+        return "retry"
+    return "repo"
+
+
+def sentence(text: str) -> str:
+    """`sentence`: a capital first letter and one full stop."""
+    return text[:1].upper() + re.sub(r"\.*\Z", "", text[1:], count=1) + "."
+
+
+def banner_of(item: dict) -> dict | None:
+    """`bannerOf`: a failed or needs-you item's banner as `{kind, node, text,
+    way}` (`""` for none), or None for any other item."""
+    stop = item.get("stop")
+    if not stop or item.get("display_status") not in ("needs_you", "failed"):
+        return None
+    node = _or(stop.get("node"), "")
+    if item["display_status"] == "failed":
+        fix = _failed_fix(stop)
+        way = {"forge_login": FORGE_LOGIN_HINT, "repo": REPO_FIX}.get(fix, "")
+        return {"kind": "failed", "node": node, "text": _or(stop.get("reason"), ""), "way": way}
+    kind = stop.get("kind")
+    if kind == "gate":
+        return {"kind": "gate", "node": _or(item.get("pending_gate"), node), "text": "", "way": ""}
+    if kind == "question":
+        asked = _or(
+            item.get("needs_context_question"),
+            re.sub(r"^needs_context:\s*", "", _or(stop.get("reason"), "")),
+        )
+        return {"kind": "question", "node": node, "text": asked, "way": ""}
+    if kind in ("cap", "budget"):
+        default = "The budget ran out" if kind == "budget" else "A limit was reached"
+        text = sentence(_or(stop.get("reason"), default))
+        way = ""
+        if kind == "budget" and not _offers_raise(item):
+            way = RAISE_REFUSED if _budget_raise(stop) else NOT_RAISABLE
+        return {"kind": "limit", "node": node, "text": text, "way": way}
+    return {"kind": "stop", "node": node, "text": _or(stop.get("reason"), ""), "way": ""}
