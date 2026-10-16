@@ -308,6 +308,25 @@ Confirm, Note, Menu, Connect, NewItem {
     height: 1;
 }
 
+/* Unfocused titles and the mark are secondary text, readable on the dialog's surface. */
+#connect Input {
+    border-title-color: $kraft-muted;
+    border-title-background: $surface;
+}
+
+#connect Input:focus {
+    border-title-color: $foreground;
+}
+
+#connect Checkbox > .toggle--button {
+    color: $kraft-muted;
+    background: $surface;
+}
+
+#connect Checkbox.-on > .toggle--button {
+    color: $success;
+}
+
 #connect-said, #connect-library {
     color: $kraft-muted;
 }
