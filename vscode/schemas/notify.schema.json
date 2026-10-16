@@ -139,7 +139,8 @@
           "worker_session_paused",
           "worker_session_started",
           "worktree_prepared",
-          "worktree_rebase_verified"
+          "worktree_rebase_verified",
+          "worktree_refresh_skipped"
         ],
         "type": "string"
       },
