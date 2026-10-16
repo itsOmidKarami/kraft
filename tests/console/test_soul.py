@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 
@@ -31,30 +32,58 @@ from kraft.console.app import KraftConsole
 from kraft.console.screens import item as item_view
 
 
-def _seen(at: float) -> None:
-    moments.seen_path().parent.mkdir(parents=True, exist_ok=True)
-    moments.seen_path().write_text(json.dumps({"seen_at": at}))
+def _seen(said: dict | None) -> None:
+    if said is not None:
+        moments.seen_path().parent.mkdir(parents=True, exist_ok=True)
+        moments.seen_path().write_text(json.dumps(said))
 
 
 RECENT_DONE = DONE | {"id": "f1f1f1f1", "updated_at": _iso(5)}
+AGO = NOW - 20 * 60
 
 
 @pytest.mark.parametrize(
     ("seen", "rows", "said"),
     [
         (None, [GATE, RUNNING], None),
-        (NOW, [GATE, RUNNING], "nothing changed since {at}"),
-        (NOW - 20 * 60, [GATE, DONE, RUNNING], "since {at} · nothing finished · 1 needs you"),
-        (NOW - 20 * 60, [GATE, RECENT_DONE], "since {at} · 1 finished · 1 needs you"),
-        (NOW - 10 * 60, [GATE, RUNNING, DONE], "since {at} · nothing finished · nothing needs you"),
+        ({"seen_at": NOW}, [GATE, RUNNING], "nothing changed since {at}"),
+        ({"seen_at": AGO}, [GATE, DONE, RUNNING], "since {at} · nothing finished · 1 needs you"),
+        ({"seen_at": AGO}, [GATE, RECENT_DONE], "since {at} · 1 finished · 1 needs you"),
+        (
+            {"seen_at": NOW - 10 * 60},
+            [GATE, RUNNING, DONE],
+            "since {at} · nothing finished · nothing needs you",
+        ),
+        # In Done at the last quit (archived then), restored since: not finished.
+        (
+            {"seen_at": AGO, "done": [RECENT_DONE["id"]]},
+            [GATE, RECENT_DONE],
+            "since {at} · nothing finished · 1 needs you",
+        ),
+        # A file that does not say a time truthfully reads as a first run.
+        ({"seen_at": float("nan")}, [GATE, RUNNING], None),
+        ({"seen_at": 1e300}, [GATE, RUNNING], None),
+        ({"seen_at": NOW + 24 * 3600}, [GATE, RUNNING], None),
+        ({"seen_at": True}, [GATE, RUNNING], None),
     ],
-    ids=["first-run", "nothing-changed", "one-needs-you", "one-finished", "only-moved-on"],
+    ids=[
+        "first-run",
+        "nothing-changed",
+        "one-needs-you",
+        "one-finished",
+        "only-moved-on",
+        "restored-is-not-finished",
+        "corrupt-nan",
+        "corrupt-huge",
+        "in-the-future",
+        "not-a-number",
+    ],
 )
 def test_opening_says_what_moved_since_the_console_was_last_closed(board, seen, rows, said):
     """D1: counted from the rows whose last change came after the last quit;
-    never on a first run, and gone at the first key. Quitting notes when."""
-    if seen is not None:
-        _seen(seen)
+    never on a first run, and gone at the first key. Quitting notes when, and
+    what was in Done then."""
+    _seen(seen)
     console = board(rows)
 
     async def scenario(app, pilot):
@@ -66,9 +95,24 @@ def test_opening_says_what_moved_since_the_console_was_last_closed(board, seen, 
 
     left = time.time()
     shown, after_a_key = console.run(scenario)
-    assert shown == (said and said.format(at=moments._clock(seen, time.time())) or False)
+    at = said and moments._clock(seen["seen_at"], time.time())
+    assert shown == (said and said.format(at=at) or False)
     assert after_a_key is False
-    assert moments.read_seen() >= left
+    noted = moments.read_seen()
+    assert noted.at >= left
+    assert noted.done == {row["id"] for row in rows if row["display_status"] == "done"}
+
+
+def test_each_console_writes_the_seen_file_through_its_own_part_file(monkeypatch):
+    """Two consoles quitting at once must not write into one part file."""
+    moved = []
+    replace = moments.Path.replace
+    monkeypatch.setattr(
+        moments.Path, "replace", lambda self, to: moved.append(self.name) or replace(self, to)
+    )
+    moments.write_seen(NOW, [])
+    assert moved == [f"{moments.SEEN_FILE}.{os.getpid()}.part"]
+    assert moments.read_seen(now=NOW) == (NOW, frozenset())
 
 
 @pytest.mark.parametrize(
@@ -117,6 +161,7 @@ def test_approving_leads_with_the_mark_and_lights_where_the_item_went(board, mon
 MERGED = RUNNING | {"display_status": "done", "mr_ref": {"number": 42, "url": "u"}}
 COMPLETED = FILED | {"display_status": "done", "title": "Rename [/] it"}
 ARCHIVED = DONE | {"id": "a0a0a0a0", "display_status": "archived"}
+SHELLY = FILED | {"display_status": "done", "title": "Expand [$HOME] in paths"}
 START = [RUNNING, FILED, DONE, ARCHIVED]
 
 
@@ -125,6 +170,8 @@ START = [RUNNING, FILED, DONE, ARCHIVED]
     [
         ([[MERGED, FILED, DONE, ARCHIVED]], ["✓ merged !42 · Docs per major"]),
         ([[RUNNING, COMPLETED, DONE, ARCHIVED]], ["✓ completed · Rename [/] it"]),
+        # Every `[` escaped: `[$HOME]` is a variable to toast markup.
+        ([[RUNNING, SHELLY, DONE, ARCHIVED]], ["✓ completed · Expand [$HOME] in paths"]),
         ([[MERGED, COMPLETED, DONE, ARCHIVED]], ["✓ 2 finished"]),
         ([[RUNNING | {"display_status": "cancelled"}, FILED, DONE, ARCHIVED]], []),
         ([[RUNNING, FILED, DONE, ARCHIVED | {"display_status": "done"}]], []),
@@ -137,6 +184,7 @@ START = [RUNNING, FILED, DONE, ARCHIVED]
     ids=[
         "merged",
         "completed",
+        "a-title-with-a-variable",
         "many-collapse",
         "cancelled-is-not-finishing",
         "restored-is-not-finishing",
@@ -204,6 +252,33 @@ def test_the_quit_line_is_printed_only_after_a_clean_quit(
     with pytest.raises(SystemExit):
         cli.main(["console"])
     assert capsys.readouterr().out == printed
+
+
+class _Gone:
+    """A terminal that went away (an SSH drop): every write fails."""
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        raise BrokenPipeError
+
+    def flush(self) -> None:
+        raise BrokenPipeError
+
+
+def test_a_terminal_gone_at_quit_leaves_the_exit_code_alone(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("sys.stdout", _Gone())
+    monkeypatch.setattr(client, "health", lambda: asyncio.sleep(0, {}))
+
+    def run(self):
+        self.farewell, self._return_code = "kraft console · 2 need you", 0
+
+    monkeypatch.setattr(KraftConsole, "run", run)
+    with pytest.raises(SystemExit) as left:
+        cli.main(["console"])
+    assert left.value.code == 0
 
 
 def test_a_console_that_never_read_the_board_notes_nothing(console, monkeypatch):

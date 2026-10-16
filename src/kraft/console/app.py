@@ -195,8 +195,8 @@ class KraftConsole(App):
         self.live = Live(
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
-        #: When the console was last closed (`moments.read_seen`); None the first time.
-        self.seen_at = moments.read_seen()
+        #: The console's last quit (`moments.read_seen`); None the first time.
+        self.seen = moments.read_seen()
         #: Whether the board has been read once: the moments speak only after it.
         self._read_once = False
         #: The items a finished toast has named: each is named once.
@@ -392,7 +392,7 @@ class KraftConsole(App):
         if self.command is not None:
             await self.command.end()
         if self._read_once:  # a console that never read the board saw nothing
-            moments.write_seen(time.time())
+            moments.write_seen(time.time(), self.rows)
             self.farewell = moments.leaving(self._in_scope(self.rows))
 
     async def on_event(self, event: events.Event) -> None:
@@ -412,7 +412,7 @@ class KraftConsole(App):
     def _since_on(self) -> None:
         """Opening (D1): after the first read, if the console was here before,
         what moved meanwhile, for `SINCE_S` or until a key."""
-        if self.seen_at is not None:
+        if self.seen is not None:
             self.default_screen.add_class("-since")
             self.set_timer(moments.SINCE_S, self._since_off)
 
@@ -420,8 +420,8 @@ class KraftConsole(App):
         self.default_screen.remove_class("-since")
 
     def _draw_since(self) -> None:
-        if self.seen_at is not None and self.default_screen.has_class("-since"):
-            line = moments.since_line(self._in_scope(self.rows), self.seen_at, time.time())
+        if self.seen is not None and self.default_screen.has_class("-since"):
+            line = moments.since_line(self._in_scope(self.rows), self.seen, time.time())
             self.query_one("#since", Static).update(Content.styled(line, "$kraft-muted"))
 
     def action_prompt(self) -> None:
@@ -698,6 +698,8 @@ def main() -> None:
     app = KraftConsole()
     app.run()
     if not app.return_code and app.farewell:
-        # Leaving (D4): one plain line stays in the terminal, never on an error.
-        print(app.farewell)
+        # Leaving (D4): one plain line stays in the terminal, never on an error;
+        # a terminal already gone (an SSH drop) must not change the exit code.
+        with contextlib.suppress(OSError):
+            print(app.farewell, flush=True)
     raise SystemExit(app.return_code or 0)

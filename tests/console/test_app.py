@@ -16,10 +16,10 @@ from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
+from kraft.console import acts, live
 from kraft.console import app as console_app
-from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
-from kraft.console.dialogs import Confirm, Keys, Note
+from kraft.console.dialogs import EVERYWHERE, Confirm, Keys, Note
 from kraft.console.live import Link
 from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
@@ -391,14 +391,26 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
 def test_no_key_does_two_things_on_one_view(name):
     """Spec §6: no key means two things on one view, and no upper and lower
     pair (`R` and `r`) shares one. `R,shift+r` is one binding: kitty's name
-    for the same key. One action under several words (`p`'s pause, resume
-    and answer, `acts.P_KEYS`) is one thing: its parameters are not compared."""
+    for the same key. `p`'s three words (pause, resume, answer: `acts.P_KEYS`)
+    are one thing; any other binding's parameters still count."""
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
             key = binding.key.removeprefix("shift+").lower()
-            actions.setdefault(key, set()).add(binding.action.partition("(")[0])
+            one = "pause_or_resume" if binding in acts.P_KEYS else binding.action
+            actions.setdefault(key, set()).add(one)
     assert {key: found for key, found in actions.items() if len(found) > 1} == {}
+
+
+def test_question_marks_everywhere_lists_every_key_the_frame_binds():
+    """`dialogs.EVERYWHERE` is written by hand: a new frame key must be added
+    there too, or `?` never shows it."""
+    listed = {key for keys, _ in EVERYWHERE for key in keys.split()}
+    bound = {
+        KraftConsole().get_key_display(binding)
+        for binding in Binding.make_bindings(KraftConsole.BINDINGS)
+    }
+    assert bound <= listed
 
 
 @pytest.mark.parametrize(

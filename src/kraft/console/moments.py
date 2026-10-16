@@ -7,10 +7,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
-
-from textual.markup import escape
+from typing import NamedTuple
 
 from kraft.console import words
 from kraft.paths import default_run_dir
@@ -24,30 +24,58 @@ SINCE_S = 60.0
 DONE_MARK = "[$success]✓[/]"
 
 
+def escape(text: str) -> str:
+    """`text` drawn as written in toast markup: every `[`, not only those
+    Textual's `escape` takes for a tag (`[$HOME]` is a variable to it). A
+    backslash needs nothing: toast markup reads only `\\[`."""
+    return text.replace("[", r"\[")
+
+
 def seen_path() -> Path:
     """`console-seen.json` in the run directory the console's server uses, as
     `kraft admin start` resolves it."""
     return Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()) / SEEN_FILE
 
 
-def read_seen() -> float | None:
-    """When the console was last closed, in seconds since the epoch; None the
-    first time, or for a file that does not say."""
+class Seen(NamedTuple):
+    """The last quit: when, and the items in Done then."""
+
+    at: float
+    done: frozenset[str]
+
+
+def read_seen(now: float | None = None) -> Seen | None:
+    """The console's last quit; None the first time, or for a file that does
+    not say it truthfully: a time that is no number, out of range, or after
+    `now` (the clock moved back) reads as a first run."""
     try:
-        seen = json.loads(seen_path().read_text())["seen_at"]
-    except (OSError, ValueError, KeyError, TypeError):
+        said = json.loads(seen_path().read_text())
+        at, done = said["seen_at"], said.get("done") or []
+        if isinstance(at, bool) or not isinstance(at, int | float):
+            return None
+        datetime.fromtimestamp(at)  # NaN and the absurd raise here, not when drawn
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
         return None
-    return float(seen) if isinstance(seen, int | float) else None
+    if at > (time.time() if now is None else now):
+        return None
+    return Seen(
+        float(at),
+        frozenset(i for i in done if isinstance(i, str)) if isinstance(done, list) else frozenset(),
+    )
 
 
-def write_seen(now: float) -> None:
-    """Note `now` as when the console was last closed. A run directory that
-    cannot take it loses only the next since line, never the quit."""
+def write_seen(now: float, rows: list[dict]) -> None:
+    """Note `now` as when the console was last closed, and the items in Done
+    then (archived ones too), so one restored later is not read as finished.
+    A run directory that cannot take it loses only the next since line,
+    never the quit. Each console writes its own part file: two quitting at
+    once must not write into one."""
     path = seen_path()
+    done = sorted(row["id"] for row in rows if words.group_of(row) == "done")
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
-        part = path.with_suffix(".part")
-        part.write_text(json.dumps({"seen_at": now}))
+        part = path.with_name(f"{path.name}.{os.getpid()}.part")
+        part.write_text(json.dumps({"seen_at": now, "done": done}))
         part.replace(path)
 
 
@@ -58,20 +86,20 @@ def _clock(seen: float, now: float) -> str:
 
 
 def _changed_since(row: dict, seen: float) -> bool:
-    try:
-        return datetime.fromisoformat(row.get("updated_at") or "").timestamp() > seen
-    except ValueError:
-        return False
+    return (words._seconds(row.get("updated_at")) or 0) > seen
 
 
-def since_line(rows: list[dict], seen: float, now: float) -> str:
+def since_line(rows: list[dict], seen: Seen, now: float) -> str:
     """Opening (D1): what moved while the console was closed, from the rows
-    whose last change came after `seen`: those done, and those that need you."""
-    after = [r for r in rows if r.get("display_status") != "archived" and _changed_since(r, seen)]
-    at = _clock(seen, now)
+    whose last change came after the last quit: those that finished (done
+    now, and not in Done then: a restored one is not), and those that need you."""
+    after = [
+        r for r in rows if r.get("display_status") != "archived" and _changed_since(r, seen.at)
+    ]
+    at = _clock(seen.at, now)
     if not after:
         return f"nothing changed since {at}"
-    finished = sum(r.get("display_status") == "done" for r in after)
+    finished = sum(r.get("display_status") == "done" and r["id"] not in seen.done for r in after)
     needs = sum(words.group_of(r) == "needs" for r in after)
     parts = [
         f"{finished} finished" if finished else "nothing finished",
