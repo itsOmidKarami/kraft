@@ -12,6 +12,11 @@ links:
     to: /get-started/install
     color: primary
     size: lg
+  - label: Try the demo
+    to: https://kraft-sdlc.dev/demo/
+    variant: outline
+    color: neutral
+    size: lg
   - label: View on GitHub
     to: https://github.com/itsOmidKarami/kraft
     variant: outline

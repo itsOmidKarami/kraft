@@ -20,6 +20,9 @@
 # tag's nuxt.config.ts (so its canonical, og:url and sitemap URLs name that
 # origin, not kraft-sdlc.dev), and a noindex tag added here after the build.
 # CONTRIBUTING.md, "Versions of the docs", has the rest.
+#
+# The dashboard demo (frontend/demo/) goes beside them at /demo/, built from
+# this checkout: one copy, not one per version. Needs frontend/node_modules too.
 set -euo pipefail
 
 OUT=${1:?usage: dev/build_docs_site.sh OUT_DIR}
@@ -40,9 +43,15 @@ generate() { # DOCSITE_DIR ID BASE DEST
   cp -RL "$1/.output/public/." "$4/"
 }
 
+# The web UI on its mocked API, as static files (frontend/demo/main.ts).
+build_demo() { # DEST
+  (cd "$ROOT/frontend" && KRAFT_DEMO_BASE=/demo/ npx vite build --mode demo --outDir "$1" --emptyOutDir </dev/null)
+}
+
 if [ -z "$PLAN" ]; then
   echo "::warning::no stable vX.Y.Z tag; building main alone at /"
   generate "$ROOT/docsite" "" / "$OUT"
+  build_demo "$OUT/demo"
   exit 0
 fi
 
@@ -117,3 +126,7 @@ while read -r id base tag <&3; do
   fi
   echo "built $id ($tag) at $dest in $((SECONDS - started))s"
 done 3<<<"$PLAN"
+
+started=$SECONDS
+build_demo "$OUT/demo"
+echo "built the dashboard demo at $OUT/demo in $((SECONDS - started))s"

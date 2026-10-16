@@ -99,6 +99,13 @@ const missingPage = `<style>
 </main>
 </div>`
 
+// The dashboard demo at /demo/ is a single-page app with no file for most of
+// its addresses (/demo/work-items/<id>), so a reload or a shared link there gets
+// this 404.html. It sends such an address back to the demo's own page as ?to=,
+// which frontend/demo/shim.ts's restoreAddress puts back before the router
+// reads it. Before anything else in the head, so the 404 never paints.
+const demoReturn = `<script>(function(l){var b='/demo/';if(l.pathname.indexOf(b)===0&&l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash))})(location)</script>`
+
 // A browser breaks a line after a space or a hyphen and after nothing else in
 // `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
 // (and the phone contents bar's) was cut inside a word ("approv" / "e": 267
@@ -244,6 +251,7 @@ export default defineNuxtConfig({
         if (moved) route.contents = forwardingPage(...moved)
         if (route.route === '/404.html' && typeof route.contents === 'string') {
           route.contents = route.contents.replace(/(<div id="__nuxt"[^>]*>)<\/div>/, (_, open) => `${open}${missingPage}</div>`)
+          route.contents = route.contents.replace(/<head[^>]*>/, head => `${head}${demoReturn}`)
           // The shell's <head> gets its title and the <html> its language from
           // the app, which a reader without JavaScript never runs.
           if (!/<title>/.test(route.contents)) route.contents = route.contents.replace('</head>', '<title>No page at this address - Kraft</title></head>')
