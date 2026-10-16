@@ -567,10 +567,16 @@ def test_the_title_names_the_view_the_item_was_opened_from(board, monkeypatch):
     assert console.run(scenario) == "Server › k7f2e9a0  Docs per major"
 
 
-def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
+@pytest.mark.parametrize(
+    "late",
+    [_detail(GATE), client.status_error(404, "gone"), client.status_error(409, "first refused")],
+    ids=["answers", "gone", "refused"],
+)
+def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch, late):
     """Ctrl+P from an open item lands while its live read is in flight: the
     answer for the old item must not draw its header or open `a` for its gate,
-    even when the new item's own read fails."""
+    even when the new item's own read fails; nor, when it is an error, say
+    the new item is gone or toast the old item's refusal."""
     other = GATE | {"id": "b2b2b2b2", "title": "Second", "pending_gate": "plan_review"}
     calls: list[tuple] = []
     _serve(monkeypatch, _detail(other), calls=calls)
@@ -583,12 +589,16 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
             if work_item_id == GATE["id"]:
                 asked.set()
                 await release.wait()
-                return _detail(GATE)
+                if isinstance(late, client.ClientError):
+                    raise late
+                return late
             if broken:
                 raise client.status_error(500, "down")
             return _detail(other)
 
         monkeypatch.setattr(client, "get_work_item", get_work_item)
+        refused, toast = [], app.notify_refusal
+        monkeypatch.setattr(app, "notify_refusal", lambda e: (refused.append(str(e)), toast(e)))
         await _settled(console, app, pilot)
         app.open_item(GATE["id"])
         await console.until(pilot, asked.is_set)
@@ -596,7 +606,12 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
         release.set()
         await _read_done(console, app, pilot)
         await pilot.pause()
-        stale = (_text(app, "#item-title"), app.view.check_action("approve", ()))
+        stale = (
+            _text(app, "#item-title"),
+            app.view.check_action("approve", ()),
+            app.query_one("#item-gone").display,
+            [said for said in refused if "first" in said],
+        )
         broken.clear()
         app.view.rows_changed([], [])
         await console.until(pilot, lambda: app.view.item is not None and _overview(app))
@@ -605,7 +620,7 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
         return stale, _text(app, "#item-title"), calls
 
     stale, title, sent = console.run(scenario)
-    assert stale == ("Board › b2b2b2b2", False)
+    assert stale == ("Board › b2b2b2b2", False, False, [])
     assert title == "Board › b2b2b2b2  Second"
     assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st"), {})]
 
