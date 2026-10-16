@@ -10,17 +10,21 @@ from functools import partial
 from typing import ClassVar
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.widgets import ContentSwitcher, RichLog, Static
 
 from kraft import answers, client, logs, render
 from kraft.console import acts, words
-from kraft.console.dialogs import Menu, Note, Reject, reject_asks
+from kraft.console.dialogs import Reject, reject_asks
+from kraft.console.pulse import Working, spins
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
+from kraft.console.screens.item_menu import MenuActions
+from kraft.console.words import status_words, usd
 
 #: The Item's tabs, in `[` and `]` order, with their names.
 TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"), ("diff", "Diff"))
@@ -42,22 +46,6 @@ DIFF_STYLE = (
     ("-", "error"),
     ("@@", "kraft-info"),
 )
-#: The `m` menu (spec §6): each entry's door (`actions`), in the web's order
-#: of the header's menu, and its label. Only open doors are listed.
-MENU = (
-    ("skip", "Skip"),
-    ("unblock", "Unblock"),
-    ("raise_budget", "Raise budget…"),
-    ("escalate", "Escalate…"),
-    ("complete", "Complete…"),
-    ("cancel", "Cancel item…"),
-    ("archive", "Archive…"),
-)
-#: What each of the menu's dialogs asks.
-SKIP = "A note for the record, or Enter for none."
-ESCALATE = "What the agent should look into: it gets the item's stop and this."
-REASON = "Why: the reason goes in the run log."
-RAISE = "The new cap in dollars, or none for no cap. It must be above what the item has spent."
 #: How long the node an approve moved the item to stays lit.
 LIT_S = 1.5
 #: A failed item's Overview, after its keys: where to read what happened.
@@ -66,42 +54,7 @@ LOG_POINTER = "The Log tab holds the session it failed in."
 MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
 
 
-def usd(amount: float) -> str:
-    """`format.ts`'s `usd`: cents from a dollar up, a tenth of a cent below."""
-    return f"${amount:.2f}" if amount >= 1 else f"${amount:.3f}"
-
-
-def status_words(item: dict) -> str:
-    """The header's status, as the web's badge says it (`headerState`), in
-    sentence case: an item filed paused and never started is "Not started"."""
-    if item.get("display_status") == "paused" and not item.get("current_node_id"):
-        return "Not started"
-    return (item.get("display_status") or "running").replace("_", " ", 1).capitalize()
-
-
-def cancel_lines(preview: dict) -> list[str]:
-    """What cancelling does, in the web's Cancel card words (`CancelCard`,
-    `stopsNow`), from `client.cancel_preview`."""
-    run = preview.get("running")
-    if run:
-        name = words.task_name(run["task"]) if run.get("task") else run.get("node")
-        attempt = f"attempt {run['attempt']}" if run.get("attempt") else ""
-        stops = f"{', '.join(p for p in (name, attempt) if p)}. That attempt's work is lost."
-    else:
-        stops = "Nothing is running."
-    kept = preview.get("kept") or {}
-    findings = f"{kept['findings']} findings" if kept.get("findings") else "findings"
-    threads = f"{kept['threads']} threads" if kept.get("threads") else "threads"
-    spent = (preview.get("spend") or {}).get("spent_usd") or 0
-    return [
-        f"Stops now: {stops}",
-        f"Keeps: branch {kept.get('branch')}, the worktree until it is archived, "
-        f"{findings}, {threads} and the run log.",
-        f"Spend: {usd(spent)} stays on the ledger and in today's total.",
-    ]
-
-
-class Item(View):
+class Item(MenuActions, View):
     label = "Item"
     BINDINGS: ClassVar[list[BindingType]] = [
         # Long content scrolls by keys: the view keeps the focus (spec §6).
@@ -111,8 +64,14 @@ class Item(View):
         Binding("pageup", "scroll('page_up')", "page up", show=False),
         Binding("home", "scroll('home')", "top", show=False),
         Binding("end", "scroll('end')", "end", show=False),
-        Binding("left_square_bracket", "tab(-1)", "tab"),
-        Binding("right_square_bracket", "tab(1)", "tab", show=False),
+        # Arrows and Tab are what people try first; the brackets stay. One
+        # footer entry (←'s); →'s blank key_display keeps `?` from listing it twice.
+        Binding("left", "tab(-1)", "tabs", key_display="←→"),
+        Binding("right", "tab(1)", "tabs", show=False, key_display=" "),
+        Binding("left_square_bracket", "tab(-1)", "tabs", show=False),
+        Binding("right_square_bracket", "tab(1)", "tabs", show=False),
+        Binding("shift+tab", "tab(-1)", "tabs", show=False),
+        Binding("tab", "tab(1)", "tabs", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
         *acts.P_KEYS,
@@ -150,15 +109,17 @@ class Item(View):
         self._lit = False
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="item-top"):
-            yield Static(id="item-title")
-            yield Static(id="item-where")
-        with Horizontal(id="item-state"):
-            yield Static(id="item-status")
-            yield Static(id="item-spent")
-        yield Static(id="item-banner")
-        yield Static(id="item-chain")
-        yield Static(id="item-tabs")
+        with Vertical(id="item-head"):
+            with Horizontal(id="item-top"):
+                yield Static(id="item-title")
+                yield Static(id="item-where")
+            with Horizontal(id="item-state"):
+                yield Static(id="item-status")
+                yield Static(id="item-spent")
+            yield Working(id="item-work")
+            yield Static(id="item-banner")
+            yield Static(id="item-chain")
+            yield Static(id="item-tabs")
         with ContentSwitcher(initial=self.tab, id="item-panes"):
             # Focus stays with the view, which scrolls these by its keys.
             overview = RichLog(id="overview", wrap=True, min_width=1)
@@ -177,6 +138,8 @@ class Item(View):
 
     def on_mount(self) -> None:
         self.query_one("#item-gone").display = False
+        # The tabs' keys, on the panel's edge beside them.
+        self.query_one("#item-head").border_subtitle = "← → tabs"
 
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
@@ -198,6 +161,7 @@ class Item(View):
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
             self.query_one(part, Static).update("")
         self.query_one("#item-banner").display = False
+        self.query_one("#item-work", Working).show_item(None)
         for pane in self.query("#item-panes > RichLog").results(RichLog):
             pane.clear()
         self.show_tab(TABS[0][0])
@@ -317,12 +281,10 @@ class Item(View):
         )
         now = time.time()
         colour = bar_of(item)
+        # A running item's working line says where it is, with its time and spend.
+        where = "" if spins(item) else f" · {words.reason_tail(item, now)}"
         self.query_one("#item-status", Static).update(
-            Content.assemble(
-                ("● ", colour),
-                (status_words(item), colour),
-                (f" · {words.reason_tail(item, now)}", "$kraft-muted"),
-            )
+            Content.assemble(("● ", colour), (status_words(item), colour), (where, "$kraft-muted"))
         )
         cap = item.get("budget_cap") or {}
         money = ""
@@ -331,6 +293,7 @@ class Item(View):
             money = f"{usd(cap['spent_usd'])}{of} · "
         age = words.ago(item.get("updated_at"), now).removesuffix(" ago")
         self.query_one("#item-spent", Static).update(Content.styled(money + age, "$kraft-muted"))
+        self.query_one("#item-work", Working).show_item(item)
         said = words.banner_line(item)
         banner = self.query_one("#item-banner", Static)
         banner.display = said is not None
@@ -343,7 +306,10 @@ class Item(View):
         # The frame's width: this view fills it, and may not be laid out yet.
         if self.item is not None:
             marks = words.chain_marks(self.item)
-            line = chain_line(marks, self.app.size.width - 2, lit=self._lit)
+            chain = self.query_one("#item-chain")
+            # Inside the header's panel: its own width once laid out.
+            width = chain.content_region.width or self.app.size.width - 4
+            line = chain_line(marks, width, lit=self._lit)
             self.query_one("#item-chain", Static).update(line)
 
     def _light(self) -> None:
@@ -364,7 +330,9 @@ class Item(View):
     def _draw_tabs(self) -> None:
         parts: list[str | tuple[str, str]] = []
         for key, name in TABS:
-            parts += [(f" {name} ", "bold $primary" if key == self.tab else "$kraft-muted"), " "]
+            # The tab shown is a pill in the accent, as the top line's view is.
+            pill = "bold $background on $kraft-accent" if key == self.tab else "$kraft-muted"
+            parts += [(f" {name} ", pill), " "]
         self.query_one("#item-tabs", Static).update(Content.assemble(*parts))
 
     async def _overview(self, item: dict) -> None:
@@ -404,8 +372,8 @@ class Item(View):
         lines.append(Text("Chain", style=f"bold {muted}"))
         styles = {
             "done": muted,
-            "current": f"bold {self.app.theme_variables['primary']}",
-            "hot": f"bold {self.app.theme_variables['primary']}",
+            "current": f"bold {self.app.theme_variables['kraft-accent']}",
+            "hot": f"bold {self.app.theme_variables['kraft-accent']}",
             "todo": "",
         }
         for mark in words.chain_marks(item):
@@ -422,14 +390,11 @@ class Item(View):
         """Where an item with no gate pending stands, and the way on: an
         agent's question whole, the keys that move it on (`acts.way_on`, the
         peek's own sentences), and for a failed one where its session is. A
-        stop's reason is the banner's, not repeated here."""
+        stop's reason is the banner's and the status line's, not repeated here."""
         banner = words.banner_of(item)
-        if banner is None:
-            said = [words.reason_tail(item, time.time())]
-        elif banner["kind"] == "question":
-            said = ["The agent asks:", banner["text"]]
-        else:
-            said = []
+        # No banner: the header's status line already says where it stands.
+        asks = banner is not None and banner["kind"] == "question"
+        said = ["The agent asks:", banner["text"]] if banner and asks else []
         way = acts.way_on(item)
         if item.get("display_status") == "failed" and item.get("worker_sessions"):
             way.append(LOG_POINTER)
@@ -624,6 +589,17 @@ class Item(View):
             self.run_worker(self._activity_older, group="older", exclusive=True)
         getattr(self._pane(), f"scroll_{how}")(animate=False)
 
+    def on_click(self, event: events.Click) -> None:
+        """A click on a tab's name opens it."""
+        if event.widget is None or event.widget.id != "item-tabs":
+            return
+        start = 0
+        for key, name in TABS:
+            start += len(name) + 3  # " Name " and the space after it
+            if event.x < start:
+                self.show_tab(key)
+                return
+
     def action_tab(self, step: int) -> None:
         keys = [key for key, _ in TABS]
         self.show_tab(keys[(keys.index(self.tab) + step) % len(keys)])
@@ -673,98 +649,6 @@ class Item(View):
             nodes=before,
             to=to,
         )
-
-    def _menu_entries(self) -> list[tuple[str, str]]:
-        doors = (self.item or {}).get("actions") or []
-        return [(door, label) for door, label in MENU if door in doors]
-
-    def action_menu(self) -> None:
-        if item := self.item:
-            self.run_worker(partial(self._menu, item), group="act")
-
-    async def _menu(self, item: dict) -> None:
-        """Pick an entry, then ask what it needs and send it, each in the
-        CLI's own sentence: the same `acts.act` the keys use."""
-        title = " ".join((item.get("title") or "").split())
-        name = await self.app.push_screen_wait(
-            Menu(f"{item['id'][:8]}  {title}", self._menu_entries())
-        )
-        # The menu was modal: the Item may have moved on or gone meanwhile.
-        if name is not None and self.work_item_id == item["id"] and not self._dead:
-            await getattr(self, f"_{name}")(item)
-
-    async def _ask(self, question: str, lines: list[str], *, required: bool) -> str | None:
-        return await self.app.push_screen_wait(Note(question, lines, required=required))
-
-    async def _skip(self, item: dict) -> None:
-        what = item.get("pending_gate") or item.get("current_node_id") or "the current node"
-        note = await self._ask(f"Skip {what} on {item['id'][:8]}", [SKIP], required=False)
-        if note is not None:
-            said = answers.item_action(answers.skipped(what))
-            await acts.act(self.app, client.skip(note or None, item["id"]), said)
-
-    async def _unblock(self, item: dict) -> None:
-        await acts.act(self.app, client.unblock(item["id"]), answers.unblocked)
-
-    async def _escalate(self, item: dict) -> None:
-        message = await self._ask(f"Escalate {item['id'][:8]}", [ESCALATE], required=True)
-        if message:
-            said = answers.item_action(answers.ESCALATED, small=answers.escalated)
-            await acts.act(self.app, client.escalate(message, item["id"]), said)
-
-    async def _complete(self, item: dict) -> None:
-        reason = await self._ask(f"Complete {item['id'][:8]}", [REASON], required=True)
-        if reason:
-            said = answers.item_action(answers.COMPLETED, status=False)
-            await acts.act(self.app, client.complete(reason, item["id"]), said)
-
-    async def _cancel(self, item: dict) -> None:
-        """The confirm is the reason's dialog (spec §7.8): what cancelling stops
-        and keeps, from `cancel_preview`, above the required reason."""
-        try:
-            preview = await client.cancel_preview(item["id"])
-        except client.ClientError as exc:
-            self.app.notify_refusal(exc)
-            self.app.live.reread()
-            return
-        lines = [*cancel_lines(preview), "", REASON]
-        reason = await self._ask(f"Cancel {item['id'][:8]}?", lines, required=True)
-        if reason:
-            said = answers.item_action(answers.CANCELLED, status=False)
-            await acts.act(self.app, client.cancel(reason, item["id"]), said)
-
-    async def _archive(self, item: dict) -> None:
-        """Through the CLI (spec §4.2): its preview, its refusals and its
-        result in the output panel, after the console's confirm (spec §7.8)."""
-        await self.app.run_asking(["item", "archive", item["id"], "--yes"])
-
-    async def _raise_budget(self, item: dict) -> None:
-        """Spec §7.2: a cap at or below what was spent is the server's 422,
-        said in the dialog, which asks again; a cap raised whose retry was
-        refused is said in the server's words, which say both."""
-        error = ""
-        while True:
-            typed = await self.app.push_screen_wait(
-                Note(f"Raise the budget of {item['id'][:8]}", [RAISE], required=True, error=error)
-            )
-            if typed is None:
-                return
-            try:
-                usd_ = answers.dollars(typed)
-            except ValueError as exc:
-                error = str(exc)
-                continue
-            try:
-                result = await client.raise_budget(usd_, item["id"])
-            except client.ClientError as exc:
-                if exc.status == 422:
-                    error = client.reason_of(str(exc))
-                    continue
-                self.app.notify_refusal(exc)
-                self.app.live.reread()
-                return
-            self.app.notify(answers.raised_budget(usd_)(result), markup=False)
-            return
 
     def action_pause_or_resume(self, _word: str = "") -> None:
         if item := self.item:

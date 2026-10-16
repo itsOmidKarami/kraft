@@ -89,7 +89,7 @@ def acme(console, tmp_path, monkeypatch):
 
 #: What Add-ons says with no collection: what they are, and the key.
 EMPTY = (
-    "Add-ons\n\nAn add-on is a directory of chains, library components, skills and agent "
+    "An add-on is a directory of chains, library components, skills and agent "
     "profiles. A collection is a git repository or a directory that lists add-ons.\n\n"
     "m adds a collection."
 )

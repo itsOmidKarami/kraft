@@ -50,7 +50,7 @@ RELEASE = {"installed": "2.4.0", "latest": "v2.5.0", "behind": True}
 UP_TO_DATE = {"installed": "2.4.0", "latest": "v2.4.0", "behind": False}
 FEED_DOWN = client.ClientError("the release feed did not answer", kind=client.Failure.UNREACHABLE)
 OK_LINES = [
-    "Server ● ok · v2.4.0 (2.5.0 available) · up 3h 12m · pid 4120 · 127.0.0.1:8765",
+    "● ok · v2.4.0 (2.5.0 available) · up 3h 12m · pid 4120 · 127.0.0.1:8765",
     "Config  templates ✓  policy ✓  intake ✓  ·  Index  ready",
     "Storage  3.1G of 20G  ·  Add-ons  1 update waiting",
 ]
@@ -90,7 +90,7 @@ def _reading_release(app) -> bool:
             [DEGRADED],
             [FEED_DOWN],
             [
-                "Server ● degraded · v2.4.0 (2.5.0 installed, R finishes it) · up 59s"
+                "● degraded · v2.4.0 (2.5.0 installed, R finishes it) · up 59s"
                 " · pid 4120 · 127.0.0.1:8765",
                 "Config  templates ✗  policy ✗  intake ✓  ·  Index  not installed",
                 "Storage  not limited  ·  Add-ons  none waiting",
@@ -309,7 +309,7 @@ def test_a_hidden_server_draws_nothing(console, monkeypatch):
         hidden = _text(app, "#server-summary")
         await pilot.press("2")
         await pilot.pause()
-        return hidden, _text(app, "#server-summary").startswith("Server ● ok")
+        return hidden, _text(app, "#server-summary").startswith("● ok")
 
     assert console.run(scenario) == ("", True)
 
@@ -337,7 +337,7 @@ def test_the_log_follows_until_scrolled_up_and_end_follows_again(console, monkey
         await pilot.press("2")
         await console.until(pilot, lambda: _log(app)[-1:] == ["line 59 [/]"])
         log = app.query_one("#server-log", RichLog)
-        following = _text(app, "#server-rule")
+        following = app.query_one("#server-rule").title.plain
         await pilot.press("pageup")
         await console.until(pilot, lambda: "End follows" in _text(app, "#server-rule"))
         held_at = log.scroll_y
@@ -391,7 +391,7 @@ def test_f_filters_the_log_and_esc_brings_every_line_back(console, monkeypatch):
         await console.until(pilot, lambda: len(_log(app)) == 4)
         await pilot.press("f", *"error")
         await console.until(pilot, lambda: len(_log(app)) == 2)
-        filtered, rule = _log(app), _text(app, "#server-rule")
+        filtered, rule = _log(app), app.query_one("#server-rule").title.plain
         _write("error late", "fine late")
         await console.until(pilot, lambda: "fine late" in app.view.lines)
         late = _log(app)

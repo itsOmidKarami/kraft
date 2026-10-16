@@ -3,12 +3,18 @@ recalling, Esc out, and what a typed line does once Enter sends it."""
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
+from support.console_board import FAILED, GATE, _settled
+from textual.widgets import Input
+from textual.widgets._footer import FooterKey
 
 from kraft import client
-from kraft.console import runner
+from kraft.console import app as console_app
+from kraft.console import prompt, runner
 from kraft.console.dialogs import Confirm
-from kraft.console.prompt import Prompt, complete
+from kraft.console.prompt import Prompt, complete, for_item
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
 
@@ -98,7 +104,7 @@ def test_slash_tab_up_and_esc_at_the_prompt(console):
 @pytest.mark.parametrize("server", [True, False], ids=["live", "no-server"])
 def test_the_prompt_stays_just_above_the_footer(console, monkeypatch, server):
     """With no server the views give way to a short message, and the prompt
-    must not ride up under it."""
+    must not ride up under it: it keeps its place over the status line."""
     if not server:
 
         async def gone(**kwargs):
@@ -110,7 +116,7 @@ def test_the_prompt_stays_just_above_the_footer(console, monkeypatch, server):
         await pilot.pause()
         return app.query_one(Prompt).region.y
 
-    assert console.run(scenario) == 22
+    assert console.run(scenario) == 21
 
 
 @pytest.mark.parametrize(
@@ -186,3 +192,135 @@ def test_a_busy_console_does_not_ask_first(console, kraft_is):
         False,
         ["A command is still running: Ctrl+O shows it, x stops it."],
     )
+
+
+def test_the_footer_names_the_prompts_own_keys(console):
+    """With the prompt focused the footer is not blank: it says how to leave,
+    complete and recall."""
+
+    async def scenario(app, pilot):
+        await pilot.press("slash")
+        await pilot.pause()
+        return [(k.key_display, k.description) for k in app.query(FooterKey)]
+
+    footer = console.run(scenario)
+    assert {("esc", "leave"), ("tab", "complete"), ("↑", "previous")} <= set(footer)
+
+
+@pytest.mark.parametrize(
+    ("argv", "sent"),
+    [
+        (["item", "pause"], ["item", "pause", "W"]),
+        (["item", "reject", "--note", "why"], ["item", "reject", "W", "--note", "why"]),
+        (["item", "review", "approve"], ["item", "review", "W", "approve"]),
+        (["item", "mr-label", "bug"], ["item", "mr-label", "--id", "W", "bug"]),
+        (["item", "archive", "--yes"], ["item", "archive", "W", "--yes"]),
+        (["item", "progress", "3"], ["item", "progress", "3", "W"]),
+        (["item", "pause", "a91c"], ["item", "pause", "a91c"]),
+        (["item", "review", "X", "approve"], ["item", "review", "X", "approve"]),
+        (["item", "archive", "A", "B"], ["item", "archive", "A", "B"]),
+        (["item", "review"], ["item", "review"]),
+        (["item", "create", "a title"], ["item", "create", "a title"]),
+        (["item", "reply", "T1", "--body", "ok"], ["item", "reply", "T1", "--body", "ok"]),
+        (["view", "show"], ["view", "show"]),
+        (["item"], ["item"]),
+    ],
+    ids=[
+        "positional",
+        "before-flags",
+        "before-a-second-positional",
+        "id-option",
+        "ids-list",
+        "after-a-first-positional",
+        "id-typed",
+        "id-typed-before-outcome",
+        "ids-typed",
+        "malformed-left-to-the-cli",
+        "files-a-new-one",
+        "thread-not-item",
+        "not-item",
+        "bare",
+    ],
+)
+def test_an_item_verb_typed_on_an_item_takes_that_item(argv, sent):
+    """By the argument that holds the item, its `id` positional, `--id` or
+    `ids`, wherever the CLI reads it, and only when none was typed."""
+    assert for_item(argv, "W") == (sent, None)
+
+
+def test_an_item_verb_with_no_id_to_take_is_refused_on_an_item(monkeypatch):
+    """It would act on the worktree the console was opened in, which is not
+    the item on screen: never silently."""
+    parser = argparse.ArgumentParser()
+    verbs = parser.add_subparsers().add_parser("item").add_subparsers()
+    verbs.add_parser("frob").add_argument("--hard", action="store_true")
+    monkeypatch.setattr(prompt, "_parser", lambda: parser)
+    assert for_item(["item", "frob"], "W") == (
+        ["item", "frob"],
+        prompt.NEEDS_ID.format(verb="frob"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("view", "placeholder"),
+    [
+        ("board", "a approve · r reject · /command…"),
+        ("item", "/item … for this item, or esc"),
+        ("server", "/command…"),
+        ("repos", "/command…"),
+    ],
+    ids=["board", "item", "server", "repos"],
+)
+def test_the_prompts_hint_says_what_this_screen_takes(board, view, placeholder):
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        if view == "item":
+            app.open_item(GATE["id"])
+        else:
+            app.show(view)
+        await pilot.pause()
+        return app.query_one(Prompt).placeholder
+
+    assert console.run(scenario) == placeholder
+
+
+@pytest.mark.parametrize(
+    "moved", [False, True], ids=["on-the-item", "item-changed-before-the-worker"]
+)
+def test_a_typed_item_verb_on_the_item_page_runs_on_that_item(board, kraft_is, moved):
+    """The item on screen when Enter was pressed, though another opens before
+    the command starts."""
+    kraft_is(ECHO)
+    console = board([GATE, FAILED])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.open_item(GATE["id"])
+        await pilot.pause()
+        app._typed(Input.Submitted(app.query_one(Prompt), "/item pause"))
+        if moved:
+            app.open_item(FAILED["id"])
+        await console.until(pilot, lambda: len(console.output(app)) >= 2)
+        await console.until(pilot, lambda: app.command is None)
+        return console.output(app)[:2]
+
+    assert console.run(scenario) == [f"kraft item pause {GATE['id']}", f"item pause {GATE['id']}"]
+
+
+def test_a_refused_item_verb_runs_nothing_and_says_why(board, kraft_is, monkeypatch):
+    kraft_is(ECHO)
+    monkeypatch.setattr(prompt, "for_item", lambda argv, wid: (argv, "Type the item's id."))
+    monkeypatch.setattr(console_app, "for_item", prompt.for_item)
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.open_item(GATE["id"])
+        await pilot.pause()
+        app._typed(Input.Submitted(app.query_one(Prompt), "/item pause"))
+        await console.until(pilot, lambda: app.screen.query("Toast"))
+        return [str(t.render()) for t in app.screen.query("Toast")], console.output(app)
+
+    assert console.run(scenario, notifications=True) == (["Type the item's id."], [])

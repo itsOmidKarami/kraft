@@ -12,15 +12,16 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.content import Content
-from textual.widgets import OptionList, Static
+from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from kraft import client, render
 from kraft.console.dialogs import Connect
 from kraft.console.screens import View
 
-#: The list's heading: what it lists, and the key that adds to it.
-HEAD = Content.assemble(("Connected repos", "$kraft-muted"), (" · c connects one", "$kraft-faint"))
+#: The panel's title, what it lists; its subtitle, the key that adds to it.
+TITLE = "Connected repos"
+ADDS = "c connects one"
 #: The list with nothing connected.
 EMPTY = "No repo is connected yet."
 
@@ -67,10 +68,13 @@ class Repos(View):
         self.repos: list[dict] = []
 
     def compose(self) -> ComposeResult:
-        yield Static(HEAD, id="repos-head")
         rows = OptionList(id="repo-rows", markup=False)
         rows.can_focus = False
         yield rows
+
+    def on_mount(self) -> None:
+        self.add_class("panel")
+        self.border_title, self.border_subtitle = TITLE, ADDS
 
     @property
     def selected(self) -> dict | None:

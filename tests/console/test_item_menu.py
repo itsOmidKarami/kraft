@@ -10,9 +10,9 @@ from textual.widgets import OptionList
 
 from kraft import client
 from kraft.console.dialogs import Confirm, Menu, Note
-from kraft.console.screens import item as item_view
+from kraft.console.screens import item_menu
 
-DOORS = ["retry", *(door for door, _ in item_view.MENU)]
+DOORS = ["retry", *(door for door, _ in item_menu.MENU)]
 ITEM = FAILED | {"title": "Tidy [/] up", "actions": DOORS}
 PREVIEW = {
     "running": {"node": "verification", "task": "verification.review.code_review", "attempt": 2},
@@ -187,7 +187,7 @@ def test_cancel_says_what_it_stops_and_keeps_above_its_reason(board, monkeypatch
         "the run log.",
         "Spend: $0.420 stays on the ledger and in today's total.",
         "",
-        item_view.REASON,
+        item_menu.REASON,
     ]
 
 
@@ -345,7 +345,7 @@ def test_a_cancel_preview_that_fails_says_so_and_reads_the_item_again(board, mon
 )
 def test_cancel_lines_join_what_runs_as_the_web_does(running, stops):
     """`stopsNow` joins the parts it has with ", ": no leading comma."""
-    lines = item_view.cancel_lines(PREVIEW | {"running": running})
+    lines = item_menu.cancel_lines(PREVIEW | {"running": running})
     assert lines[0] == f"Stops now: {stops}"
 
 

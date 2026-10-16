@@ -19,6 +19,7 @@ from textual.widgets import Input, RichLog, Static
 
 from kraft import answers, client, render
 from kraft.console import tail, words
+from kraft.console.panels import Rule
 from kraft.console.screens import View
 
 #: Lines of `server.log` kept, for the pane and for the filter to search.
@@ -114,7 +115,6 @@ def summary(health: dict, release: dict | None, *, answered: bool = True) -> Con
         *(f"index error: {error}" for error in index.get("errors") or []),
     ]
     return Content.assemble(
-        ("Server ", "bold"),
         (f"● {status}", dot),
         f" · {' · '.join(head)}\n",
         ("Config  ", "$kraft-muted"),
@@ -166,7 +166,7 @@ class Server(View):
 
     def compose(self) -> ComposeResult:
         yield Static(id="server-summary")
-        yield Static(id="server-rule")
+        yield Rule(id="server-rule")
         yield Input(placeholder="filter server.log · Esc clears", id="server-filter")
         # Focus stays with the view, which scrolls the log by its keys.
         log = RichLog(id="server-log", wrap=True, min_width=1, max_lines=MAX_LINES)
@@ -174,6 +174,8 @@ class Server(View):
         yield log
 
     def on_mount(self) -> None:
+        self.add_class("panel")
+        self.border_title = "Server"
         self.query_one("#server-filter").display = False
         # The rule says whether the log follows: whenever it scrolls, by key, wheel or write.
         self.watch(self.query_one("#server-log", RichLog), "scroll_y", self._draw_rule, init=False)
@@ -232,7 +234,7 @@ class Server(View):
         state = FOLLOWING if log.is_vertical_scroll_end else HELD
         text = self.filter_text.strip()
         shown = f" · filter: {text}" if text else ""
-        self.query_one("#server-rule", Static).update(
+        self.query_one("#server-rule", Rule).show(
             Content.styled(f"server.log{shown} · {state}", "$kraft-muted")
         )
 

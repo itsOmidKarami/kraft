@@ -613,3 +613,15 @@ async def storage_usage() -> dict:
     (`GET /storage`). Answers from the last measurement; measures first when
     there is none."""
     return await transport._get("/storage")
+
+
+async def budget_today() -> dict:
+    """The instance's spend since local midnight and the daily cap
+    (`GET /budget/today`): `{spent_usd, cap_usd}`, the cap None when there is none."""
+    return await transport._get("/budget/today")
+
+
+async def harness_status() -> list[dict]:
+    """Each harness provider, with whether its CLI is on the server's PATH
+    (`GET /harnesses`, `executable_found`)."""
+    return await transport._get("/harnesses")

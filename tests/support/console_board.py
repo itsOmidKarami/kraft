@@ -84,7 +84,11 @@ def _text(app, selector: str) -> str:
 
 
 def _lines(app) -> list[str]:
-    return [option.prompt.plain for option in app.query_one("#rows", OptionList).options]
+    """The Board's options, each its first line: the cursor's row opens a
+    second, and the panel's edges are no rows of their own."""
+    options = app.query_one("#rows", OptionList).options
+    edges = ("group:end", "group:top")
+    return [o.prompt.plain.split("\n")[0] for o in options if o.id not in edges]
 
 
 def _ids(app) -> list[str]:

@@ -28,8 +28,6 @@ from kraft.console.screens.server import held
 #: The list with no collection added: what add-ons are, in the reference
 #: page's words (`12.addons.md`), and the key that adds one.
 EMPTY = Content.assemble(
-    ("Add-ons", "bold"),
-    "\n\n",
     (
         "An add-on is a directory of chains, library components, skills and agent "
         "profiles. A collection is a git repository or a directory that lists add-ons.",
@@ -165,6 +163,10 @@ class Addons(View):
         self.taking = False
         #: Why the last read was refused, drawn until a read succeeds.
         self.refused: str | None = None
+
+    def on_mount(self) -> None:
+        self.add_class("panel")
+        self.border_title = "Add-ons"
 
     def compose(self) -> ComposeResult:
         rows = OptionList(id="addon-rows", markup=False)
