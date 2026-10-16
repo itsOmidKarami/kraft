@@ -205,6 +205,12 @@ Confirm, Note, Menu, Connect, NewItem {
     color: $kraft-muted;
 }
 
+/* A listing past this many rows scrolls: the buttons stay in sight. */
+#confirm-scroll {
+    height: auto;
+    max-height: 12;
+}
+
 #note Input {
     margin-top: 1;
 }
