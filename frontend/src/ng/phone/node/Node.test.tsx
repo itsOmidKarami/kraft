@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -286,6 +286,17 @@ describe("the node screen (D)", () => {
     expect(screen.getByText(/grep cache/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "stdout" }));
     expect(screen.getByText("No lines to show. Clear the filter, or the node has not started.")).toBeInTheDocument();
+  });
+
+  it("names the reject target on a gate's overview button and its config's on-failure fact, not its id", async () => {
+    const nodes = detail().chain_definition.nodes.map((n) => (n.id === "plan_approval" ? { ...n, reject_to: "merge_request" } : n));
+    const over = { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], chain_definition: { template_id: "default", nodes } };
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), over), "/work-items/w1/nodes/plan_approval");
+    expect((await screen.findAllByRole("button", { name: "merge request" })).length).toBeGreaterThan(0);
+    expect(screen.queryByText("merge_request")).toBeNull();
+    cleanup();
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), over), "/work-items/w1/nodes/plan_approval?tab=config");
+    expect(await screen.findByText("reject to merge request")).toBeInTheDocument();
   });
 
   it("a gate shows its review path with the reject target, never an invented verdict", async () => {

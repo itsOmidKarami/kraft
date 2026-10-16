@@ -48,6 +48,7 @@
 .ng-side-brand { font-weight: 600; font-size: var(--fs-meta); }
 .ng-side-live { font-size: var(--fs-meta); }
 .ng-side-live.ok, .ng-side-live-dot.ok { color: var(--ok); }
+.ng-side-live.neutral, .ng-side-live-dot.neutral { color: var(--text-muted); }
 .ng-side-live.bad, .ng-side-live-dot.bad { color: var(--bad); }
 .ng-side-live-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .ng-side-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; display: flex; flex-direction: column; }

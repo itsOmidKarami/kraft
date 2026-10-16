@@ -212,13 +212,14 @@ describe("ng Sidebar", () => {
   });
 
   it.each([
-    ["open", "live"],
-    ["connecting", "connecting…"],
-    ["reconnecting", "reconnecting…"],
-  ])("says %s as %s", (connection, word) => {
+    ["open", "live", "ok"],
+    ["connecting", "connecting…", "neutral"],
+    ["reconnecting", "reconnecting…", "bad"],
+  ])("says %s as %s", (connection, word, tone) => {
     useStore.setState({ connection } as never);
     mount();
     expect(screen.getByText(word)).toBeInTheDocument();
+    expect(screen.getByText(word)).toHaveClass(tone);
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
   });
 

@@ -146,6 +146,15 @@ describe("a fix-loop node", () => {
     expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["✓Attempt 2failed · 5s", "Attempt 1failed · 4m"]);
   });
 
+  it("names the nodes a frozen node's Config rows point at, not their ids", async () => {
+    const named = nodes.map((n) => (n.id === "verification" ? { ...n, reject_to: "merge_request", rebase_bounce_to: "merge_request" } : n));
+    mount("/work-items/w1/nodes/verification", detail({ chain_definition: { template_id: "default", nodes: named }, materialized_chain: LOOPED, worker_sessions: run() }));
+    const config = screen.queryByRole("tab", { name: /config/i });
+    if (config) await userEvent.click(config);
+    expect(within(pane("verification")).getByText("reject to").nextElementSibling).toHaveTextContent(/^merge request$/);
+    expect(within(pane("verification")).getByText("rebase back to").nextElementSibling).toHaveTextContent(/^merge request$/);
+  });
+
   it("says 'round 2 of 3' in the node's own fix loop row", () => {
     mount("/work-items/w1/nodes/verification");
     expect(within(pane("verification")).getByText("fix loop").nextElementSibling).toHaveTextContent("round 2 of 3");
