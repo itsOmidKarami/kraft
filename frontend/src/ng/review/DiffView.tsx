@@ -11,6 +11,7 @@ import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
 import { languageOf } from "./tokenize";
 import { tip } from "../ui/Tooltip";
+import { Empty } from "../ui/Empty";
 
 /** A picked range of one file's lines. `anchor` is where the pick started,
  *  `head` where it ends now; Shift moves only the head. Both are on `side`,
@@ -81,7 +82,7 @@ export function DiffView(p: DiffViewProps) {
     if (!p.selected || p.prefs.one_file_at_a_time) return;
     col.current?.querySelector(`[data-file="${CSS.escape(p.selected)}"]`)?.scrollIntoView?.({ block: "start" });
   }, [p.selected, p.prefs.one_file_at_a_time]);
-  if (!p.files.length) return <p className="rv-empty">No files match this comparison.</p>;
+  if (!p.files.length) return <Empty variant="block">No files match this comparison.</Empty>;
   return (
     <div ref={col} className={`rv-files${p.prefs.wrap_lines || p.prefs.layout === "split" ? " is-wrap" : ""}`} data-colours={p.prefs.colours}>
       {shown.map((f) => {
@@ -89,9 +90,9 @@ export function DiffView(p: DiffViewProps) {
         return pf ? <FileBlock key={f.path} file={f} pf={pf} {...p} /> : null;
       })}
       {p.truncated && (
-        <p className="rv-empty">
+        <Empty variant="block">
           The diff stops at {Math.round(p.truncated.bytes / 1024)} KB ({p.truncated.files} {p.truncated.files === 1 ? "file" : "files"} not shown). The rest is in the worktree.
-        </p>
+        </Empty>
       )}
     </div>
   );

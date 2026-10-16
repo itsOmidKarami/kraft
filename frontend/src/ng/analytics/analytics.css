@@ -3,7 +3,7 @@
 .an-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 .an-scope { font-size: var(--fs-label); color: var(--text-muted); }
 .an-error { margin: 0; font-size: var(--fs-label); color: var(--bad); }
-.an-empty { margin: 0; padding: 14px 0; font-size: var(--fs-label); color: var(--text-muted); }
+.an-empty.empty { padding: 14px 0; }
 .an-section { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .an-section-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; }
 .an-section h2 { margin: 0; font-size: var(--fs-h2); font-weight: 500; color: var(--text); }

@@ -32,6 +32,7 @@ import { countIn } from "./counts";
 import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
 import { LinkButton } from "../ui/LinkButton";
+import { Empty } from "../ui/Empty";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -336,7 +337,7 @@ export function BoardPage() {
             {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.length === 0 ? (
               filtered
                 ? <NoMatch className="board-empty board-empty-solo" query={query.q} onClear={() => setQuery({ q: "", repo: "", chain: "", gate: "", stop: "" })} />
-                : <p className="board-empty board-empty-solo">No work items yet.</p>
+                : <Empty className="board-empty board-empty-solo">No work items yet.</Empty>
             ) : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">

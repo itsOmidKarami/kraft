@@ -7,6 +7,7 @@ import { authoredNodes, changeAt, kindOf, nodeGlyph, problemsAt, type NodeA } fr
 import { SeamMenu } from "./menus/SeamMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
+import { Empty } from "../ui/Empty";
 
 type Props = {
   scope: Scope;
@@ -117,7 +118,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
           setMenu(at);
         }}
       />
-      {!nodes.length && !readOnly && <p className="tpl-empty-chain">Add the first node with +</p>}
+      {!nodes.length && !readOnly && <Empty className="tpl-empty-chain">Add the first node with +</Empty>}
       {strip && <p className={`tpl-strip${strip.ok ? "" : " is-bad"}`} role="status">{strip.text}</p>}
       {menu !== null && (
         <SeamMenu

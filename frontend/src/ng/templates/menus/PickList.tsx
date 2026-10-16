@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { focusSoon } from "./focus";
+import { Empty } from "../../ui/Empty";
 
 export type Pick = { key: string; label: string; sub?: string; icon?: ReactNode };
 
@@ -31,7 +32,7 @@ export function PickList({ items, placeholder, empty, onPick, autoFocus = true }
             <span><span className="picklist-name">{i.label}</span>{i.sub && <span className="picklist-sub">{i.sub}</span>}</span>
           </button>
         ))}
-        {!shown.length && <p className="picklist-empty">{empty}</p>}
+        {!shown.length && <Empty className="picklist-empty">{empty}</Empty>}
       </div>
     </div>
   );

@@ -21,7 +21,7 @@
 .hn-row-meta[data-access="override"] { color: var(--text); }
 .hn-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
 .hn-add { margin-top: 6px; color: var(--text-sub); }
-.hn-empty { margin: 8px 6px; font-size: var(--fs-label); color: var(--text-muted); }
+.hn-empty.empty { margin: 8px 6px; }
 
 /* The canvas and its lanes: 520px each, the canvas scrolls. */
 .hn-stage { position: relative; flex: 1; min-width: 0; }
