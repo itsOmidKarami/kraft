@@ -3,7 +3,7 @@ import { buildScenario, type ItemBundle, type Scenario } from "../e2e/contract/m
 import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { ngDryRun } from "../e2e/contract/mocks/ngBoard";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
-import { displayStatus, transitions, type Ev, type Transitions } from "../e2e/contract/mocks/transitions";
+import { displayStatus, escalationThreads, transitions, type Ev, type Transitions } from "../e2e/contract/mocks/transitions";
 
 /** The mock's item transitions (transitions.ts): what each door changes, the events it appends, the words it refuses in. */
 
@@ -29,6 +29,14 @@ describe("displayStatus", () => {
   ])("%s", (_name, item, shown) => {
     expect(displayStatus(item)).toBe(shown);
   });
+
+  it("agrees with every sample item's own badge, and every sample's threads are its sessions'", () => {
+    const S = buildScenario("default");
+    const off = Object.values(S.bundles).filter((b) => b.item.display_status !== displayStatus(b.item)).map((b) => `${b.item.id} ${b.item.status} ${b.item.display_status}`);
+    expect(off).toEqual([]);
+    const escalated = S.bundles[S.ng.escalated];
+    expect([escalated.item.display_status, escalated.item.escalation_threads]).toEqual(["escalated", escalationThreads(escalated.sessions)]);
+  });
 });
 
 /** An event a door appends: its type, the payload fields it carries, and the node it is filed under. */
@@ -45,13 +53,30 @@ describe("transitions", () => {
   it.each<[string, string, Act, Record<string, unknown>, Want[]]>([
     ["approve clears the gate and runs on", "needs-gate", (T, id) => T.approve(id, "final_review"), { status: "active", display_status: "running", pending_gate: null, stop: null },
       [["gate_approved", { gate: "final_review", by: "human" }, "final_review"], ["node_completed", { node_id: "final_review" }, "final_review"]]],
-    ["reject goes back to the gate's reject_to", "needs-gate", (T, id) => T.reject(id, "final_review", "too vague"), { status: "active", display_status: "running", pending_gate: null, current_node_id: "implementation" },
+    ["reject goes back to the gate's reject_to", "needs-gate", (T, id) => T.reject(id, "final_review", "too vague"), { status: "active", display_status: "running", pending_gate: null, current_node_id: "implementation", attempts: [] },
       [["gate_rejected", { gate: "final_review", note: "too vague", node: "implementation", by: "human", verdict: "reject" }, "implementation"]]],
     ["reject with no reject_to goes back to the exec node before the gate", "needs-gate", noRejectTo, { status: "active", current_node_id: "summary" },
       [["gate_rejected", { node: "summary" }, "summary"]]],
     ["pause stops the node's running session", "running", (T, id) => T.pause(id), { status: "paused", display_status: "paused" },
       [["pause_requested", { sessions: [expect.any(String)] }, null], ["worker_session_paused", { session_id: expect.any(String) }, null]]],
-    ["resume runs a paused item again", "paused", (T, id) => T.resume(id), { status: "active", display_status: "running" }, [["work_item_resumed", { steer: null }, null]]],
+    ["resume runs a paused item again, its steer taken", "paused", (T, id, b) => ((b.item.pending_steer_context = "look at the race"), T.resume(id)), { status: "active", display_status: "running", current_node_id: "verification", pending_steer_context: null },
+      [["work_item_resumed", { steer: null }, null]]],
+    ["resume starts a never-started item at its first node", "kraft-f5d3", (T, id) => T.resume(id), { status: "active", display_status: "running", current_node_id: "spec" }, [["work_item_resumed", { steer: null }, null]]],
+    ["resume honours a queued rewind, its note carried with the steer", "paused", (T, id) => (T.requestChanges(id, "implementation", "redo the cache"), T.resume(id, "and bound it")), { status: "active", current_node_id: "implementation" },
+      [["rewind_requested", { target: "implementation", note: "redo the cache" }, "implementation"], ["work_item_resumed", { steer: "redo the cache\n\nand bound it" }, null]]],
+    ["retry honours a pending rewind", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }, "implementation"), T.retry(id)), { status: "active", current_node_id: "implementation" },
+      [["rewind_requested"], ["work_item_retried", { node_id: "implementation", steer: "redo it" }, "implementation"]]],
+    ["a cancelled rewind is not honoured", "failed", (T, id) => (T.append(id, "rewind_requested", { review_id: "r1", target: "implementation", note: "redo it" }), T.append(id, "rewind_cancelled", { review_id: "r1" }), T.retry(id)), { current_node_id: "merge_request" },
+      [["rewind_requested"], ["rewind_cancelled"], ["work_item_retried", { node_id: "merge_request", steer: null }]]],
+    ["escalate, retry, pause and resume: the retry stops the turn", "failed", (T, id) => (T.escalate(id, "look"), T.retry(id), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
+      [["escalation_message"], ["worker_session_paused"], ["work_item_retried"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
+    ["escalate at a gate, approve, pause and resume: the approval stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.approve(id, "final_review"), T.pause(id), T.resume(id)), { status: "active", display_status: "running", escalation_threads: [expect.objectContaining({ status: "paused" })] },
+      [["escalation_message"], ["pause_requested", { sessions: [expect.any(String)] }], ["worker_session_paused"], ["gate_approved"], ["node_completed"], ["pause_requested", { sessions: [] }], ["work_item_resumed"]]],
+    ["escalate at a gate, then reject: the rejection stops the turn", "needs-gate", (T, id) => (T.escalate(id, "look"), T.reject(id, "final_review", "no")), { status: "active", escalation_threads: [expect.objectContaining({ status: "paused" })] },
+      [["escalation_message"], ["pause_requested"], ["worker_session_paused"], ["gate_rejected"]]],
+    ["a thread no session stands for holds nothing up, and goes", "paused", (T, id, b) => ((b.item.escalation_threads = [{ thread: 1, session_id: "f".repeat(32), turns: 1, status: "running", ended_at: null }]), T.resume(id)), { status: "active", escalation_threads: [] },
+      [["work_item_resumed"]]],
+    ["abandon twice reclaims again with no second event", "failed", (T, id) => (T.abandon(id), T.abandon(id)), { status: "abandoned" }, [["work_item_abandoned", {}, null]]],
     ["retry runs a stopped item on its node", "failed", (T, id) => T.retry(id, "use the new token"), { status: "active", display_status: "running", stop: null, current_node_id: "merge_request" },
       [["work_item_retried", { node_id: "merge_request", steer: "use the new token", escalated: false }, "merge_request"]]],
     ["skip passes the node it stands on", "failed", (T, id) => T.skip(id, "merge_request", "opened by hand"), { status: "active", display_status: "running", stop: null },
@@ -180,6 +205,7 @@ describe("refusals", () => {
     ["escalate, no message", "failed", (T, id) => T.escalate(id, " "), 400, "message is required"],
     ["escalate, a turn already running", "failed", (T, id) => T.escalate(id, "two"), 409, "an escalation turn (SESSION) is already running", escalated],
     ["stop escalation, no turn running", "failed", (T, id) => T.stopEscalation(id), 409, "no escalation turn is running"],
+    ["stop escalation, after a cancel stopped the turn", "failed", (T, id) => T.stopEscalation(id), 409, "no escalation turn is running", { first: (T, id) => void (T.escalate(id, "one"), T.end(id, "cancel", "dup")) }],
     ["stop escalation, a turn already stopped", "failed", (T, id) => T.stopEscalation(id), 409, "no escalation turn is running", { first: (T, id) => void (T.escalate(id, "one"), T.stopEscalation(id)) }],
     ["patch, an empty title", "running", (T, id) => T.patch(id, { title: " " }), 422, "title cannot be empty"],
     ["patch, nothing to patch", "running", (T, id) => T.patch(id, {}), 422, "nothing to patch: send a title, description, chain, agent_overrides, node_overrides, policy, attachments, or budget_usd"],
@@ -260,18 +286,18 @@ describe("the list and the detail", () => {
 
 describe("the review doors", () => {
   it.each([
-    ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "review_submitted"]],
-    ["a running item at the target reruns it", "kraft-91bc", "verification", "rerun", "active", ["rewind_requested", "pause_requested", "worker_session_paused", "work_item_resumed", "review_submitted"]],
-    ["a paused item waits for it", "kraft-4e19", "implementation", "queued", "paused", ["rewind_requested", "review_submitted"]],
-  ])("with no gate pending, request changes: %s", async (_name, bead, node, action, status, types) => {
+    ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "review_submitted"], "implementation"],
+    ["a running item at the target reruns it", "kraft-91bc", "verification", "rerun", "active", ["rewind_requested", "pause_requested", "worker_session_paused", "work_item_resumed", "review_submitted"], "verification"],
+    ["a paused item waits for it", "kraft-4e19", "implementation", "queued", "paused", ["rewind_requested", "review_submitted"], "verification"],
+  ])("with no gate pending, request changes: %s", async (_name, bead, node, action, status, types, at) => {
     const { S, call } = server();
     const id = idOf(S, bead);
     const had = S.bundles[id].events.length;
     const r = await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", summary: "redo the cache", node });
     expect(r.body).toMatchObject({ outcome: "request_changes", gate: null, target: node, action });
     const added = S.bundles[id].events.slice(had);
-    expect([S.bundles[id].item.status, added.map((e) => e.type)]).toEqual([status, types]);
-    expect(added[0].payload).toEqual({ review_id: "r2", target: node, note: "redo the cache" });
+    expect([S.bundles[id].item.status, S.bundles[id].item.current_node_id, added.map((e) => e.type)]).toEqual([status, at, types]);
+    expect([added[0].payload, added[0].node_id]).toEqual([{ review_id: "r2", target: node, note: "redo the cache" }, node]);
   });
 
   it("a comment publishes the drafts, the gate staying open", async () => {
@@ -307,11 +333,13 @@ describe("a created item", () => {
     const before = (await call("GET", "/work-items")).body.items.length;
     const body = { title: "Cache embeddings by hash", description: "Bound it.", repo: "/Users/dev/code/kraft-api", chain_template: "docs_only", attachments: [{ kind: "spec", path: "/tmp/spec.md" }], autostart };
     const made = await call("POST", "/work-items", body);
-    expect(made).toEqual({ status: 201, body: { id: expect.stringMatching(/^[0-9a-f]{32}$/), status, bead_id: null } });
     const id = made.body.id;
+    expect(made).toEqual({ status: 201, body: autostart
+      ? { id: expect.stringMatching(/^[0-9a-f]{32}$/), bead_id: null, status, chain_definition: expect.objectContaining({ template_id: "docs_only" }), materialized_chain: expect.any(String), current_node_id: "implementation" }
+      : { id: expect.stringMatching(/^[0-9a-f]{32}$/), status } });
     const list = (await call("GET", "/work-items")).body.items;
     expect(list.length).toBe(before + 1);
-    expect(list.at(-1)).toMatchObject({ id, title: "Cache embeddings by hash", repo: "/Users/dev/code/kraft-api", chain_template: "docs_only", status, display_status: shown, current_node_id: null });
+    expect(list.at(-1)).toMatchObject({ id, title: "Cache embeddings by hash", repo: "/Users/dev/code/kraft-api", chain_template: "docs_only", status, display_status: shown, current_node_id: autostart ? "implementation" : null });
     const detail = (await call("GET", `/work-items/${id}`)).body;
     // The chain the composer's dry run showed: docs_only, less what the spec covers.
     const nodes = (ngDryRun(body).body as { nodes: { id: string }[] }).nodes.map((n) => n.id);
@@ -366,5 +394,13 @@ describe("onEvent", () => {
     await call("POST", `/work-items/${id}/pause`);
     expect(told).toEqual(S.bundles[id].events.slice(had));
     expect(told.map((e) => e.type)).toEqual(["pause_requested", "worker_session_paused"]);
+  });
+
+  it("the list's cursor is the newest seq, so a socket opened after an action does not replay it", async () => {
+    const { S, call, told } = server();
+    const before = (await call("GET", "/work-items")).body.cursor;
+    await call("POST", `/work-items/${idOf(S, "kraft-91bc")}/pause`);
+    const after = (await call("GET", "/work-items")).body.cursor;
+    expect([after, after - before]).toEqual([told.at(-1)!.seq, told.length]);
   });
 });

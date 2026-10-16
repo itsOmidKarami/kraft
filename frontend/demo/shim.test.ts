@@ -139,9 +139,13 @@ describe("patchWebSocket", () => {
 describe("broadcast", () => {
   it.each([
     ["an open socket gets the event", "open", ['{"seq":4243,"type":"pause_requested"}']],
-    ["a socket still connecting gets nothing", "connecting", []],
+    ["a socket still connecting when the frame is sent gets nothing", "connecting", []],
     ["a closed socket gets nothing", "closed", []],
+    ["a socket closing gets nothing", "closing", []],
   ])("%s", async (_, state, want) => {
+    const send = () => broadcast({ seq: 4243, type: "pause_requested" });
+    // Connecting: made after the send, so it opens before the frame is delivered, and still was not open when it was sent.
+    if (state === "connecting") send();
     const ws = new DemoSocket("ws://localhost/api/ws/events");
     const got: string[] = [];
     ws.onmessage = (e) => got.push(e.data);
@@ -151,8 +155,31 @@ describe("broadcast", () => {
       ws.close();
       await closed;
     }
-    broadcast({ seq: 4243, type: "pause_requested" });
+    if (state === "closing") ws.close();
+    if (state !== "connecting") send();
+    // A frame arrives on a later task, never inside the call that sent it.
+    expect(got).toEqual([]);
+    await new Promise((r) => setTimeout(r, 0));
     expect(got).toEqual(want);
+    ws.close();
+  });
+
+  it("answers the action before any frame, and a listener that throws harms neither", async () => {
+    const S = buildScenario("default");
+    const serve = mockServer(S, { ngBoard: true, onEvent: broadcast });
+    const id = S.ngBoard.find((x) => S.bundles[x].item.bead_id === "kraft-91bc")!;
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    await new Promise((r) => (ws.onopen = r));
+    const order: string[] = [];
+    ws.onmessage = (e) => { order.push(JSON.parse(e.data).type); throw new Error("a listener broke"); };
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = (await serve({ method: "POST", url: `http://localhost/api/work-items/${id}/pause`, json: () => ({}) })) as { status: number };
+    order.push(`answer ${r.status}`);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(order).toEqual(["answer 200", "pause_requested", "worker_session_paused"]);
+    expect([S.bundles[id].item.status, S.bundles[id].events.slice(-2).map((e) => e.type)]).toEqual(["paused", ["pause_requested", "worker_session_paused"]]);
+    expect(logged).toHaveBeenCalledTimes(2);
+    logged.mockRestore();
     ws.close();
   });
 

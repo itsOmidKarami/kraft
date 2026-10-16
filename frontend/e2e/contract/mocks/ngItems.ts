@@ -158,11 +158,15 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
 
   switch (sc) {
     case "running": case "escalated": case "paused": case "cancelled": case "waiting-ci": {
-      verificationAt(sc === "paused" ? "paused" : "running");
+      verificationAt(sc === "paused" ? "paused" : sc === "escalated" ? "done" : "running");
       if (sc === "escalated") {
-        const e = sess("implementation.escalation.escalation", "done", { node_id: "implementation", hook_point: "escalation" });
-        ev("escalation_message", { session_id: e.id, node_id: "implementation", thread: 1, turn: 1, message: "The attached spec says LRU, 50k entries. Answered and resumed." }, 1);
-        item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 1, started_at: t(m - 2), ended_at: t(m), status: "done" }];
+        // Stuck on verification, an escalation agent's turn running on it: what `display_status` calls escalated.
+        ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: "The fix loop made no progress in 2 rounds." }, 0.5);
+        const e = sess("verification.escalation.escalation", "running", { hook_point: "escalation" });
+        ev("escalation_message", { session_id: e.id, node_id: "verification", thread: 1, turn: 1, message: "The fix loop made no progress in 2 rounds: look at why code_review keeps finding the same race." }, 0.5);
+        item.status = "needs_human";
+        item.stop = stop("stuck", "verification.review.code_review", { attempt: 2, reason: "The fix loop made no progress in 2 rounds." });
+        item.escalation_threads = [{ thread: 1, session_id: e.id, turns: 1, started_at: e.created_at, ended_at: null, status: "running" }];
         item.display_status = "escalated";
       }
       if (sc === "paused") {
