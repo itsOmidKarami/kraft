@@ -16,16 +16,30 @@ from textual.containers import Horizontal
 from textual.content import Content
 from textual.widgets import ContentSwitcher, RichLog, Static
 
-from kraft import answers, client, render
+from kraft import answers, client, logs, render
 from kraft.console import acts, words
 from kraft.console.dialogs import Reject
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 
 #: The Item's tabs, in `[` and `]` order, with their names.
-TABS = (("overview", "Overview"),)
+TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"), ("diff", "Diff"))
+#: How many events the Activity reads at a time, newest first.
+PAGE = 50
+#: A `before_seq` past every event: SQLite's largest integer.
+NEWEST = 2**63 - 1
 #: What the view says once its item is gone (spec §7.2).
 GONE = "This item no longer exists. Esc goes back."
+#: A diff line's colour by how it starts, the first match winning: the web's
+#: add and delete colours, git's bold headers and hunk colour.
+DIFF_STYLE = (
+    ("+++", "bold"),
+    ("---", "bold"),
+    ("diff --git", "bold"),
+    ("+", "success"),
+    ("-", "error"),
+    ("@@", "kraft-info"),
+)
 #: A chain node's mark in the Overview's list, by its state.
 MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
 
@@ -71,10 +85,13 @@ class Item(View):
         Binding("pageup", "scroll('page_up')", "page up", show=False),
         Binding("home", "scroll('home')", "top", show=False),
         Binding("end", "scroll('end')", "end", show=False),
+        Binding("left_square_bracket", "tab(-1)", "tab"),
+        Binding("right_square_bracket", "tab(1)", "tab", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
         Binding("p", "pause_or_resume", "pause/resume"),
         Binding("t", "retry", "retry"),
+        Binding("s", "session", "session"),
     ]
 
     def __init__(self, **kwargs) -> None:
@@ -93,6 +110,13 @@ class Item(View):
         self._key: tuple | None = None
         #: The item answered 404: nothing is read until `open` shows another.
         self._dead = False
+        #: What the Overview draws, kept for when its pane is shown.
+        self._lines: list[str | Text] = []
+        #: The Activity's events, newest first, and whether older ones remain.
+        self.events: list[dict] = []
+        self.more = False
+        #: The session the Log shows; None picks as `kraft view logs -f` does.
+        self.session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="item-top"):
@@ -109,6 +133,15 @@ class Item(View):
             overview = RichLog(id="overview", wrap=True, min_width=1)
             overview.can_focus = False
             yield overview
+            activity = RichLog(id="activity", wrap=True, min_width=1)
+            activity.can_focus = False
+            yield activity
+            log = RichLog(id="log", wrap=True, min_width=1, max_lines=2000)
+            log.can_focus = False
+            yield log
+            diff = RichLog(id="diff", wrap=True, min_width=1)
+            diff.can_focus = False
+            yield diff
         yield Static(Content(GONE), id="item-gone")
 
     def on_mount(self) -> None:
@@ -117,7 +150,8 @@ class Item(View):
     def open(self, work_item_id: str) -> None:
         """Show `work_item_id`, on the Overview, read afresh."""
         # The read still answering for the item shown before must not draw it.
-        self.workers.cancel_group(self, "read")
+        for group in ("read", "tab", "older", "log"):
+            self.workers.cancel_group(self, group)
         self.work_item_id, self.item, self._key = work_item_id, None, None
         self._dead = False
         # Where it was opened from: the top view showing, never a guess.
@@ -125,18 +159,61 @@ class Item(View):
 
         self.crumb = VIEWS[self.app._last_top].label
         self.read_gate = self.digest = None
-        self.tab = TABS[0][0]
+        self.events, self.more = [], False
+        self._lines = []
+        self.session_id = None
         self.query_one("#item-gone").display = False
         self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
         for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
             self.query_one(part, Static).update("")
         self.query_one("#item-banner").display = False
-        self.query_one("#overview", RichLog).clear()
-        self._draw_tabs()
-        self.refresh_bindings()
+        for pane in self.query("#item-panes > RichLog").results(RichLog):
+            pane.clear()
+        self.show_tab(TABS[0][0])
         # After the next refresh: a pane just shown has no width until it is
         # laid out, and a RichLog wraps what it is given then at one cell.
         self.call_after_refresh(self._read)
+
+    def show_tab(self, tab: str) -> None:
+        """Switch to `tab`, reading what it shows afresh."""
+        self.tab = tab
+        self.query_one("#item-panes", ContentSwitcher).current = tab
+        self._draw_tabs()
+        self.refresh_bindings()
+        # An older page asked for before the tab was left must not land on the
+        # list this visit rereads: its boundary is gone.
+        self.workers.cancel_group(self, "older")
+        if self.work_item_id is not None and not self._dead:
+            work = {
+                "activity": (self._activity_first, "tab"),
+                "diff": (self._diff, "tab"),
+                "log": (self._follow, "log"),
+            }.get(tab)
+            if work:
+                self.call_after_refresh(self._start, tab, *work)
+            else:  # a pane written while hidden wraps at one cell: draw it shown
+                self.call_after_refresh(self._write_overview)
+        if tab != "log" or self._dead:  # a log nobody sees is not followed
+            self.workers.cancel_group(self, "log")
+
+    def _shown(self, tab: str) -> bool:
+        """Whether `tab`'s pane is on screen: a RichLog written while it is not
+        has no width and wraps what it is given at one cell (ruling 15)."""
+        return self.display and self.tab == tab
+
+    def _start(self, tab: str, work, group: str) -> None:
+        # After the refresh, a key or a view change may have moved on.
+        if self._shown(tab) and not self._dead:
+            self.run_worker(work, group=group, exclusive=True)
+
+    def on_show(self) -> None:
+        # Hidden (another view, or a terminal too small), the panes were not
+        # drawn and the Log was let go: draw and follow again.
+        if self.work_item_id is not None and not self._dead:
+            self.show_tab(self.tab)
+
+    def on_hide(self) -> None:
+        self.workers.cancel_group(self, "log")
 
     def _read(self) -> None:
         # Exclusive: a read still answering for an older state is dropped.
@@ -146,11 +223,18 @@ class Item(View):
         # A hidden Item still hears every event: it reads nothing then.
         if not self.display or self.work_item_id is None or self._dead:
             return
+        if self.tab == "activity":
+            mine = [e for e in events if e.get("work_item_id") == self.work_item_id]
+            # A reread (no events) or a line of this item's: read what is newer.
+            if mine or not events:
+                self.run_worker(self._activity_newer, group="tab", exclusive=True)
         row = next((r for r in rows if r["id"] == self.work_item_id), None)
         key = (row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
         if events and key == self._key:
             return
         self._read()
+        if self.tab == "diff":  # a commit landed, or the worktree went
+            self.run_worker(self._diff, group="tab", exclusive=True)
 
     async def _read_now(self) -> None:
         try:
@@ -169,15 +253,20 @@ class Item(View):
         try:
             await self._overview(item)
         except client.ClientError as exc:
-            log = self.query_one("#overview", RichLog)
-            log.clear()  # one copy of the error, not one per failed read
-            log.write(client.reason_of(str(exc)))
+            # One copy of the error, not one per failed read.
+            self._lines = [client.reason_of(str(exc))]
+            self._write_overview()
         self.refresh_bindings()
+        # A Log opened before this read had no session to pick; now it has.
+        if self._shown("log") and self.session_id is None and not self._dead:
+            self.run_worker(self._follow, group="log", exclusive=True)
 
     def _gone(self) -> None:
         """Archived or abandoned while open (spec §7.2): say so; nothing acts."""
         # Further events read nothing for an item that is not there.
         self.item, self._dead = None, True
+        for group in ("tab", "older", "log"):
+            self.workers.cancel_group(self, group)
         self.query_one("#item-gone").display = True
         self.query_one("#item-panes").display = False
         self.refresh_bindings()
@@ -234,7 +323,6 @@ class Item(View):
     async def _overview(self, item: dict) -> None:
         """With a gate pending, its document, whole and scrollable, and why
         approve waits; else where the item stands. Then every node."""
-        log = self.query_one("#overview", RichLog)
         # Nothing is read until the document answers: approve stays shut for
         # the length of the reads, and never offers the last version's digest.
         self.read_gate = self.digest = None
@@ -278,30 +366,204 @@ class Item(View):
                     f" {MARK[mark['state']]} {mark['node']}{gate_word}", style=styles[mark["state"]]
                 )
             )
+        self._lines = lines
+        self._write_overview()
+
+    def _write_overview(self) -> None:
+        """Draw the Overview's lines, once its pane is on screen: kept until
+        then, and drawn again when the tab or the view is shown."""
+        if not self._shown("overview"):
+            return
+        log = self.query_one("#overview", RichLog)
+        scrolled = log.scroll_y
         log.clear()
-        for line in lines:
+        for line in self._lines:
             # From the top: a document opens at its start, not its end.
             log.write(line, scroll_end=False)
-        # A live read redraws it; a clear keeps the log's scroll, and the
-        # reader stays where they were (pinned by a test).
+        # A live read redraws it: the reader stays where they were.
+        log.scroll_to(y=scrolled, animate=False, immediate=True)
+
+    async def _activity_first(self) -> None:
+        """The newest page of the item's events (spec §7.2)."""
+        page = await self._events(limit=PAGE, before_seq=NEWEST)
+        if page is not None:
+            self.events, self.more = page[::-1], len(page) == PAGE
+            self._draw_activity()
+
+    async def _activity_older(self) -> None:
+        """The page before the oldest shown: End at the bottom asks for it."""
+        if not self.events:
+            return
+        since = self.events[-1]["seq"]
+        page = await self._events(limit=PAGE, before_seq=since)
+        # The first page may have been reread meanwhile: its boundary moved.
+        if page is not None and self.events and self.events[-1]["seq"] == since:
+            self.events += page[::-1]
+            self.more = len(page) == PAGE
+            self._draw_activity()
+            self.query_one("#activity", RichLog).scroll_end(animate=False)
+
+    async def _activity_newer(self) -> None:
+        if not self.events:
+            await self._activity_first()
+            return
+        page = await self._events(after_seq=self.events[0]["seq"])
+        if page:
+            self.events = page[::-1] + self.events
+            self._draw_activity()
+
+    async def _events(self, **since) -> list[dict] | None:
+        asked = self.work_item_id
+        try:
+            page = await client.events(asked, **since)
+            # An answer for an item no longer open is dropped.
+            return page if asked == self.work_item_id else None
+        except client.ClientError as exc:
+            if exc.kind == client.Failure.NOT_FOUND:
+                self._gone()
+            else:
+                self.app.notify_refusal(exc)
+            return None
+
+    def _draw_activity(self) -> None:
+        """One line an event, newest first, as the web's Activity words them;
+        the quiet set (bookkeeping) left out."""
+        if not self._shown("activity"):  # drawn again by the next visit
+            return
+        log = self.query_one("#activity", RichLog)
+        scrolled = log.scroll_y
+        muted = self.app.theme_variables["kraft-muted"]
+        now = time.time()
+        log.clear()
+        for event in self.events:
+            if (line := words.event_line(event)) is not None:
+                age = words.event_age(event.get("created_at"), now).rjust(7)
+                log.write(Text.assemble((age, muted), "  ", line), scroll_end=False)
+        if self.more:
+            log.write(Text("End loads earlier events.", style=muted), scroll_end=False)
+        log.scroll_to(y=scrolled, animate=False, immediate=True)
+
+    async def _diff(self) -> None:
+        """Spec §7.2: what has landed on the branch first, under its head, then
+        uncommitted work, then the trailer every diff view ends with (4.3), in
+        the web's add and delete colours. A gone worktree is the server's own
+        words."""
+        log = self.query_one("#diff", RichLog)
+        try:
+            payload = await client.diff(self.work_item_id)
+        except client.ClientError as exc:
+            if self._shown("diff"):
+                log.clear()
+                log.write(client.reason_of(str(exc)))
+            return
+        colour = self.app.theme_variables
+        muted, warn = colour["kraft-muted"], colour["warning"]
+        lines: list[Text] = []
+        if payload.get("base_ref") is None:
+            lines.append(Text(render.NO_BASELINE, style=muted))
+        else:
+            landed = (payload.get("landed") or {}).get("diff") or ""
+            if landed:
+                lines.append(Text(render.landed_head(payload), style=muted))
+                lines += [self._diff_line(line) for line in landed.splitlines()]
+                lines += [Text(""), Text(render.UNCOMMITTED_HEAD, style=muted)]
+            body = [self._diff_line(line) for line in (payload.get("diff") or "").splitlines()]
+            empty = render.NOTHING_UNCOMMITTED if landed else render.NO_CHANGES
+            lines += body or [Text(empty, style=muted)]
+        how = {"": "", "dim": muted, "warn": warn}
+        lines += [Text(line, style=how[kind]) for line, kind in render.diff_trailer(payload)]
+        if not self._shown("diff"):  # drawn again by the next visit
+            return
+        scrolled = log.scroll_y
+        log.clear()
+        for line in lines:
+            log.write(line, scroll_end=False)
+        log.scroll_to(y=scrolled, animate=False, immediate=True)
+
+    def _diff_line(self, line: str) -> Text:
+        style = next((style for start, style in DIFF_STYLE if line.startswith(start)), "")
+        return Text(line, style=self.app.theme_variables.get(style, style))
+
+    def _sessions(self) -> list[dict]:
+        """The item's sessions, newest first."""
+        return list(reversed((self.item or {}).get("worker_sessions") or []))
+
+    async def _follow(self) -> None:
+        """The Log (spec §7.2): the session picked, else the newest, followed
+        to its end; while the reader is scrolled up, writes leave them there."""
+        log = self.query_one("#log", RichLog)
+        log.clear()
+        sessions = self._sessions()
+        session = next((s for s in sessions if s["id"] == self.session_id), None)
+        passed_over = None
+        if session is None and self.item is not None:
+            session, passed_over = logs.pick_session(self.item, follow=True)
+        muted = self.app.theme_variables["kraft-muted"]
+        if session is None:
+            log.write(Text("No session has run yet.", style=muted))
+            return
+        self.session_id = session["id"]
+        k = next(n for n, s in enumerate(sessions, 1) if s["id"] == session["id"])
+        head = f"{session['hook_point']} · {session['status']} · session {k} of {len(sessions)}"
+        heads = [Text(head, style=f"bold {muted}")]
+        heads += [Text(passed_over, style=muted)] if passed_over else []
+        for line in [*heads, Text("waiting for output", style=muted)]:
+            log.write(line)
+        fresh = True
+        try:
+            async for entry in client.stream_log(self.work_item_id, session["id"]):
+                if fresh:  # the placeholder goes once output comes
+                    log.clear()
+                    for line in heads:
+                        log.write(line)
+                    fresh = False
+                # As `kraft view logs` reads a line: its summary, else its text.
+                text = str(entry.get("summary") or entry.get("text") or "")
+                log.write(text, scroll_end=log.is_vertical_scroll_end)
+        except client.ClientError as exc:
+            log.write(client.reason_of(str(exc)))
+            return
+        log.write(Text("session ended", style=muted), scroll_end=log.is_vertical_scroll_end)
+
+    def action_session(self) -> None:
+        """`s` on the Log: the next older session, round to the newest."""
+        ids = [s["id"] for s in self._sessions()]
+        at = ids.index(self.session_id) if self.session_id in ids else -1
+        self.session_id = ids[(at + 1) % len(ids)]
+        self.run_worker(self._follow, group="log", exclusive=True)
 
     def _pane(self) -> RichLog:
         return self.query_one(f"#{self.tab}", RichLog)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "approve":
-            # Only once the document it approves has been read (its digest).
+            # Elsewhere it shows the Overview; there, only once the document
+            # it approves has been read (its digest).
             item = self.item
-            return acts.opens(action, item) and self.read_gate == item.get("pending_gate")
+            return acts.opens(action, item) and (
+                self.tab != "overview" or self.read_gate == item.get("pending_gate")
+            )
         if action in acts.DOORS:
             return acts.opens(action, self.item)
+        if action == "session":
+            return self.tab == "log" and len(self._sessions()) > 1
         return True
 
     def action_scroll(self, how: str) -> None:
+        if how == "end" and self.tab == "activity" and self.more:
+            # Its own group: a live line arriving meanwhile must not cancel it.
+            self.run_worker(self._activity_older, group="older", exclusive=True)
         getattr(self._pane(), f"scroll_{how}")(animate=False)
 
+    def action_tab(self, step: int) -> None:
+        keys = [key for key, _ in TABS]
+        self.show_tab(keys[(keys.index(self.tab) + step) % len(keys)])
+
     def action_approve(self) -> None:
-        if item := self.item:
+        """Spec §6: from another tab, `a` shows the Overview first."""
+        if self.tab != "overview":
+            self.show_tab("overview")
+        elif item := self.item:
             digest = self.digest
             # Shut until the next read answers: a second `a` would approve twice.
             self.read_gate = self.digest = None

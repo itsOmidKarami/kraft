@@ -266,35 +266,41 @@ _DIFF_LINE_COLORS = (
 )
 
 
-def _diff_trailer(payload: dict) -> list[str]:
-    """What must follow every diff view, stat or full: files git cannot see, and
-    the warning that the diff you just read was not all of it.
+#: How a diff trailer's line is drawn: plain, dim, or as a warning.
+_TRAILER_PAINT = {"": "", "dim": DIM, "warn": "\033[33m"}
 
-    One helper for both renderers so a future third view cannot forget either.
+
+def diff_trailer(payload: dict) -> list[tuple[str, str]]:
+    """What must follow every diff view, stat or full: files git cannot see, and
+    the warning that the diff you just read was not all of it. Plain text, each
+    line with how it is drawn (`""`, `dim`, `warn`): the CLI paints it, the
+    console draws it.
+
+    One helper for every renderer so a future view cannot forget either.
     """
-    lines: list[str] = []
+    lines: list[tuple[str, str]] = []
     if payload.get("untracked"):
-        lines.append("")
-        lines.append(paint("untracked (not in the diff above):", DIM))
-        lines.extend(f"  {path}" for path in payload["untracked"])
+        lines += [("", ""), ("untracked (not in the diff above):", "dim")]
+        lines += [(f"  {path}", "") for path in payload["untracked"]]
     if payload.get("truncated"):
         limit = payload.get("diff_max_bytes")
         where = payload.get("worktree_path")
-        lines.append("")
-        lines.append(
-            paint(
-                "WARNING: diff truncated by the server at "
-                + (f"{limit} bytes" if limit else "its size limit")
-                + " — this is not the whole change. Read the rest in "
-                + (where or "the worktree")
-                + ".",
-                "\033[33m",
-            )
+        warning = (
+            "WARNING: diff truncated by the server at "
+            + (f"{limit} bytes" if limit else "its size limit")
+            + " — this is not the whole change. Read the rest in "
+            + (where or "the worktree")
+            + "."
         )
+        lines += [("", ""), (warning, "warn")]
     return lines
 
 
-def _landed_head(payload: dict) -> str:
+def _diff_trailer(payload: dict) -> list[str]:
+    return [paint(line, _TRAILER_PAINT[how]) for line, how in diff_trailer(payload)]
+
+
+def landed_head(payload: dict) -> str:
     """Kraft commits after every task, so by a review gate the change is on the
     branch already: this block, not the working tree, is what is under review."""
     n = len((payload.get("landed") or {}).get("commits") or [])
@@ -303,8 +309,10 @@ def _landed_head(payload: dict) -> str:
     )
 
 
-_UNCOMMITTED_HEAD = "uncommitted — changes in the worktree, not committed yet"
-_NOTHING_UNCOMMITTED = "(nothing uncommitted)"
+UNCOMMITTED_HEAD = "uncommitted — changes in the worktree, not committed yet"
+NOTHING_UNCOMMITTED = "(nothing uncommitted)"
+NO_CHANGES = "(no changes)"
+NO_BASELINE = "no baseline recorded for this work item"
 
 
 def _colour_diff(diff: str) -> list[str]:
@@ -318,9 +326,9 @@ def _colour_diff(diff: str) -> list[str]:
 def diff_stat(payload: dict) -> str:
     """ "How big is this" — the question asked before deciding to read it."""
     if payload.get("base_ref") is None:
-        return "no baseline recorded for this work item"
+        return NO_BASELINE
 
-    def block(files: list[dict], empty: str = "(no changes)") -> str:
+    def block(files: list[dict], empty: str = NO_CHANGES) -> str:
         rows = [
             {
                 "path": f["path"],
@@ -340,29 +348,27 @@ def diff_stat(payload: dict) -> str:
         # The committed block leads: it holds the change a reviewer reads. The
         # working tree is whatever an agent has not committed yet, usually none.
         out += [
-            paint(_landed_head(payload), DIM),
+            paint(landed_head(payload), DIM),
             block(landed_files),
             "",
-            paint(_UNCOMMITTED_HEAD, DIM),
+            paint(UNCOMMITTED_HEAD, DIM),
         ]
-    out.append(
-        block(payload.get("files", []), _NOTHING_UNCOMMITTED if landed_files else "(no changes)")
-    )
+    out.append(block(payload.get("files", []), NOTHING_UNCOMMITTED if landed_files else NO_CHANGES))
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
 def diff_body(payload: dict) -> str:
     """The unified diff, coloured the way `git diff` colours it."""
     if payload.get("base_ref") is None:
-        return "no baseline recorded for this work item"
+        return NO_BASELINE
     out: list[str] = []
     landed = (payload.get("landed") or {}).get("diff") or ""
     if landed:
-        out.append(paint(_landed_head(payload), DIM))
+        out.append(paint(landed_head(payload), DIM))
         out += _colour_diff(landed)
-        out += ["", paint(_UNCOMMITTED_HEAD, DIM)]
+        out += ["", paint(UNCOMMITTED_HEAD, DIM)]
     body = _colour_diff(payload.get("diff", ""))
-    out += body or [_NOTHING_UNCOMMITTED if landed else "(no changes)"]
+    out += body or [NOTHING_UNCOMMITTED if landed else NO_CHANGES]
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
@@ -426,7 +432,7 @@ def compare_body(payload: dict) -> str:
     """The unified diff between two review targets, coloured like `diff_body`."""
     out = [_compare_head(payload), *_colour_diff(payload.get("diff", ""))]
     if not payload.get("diff"):
-        out.append("(no changes)")
+        out.append(NO_CHANGES)
     out += _diff_trailer(payload)
     return "\n".join(out)
 

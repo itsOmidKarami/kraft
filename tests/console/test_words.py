@@ -43,3 +43,13 @@ def test_a_time_reads_as_on_the_web(scale):
 @pytest.mark.parametrize("case", CASES["banners"], ids=[case["name"] for case in CASES["banners"]])
 def test_a_stop_banner_reads_as_on_the_web(case):
     assert words.banner_of(case["item"]) == case["banner"]
+
+
+@pytest.mark.parametrize("case", CASES["events"], ids=[case["name"] for case in CASES["events"]])
+def test_an_event_reads_as_on_the_web(case):
+    assert words.event_line(case["event"]) == case["line"]
+
+
+def test_an_events_age_reads_as_on_the_web():
+    ages = CASES["event_ages"]
+    assert [words.event_age(iso, NOW) for iso, _ in ages] == [want for _, want in ages]
