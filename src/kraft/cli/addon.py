@@ -19,13 +19,14 @@ import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from kraft import client, harness, paths, update
-from kraft.addons import fetch, load, manifest, review
+from kraft import client, harness, update
+from kraft.addons import fetch, flow, load, manifest, review
 from kraft.addons import update as addon_update
 from kraft.addons.config import AddonEntry, AddonsConfig, AddonsLock
 from kraft.addons.load import InstalledAddon
@@ -210,7 +211,7 @@ def _render(report: dict) -> str:
 
 
 def _cmd_validate(ns: argparse.Namespace) -> None:
-    config_dir, addons_dir = _home()
+    config_dir, addons_dir = flow.home()
     # A Kraft home is one that has a library; CI has none.
     home = (config_dir, addons_dir) if (config_dir / "library.yaml").is_file() else None
     report = validate(Path(ns.path).resolve(), home)
@@ -223,12 +224,18 @@ def _cmd_validate(ns: argparse.Namespace) -> None:
 _OWNER_REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 
 
-def _home() -> tuple[Path, Path]:
-    return paths.config_dir(), load.addons_dir()
-
-
 def _refuse(message: str) -> SystemExit:
     return SystemExit(f"error: {fetch.redact(message)}")
+
+
+@contextmanager
+def _as_cli() -> Iterator[None]:
+    """A refusal of the shared add-on flow, said as every verb here says one:
+    `error: ...`, exit 1."""
+    try:
+        yield
+    except flow.Refusal as exc:
+        raise _refuse(str(exc)) from exc
 
 
 def _not_a_worker() -> None:
@@ -259,7 +266,7 @@ def _edit(
     """`addons.yaml` rewritten by `change(raw, parsed)` under the update lock,
     refused when the result is not a valid file. `then` runs after the write,
     still under the lock."""
-    config_dir, addons_dir = _home()
+    config_dir, addons_dir = flow.home()
     path = config_dir / AddonsConfig.FILE
     try:
         with addon_update.write_lock(addons_dir):
@@ -300,29 +307,9 @@ def _short_entry(raw: dict, addon_id: str) -> None:
         del entry["enabled"]
 
 
-def _catalogue(name: str, collection, addons_dir: Path) -> list[str] | None:
-    """The add-ons the collection listed when it was last fetched; None when
-    it has not been. No network."""
-    where = manifest.COLLECTION_JSON
-    try:
-        if collection.git is None:
-            text = (Path(collection.path) / where).read_text()
-        else:
-            mirror = fetch.mirror_path(addons_dir, name, collection.git)
-            if not mirror.is_dir():
-                return None
-            commit = fetch._git("rev-parse", "--verify", "FETCH_HEAD^{commit}", git_dir=mirror)
-            text = fetch.read_file(mirror, commit.decode().strip(), where, fetch.MAX_JSON).decode()
-        return [
-            entry.name for entry in manifest.collection(manifest.parse(text, where), where).addons
-        ]
-    except (OSError, ValueError, fetch.FetchError, fetch.AddonRefused, manifest.ManifestError):
-        return None
-
-
 def _cmd_collection_add(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    _config_dir, addons_dir = _home()
+    _config_dir, addons_dir = flow.home()
     where = manifest.COLLECTION_JSON
     directory = Path(ns.source).expanduser()
     try:
@@ -377,25 +364,8 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
 
 
 def _cmd_collection_list(ns: argparse.Namespace) -> None:
-    config_dir, addons_dir = _home()
-    try:
-        config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
-    except ConfigError as exc:
-        raise _refuse(str(exc)) from exc
-    rows = []
-    for name, collection in config.collections.items():
-        listed = _catalogue(name, collection, addons_dir)
-        rows.append(
-            {
-                "name": name,
-                "source": fetch.redact(collection.git) if collection.git else collection.path,
-                "ref": collection.ref,
-                "auto_update": collection.auto_update,
-                "addons": None
-                if listed is None
-                else [{"name": p, "installed": f"{p}@{name}" in config.addons} for p in listed],
-            }
-        )
+    with _as_cli():
+        rows = flow.collection_rows()
 
     def render(value: list[dict]) -> str:
         lines = []
@@ -413,7 +383,7 @@ def _cmd_collection_list(ns: argparse.Namespace) -> None:
 
 def _cmd_collection_update(ns: argparse.Namespace) -> None:
     _not_a_worker()  # it writes the mirrors the daemon later reads
-    config_dir, addons_dir = _home()
+    config_dir, addons_dir = flow.home()
     try:
         config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
     except ConfigError as exc:
@@ -473,7 +443,7 @@ def _cmd_collection_auto_update(ns: argparse.Namespace) -> None:
 
 def _cmd_collection_remove(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, addons_dir = _home()
+    config_dir, addons_dir = flow.home()
     gone: list[str] = []
 
     def change(raw: dict, config: AddonsConfig) -> None:
@@ -545,7 +515,7 @@ def _run_update(
             return False
         return input(f"Apply {reviewed.addon_id}? [y/N] ").strip().lower() in ("y", "yes")
 
-    config_dir, addons_dir = _home()
+    config_dir, addons_dir = flow.home()
     try:
         results = addon_update.update(
             ids, accept=accept, config_dir=config_dir, addons_root=addons_dir, **kw
@@ -566,7 +536,7 @@ def _run_update(
 
 def _cmd_install(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, _addons_dir = _home()
+    config_dir, _addons_dir = flow.home()
     try:
         locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons
         config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
@@ -664,7 +634,7 @@ def _still_referenced(config: AddonsConfig, config_dir: Path, addon_id: str, ver
 def _cmd_enable(ns: argparse.Namespace) -> None:
     _not_a_worker()
     on = ns.addon_verb == "enable"
-    config_dir, _addons_dir = _home()
+    config_dir, _addons_dir = flow.home()
 
     def change(raw: dict, config: AddonsConfig) -> None:
         _installed_id(config, ns.addon)
@@ -680,7 +650,7 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
 
 def _cmd_uninstall(ns: argparse.Namespace) -> None:
     _not_a_worker()
-    config_dir, _addons_dir = _home()
+    config_dir, _addons_dir = flow.home()
     lock_file = config_dir / AddonsLock.FILE
     try:
         lock = read_yaml(lock_file, {})
@@ -710,45 +680,8 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
 
 
 def _cmd_list(ns: argparse.Namespace) -> None:
-    config_dir, addons_dir = _home()
-    try:
-        config = AddonsConfig.load(config_dir / AddonsConfig.FILE)
-        lock = AddonsLock.load(config_dir / AddonsLock.FILE)
-    except ConfigError as exc:
-        raise _refuse(str(exc)) from exc
-    rows = []
-    for addon in load.installed(config_dir, addons_dir):
-        if addon.repo_id is not None:
-            continue  # `kraft repo library` is how a repo library is listed and taken
-        collection = config.collections.get(addon.id.split("@", 1)[1])
-        listed = addon.id in config.addons
-        entry = config.entry(addon.id) if listed else None
-        locked = lock.addons.get(addon.id)
-        pending = []
-        if listed and locked and config.namespace(addon.id) != locked.namespace:
-            pending.append("alias change pending")
-        if collection and locked and collection.ref != locked.ref:
-            pending.append("ref change pending")
-        if collection and locked and addon_update._moved(collection, locked):
-            pending.append("collection URL change pending")
-        auto = None
-        if collection is not None and collection.auto_update:
-            auto = "collection"
-        elif entry is not None and entry.auto_update:
-            auto = "addon"
-        rows.append(
-            {
-                "id": addon.id,
-                "namespace": addon.namespace,
-                "version": addon.version or None,
-                "commit": locked.commit if locked else None,
-                "enabled": bool(entry and entry.enabled),
-                "auto_update": auto,
-                "local_directory": bool(collection and collection.path),
-                "pending": pending,
-                "left_out": addon.left_out,
-            }
-        )
+    with _as_cli():
+        rows = flow.addon_rows()
 
     def render(value: list[dict]) -> str:
         lines = []

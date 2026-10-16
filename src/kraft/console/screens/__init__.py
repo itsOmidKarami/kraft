@@ -1,14 +1,12 @@
-"""The views the frame switches between. Each later pull request replaces its
-placeholder in `VIEWS` with its own module (`board.py`, `item.py`, ...)."""
+"""The views the frame switches between. Each lives in its own module
+(`board.py`, `item.py`, ...)."""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
-from textual.app import ComposeResult
 from textual.binding import BindingType
 from textual.containers import Vertical
-from textual.widgets import Static
 
 
 class View(Vertical, can_focus=True):
@@ -38,16 +36,8 @@ class View(Vertical, can_focus=True):
         """`/health` answered (None: it did not)."""
 
 
-class _Placeholder(View):
-    def compose(self) -> ComposeResult:
-        yield Static(f"{self.label}: not built yet.", markup=False)
-
-
-class Addons(_Placeholder):
-    label = "Add-ons"
-
-
 # After `View`, which each view's module builds on.
+from kraft.console.screens.addons import Addons  # noqa: E402
 from kraft.console.screens.board import Board  # noqa: E402
 from kraft.console.screens.item import Item  # noqa: E402
 from kraft.console.screens.repos import Repos  # noqa: E402
