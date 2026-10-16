@@ -15,7 +15,7 @@ import { NoMatch } from "../../ui/NoMatch";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
-import { homePath } from "../../templates/repos/path";
+import { homePath, pathTail } from "../../templates/repos/path";
 
 const url = (r: RepoView) => `/settings/repos/${encodeURIComponent(r.name || r.path)}`;
 
@@ -48,7 +48,7 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: homePath(r.path), subCut: true, value: String(r.entry.default_chain ?? "default"),
+            sub: pathTail(r.path), subFull: r.path, subCut: true, value: String(r.entry.default_chain ?? "default"),
             chips: [{ label: readiness(r.entry).word, tone: readiness(r.entry).ok ? "ok" as const : "warn" as const }, { label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />

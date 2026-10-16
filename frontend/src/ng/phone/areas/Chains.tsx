@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import type { ChainNode, TemplateSummary } from "../../../types";
 import { detailOf, request } from "../../http";
+import { displayName } from "../../board/rowText";
 import { rejectTarget } from "../../item/graph";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
 import { chainCapGroups, settingRows } from "../../templates/draft/view";
@@ -72,7 +73,7 @@ export function ChainView() {
     <AreaScreen title={chain} sub={c ? `${c.addon ? `${addonLabel(c.addon)} · ` : ""}${nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}` : undefined} draft={draft} yaml={draft.view ? true : text ?? ""}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && !c && <p className="ph-empty">There is no chain {chain}.</p>}
-      <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: n.id, mono: true, sub: nodeSub(n), to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />
+      <Group title={`Nodes · ${nodes.length}`} note={c && !c.addon ? STRUCTURE : undefined} rows={nodes.map((n) => ({ key: n.id, label: displayName(n), sub: `${n.id} · ${nodeSub(n)}`, subMono: true, to: `/templates/chains/${encodeURIComponent(chain)}/nodes/${encodeURIComponent(n.id)}` }))} />
       {draft.view && c && chainCapGroups(draft.view.result, draft.scope).map((g) => {
         const rows = settings("", g.rows);
         return <Group key={g.head} title={g.head} rows={[...rows.set, ...rows.unset]} />;

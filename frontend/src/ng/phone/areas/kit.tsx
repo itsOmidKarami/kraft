@@ -17,6 +17,10 @@ export interface RowSpec {
   sub?: string;
   /** The sub line is one truncated line (a path), whole in its title. */
   subCut?: boolean;
+  /** The whole of `sub` when `sub` is a shortened form of it, kept as the hint's title. */
+  subFull?: string;
+  /** The sub line is an id or other literal, in mono. */
+  subMono?: boolean;
   value?: string;
   mono?: boolean;
   /** The value alone is monospace and stays on one line (a version); the label is plain. */
@@ -51,7 +55,7 @@ function RowBody({ r }: { r: RowSpec }) {
       {Icon && <span className="ph-row-icon"><Icon size={15} aria-hidden="true" /></span>}
       <span className="ph-row-text">
         <span className={`ph-row-label${r.mono ? " ph-mono" : ""}`}>{r.mono ? breakable(r.label) : r.label}</span>
-        {r.sub && <span className={`ph-row-hint${r.subCut ? " ph-row-cut" : ""}`} title={r.subCut ? r.sub : undefined}>{r.subCut ? breakable(r.sub) : r.sub}</span>}
+        {r.sub && <span className={`ph-row-hint${r.subCut ? " ph-row-cut" : ""}${r.subMono ? " ph-mono" : ""}`} title={r.subCut ? (r.subFull ?? r.sub) : undefined}>{r.subCut ? breakable(r.sub) : r.sub}</span>}
         {r.error && <span className="ph-row-error" role="alert">{r.error}</span>}
       </span>
       {r.selected && <span className="ph-row-check" aria-hidden="true">✓</span>}

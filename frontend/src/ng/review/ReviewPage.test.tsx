@@ -326,6 +326,14 @@ describe("commenting on lines", () => {
     expect(screen.getByRole("group", { name: /^Lines of a.py/ })).toHaveFocus();
   });
 
+  it("Esc on an empty whole-file composer hands the focus back to the button that opened it", async () => {
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Comment on this file" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: /^Comment: / })).toBeNull();
+    expect(screen.getByRole("button", { name: "Comment on this file" })).toHaveFocus();
+  });
+
   it("drops a cancelled draft: nothing is sent, and the line's composer opens empty again", async () => {
     await open();
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));

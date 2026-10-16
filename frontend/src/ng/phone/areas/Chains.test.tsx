@@ -42,8 +42,12 @@ describe("Chains (L.1)", () => {
   it("a chain shows its draft, its nodes and caps, and its YAML read only", async () => {
     const { calls } = open();
     expect(await screen.findByText("draft · 2 changes")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^verification/ })).toHaveTextContent("exec · 2 steps · fix loop");
-    expect(screen.getByRole("link", { name: /^spec_approval/ })).toHaveTextContent("gate · reject to spec");
+    // A node row reads its name, with the id under it in mono.
+    expect(screen.getByRole("link", { name: /^verification/ })).toHaveTextContent("verification · exec · 2 steps · fix loop");
+    const gate = screen.getByRole("link", { name: /^approve spec/ });
+    expect(gate).toHaveTextContent("spec_approval · gate · reject to spec");
+    expect(within(gate).getByText(/^spec_approval/)).toHaveClass("ph-mono");
+    expect(within(gate).getByText("approve spec")).not.toHaveClass("ph-mono");
     expect(screen.getByText("Adding, removing and reordering nodes and steps is on desktop.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Chain-wide time caps" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "YAML" }));

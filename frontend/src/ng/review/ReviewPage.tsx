@@ -98,10 +98,12 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
     patch,
     threads: threadList,
     reload: threads.reload,
-    // Sent or cancelled, the pick goes with it, and the focus goes back to the file's lines.
+    // Sent or cancelled, the pick goes with it, and the focus goes back to the file's lines, or to the button that opened a whole-file composer.
     onClose: (t) => {
       setPicked(null);
-      [...document.querySelectorAll<HTMLElement>(".rv-file")].find((f) => f.dataset.file === t.path)?.querySelector<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
+      const file = [...document.querySelectorAll<HTMLElement>(".rv-file")].find((f) => f.dataset.file === t.path);
+      const opener = t.range ? null : file?.querySelector<HTMLElement>('button[aria-label="Comment on this file"]');
+      (opener ?? file?.querySelector<HTMLElement>(".rv-lines"))?.focus({ preventScroll: true });
     },
     // The composer's ×: the pick follows, so the diff shades the new range.
     onRetarget: (t) => t.range && setPicked(pickOf(t.path, { side: t.range.startSide ?? t.range.side, line: t.range.start }, { side: t.range.side, line: t.range.end })),

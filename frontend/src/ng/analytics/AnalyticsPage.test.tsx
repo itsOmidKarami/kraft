@@ -146,7 +146,7 @@ describe("ng AnalyticsPage", () => {
 
   it("collapses an empty section to one line under its heading, in no panel", async () => {
     await show({ ...REPORT, totals: { ...REPORT.totals, mrs_merged: 0, completed: 1, completed_prev: null }, by_node: [], by_repo: [], gate_waits: [], stop_reasons: [] });
-    expect(screen.getByText("Nothing merged in this range.")).toBeInTheDocument();
+    expect(screen.getByText("No merge requests merged in this range.")).toBeInTheDocument();
     expect(screen.getByText("No gate waits in this range.")).toBeInTheDocument();
     expect(screen.getAllByText("Nothing here yet.")).toHaveLength(2);
     expect(screen.getByText("Nothing stopped for a person in this range.")).toBeInTheDocument();
