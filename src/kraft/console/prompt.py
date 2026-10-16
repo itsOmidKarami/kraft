@@ -36,14 +36,19 @@ def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     lead = "/" if line.startswith("/") else ""
     *done, word = line.removeprefix("/").split(" ")
     parser = _parser()
-    # A word that is no verb (`kraft`, an id, a flag's value) leaves it where it was.
+    # The words after the last verb: a word that is no verb (`kraft`, an id, a
+    # flag's value) leaves the parser where it was.
+    after: list[str] = []
     for typed in done:
-        parser = _verbs(parser).get(typed, parser)
+        verbs = _verbs(parser)
+        parser, after = (verbs[typed], []) if typed in verbs else (parser, [*after, typed])
     if word.startswith("-"):
         options = [flag for action in parser._actions for flag in action.option_strings]
     elif verbs := _verbs(parser):
         options = list(verbs)
-    elif any(a.dest == "id" and not a.option_strings for a in parser._actions):
+    elif all(w.startswith("-") for w in after if w) and any(
+        a.dest == "id" and not a.option_strings for a in parser._actions
+    ):
         options = list(ids)
     else:
         options = []
