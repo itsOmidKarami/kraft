@@ -8,6 +8,7 @@ that wrote it in its worktree's `.engineering/`.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import shutil
@@ -448,20 +449,30 @@ def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
     assert len(body["content"]) <= DIFF_MAX_BYTES
 
 
+def _await_artifact_docs(client, wid: str) -> list:
+    """The ingest runs after the approve response; wait for its document."""
+    deadline = time.monotonic() + 10
+    while True:
+        docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
+        found = [d for d in docs if d["source_kind"] == "artifact"]
+        if found or time.monotonic() > deadline:
+            return found
+        time.sleep(0.05)
+
+
 def test_approving_a_gate_ingests_its_artifact_into_the_index(client, item_at_spec_gate):
     """A gate document is never committed (it is outside the worktree, or,
     for an older item, under `.engineering/`, which
     `forge._work_product_pathspec` excludes), so gate approval is what makes
     the spec durable:
-    it must land in the index synchronously, before the approve response comes
-    back — not on the indexer's own scan schedule."""
+    it must land in the index right after the approve response, not on the
+    indexer's own scan schedule."""
     _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
 
     resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
     assert resp.status_code == 200
 
-    docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
-    artifacts = [d for d in docs if d["source_kind"] == "artifact"]
+    artifacts = _await_artifact_docs(client, item_at_spec_gate)
     assert len(artifacts) == 1
     assert artifacts[0]["kind"] == "specs"
     assert artifacts[0]["path"] == item_paths.document_name(item_at_spec_gate, "spec")
@@ -496,6 +507,31 @@ def test_approving_a_gate_survives_a_broken_index(client, item_at_spec_gate, mon
 
     docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
     assert [d for d in docs if d["source_kind"] == "artifact"] == []
+
+
+def test_approving_a_gate_does_not_wait_for_a_slow_ingest(client, item_at_spec_gate, monkeypatch):
+    """With the vector extra installed and the model host unreachable, the
+    embed stalls for minutes. The approval answers without it, and the ingest
+    still finishes afterwards."""
+    _write_artifact(client, item_at_spec_gate, "---\ntitle: A spec\n---\n\nthe body\n")
+    real = api.app.state.indexer.ingest_gate_artifact
+    release = threading.Event()
+
+    async def _slow(**kwargs):
+        while not release.is_set():
+            await asyncio.sleep(0.02)
+        await real(**kwargs)
+
+    monkeypatch.setattr(api.app.state.indexer, "ingest_gate_artifact", _slow)
+
+    started = time.monotonic()
+    resp = client.post(f"/api/work-items/{item_at_spec_gate}/gates/spec_approval/approve")
+    assert resp.status_code == 200
+    assert time.monotonic() - started < 5
+    docs = client.get(f"/api/work-items/{item_at_spec_gate}/documents").json()["documents"]
+    assert [d for d in docs if d["source_kind"] == "artifact"] == []
+    release.set()
+    assert len(_await_artifact_docs(client, item_at_spec_gate)) == 1
 
 
 def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_gate):
