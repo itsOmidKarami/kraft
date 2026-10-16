@@ -94,6 +94,28 @@ Screen.-tiny #tiny {
     display: block;
 }
 
+/* The Board: a filter line when asked for, and the rows. */
+#board-filter {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $kraft-side;
+}
+
+#rows {
+    height: 1fr;
+    max-height: 100%;
+    border: none;
+    padding: 0;
+    scrollbar-gutter: stable;
+    background: $background;
+}
+
+#rows > .option-list--option-highlighted {
+    background: $primary 12%;
+    text-style: bold;
+}
+
 /* The output panel: above the prompt and footer, which stay in sight. */
 OutputPanel {
     align: center bottom;

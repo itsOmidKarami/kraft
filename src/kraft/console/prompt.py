@@ -28,22 +28,60 @@ def _verbs(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser
     return {}
 
 
+def _split(text: str) -> list[str]:
+    """`text` cut at the spaces outside quotes, quotes kept, so `--note "a b"`
+    is one word and the line joins back as typed."""
+    out, quote, start = [], "", 0
+    for k, char in enumerate(text):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "\"'":
+            quote = char
+        elif char == " ":
+            out.append(text[start:k])
+            start = k + 1
+    return [*out, text[start:]]
+
+
+def _wants_id(parser: argparse.ArgumentParser, typed: list[str]) -> bool:
+    """Whether the verb's next positional, after `typed`, is the item `id`:
+    a flag and its value (by the flag's `nargs`) are not positionals."""
+    positionals = [a for a in parser._actions if not a.option_strings]
+    given, k = 0, 0
+    while k < len(typed):
+        word = typed[k]
+        k += 1
+        if not word:
+            continue
+        if word.startswith("-"):
+            action = parser._option_string_actions.get(word.split("=")[0])
+            if action is not None and "=" not in word:
+                k += 1 if action.nargs in (None, "?", "*", "+") else action.nargs
+            continue
+        if given < len(positionals) and positionals[given].nargs not in ("*", "+"):
+            given += 1
+    return given < len(positionals) and positionals[given].dest == "id"
+
+
 def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     """`line` with its last word completed as far as the CLI's parser makes it
     certain, and what that word could still become when that is more than one
     thing. It completes a group, a verb, a flag, or an item id where the
     verb's positional is `id`."""
     lead = "/" if line.startswith("/") else ""
-    *done, word = line.removeprefix("/").split(" ")
+    *done, word = _split(line.removeprefix("/"))
     parser = _parser()
-    # A word that is no verb (`kraft`, an id, a flag's value) leaves it where it was.
+    # The words after the last verb: a word that is no verb (`kraft`, an id, a
+    # flag's value) leaves the parser where it was.
+    after: list[str] = []
     for typed in done:
-        parser = _verbs(parser).get(typed, parser)
+        verbs = _verbs(parser)
+        parser, after = (verbs[typed], []) if typed in verbs else (parser, [*after, typed])
     if word.startswith("-"):
         options = [flag for action in parser._actions for flag in action.option_strings]
     elif verbs := _verbs(parser):
         options = list(verbs)
-    elif any(a.dest == "id" and not a.option_strings for a in parser._actions):
+    elif _wants_id(parser, after):
         options = list(ids)
     else:
         options = []

@@ -25,12 +25,12 @@ from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
 
 from kraft import answers, client, config, update
-from kraft.console import runner, theme
+from kraft.console import runner, theme, words
 from kraft.console.dialogs import Confirm
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt
-from kraft.console.screens import VIEWS, View
+from kraft.console.screens import VIEWS, Board, View
 from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
@@ -130,6 +130,8 @@ class KraftConsole(App):
         self._health_answered = False
         #: The repo the console was opened in, or None for all repos.
         self.scope: str | None = None
+        #: `s` on the Board: every repo, though the console was opened in one.
+        self.everywhere = False
         self.link = Link.RECONNECTING
         self.update_waiting = False
         self._scoped = False
@@ -187,6 +189,17 @@ class KraftConsole(App):
         view.shown()
         self._draw_top()
         return view
+
+    @property
+    def repo(self) -> str | None:
+        """The repo the Board and its count show: the console's own, or None
+        for every repo."""
+        return None if self.everywhere else self.scope
+
+    def widen(self, everywhere: bool) -> None:
+        """Show every repo, or only the console's own (`s` on the Board)."""
+        self.everywhere = everywhere
+        self._draw_top()
 
     def notify_refusal(self, error: client.ClientError) -> None:
         """A call that failed, said in the server's words (spec §8). A token
@@ -388,6 +401,7 @@ class KraftConsole(App):
             return  # read again on the next reconnect
         self._scoped = True
         self._draw_top()
+        self.query_one("#board", Board).draw()
 
     async def _check_update(self) -> None:
         try:
@@ -413,7 +427,7 @@ class KraftConsole(App):
                 *tabs[:-1],
             )
         )
-        where = home_relative(self.scope) if self.scope else "all repos"
+        where = home_relative(self.repo) if self.repo else "all repos"
         update_note = " · update available" if self.update_waiting else ""
         self.query_one("#where", Static).update(Content(f"{where} · v{self.version}{update_note}"))
 
@@ -421,7 +435,7 @@ class KraftConsole(App):
         """Each top view's tab with its count (spec §5.4): how many need you
         in scope, the server's health word, how many add-on updates wait."""
         needs_you = sum(
-            row.get("display_status") == "needs_you" and self.scope in (None, row.get("repo"))
+            words.group_of(row) == "needs" and self.repo in (None, row.get("repo"))
             for row in self.rows
         )
         held = sum(

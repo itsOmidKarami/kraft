@@ -42,10 +42,6 @@ class _Placeholder(View):
         yield Static(f"{self.label}: not built yet.", markup=False)
 
 
-class Board(_Placeholder):
-    label = "Board"
-
-
 class Item(_Placeholder):
     label = "Item"
 
@@ -61,6 +57,9 @@ class Addons(_Placeholder):
 class Repos(_Placeholder):
     label = "Repos"
 
+
+# After `View`, which each view's module builds on.
+from kraft.console.screens.board import Board  # noqa: E402
 
 #: Every view, by the name `KraftConsole.show` takes.
 VIEWS: dict[str, type[View]] = {
