@@ -221,6 +221,22 @@ def until(iso: str | None, now: float) -> str:
     return f"in {hours}h" if hours < 24 else f"in {hours // 24}d"
 
 
+def elapsed(seconds: float) -> str:
+    """`format.ts`'s `elapsed`, from seconds: "59s", "12m", "3h 12m", "1d 4h"."""
+    # floor(x + 0.5): JavaScript's Math.round, which Python's round() is not at .5.
+    s = max(0, math.floor(seconds + 0.5)) if math.isfinite(seconds) else 0
+    if s < 60:
+        return f"{s}s"
+    m = s // 60
+    if m < 60:
+        return f"{m}m"
+    h = m // 60
+    if h < 24:
+        return f"{h}h {m % 60}m" if m % 60 else f"{h}h"
+    d = h // 24
+    return f"{d}d {h % 24}h" if h % 24 else f"{d}d"
+
+
 #: `status.ts`: a budget stop the item could raise, but not now.
 RAISE_REFUSED = "Kraft takes no raise for it right now."
 #: `status.ts`: a budget stop the item cannot raise.
