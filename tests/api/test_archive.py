@@ -155,7 +155,8 @@ def test_a_moved_repository_still_lets_the_worktree_go(client, repo, action):
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
     moved = repo.rename(repo.with_name("moved"))
 
-    r = client.post(f"/api/work-items/{wid}/{action}")
+    body = {"reason": "later"} if action == "abandon" else None
+    r = client.post(f"/api/work-items/{wid}/{action}", json=body)
 
     assert r.status_code == 200, r.text
     assert r.json()["worktree_removed"] is True
