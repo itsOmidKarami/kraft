@@ -14,7 +14,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   await page.clock.setFixedTime(new Date(NG_NOW));
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
-  const serve = mockServer(S, opts);
+  // An action's events and updated_at at the frozen page clock's instant, not the machine's.
+  const serve = mockServer(S, { now: () => NG_NOW, ...opts });
   await page.route(/\/api\//, async (route) => {
     const req = route.request();
     const reply = await serve({ method: req.method(), url: req.url(), json: () => req.postDataJSON() });

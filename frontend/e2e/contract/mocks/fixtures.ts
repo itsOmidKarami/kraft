@@ -578,7 +578,7 @@ export function compareFor(id: string, variant: Variant, ignoreWhitespace = fals
   };
 }
 
-function documentsFor(item: any, variant: Variant) {
+export function documentsFor(item: any, variant: Variant) {
   const long = variant === "long";
   const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, long ? 110 : 40);
   // Two documents attached at intake in every variant, at the real shape (W10.D):
@@ -767,9 +767,9 @@ export interface Scenario {
   byState: Record<DisplayState, ItemBundle>;
   /** ux2-W5: the item page's items, by scenario; in bundles, never in the board list. */
   ng: Record<string, string>;
-  /** ux2-W6: the board's list and archived list, served only with `MockOptions.ngBoard`. */
-  ngBoard: any[];
-  ngArchived: any[];
+  /** ux2-W6: the board's ids and the archived list's, in order, served only with `MockOptions.ngBoard`: each row is read from its bundle (transitions.ts `listRow`). */
+  ngBoard: string[];
+  ngArchived: string[];
   bundles: Record<string, ItemBundle>;
   docs: Record<string, any[]>;
   settings: ReturnType<typeof settingsFor>;
@@ -802,7 +802,7 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
     ng[sc] = b.item.id; bundles[b.item.id] = b; docs[b.item.id] = [];
   });
   const board = buildNgBoard(variant, bundles);
-  for (const i of [...board.list, ...board.archived]) docs[i.id] = [];
+  for (const id of [...board.list, ...board.archived]) docs[id] = [];
   return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }
 
