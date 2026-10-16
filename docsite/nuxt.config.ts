@@ -219,6 +219,24 @@ export default defineNuxtConfig({
       moved: Object.fromEntries(redirects),
     },
   },
+  // The label icon of a ```yaml [config/x.yaml] block is Nuxt UI's
+  // `i-vscode-icons-file-type-<extension>`, built at render time, so the icon
+  // scan cannot see it and a static site fetched it from api.iconify.design in
+  // the reader's browser. Listed here, they ship in the client bundle: a reader's
+  // browser calls no third party (see fonts below). A fence with a new
+  // extension that gets an icon needs its name here.
+  icon: {
+    clientBundle: {
+      icons: [
+        'vscode-icons:file-type-yaml',
+        'vscode-icons:file-type-json',
+        'vscode-icons:file-type-toml',
+        'vscode-icons:file-type-markdown',
+        'vscode-icons:file-type-docker',
+      ],
+      scan: true,
+    },
+  },
   // The IPX image proxy double-prefixes app.baseURL for content images
   // (/_ipx/_/assets/...), 404ing every screenshot. These are
   // already correctly-sized PNGs with no need for runtime resizing, so skip
