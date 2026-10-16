@@ -63,10 +63,13 @@ def _is_item(option_id: str | None) -> bool:
 
 def bar_of(row: dict) -> str:
     """The row's state colour (spec §5.2): failed is bad, cancelled faint,
-    the rest their group's."""
+    paused mid-chain neutral as on the web (it waits on nobody), the rest
+    their group's."""
     status = row.get("display_status")
     if status == "failed":
         return "$error"
+    if status == "paused" and row.get("current_node_id"):
+        return "$kraft-muted"
     if status == "cancelled":
         return "$kraft-faint"
     return BAR[words.group_of(row)]
@@ -445,7 +448,9 @@ class Board(View):
             chain = self.query_one("#peek-chain", Static)
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
             chain.display = True
-            say(f"{item.get('pending_gate') or stop.get('node')} is waiting on your decision.")
+            gate = item.get("pending_gate") or stop.get("node") or ""
+            gate = words.gate_name(words.nodes_of(item), gate)
+            say(f"{words.capitalise(gate)} is waiting on your decision.")
             if "approve" not in doors and (waits := await acts.approve_waits(work_item_id)):
                 say(waits)
             try:

@@ -360,7 +360,7 @@ def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
         await _opened(console, app, pilot, GATE["id"])
         await pilot.press("r")
         await console.until(pilot, lambda: isinstance(app.screen, Note))
-        asked = isinstance(app.screen, Reject)
+        asked, question = isinstance(app.screen, Reject), app.screen.question
         for key in keys[:-1]:
             await pilot.press(key)
         asks = str(app.screen.query_one("#note-lines").render())
@@ -368,9 +368,10 @@ def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
         if sent:
             await console.until(pilot, lambda: calls)
         await console.until(pilot, lambda: not isinstance(app.screen, Note))
-        return calls, asked, asks
+        return calls, asked, asks, question
 
-    assert console.run(scenario) == (sent, picker, said)
+    # Either dialog names the gate as the web does.
+    assert console.run(scenario) == (sent, picker, said, "Reject approve spec on a91c03fe")
 
 
 def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):

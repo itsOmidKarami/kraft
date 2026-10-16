@@ -102,7 +102,7 @@ def test_the_board_draws_the_webs_groups_in_a_fixed_grid(board, size, repo, line
     ("row", "bar"),
     [
         (GATE, "$warning"),
-        (_row("p", "paused"), "$warning"),
+        (_row("p", "paused"), "$kraft-muted"),
         (FAILED, "$error"),
         (RUNNING, "$kraft-info"),
         (_row("q", "queued", current_node_id=None), "$kraft-info"),
@@ -379,7 +379,7 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
             _detail(GATE, actions=["reject"]),
             "spec → spec_approval ● → plan → implement",
             [
-                "spec_approval is waiting on your decision.",
+                "Approve spec is waiting on your decision.",
                 "Approve waits on 2 open must-fix threads.",
                 "",
                 "# Spec",

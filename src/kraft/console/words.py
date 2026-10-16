@@ -99,8 +99,14 @@ def gate_name(nodes: list[dict] | None, node_id: str) -> str:
     return display_name({**_named(nodes, node_id), "kind": "gate"})
 
 
-def _nodes(item: dict) -> list[dict] | None:
+def nodes_of(item: dict) -> list[dict] | None:
+    """The nodes of the item's chain, for `name_of` and `gate_name`."""
     return (item.get("chain_definition") or {}).get("nodes")
+
+
+def capitalise(text: str) -> str:
+    """`capitalise`: the first letter upper case, the rest as they are."""
+    return text[:1].upper() + text[1:]
 
 
 def _node_of(row: dict) -> str:
@@ -132,7 +138,7 @@ def _fallback_name(to: object) -> str:
 def reason_tail(row: dict, now: float) -> str:
     """`reasonTail`: the row's one short line, per status and stop kind.
     `now` is seconds since the epoch."""
-    node = name_of(_nodes(row), _node_of(row))
+    node = name_of(nodes_of(row), _node_of(row))
     stop = row.get("stop") or {}
     tail = _tail(row, stop, node, now)
     on = _fallback_name((row.get("fallback") or {}).get("to"))
@@ -145,7 +151,7 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
             reason = stop.get("reason")
             match stop.get("kind"):
                 case "gate":
-                    return gate_name(_nodes(row), _or(row.get("pending_gate"), _node_of(row)))
+                    return gate_name(nodes_of(row), _or(row.get("pending_gate"), _node_of(row)))
                 case "question":
                     asked = re.sub(r"^needs_context:\s*", "", _or(reason, ""))
                     return f"agent asks: {asked}".strip()
@@ -330,7 +336,7 @@ def banner_of(item: dict) -> dict | None:
     words = _banner_words(item)
     if words is None:
         return None
-    node, nodes = words["node"], _nodes(item)
+    node, nodes = words["node"], nodes_of(item)
     named = gate_name if words["kind"] == "gate" else name_of
     return {**words, "name": named(nodes, node) if node else ""}
 

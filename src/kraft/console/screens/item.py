@@ -686,7 +686,7 @@ class Item(View):
         if to not in before:
             return None
         return Reject(
-            f"Reject {gate} on {item['id'][:8]}",
+            f"Reject {words.gate_name(nodes, gate or '')} on {item['id'][:8]}",
             [reject_asks(to)],
             nodes=before,
             to=to,

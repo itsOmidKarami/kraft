@@ -80,8 +80,9 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
     """Reject the pending gate with a required note. `note_dialog` asks
     instead of the plain note (the Item's, which also picks the node)."""
     gate = row.get("pending_gate") or "the gate"
+    named = words.gate_name(words.nodes_of(row), gate) if row.get("pending_gate") else gate
     asked = note_dialog or Note(
-        f"Reject {gate} on {row['id'][:8]}",
+        f"Reject {named} on {row['id'][:8]}",
         [reject_asks((row.get("fix_target") or {}).get("node"))],
         required=True,
     )
