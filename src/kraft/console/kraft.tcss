@@ -56,6 +56,16 @@ Screen.-no-server #start {
     display: block;
 }
 
+/* Docked, so it stays above the footer when the no-server message replaces the views. */
+#prompt {
+    dock: bottom;
+    margin-bottom: 1;
+    border: none;
+    height: 1;
+    padding: 0 1;
+    background: $kraft-side;
+}
+
 Screen.-narrow Footer {
     display: none;
 }
@@ -75,6 +85,7 @@ Screen.-tiny > * {
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
 Screen.-tiny #down,
 Screen.-tiny #start,
+Screen.-tiny #prompt,
 Screen.-tiny #narrow-keys {
     display: none;
 }

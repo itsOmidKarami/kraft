@@ -20,6 +20,7 @@ from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.dialogs import Confirm
 from kraft.console.live import Link
+from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
 
 OTHER_INSTANCE = client.ClientError(
@@ -547,8 +548,8 @@ def test_start_server_takes_the_focus_only_from_the_view(console, steps, on_inpu
         if on_input == "in-view":  # a focusable child of the view, as PR 3 adds
             await app.view.mount(typing)
             app.default_screen.set_focus(typing)
-        elif on_input:
-            await app.default_screen.mount(typing)
+        elif on_input:  # the real prompt, which sits outside the view
+            typing = app.query_one(Prompt)
             app.default_screen.set_focus(typing)
         for link in steps:
             app._live_link(link, None)

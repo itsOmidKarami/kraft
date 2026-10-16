@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import signal
 import sys
 from collections.abc import Iterable, Sequence
@@ -21,13 +22,14 @@ from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Static
+from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
 
 from kraft import answers, client, config, update
 from kraft.console import runner, theme
 from kraft.console.dialogs import Confirm
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
+from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
 from kraft.vocab import WorkItemStatus
 
@@ -111,6 +113,7 @@ class KraftConsole(App):
         Binding("escape", "back", "back", show=False),
         Binding("q", "back(True)", "back or quit", show=False),
         Binding("question_mark", "keys", "keys"),
+        Binding("slash", "prompt", "command", show=False),
         Binding("ctrl+o", "output", "output", show=False),
     ]
 
@@ -150,6 +153,7 @@ class KraftConsole(App):
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
                 yield view(id=name)
+        yield Prompt()
         yield Footer(show_command_palette=False)
         # Textual's Footer cannot hide one key, so a narrow frame swaps it for this.
         yield Static("? keys", id="narrow-keys")
@@ -262,8 +266,33 @@ class KraftConsole(App):
         if self.command is not None:
             await self.command.end()
 
+    def action_prompt(self) -> None:
+        prompt = self.query_one(Prompt)
+        prompt.value = "/"
+        prompt.cursor_position = 1
+        prompt.focus()
+
     def action_output(self) -> None:
         self.run_worker(self._show_panel())
+
+    @on(Input.Submitted, "#prompt")
+    def _typed(self, event: Input.Submitted) -> None:
+        if event.value.strip(" /"):
+            self.run_worker(self._run_typed(event.value), group="typed")
+
+    async def _run_typed(self, line: str) -> None:
+        kind, what = runner.route(line)
+        if kind == "show":
+            self.show(what)
+        elif kind == "say":
+            self.notify(what, markup=False)
+        else:
+            asked = runner.ask(what)
+            if asked is not None:
+                sentence, doing = asked
+                if not await self.confirm(f"kraft {shlex.join(what)}", [sentence], running=doing):
+                    return
+            await self.run_command(what)
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:
