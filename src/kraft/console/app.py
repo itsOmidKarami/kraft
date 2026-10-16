@@ -23,20 +23,21 @@ from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
 from textual.color import Color
 from textual.command import DiscoveryHit, Hit, Hits, Provider
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
-from kraft.console import moments, runner, theme, words
+from kraft.console import moments, panels, pulse, runner, theme, words
 from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
-from kraft.console.prompt import Prompt, commands
+from kraft.console.prompt import Prompt, commands, for_item
 from kraft.console.screens import VIEWS, Board, Item, View, new_item
 from kraft.console.screens.server import updates_waiting
+from kraft.console.status import StatusLine
 from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
@@ -54,6 +55,13 @@ CONFIRM_LIST_S = 2.0
 WIDE = 100
 #: Said after `kraft admin update` installed a version the console did not start on.
 UPDATED = "Kraft was updated; restart the console to use the new version."
+#: The prompt's hint while it is empty, by the view shown: the keys that act
+#: on the Board, and on an Item that a typed `/item` verb takes this item.
+PLACEHOLDERS = {
+    "board": "a approve · r reject · /command…",
+    "item": "/item … for this item, or esc",
+}
+PLACEHOLDER = "/command…"
 
 
 def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
@@ -76,6 +84,13 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
             "kraft-info": tokens["info"],
             "kraft-muted": tokens["text-muted"],
             "kraft-faint": tokens["text-faint"],
+            # The console's own accent and its quieter variant (`gen_theme.CONSOLE_ACCENT`).
+            "kraft-accent": tokens["brand"],
+            "kraft-accent-muted": tokens["brand-muted"],
+            # A panel's frame: the web's border, quieter than anything it holds.
+            "kraft-frame": tokens["border"],
+            # The live dot for the beat after an event lands.
+            "kraft-live-lit": Color.parse(tokens["ok"]).blend(Color.parse(tokens["text"]), 0.6).hex,
             # A field's frame: the accent at half strength when focused, so the
             # field is not the loudest thing in a dialog; the web's border else,
             # so a field not focused still reads as one to type in.
@@ -204,6 +219,10 @@ class KraftConsole(App):
         #: The line the terminal keeps after the console quits; None until it
         #: quits, and when it never read the board.
         self.farewell: str | None = None
+        #: The one clock every spinner and running time moves by.
+        self.pulse = pulse.Pulse(self)
+        #: The live dot drawn lit: for one beat after an event lands.
+        self._lit = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
@@ -218,10 +237,14 @@ class KraftConsole(App):
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
                 yield view(id=name)
-        yield Prompt()
+        # Docked, so it stays above the footer when the no-server message replaces the views.
+        with Vertical(id="dock"):
+            with Horizontal(id="prompt-box"):
+                yield Static("❯", id="prompt-mark")
+                yield Prompt()
+            # A narrow frame's footer is hidden: this line names `? keys` instead.
+            yield StatusLine()
         yield Footer(show_command_palette=False)
-        # Textual's Footer cannot hide one key, so a narrow frame swaps it for this.
-        yield Static("? keys", id="narrow-keys")
 
     def on_mount(self) -> None:
         self.show("board")
@@ -249,6 +272,7 @@ class KraftConsole(App):
         view = switcher.query_one(f"#{name}", View)
         if name in TABS:
             self._last_top = name
+        self.query_one(Prompt).placeholder = PLACEHOLDERS.get(name, PLACEHOLDER)
         view.shown()
         self._draw_top()
         return view
@@ -456,6 +480,8 @@ class KraftConsole(App):
 
     async def _run_typed(self, line: str) -> None:
         kind, what = runner.route(line)
+        if kind == "run" and isinstance(self.view, Item) and self.view.work_item_id:
+            what = for_item(what, self.view.work_item_id)
         if kind == "show":
             self.show(what)
         elif kind == "say":
@@ -538,11 +564,20 @@ class KraftConsole(App):
         # The frame, not whatever is on top: Ctrl+P's palette is a pushed screen.
         self.default_screen.set_class(width < MIN_SIZE[0] or height < MIN_SIZE[1], "-tiny")
         self.default_screen.set_class(width < NARROW, "-narrow")
+        self.default_screen.set_class(height < panels.COMPACT_ROWS, "-compact")
         self._draw_top(width)
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
         before, first = self.rows, not self._read_once
         self.rows, self._read_once = rows, True
+        status = self.query_one(StatusLine)
+        if not events:  # reconnected, or read again: so are the spend and the agents
+            self.run_worker(status.read, group="status", exclusive=True)
+        elif any(event.get("type") == "worker_session_exited" for event in events):
+            # A session's cost is on the ledger once it ends.
+            self.run_worker(status.read_budget, group="status", exclusive=True)
+        if events:
+            self._light_dot()
         if first:
             self._since_on()
         if done := [
@@ -588,6 +623,8 @@ class KraftConsole(App):
         elif was_down and frame.focused in (None, start):
             # The frame's own focus, which the output panel may be covering.
             frame.set_focus(self.view)
+        if status := self.query_one_optional(StatusLine):
+            status.draw()
         if link is Link.LIVE and not self._scoped:
             self.run_worker(self._resolve_scope, name="scope", group="scope", exclusive=True)
         self._draw_top()
@@ -634,21 +671,40 @@ class KraftConsole(App):
         self.release, self.update_waiting = None, False
         self.run_worker(self.check_update, name="update")
 
+    def _light_dot(self) -> None:
+        """An event landed: the live dot is lit for one beat, then itself again."""
+        self._lit = True
+        self._draw_top()
+        # The top line's own timer: it goes with the line when the frame comes down.
+        self.query_one("#tabs").set_timer(1 / pulse.FPS, self._unlight_dot)
+
+    def _unlight_dot(self) -> None:
+        self._lit = False
+        self._draw_top()
+
     def _draw_top(self, width: int | None = None) -> None:
         self._draw_since()
+        # The scope may have moved (resolved, or `s`): the count follows it.
+        if status := self.query_one_optional(StatusLine):  # none once the frame is down
+            status.show_rows(self._in_scope(self.rows))
         live = self.link is Link.LIVE
-        tabs: list[str | tuple[str, str]] = []
+        tabs: list[str | Content | tuple[str, str]] = []
         for name, count in self._tabs():
-            tabs.append((VIEWS[name].label, "bold" if name == self._last_top else "$kraft-muted"))
-            if count:
-                tabs += [" ", count]
-            tabs.append(" · ")
+            if name == self._last_top:
+                # The active tab is a pill in the accent; its count reads in it.
+                said = VIEWS[name].label + (f" {Content.assemble(count).plain}" if count else "")
+                tabs.append((f" {said} ", "bold $background on $kraft-accent"))
+            else:
+                tabs += [(f" {VIEWS[name].label}", "$kraft-muted")]
+                tabs += [" ", count, " "] if count else [" "]
+        dot = "bold $kraft-live-lit" if self._lit else "$success"
         head = Content.assemble(
-            ("Kraft ", "bold"),
-            ("● live", "$success") if live else ("● reconnecting", "$kraft-muted"),
-            "   ",
-            *tabs[:-1],
-        )
+            ("◆ ", "$kraft-accent"),
+            ("kraft ", "bold"),
+            ("● live", dot) if live else ("● reconnecting", "$kraft-muted"),
+            " ",
+            *tabs,
+        ).rstrip()
         self.query_one("#tabs", Static).update(head)
         where = home_relative(self.repo) if self.repo else "all repos"
         # `width` from a resize: inside one, `self.size` is still the old size.

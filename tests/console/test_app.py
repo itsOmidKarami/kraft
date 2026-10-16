@@ -9,14 +9,14 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
-from support.console_board import _text
+from support.console_board import GATE, _settled, _text
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
-from kraft.console import acts, live
+from kraft.console import acts, live, pulse
 from kraft.console import app as console_app
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.dialogs import EVERYWHERE, Confirm, Keys, Note
@@ -46,7 +46,7 @@ def test_an_event_reads_the_board_again(console, stream, tmp_path):
 
     wid, rows, tabs = console.run(scenario)
     assert [row["id"] for row in rows] == [wid]
-    assert tabs.startswith("Kraft ● live")
+    assert tabs.startswith("◆ kraft ● live")
     assert "Server ok" in tabs
 
 
@@ -352,7 +352,7 @@ def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
 ):
     """Under 60x16 nothing else is drawn, whatever state the link is in, so
     the frame says so instead of drawing it clipped; under 80 columns the
-    footer keeps only `? keys`."""
+    footer goes and the status line names `? keys`."""
     if no_server:
 
         async def board_rows(**kwargs):
@@ -365,7 +365,9 @@ def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
         await pilot.pause()
         return (
             app.query_one("#tiny").display and app.query_one("#tiny").region.area > 0,
-            app.query_one("#narrow-keys").display and not app.query_one(Footer).display,
+            "? keys" in _text(app, "#status-text")
+            and pulse.shown(app.query_one("#status-text"))
+            and not app.query_one(Footer).display,
             app.query_one("#down").display or app.query_one("#start").display,
         )
 
@@ -712,3 +714,28 @@ def test_widening_the_window_names_the_version_with_no_live_event(console, monke
         return before
 
     assert console.run(scenario) is False
+
+
+def test_the_top_line_leads_with_the_brand_and_lights_the_dot_one_beat(board):
+    """`◆ kraft` in the accent, the shown view a pill in it, and the live dot
+    lit for one beat when an event lands, then itself again."""
+    console = board([GATE])
+
+    def style_of(app, text: str) -> str:
+        line = app.query_one("#tabs").render()
+        return next(str(s.style) for s in line.spans if line.plain[s.start : s.end] == text)
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        brand, pill, calm = style_of(app, "◆ "), style_of(app, " Board 1 "), style_of(app, "● live")
+        app._live_event([GATE], [{"seq": 1, "type": "node_started"}])
+        lit = style_of(app, "● live")
+        await console.until(pilot, lambda: style_of(app, "● live") == calm, 1.0)
+        return brand, pill, calm, lit
+
+    assert console.run(scenario) == (
+        "$kraft-accent",
+        "bold $background on $kraft-accent",
+        "$success",
+        "bold $kraft-live-lit",
+    )

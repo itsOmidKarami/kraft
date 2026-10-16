@@ -93,6 +93,17 @@ def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     return lead + " ".join([*done, word]), found if len(found) > 1 else []
 
 
+def for_item(argv: list[str], work_item_id: str) -> list[str]:
+    """`argv` with `work_item_id` as its id where an `item` verb takes one and
+    none was typed: `/item pause` on an item's page pauses that item."""
+    if argv[:1] != ["item"] or len(argv) < 2:
+        return argv
+    verb = _verbs(_verbs(_parser())["item"]).get(argv[1])
+    if verb is None or not _wants_id(verb, argv[2:]):
+        return argv
+    return [*argv, work_item_id]
+
+
 def commands() -> list[str]:
     """Every verb the CLI takes, as typed after `kraft`: `item approve`,
     `admin addon install`."""
@@ -117,7 +128,7 @@ class Prompt(Input):
     ]
 
     def __init__(self) -> None:
-        super().__init__(placeholder="/ runs a kraft command", id="prompt", select_on_focus=False)
+        super().__init__(placeholder="/command…", id="prompt", select_on_focus=False)
         self.history: list[str] = []
         self._back = 0
 

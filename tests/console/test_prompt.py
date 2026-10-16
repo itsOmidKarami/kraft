@@ -4,12 +4,13 @@ recalling, Esc out, and what a typed line does once Enter sends it."""
 from __future__ import annotations
 
 import pytest
+from support.console_board import GATE, _settled
 from textual.widgets._footer import FooterKey
 
 from kraft import client
 from kraft.console import runner
 from kraft.console.dialogs import Confirm
-from kraft.console.prompt import Prompt, complete
+from kraft.console.prompt import Prompt, complete, for_item
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
 
@@ -99,7 +100,7 @@ def test_slash_tab_up_and_esc_at_the_prompt(console):
 @pytest.mark.parametrize("server", [True, False], ids=["live", "no-server"])
 def test_the_prompt_stays_just_above_the_footer(console, monkeypatch, server):
     """With no server the views give way to a short message, and the prompt
-    must not ride up under it."""
+    must not ride up under it: it keeps its place over the status line."""
     if not server:
 
         async def gone(**kwargs):
@@ -111,7 +112,7 @@ def test_the_prompt_stays_just_above_the_footer(console, monkeypatch, server):
         await pilot.pause()
         return app.query_one(Prompt).region.y
 
-    assert console.run(scenario) == 22
+    assert console.run(scenario) == 21
 
 
 @pytest.mark.parametrize(
@@ -200,3 +201,63 @@ def test_the_footer_names_the_prompts_own_keys(console):
 
     footer = console.run(scenario)
     assert {("esc", "leave"), ("tab", "complete"), ("↑", "previous")} <= set(footer)
+
+
+@pytest.mark.parametrize(
+    ("argv", "sent"),
+    [
+        (["item", "pause"], ["item", "pause", "W"]),
+        (["item", "reject", "--note", "why"], ["item", "reject", "--note", "why", "W"]),
+        (["item", "pause", "a91c"], ["item", "pause", "a91c"]),
+        (["item", "create", "a title"], ["item", "create", "a title"]),
+        (["item", "reply", "T1", "--body", "ok"], ["item", "reply", "T1", "--body", "ok"]),
+        (["view", "show"], ["view", "show"]),
+        (["item"], ["item"]),
+    ],
+    ids=["no-id", "after-flags", "id-typed", "no-id-taken", "thread-not-item", "not-item", "bare"],
+)
+def test_an_item_verb_typed_on_an_item_takes_that_item(argv, sent):
+    """Where the verb's positional is the item's `id` and none was typed."""
+    assert for_item(argv, "W") == sent
+
+
+@pytest.mark.parametrize(
+    ("view", "placeholder"),
+    [
+        ("board", "a approve · r reject · /command…"),
+        ("item", "/item … for this item, or esc"),
+        ("server", "/command…"),
+        ("repos", "/command…"),
+    ],
+    ids=["board", "item", "server", "repos"],
+)
+def test_the_prompts_hint_says_what_this_screen_takes(board, view, placeholder):
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        if view == "item":
+            app.open_item(GATE["id"])
+        else:
+            app.show(view)
+        await pilot.pause()
+        return app.query_one(Prompt).placeholder
+
+    assert console.run(scenario) == placeholder
+
+
+def test_a_typed_item_verb_on_the_item_page_runs_on_that_item(board, kraft_is):
+    kraft_is(ECHO)
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        app.open_item(GATE["id"])
+        await pilot.press("slash")
+        app.query_one(Prompt).value = "/item pause"
+        await pilot.press("enter")
+        await console.until(pilot, lambda: len(console.output(app)) >= 2)
+        await console.until(pilot, lambda: app.command is None)
+        return console.output(app)[:2]
+
+    assert console.run(scenario) == [f"kraft item pause {GATE['id']}", f"item pause {GATE['id']}"]
