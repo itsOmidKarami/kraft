@@ -40,6 +40,13 @@ def _truncate(path):
         ("old\n", _rotate, ["old"], ["fresh start"]),
         ("a much longer first line\n", _truncate, ["a much longer first line"], ["cut"]),
         (None, _append("born\n"), [], ["born"]),
+        # 50 bytes in 10-byte lines, a 30-byte backlog: the seek lands on a line start.
+        (
+            "".join(f"line{n:05d}\n" for n in range(5)),
+            _append("new\n"),
+            ["line00002", "line00003", "line00004"],
+            ["new"],
+        ),
         ("old\n", _append("half"), ["old"], []),
         ("old\n", _append("half\nwhole\n"), ["old"], ["half", "whole"]),
     ],
@@ -49,6 +56,7 @@ def _truncate(path):
         "rotated",
         "truncated",
         "missing-at-first",
+        "seek-on-a-boundary",
         "partial",
         "partial-done",
     ],
@@ -80,3 +88,67 @@ async def test_the_tail_follows_the_log_through_a_rotation_and_a_truncation(
     finally:
         reader.cancel()
     assert got == first + after
+
+
+def _make_a_file(path):
+    path.rmdir()
+    path.write_text("ok\n")
+
+
+def _make_it_readable(path):
+    path.chmod(0o644)
+    _append("ok\n")(path)
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs permissions to deny")
+@pytest.mark.parametrize("unreadable", ["a-directory", "no-permission"])
+async def test_an_unreadable_log_is_waited_for_not_raised(tmp_path, monkeypatch, unreadable):
+    """The follower is the console's, not a crash: whatever stops it opening
+    the log is read as the log not being there yet."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    path = tmp_path / "server.log"
+    if unreadable == "a-directory":
+        path.mkdir()
+        fix = _make_a_file
+    else:
+        path.write_text("secret\n")
+        path.chmod(0)
+        fix = _make_it_readable
+    got: list[str] = []
+
+    async def read() -> None:
+        async for line in tail.follow(path):
+            got.append(line)
+
+    reader = asyncio.create_task(read())
+    try:
+        await asyncio.sleep(0.1)  # several polls, refused each time
+        assert not reader.done()
+        fix(path)
+        async with asyncio.timeout(5):
+            while "ok" not in got:
+                await asyncio.sleep(0.01)
+    finally:
+        reader.cancel()
+
+
+async def test_a_backlog_of_none_says_no_old_lines(tmp_path, monkeypatch):
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    path = tmp_path / "server.log"
+    path.write_text("old\n")
+    got: list[str] = []
+
+    async def read() -> None:
+        async for line in tail.follow(path, backlog=0):
+            got.append(line)
+
+    reader = asyncio.create_task(read())
+    try:
+        await asyncio.sleep(0.1)
+        _append("new\n")(path)
+        async with asyncio.timeout(5):
+            while not got:
+                await asyncio.sleep(0.01)
+    finally:
+        reader.cancel()
+    assert got == ["new"]

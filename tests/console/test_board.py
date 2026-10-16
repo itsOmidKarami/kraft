@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -513,6 +514,12 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
             None,
             ["This item no longer exists."],
         ),
+        (
+            [GATE],
+            client.status_error(500, "the store is unavailable"),
+            None,
+            [client.reason_of(str(client.status_error(500, "the store is unavailable")))],
+        ),
         ([], None, None, ["server: started", "server: listening"]),
     ],
     ids=[
@@ -526,6 +533,7 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
         "running-before-output",
         "done",
         "gone",
+        "server-error",
         "nothing-selected",
     ],
 )
@@ -594,27 +602,108 @@ def test_the_peek_starts_closed_on_a_short_window_and_v_toggles_it(board, height
 
 def test_holding_j_reads_only_where_the_cursor_stops(board, monkeypatch):
     """The peek reads after the cursor stops, so running down the board reads
-    one item, not every row passed."""
+    one item, not every row passed: each move stops the timer before it."""
     rows = [_row(f"r{n}r{n}r{n}r{n}", "running", n) for n in range(5)]
     read: list[str] = []
+    timers: list[SimpleNamespace] = []
+
+    def set_timer(self, delay, callback=None, **kwargs):
+        timer = SimpleNamespace(stopped=False, callback=callback)
+        timer.stop = lambda: setattr(timer, "stopped", True)
+        timers.append(timer)
+        return timer
 
     async def get_work_item(work_item_id=None, *, full=False):
         read.append(work_item_id)
         return _detail(next(row for row in rows if row["id"] == work_item_id))
 
     monkeypatch.setattr(client, "get_work_item", get_work_item)
-    monkeypatch.setattr(board_view, "PEEK_WAIT_S", 0.3)
+    monkeypatch.setattr(board_view.Board, "set_timer", set_timer)
 
     async def scenario(app, pilot):
         await _settled(board(rows), app, pilot)
-        for _ in range(4):  # held: each press inside the wait of the one before
-            await pilot.press("j")
-            await pilot.pause(0.1)
+        before = len(timers)
+        await pilot.press("j", "j", "j", "j")
+        held = timers[before:]
+        waiting = [timer for timer in held if not timer.stopped]
+        quiet = list(read)
+        for timer in waiting:
+            timer.callback()
         await board(rows).until(pilot, lambda: read)
-        await pilot.pause(0.4)
-        return read
+        return len(waiting), quiet, read
 
-    assert board(rows).run(scenario, size=(80, 40)) == [rows[4]["id"]]
+    assert board(rows).run(scenario, size=(80, 40)) == (1, [], [rows[4]["id"]])
+
+
+def test_the_peek_stops_when_its_view_is_hidden_and_starts_when_shown(board):
+    """The Board stays mounted behind other tabs: its `server.log` follower
+    must not keep polling there."""
+
+    async def scenario(app, pilot):
+        await board([]).until(pilot, lambda: app._scoped)
+        running = lambda: [w for w in app.workers if w.group == "peek" and w.is_running]  # noqa: E731
+        await board([]).until(pilot, running)
+        app.show("server")
+        await board([]).until(pilot, lambda: not running())
+        app.show("board")
+        await board([]).until(pilot, running)
+        return True
+
+    assert board([]).run(scenario, size=(80, 40))
+
+
+def test_a_later_selection_is_not_painted_over_by_the_earlier_log(board, monkeypatch):
+    """Follow A's log, move to B: A's lines, written late, must not appear."""
+    other = _row("o0o0o0o0", "running", 10)
+    rows = [RUNNING, other]
+    late = asyncio.Event()
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        row = next(row for row in rows if row["id"] == work_item_id)
+        return _detail(row, worker_sessions=[SESSION])
+
+    async def stream_log(work_item_id, session_id, after_line=0):
+        yield {"n": 0, "text": f"first from {work_item_id}"}
+        if work_item_id == RUNNING["id"]:
+            await late.wait()
+            yield {"n": 1, "text": "late from the first"}
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(client, "stream_log", stream_log)
+    monkeypatch.setattr(board_view, "PEEK_WAIT_S", 0.01)
+
+    async def scenario(app, pilot):
+        await _settled(board(rows), app, pilot)
+        await board(rows).until(pilot, lambda: "first from k7f2e9a0" in _peek(app))
+        await pilot.press("j")
+        await board(rows).until(pilot, lambda: "first from o0o0o0o0" in _peek(app))
+        late.set()
+        await pilot.pause(0.1)
+        return _peek(app)
+
+    assert "late from the first" not in board(rows).run(scenario, size=(80, 40))
+
+
+def test_a_long_line_wraps_inside_a_narrow_window(board, monkeypatch):
+    """The body cannot take focus, so a line past the window's edge could never
+    be read: it wraps at the window's width, not at the log's usual minimum."""
+    long = "keep " * 24
+    detail = _detail(QUESTION, needs_context_question=long.strip())
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        return detail
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+
+    async def scenario(app, pilot):
+        await _settled(board([QUESTION]), app, pilot)
+        await board([QUESTION]).until(pilot, lambda: len(_peek(app)) >= 5)
+        await pilot.pause(0.05)
+        return _peek(app)
+
+    lines = board([QUESTION]).run(scenario, size=(60, 40))
+    assert max(len(line) for line in lines) <= 60
+    assert " ".join(" ".join(lines).split()).count("keep") == 24
 
 
 def test_a_live_refresh_rereads_the_peek_only_when_its_item_changed(board, monkeypatch):

@@ -171,7 +171,7 @@ class Board(View):
             yield Static(id="peek-head")
             yield Static(id="peek-chain")
             # Focus stays with the Board and the prompt, never the peek.
-            body = RichLog(id="peek-body", wrap=True, max_lines=500)
+            body = RichLog(id="peek-body", wrap=True, max_lines=500, min_width=1)
             body.can_focus = False
             yield body
 
@@ -347,6 +347,17 @@ class Board(View):
         box = self.query_one("#board-filter", Input)
         box.display = True
         box.focus()
+
+    def on_hide(self) -> None:
+        """Another view is shown (this one stays mounted): stop polling
+        `server.log` and following a session log until it comes back."""
+        if self._timer is not None:
+            self._timer.stop()
+        self.workers.cancel_group(self, "peek")
+        self._peeked = ()
+
+    def on_show(self) -> None:
+        self._peek_soon()
 
     def _peek_soon(self) -> None:
         """Look again once the cursor has stopped for `PEEK_WAIT_S`."""
