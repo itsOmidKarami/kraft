@@ -212,7 +212,7 @@ the full suite.
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
 | `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages, each older major's and `main`'s, all with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
-| `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
+| `docs nudge` | a comment when source moved without its docs page, or the API without the demo's mocks; never fails | nothing to run |
 | `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
 
@@ -469,6 +469,14 @@ frontend with an `npm ci` of its lockfile, because the demo's mocks describe
 that release's API. A tag from before the demo has none. Link to it as
 `/demo/`, like a page: each build gives it its own base, and
 `docsite/app/plugins/demo.ts` loads it from the server rather than the router.
+
+The demo answers from the UI contract's mocks (`frontend/e2e/contract/mocks/`),
+so a change to what it shows is a change to them. They are held to the server
+by `tests/api/api_shapes.json`, which `just shapes` rewrites, and to the
+vocabulary by `frontend/demo/sampleCoverage.test.ts`. When a response
+changes, run `just shapes` and update the mock in the same PR; the `docs
+nudge` workflow comments when `src/kraft/api/` or `src/kraft/vocab/` moved
+without either.
 
 If a frozen major stops building with `main`'s components, build it with its
 own tag's site code instead:
