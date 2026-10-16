@@ -6,13 +6,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import ClassVar
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Input, Select, Static
 
 
 class Dialog[R](ModalScreen[R]):
@@ -99,3 +100,24 @@ class Note(Dialog[str | None]):
     @on(Input.Changed)
     def _typed(self) -> None:
         self.query_one("#note-error", Static).update("")
+
+
+class Reject(Note):
+    """The reject note on the Item (spec §7.2), with where the work goes back
+    to: the nodes before the gate, its fix target chosen. Answers
+    `(note, node)`, or None for Esc."""
+
+    def __init__(self, question: str, lines: Sequence[str], *, nodes: Sequence[str], to: str):
+        super().__init__(question, lines, required=True)
+        self.nodes = nodes
+        self.to = to
+
+    def on_mount(self) -> None:
+        # Textual runs Note's on_mount too, after this one: it focuses the note.
+        # Text, not a str: a node id is drawn as written, never as markup.
+        options = [(Text(node), node) for node in self.nodes]
+        picker = Select(options, allow_blank=False, value=self.to, id="reject-to")
+        self.query_one("#note").mount(picker, before=self.query_one(Input))
+
+    def _answer(self, value) -> None:
+        super()._answer(None if value is None else (value, self.query_one(Select).value))

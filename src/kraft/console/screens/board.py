@@ -22,7 +22,6 @@ from textual.widgets.option_list import Option
 from kraft import client, logs
 from kraft.console import acts, tail, words
 from kraft.console.screens import View
-from kraft.vocab import ThreadLabel
 
 #: A row's columns besides the title and the tail: the repo-and-chain column
 #: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
@@ -148,6 +147,7 @@ class Board(View):
         Binding("end", "rows('last')", "last", show=False),
         Binding("pageup", "rows('page_up')", "page up", show=False),
         Binding("pagedown", "rows('page_down')", "page down", show=False),
+        Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
         Binding("p", "pause_or_resume", "pause/resume"),
         Binding("t", "retry", "retry"),
@@ -302,11 +302,9 @@ class Board(View):
         if action in acts.DOORS:
             return acts.opens(action, self.selected)
         # `s` only where there is a repo to come back to.
-        if action == "open":  # folds Done, or opens a closed peek on an item
+        if action == "open":  # folds Done, or opens the item
             option = self.query_one("#rows", OptionList).highlighted_option
-            if option is not None and option.id == "group:done":
-                return True
-            return self.selected is not None and not self.query_one("#peek").display
+            return self.selected is not None or (option is not None and option.id == "group:done")
         return self.app.scope is not None if action == "scope" else True
 
     @on(OptionList.OptionHighlighted, "#rows")
@@ -328,13 +326,19 @@ class Board(View):
 
     def action_open(self) -> None:
         """Enter on Done's heading folds and unfolds it; on an item it opens
-        the peek, until the Item screen (PR 4) takes Enter over."""
+        the Item (spec §6). `v` is the peek's."""
         option = self.query_one("#rows", OptionList).highlighted_option
         if option is not None and option.id == "group:done":
             self.done_open = not self.done_open
             self.draw()
-        elif self.selected is not None and not self.query_one("#peek").display:
-            self.action_peek()
+        elif row := self.selected:
+            self.app.open_item(row["id"])
+
+    def action_approve(self) -> None:
+        """`a` opens the item's Overview rather than approving blind: a chain
+        revision's approval needs the digest of the version read (spec §7.1)."""
+        if row := self.selected:
+            self.app.open_item(row["id"])
 
     def action_peek(self) -> None:
         peek = self.query_one("#peek")
@@ -433,11 +437,8 @@ class Board(View):
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
             chain.display = True
             say(f"{item.get('pending_gate') or stop.get('node')} is waiting on your decision.")
-            if "approve" not in doors:
-                threads = await client.threads(work_item_id, open_only=True)
-                must = sum(thread.get("label") == ThreadLabel.MUST_FIX for thread in threads)
-                if must:
-                    say(f"Approve waits on {must} open must-fix thread{'s' if must != 1 else ''}.")
+            if "approve" not in doors and (waits := await acts.approve_waits(work_item_id)):
+                say(waits)
             try:
                 document = await client.artifact(work_item_id)
             except client.ClientError as exc:

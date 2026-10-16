@@ -202,3 +202,53 @@ Confirm, Note {
 #confirm Button {
     margin-right: 2;
 }
+
+/* The Item: two header lines, the banner when stopped, the chain, the tabs. */
+#item-top, #item-state {
+    height: 1;
+}
+
+#item-title, #item-status {
+    width: 1fr;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#item-where, #item-spent {
+    width: auto;
+    padding: 0 1;
+}
+
+#item-title, #item-status, #item-chain, #item-tabs, #item-banner, #item-gone {
+    padding: 0 1;
+}
+
+#item-chain, #item-tabs {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* The reason wraps: a stop's way on is read whole. */
+#item-banner {
+    height: auto;
+    background: $surface;
+}
+
+#item-tabs {
+    border-bottom: solid $kraft-line;
+    height: 2;
+}
+
+#item-panes, #item-panes > RichLog {
+    height: 1fr;
+}
+
+#item-panes > RichLog {
+    padding: 0 1;
+    background: $background;
+}
+
+#note Select {
+    margin-top: 1;
+}

@@ -9,6 +9,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
+from support.console_board import _text
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
@@ -27,10 +28,6 @@ OTHER_INSTANCE = client.ClientError(
     "kraft: the server at x is a different instance", kind=client.Failure.OTHER_INSTANCE
 )
 UNREACHABLE = client.transport._unreachable()
-
-
-def _text(app, selector: str) -> str:
-    return str(app.query_one(selector).render())
 
 
 def test_an_event_reads_the_board_again(console, stream, tmp_path):

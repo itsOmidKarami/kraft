@@ -431,6 +431,21 @@ def compare_body(payload: dict) -> str:
     return "\n".join(out)
 
 
+def artifact_truncated(payload: dict) -> str | None:
+    """The warning a cut document carries wherever it is read, plain: the CLI
+    paints it, the console draws it. None for a whole one."""
+    if not payload.get("truncated"):
+        return None
+    limit = payload.get("artifact_max_bytes")
+    return (
+        "WARNING: this document was truncated by the server at "
+        + (f"{limit} bytes" if limit else "its size limit")
+        + " — this is not the whole file. Read the rest at "
+        + (payload.get("path") or "its path in the worktree")
+        + "."
+    )
+
+
 def artifact_body(payload: dict) -> str:
     """A gate's spec/plan document, with the same truncation notice the diff
     renderer gives — `kraft view artifact` is the one surface where a reviewer
@@ -438,16 +453,8 @@ def artifact_body(payload: dict) -> str:
     `_cmd_artifact` used to page `content` straight through with no read of
     `truncated` at all."""
     out = payload.get("content", "")
-    if payload.get("truncated"):
-        limit = payload.get("artifact_max_bytes")
-        out += "\n\n" + paint(
-            "WARNING: this document was truncated by the server at "
-            + (f"{limit} bytes" if limit else "its size limit")
-            + " — this is not the whole file. Read the rest at "
-            + (payload.get("path") or "its path in the worktree")
-            + ".",
-            "\033[33m",
-        )
+    if warning := artifact_truncated(payload):
+        out += "\n\n" + paint(warning, "\033[33m")
     if payload.get("digest"):
         # A chain revision's approval is bound to this render (Kraft-ec66w).
         out += (

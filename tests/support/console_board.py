@@ -71,6 +71,11 @@ ARCHIVED = _row("z9z9z9z9", "archived", 900)
 BOARD = [RUNNING, DONE, GATE, ARCHIVED, ELSEWHERE, FILED, FAILED]
 
 
+def _text(app, selector: str) -> str:
+    """What a widget draws, as plain text."""
+    return str(app.query_one(selector).render())
+
+
 def _lines(app) -> list[str]:
     return [option.prompt.plain for option in app.query_one("#rows", OptionList).options]
 

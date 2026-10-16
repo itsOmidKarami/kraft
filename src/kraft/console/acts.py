@@ -14,16 +14,28 @@ from textual.app import App
 from kraft import answers, client
 from kraft.console import words
 from kraft.console.dialogs import Note
+from kraft.vocab import ThreadLabel
 
 #: The keys that act on an item, and the doors (`actions`) that open each: a
 #: key is bound only while the server lists one (spec §6).
 DOORS = {
+    "approve": ("approve",),
     "reject": ("reject",),
     "pause_or_resume": ("pause", "resume"),
     "retry": ("retry",),
 }
 #: What a steer's dialog says: the retry and resume routes take one or none.
 STEER = "A steer for the agent, or Enter for none."
+
+
+async def approve_waits(work_item_id: str) -> str | None:
+    """Why approve is closed at a pending gate, when open must-fix threads
+    keep it so (spec §7.1, §7.2), in the sentence the peek and the Item say."""
+    threads = await client.threads(work_item_id, open_only=True)
+    must = sum(thread.get("label") == ThreadLabel.MUST_FIX for thread in threads)
+    if not must:
+        return None
+    return f"Approve waits on {must} open must-fix thread{'s' if must != 1 else ''}."
 
 
 def opens(action: str, row: dict | None) -> bool:
