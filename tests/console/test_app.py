@@ -408,6 +408,11 @@ def test_no_key_does_two_things_on_one_view(name):
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
+            # An open Chain node's close shares ← and Esc with the key that is
+            # live when none is open; `check_action` shuts one of the two
+            # (pinned in tests/console/test_item_chain_live.py).
+            if binding.action == "close_node":
+                continue
             # `shift+r` is kitty's name for `R`; `shift+tab` is a key of its own.
             key = binding.key.lower()
             if len(key.removeprefix("shift+")) == 1:

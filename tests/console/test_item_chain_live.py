@@ -292,3 +292,21 @@ def test_the_cursor_has_a_column_of_its_own(board, monkeypatch):
         return {line.index("✓") for line in raw}
 
     assert len(console.run(scenario)) == 1
+
+
+@pytest.mark.parametrize("keys", [[], ["enter"]], ids=["list", "open-node"])
+def test_one_of_a_keys_two_actions_is_live_at_a_time(board, monkeypatch, keys):
+    """← and Esc each mean close or the other thing, never both: exactly one of
+    `left` and `close_node` acts, and only an open node's close does."""
+    detail = _flow(_session("implement", "author", 1, 20))
+    _serve(monkeypatch, detail, calls=[])
+    _serve_events(monkeypatch, [])
+    console = board([detail])
+
+    async def scenario(app, pilot):
+        await _chain_tab(console, app, pilot)
+        await pilot.press(*keys)
+        view = app.view
+        return view.check_action("left", ()), view.check_action("close_node", ())
+
+    assert console.run(scenario) == ((True, False) if not keys else (False, True))
