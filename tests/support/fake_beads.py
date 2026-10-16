@@ -80,7 +80,9 @@ class FakeBeads:
         }
         return bead_id
 
-    async def complete(self, bead_id: str, *, cwd: str | None = None) -> None:
+    async def complete(
+        self, bead_id: str, *, cwd: str | None = None, reason: str | None = None
+    ) -> None:
         self._spawn_in(cwd)
         bead = self._ws(cwd).get(bead_id)
         if bead is None:
@@ -88,6 +90,14 @@ class FakeBeads:
             # with check=True.
             raise RuntimeError(f"fake bd close: no bead {bead_id!r} in {cwd!r}")
         bead["status"] = "closed"
+        bead["close_reason"] = reason
+
+    async def annotate(self, bead_id: str, text: str, *, cwd: str | None = None) -> None:
+        self._spawn_in(cwd)
+        bead = self._ws(cwd).get(bead_id)
+        if bead is None:
+            raise RuntimeError(f"fake bd comments add: no bead {bead_id!r} in {cwd!r}")
+        bead.setdefault("comments", []).append(text)
 
     async def search(self, q: str, *, cwd: str | None = None, limit: int = 5) -> list[dict]:
         rows = [b for b in self._ws(cwd).values() if q.lower() in b["title"].lower()]

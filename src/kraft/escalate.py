@@ -91,7 +91,7 @@ _HANDS_OFF = (
     "right, say plainly that you may not take that action yourself, and give "
     "them the one command that does: `kraft item skip {work_item_id}` (or the "
     "Skip action on the board). Abandoning is theirs as well: `kraft item "
-    "abandon --yes {work_item_id}`.\n"
+    'abandon --reason "..." --yes {work_item_id}`.\n'
 )
 
 

@@ -133,7 +133,9 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
 
     async def abandon():
         async with client.transport.http() as http:
-            assert (await http.post(f"/api/work-items/{wid}/abandon")).status_code == 200
+            assert (
+                await http.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
+            ).status_code == 200
 
     asyncio.run(abandon())
 

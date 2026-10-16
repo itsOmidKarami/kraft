@@ -272,17 +272,18 @@ def test_a_plan_without_task_headings_is_a_400_and_no_progress(client, repo):
     assert _board_row(client, wid)["progress"] is None
 
 
-@pytest.mark.parametrize("rework", [False, True], ids=["paused", "rework"])
-def test_the_detail_keeps_progress_the_board_drops(client, repo, rework):
+@pytest.mark.parametrize("case", ["paused", "rework", "skipped"])
+def test_the_detail_keeps_progress_the_board_drops(client, repo, case):
     """Off the running node the board shows no task count, but the detail keeps
     the plan: paused on the node, where it stands; bounced back by a rejection
-    (Kraft-hj2q9), the plan finished, since the run follows the note instead."""
+    (Kraft-hj2q9), the plan finished, since the run follows the note instead;
+    skipped past, settled too, with no task left `current`."""
     wid = _paused_item(client, repo)
     wt = _worktree(wid)
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
     git(wt, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: done")
-    if rework:
+    if case == "rework":
         conn = _db()
         try:
             events.append(conn, wid, "node_completed", {"node_id": "implementation"})
@@ -291,11 +292,23 @@ def test_the_detail_keeps_progress_the_board_drops(client, repo, rework):
         finally:
             conn.close()
         _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
-    _force_node(wid, "implementation", "active" if rework else "paused")
+    if case == "skipped":
+        conn = _db()
+        try:
+            events.append(
+                conn,
+                wid,
+                "node_skipped",
+                {"node_id": "implementation", "gate": None, "note": None},
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    _force_node(wid, "implementation", "active" if case == "rework" else "paused")
 
     detail = client.get(f"/api/work-items/{wid}").json()["progress"]
     assert [t["state"] for t in detail["tasks"]] == (
-        ["done", "done", "done"] if rework else ["done", "current", "pending"]
+        ["done", "current", "pending"] if case == "paused" else ["done", "done", "done"]
     )
     assert detail["tasks"][0]["sha"] == git_read(wt, "rev-parse", "--short", "HEAD")
     assert _board_row(client, wid)["progress"] is None

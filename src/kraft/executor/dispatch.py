@@ -830,15 +830,48 @@ def scope_runs(
         return session_pass.get(row["id"], 1)
 
     newest_pass = len(node_passes.get(node_id, [None]))
-    # What each round of a pass picked in a repository, from its latest dispatch.
-    picked: dict[tuple[int, str | None, int], tuple[int, list[str]]] = {}
+    # Every pick, in order, with the pass it belongs to.
+    dispatches: list[tuple[int, int, str | None, int, list[str]]] = []
     for seq, p in selections:
         # shortcut: picks carry no pass, so ones that started nothing before the node was sent
         # back are read as the next pass's; stamp the pass on the event if that ever shows.
         n = next((ran_in(r) for r in rows if r["seq"] > seq), newest_pass)
-        picked[(n, p.get("repository"), p["round"])] = (seq, p["commands"])
+        dispatches.append((seq, n, p.get("repository"), p["round"], p["commands"]))
+    # What each round of a pass picked in a repository, from its latest dispatch.
+    picked: dict[tuple[int, str | None, int], tuple[int, list[str]]] = {
+        (n, repo, rnd): (seq, commands) for seq, n, repo, rnd, commands in dispatches
+    }
+    # A dispatch replaces the one before it only when no other round was picked between the two: a
+    # round measured again straight away (a resume cut it short) is one dispatch, but a round the
+    # loop came back to after another one ran (the recovery's re-measure, then a fix cycle's, then
+    # the recovery's again on a resumed entry) is a second run of it, and the first is still a run.
+    superseded: set[int] = set()
+    last_pick: dict[tuple[int, str | None], tuple[int, int]] = {}
+    for seq, n, repo, rnd, _commands in dispatches:
+        before = last_pick.get((n, repo))
+        if before is not None and before[1] == rnd:
+            superseded.add(before[0])
+        last_pick[(n, repo)] = (seq, rnd)
+
+    def owner(row) -> int:
+        """The dispatch a session ran under: the latest pick of its round before it started, 0 when
+        there is none."""
+        key = (ran_in(row), row["repository"], row["round"])
+        return max(
+            (
+                seq
+                for seq, n, repo, rnd, _ in dispatches
+                if (n, repo, rnd) == key and seq < row["seq"]
+            ),
+            default=0,
+        )
+
+    # A session from before every pick of its round is replaced by them.
     rows = [
-        r for r in rows if r["seq"] > picked.get((ran_in(r), r["repository"], r["round"]), (0,))[0]
+        r
+        for r in rows
+        if (o := owner(r)) not in superseded
+        and (o or (ran_in(r), r["repository"], r["round"]) not in picked)
     ]
     tables: dict[str | None, list[dict]] = {}
     out = []
@@ -868,12 +901,12 @@ def scope_runs(
             entry["exit_code"] = code
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
-    started = {(ran_in(r), r["repository"], r["round"], r["command"]) for r in rows}
+    started = {(ran_in(r), r["repository"], r["round"], r["command"], owner(r)) for r in rows}
     # Only the round of the node's latest pick can still start what it picked.
     newest = max(((seq, n, rnd) for (n, _, rnd), (seq, _) in picked.items()), default=(0,))[1:]
-    for (n, repo, rnd), (_, commands) in picked.items():
+    for (n, repo, rnd), (pick_seq, commands) in picked.items():
         for command in commands:
-            if live and (n, rnd) == newest and (n, repo, rnd, command) not in started:
+            if live and (n, rnd) == newest and (n, repo, rnd, command, pick_seq) not in started:
                 out.append(
                     {
                         "session_id": None,

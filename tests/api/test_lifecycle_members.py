@@ -40,7 +40,7 @@ def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
         git(repo, "update-ref", record, "HEAD")
     _set_status(wid, "paused")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 200, r.text
     assert not worktree.exists()

@@ -17,7 +17,7 @@ import { totals } from "./Top";
 import { FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
-import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER } from "./sharedWords";
+import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
 
@@ -237,13 +237,28 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   if (status === "cancelled") {
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;
+    // An abandon alone (no cancel before it) deleted the worktree and branch: the card says so, and why.
+    if (!ev && events.some((e) => e.type === "work_item_abandoned")) {
+      return {
+        tone: "muted", glyph: <Ban size={14} aria-hidden />, title: ABANDONED, where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
+        text: `${ABANDONED_TEXT} Duplicating it starts a new one with the same title, brief and chain.`,
+        facts: [
+          ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
+          ["reason", item.ended_reason || NO_REASON_GIVEN],
+        ],
+        actions: [
+          { label: "Duplicate as new item", primary: true, run: h.onDuplicate },
+          ...when(admits(item, "archive", true), { label: "Archive", run: () => run(act.archive(item.id)) }),
+        ],
+      };
+    }
     return {
       tone: "muted", glyph: <Ban size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, node: at,
       text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
         ["work kept", "the branch, the worktree until it is archived, findings and threads"],
         ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
-        ["reason", str(ev?.payload.reason) || "no reason given"],
+        ["reason", item.ended_reason || str(ev?.payload.reason) || NO_REASON_GIVEN],
       ],
       actions: [
         { label: "Duplicate as new item", primary: true, run: h.onDuplicate },

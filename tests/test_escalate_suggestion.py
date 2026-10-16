@@ -107,4 +107,4 @@ async def test_an_escalation_turn_hands_a_skip_to_the_person(
     assert ("This item is paused" in instruction) is paused
     assert "You are not allowed to skip or abandon this work item yourself" in instruction
     assert "`kraft item skip w1`" in instruction
-    assert "`kraft item abandon --yes w1`" in instruction
+    assert '`kraft item abandon --reason "..." --yes w1`' in instruction

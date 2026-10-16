@@ -326,7 +326,7 @@ def templates_dir(tmp_path, monkeypatch):
         ("POST", "/api/work-items/w1/pause", None),
         ("POST", "/api/work-items/w1/resume", {}),
         ("POST", "/api/work-items/w1/skip", {}),
-        ("POST", "/api/work-items/w1/abandon", None),
+        ("POST", "/api/work-items/w1/abandon", {"reason": "no"}),
         ("POST", "/api/work-items/w1/retry", {}),
         ("POST", "/api/work-items/w1/complete", {"reason": "done"}),
         ("POST", "/api/work-items/w1/cancel", {"reason": "no"}),

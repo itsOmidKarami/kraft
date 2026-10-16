@@ -75,7 +75,7 @@ def test_abandon_refusal_fits_the_items_state(monkeypatch, capsys, status, advic
 
     monkeypatch.setattr(cli.item.client, "get_work_item", get_work_item)
     with pytest.raises(SystemExit) as stopped:
-        cli.main(["item", "abandon", "w1"])
+        cli.main(["item", "abandon", "w1", "--reason", "superseded"])
     assert stopped.value.code == 1
     err = capsys.readouterr().err
     assert advice in err and "pass --yes" in err
@@ -88,8 +88,34 @@ def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, c
 
     monkeypatch.setattr(cli.item.client, "get_work_item", get_work_item)
     with pytest.raises(SystemExit):
-        cli.main(["item", "abandon", "w1"])
+        cli.main(["item", "abandon", "w1", "--reason", "superseded"])
     assert "To keep them, cancel the item instead." in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("argv", "sent", "exit_code"),
+    [
+        (["item", "abandon", "w1", "--yes"], None, 2),
+        (["item", "abandon", "w1", "--reason", "  ", "--yes"], None, 1),
+        (["item", "abandon", "w1", "--reason", "superseded", "--yes"], "superseded", None),
+    ],
+    ids=["no-reason", "blank-reason", "reason"],
+)
+def test_abandon_needs_a_reason_and_sends_it(monkeypatch, capsys, argv, sent, exit_code):
+    calls = []
+
+    async def abandon(reason, item_id=None):
+        calls.append(reason)
+        return {"id": item_id, "status": "abandoned", "worktree_removed": True}
+
+    monkeypatch.setattr(cli.item.client, "abandon", abandon)
+    if exit_code:
+        with pytest.raises(SystemExit) as stopped:
+            cli.main(argv)
+        assert stopped.value.code == exit_code
+    else:
+        cli.main(argv)
+    assert calls == ([sent] if sent else [])
 
 
 _QUEUED_ANSWER = {"id": "w1", "status": "queued", "slots": {"busy": 3, "limit": 3}}
@@ -269,7 +295,8 @@ def test_approve_prints_one_line_naming_the_pending_gate(monkeypatch, capsys):
         (
             ["item", "cancel", "w1", "--reason", "dropped"],
             "cancel",
-            "cancelled w1; its worktree and branch stay (kraft item abandon w1 --yes deletes them)",
+            "cancelled w1; its worktree and branch stay "
+            "(kraft item abandon w1 --reason '...' --yes deletes them)",
         ),
         (
             ["item", "review", "w1", "approve"],
@@ -683,3 +710,16 @@ def test_restore_names_the_item(monkeypatch, capsys, argv, sent):
 
     assert seen == [sent]
     assert "restored w1" in capsys.readouterr().out
+
+
+def test_an_abandoned_item_shows_its_reason_in_view_show(app, capsys, make_item, repo):
+    """`item abandon --reason` end to end: the reason is on the event and
+    `view show` prints it, which a cancel's reason has not been before."""
+    wid = make_item(repo)
+
+    cli.main(["item", "abandon", wid, "--reason", "refiled as another item", "--yes"])
+    capsys.readouterr()
+    cli.main(["view", "show", wid])
+
+    assert "ended_reason" in (out := capsys.readouterr().out)
+    assert "refiled as another item" in out

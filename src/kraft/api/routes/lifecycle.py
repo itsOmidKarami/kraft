@@ -101,6 +101,10 @@ class EndWorkItem(BaseModel):
     reason: str
 
 
+class AbandonWorkItem(EndWorkItem):
+    """Why the item is being dropped; required, as a cancel's is."""
+
+
 class CompleteWorkItem(EndWorkItem):
     #: Close the item's beads as a walked completion would. Off by default.
     close_beads: bool = False
@@ -453,7 +457,7 @@ def _connected_members(st, row) -> list[Path]:
 
 # Kraft-x85; reaping what else ran in the worktree: Kraft-ugm6.
 @api_router.post("/work-items/{wid}/abandon")
-async def abandon_work_item(wid: str, request: Request):
+async def abandon_work_item(wid: str, body: AbandonWorkItem, request: Request):
     """Terminal state plus worktree and branch reclaim, a cancelled item's
     included.
 
@@ -466,6 +470,9 @@ async def abandon_work_item(wid: str, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(422, "reason: abandoning needs a reason")
     if row["status"] not in admitting(Verb.ABANDON):
         raise HTTPException(409, "work item is active; pause it before abandoning")
     # An already-abandoned item is a cancelled one (cancel stores `abandoned`
@@ -473,7 +480,8 @@ async def abandon_work_item(wid: str, request: Request):
     # again, without a second `work_item_abandoned`. A second call finds
     # nothing left and answers `worktree_removed: false`.
     if row["status"] != WorkItemStatus.ABANDONED:
-        await st.db.write(lambda c: store.abandon_work_item(c, wid))
+        await st.db.write(lambda c: store.abandon_work_item(c, wid, reason))
+        await executor.settle_beads_on_abandon(row, deps.bd_cwd(), reason)
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:

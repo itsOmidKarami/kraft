@@ -25,7 +25,7 @@ def test_abandoning_removes_the_item_s_folder_and_nothing_a_link_in_it_points_at
     (folder / "sandbox-home").mkdir()
     (folder / "sandbox-home" / ".cache").symlink_to(victim.parent)
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 200, r.text
     assert not folder.exists()
@@ -54,7 +54,7 @@ def test_abandoning_removes_the_item_s_folder_off_the_event_loop(client, repo, m
 
     monkeypatch.setattr(item_paths, "remove_tree", remove_tree)
 
-    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+    assert client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"}).status_code == 200
     assert walked and on_loop == []
     assert not (Path(os.environ["KRAFT_RUN_DIR"]) / "items" / wid).exists()
 
@@ -73,7 +73,7 @@ def test_abandoning_takes_the_item_s_documents_off_the_storage_figure(client, re
         {wid: 60, "other": 40},
     )
 
-    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
+    assert client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"}).status_code == 200
 
     used = storage.usage(client.app.state)
     assert (used.governed, used.categories["documents"], used.documents) == (40, 40, {"other": 40})

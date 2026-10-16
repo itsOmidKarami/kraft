@@ -392,11 +392,64 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
     _set_status(wid, "paused")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "abandoned"
     assert not worktree.exists()
+
+
+@pytest.mark.parametrize("beads_fail", [False, True], ids=["beads", "beads-down"])
+def test_abandon_records_why_and_settles_the_items_beads(
+    client, repo, fake_beads, monkeypatch, beads_fail
+):
+    """The reason lands on the event and the detail; the bead intake filed is
+    closed with it, a bead the item implements gets a note and stays open, and
+    a beads failure never fails the abandon."""
+    cwd = os.environ["KRAFT_BD_CWD"]
+    other = client.portal.call(lambda: fake_beads.intake("sub-task", cwd=cwd))
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "autostart": False, "implements_beads": [other]},
+    ).json()["id"]
+    own = client.get(f"/api/work-items/{wid}").json()["bead_id"]
+    if beads_fail:
+
+        async def down(*_a, **_k):
+            raise RuntimeError("bd is down")
+
+        monkeypatch.setattr("kraft.adapters.beads.complete", down)
+        monkeypatch.setattr("kraft.adapters.beads.annotate", down)
+
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "refiled as another item"})
+
+    assert r.status_code == 200, r.text
+    event = [e for e in client.get(f"/api/work-items/{wid}/events").json()]
+    abandoned = [e["payload"] for e in event if e["type"] == "work_item_abandoned"]
+    assert abandoned == [{"reason": "refiled as another item"}]
+    assert client.get(f"/api/work-items/{wid}").json()["ended_reason"] == "refiled as another item"
+    beads = fake_beads.all()
+    if beads_fail:
+        assert beads[own]["status"] == "open" and "comments" not in beads[other]
+        return
+    assert beads[own]["status"] == "closed"
+    assert beads[own]["close_reason"] == "abandoned: refiled as another item"
+    assert beads[other]["status"] == "open"
+    assert beads[other]["comments"] == [
+        f"Kraft work item {wid} was abandoned: refiled as another item"
+    ]
+
+
+@pytest.mark.parametrize("body", [{}, {"reason": "  "}], ids=["missing", "blank"])
+def test_abandon_without_a_reason_is_refused_and_changes_nothing(client, repo, body):
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+
+    r = client.post(f"/api/work-items/{wid}/abandon", json=body)
+
+    assert r.status_code == 422, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
 
 
 def test_abandon_reclaims_a_cancelled_items_worktree_and_branch(client, repo):
@@ -408,7 +461,7 @@ def test_abandon_reclaims_a_cancelled_items_worktree_and_branch(client, repo):
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.json() == {"id": wid, "status": "abandoned", "worktree_removed": True}
     assert not worktree.exists()
@@ -436,7 +489,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")
 
-    client.post(f"/api/work-items/{wid}/abandon")
+    client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert not stored.exists()
 
@@ -456,7 +509,7 @@ def test_abandon_reclaims_what_a_sandbox_kept_beside_the_worktree(client, repo):
     home = run_dirs.base / "sandbox-home" / wid
     home.mkdir(parents=True)
 
-    client.post(f"/api/work-items/{wid}/abandon")
+    client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert not store.shadow.exists()
     assert not home.exists()
@@ -468,7 +521,7 @@ def test_abandon_refuses_an_active_item(client, repo):
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "active")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
     assert r.status_code == 409, r.text
     assert "active" in r.json()["detail"]
@@ -485,7 +538,7 @@ def test_abandon_kills_a_process_left_running_from_the_worktree(client, repo):
     try:
         _set_status(wid, "paused")
 
-        r = client.post(f"/api/work-items/{wid}/abandon")
+        r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "test"})
 
         assert r.status_code == 200, r.text
         for _ in range(50):

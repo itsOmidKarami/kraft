@@ -534,7 +534,7 @@ async def test_queueing_refuses_a_status_the_door_does_not_start_from(database):
 @pytest.mark.parametrize(
     "end",
     [
-        lambda c: store.abandon_work_item(c, "w1"),
+        lambda c: store.abandon_work_item(c, "w1", "test"),
         lambda c: store.end_work_item(c, "w1", "cancel", "r"),
         lambda c: store.end_work_item(c, "w1", "complete", "r"),
     ],

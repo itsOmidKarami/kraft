@@ -1000,6 +1000,20 @@ def _item_policy(row, patch: dict | None, new_materialized: str | None):
         raise HTTPException(422, str(exc)) from exc
 
 
+def _kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain) -> frozenset[str]:
+    """The nodes the item was filed without (`skip_nodes`) that a switch to
+    `new_chain` still has. Intake stores no list of them: they are the nodes
+    the item's template has, trimmed for the attachments it carries, and its
+    snapshot lacks. A skipped node `new_chain` does not know has nothing to
+    skip there."""
+    if previous is None:
+        return frozenset()
+    old = deps.scoped_chain_or_422(st, repo_entry, row["chain_template"])
+    filed = {n.id for n in old.trim_for_attachments(filed_kinds).nodes}
+    skipped = filed - {n.id for n in previous.chain.nodes}
+    return frozenset(skipped & {n.id for n in new_chain.nodes})
+
+
 def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     """The item's own snapshot, re-trimmed for `kinds` (Kraft-2fyjt): never the
     live template, whose nodes, policy and steering may have changed since
@@ -1109,12 +1123,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         # library: the caller asked for a different template.
         previous = store.materialized_chain_of(row)
         target = previous.target if previous is not None else None
+        repo_entry = deps.connected_or_422(st, row["repo"])
+        new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
         try:
             new_materialized = (
-                deps.scoped_chain_or_422(
-                    st, deps.connected_or_422(st, row["repo"]), body.chain_template
-                )
-                .materialize(
+                new_chain.materialize(
                     target=target or entry.single_repo_target(row["repo"]),
                     # The instance and repository layers, never
                     # `previous.policy`: that one already carries the old
@@ -1126,6 +1139,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     # filed with stays frozen across a template switch.
                     repository_steering=previous.repository_steering if previous else None,
                     attachment_kinds=kinds,
+                    skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
                 )
                 .to_json()
             )

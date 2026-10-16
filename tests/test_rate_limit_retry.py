@@ -148,7 +148,7 @@ async def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(
         # the row is still 'rate_limited' here -- simulate a human's
         # abandon landing in the window between bump_counter and the
         # poller's own claim
-        store.abandon_work_item(c, "w1")
+        store.abandon_work_item(c, "w1", "test")
         return result
 
     monkeypatch.setattr(store, "bump_counter", bump_then_abandon)

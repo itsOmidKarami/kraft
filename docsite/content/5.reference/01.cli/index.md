@@ -85,7 +85,7 @@ Each command links to its entry.
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
 | Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#set-item-wide-overrides), or [`kraft item set-node-override`](/reference/cli/item#one-nodes-agent-tasks) |
 | End it as done, or as cancelled | [`kraft item complete`, `kraft item cancel`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
-| Drop it and delete its worktree | [`kraft item abandon --yes`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
+| Drop it and delete its worktree | [`kraft item abandon --reason "..." --yes`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
 
 ### Housekeeping
 
