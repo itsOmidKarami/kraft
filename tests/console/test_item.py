@@ -119,6 +119,17 @@ async def _read_done(console, app, pilot) -> None:
             "spec → spec_approval → plan → implement",
         ),
         (
+            # Nothing to say but that it stopped: the frame still says that much.
+            STUCK | {"stop": {"kind": "stuck", "node": None, "reason": None}},
+            "Board › s5s5s5s5  item s5s5s5s5",
+            "● Needs you · waiting for you at verification",
+            "▌ Stopped.",
+            "$warning",
+            "5m",
+            "r · default",
+            "spec → spec_approval → plan → implement",
+        ),
+        (
             FILED,
             "Board › n0n0n0n0  item n0n0n0n0",
             "● Not started · created paused",
@@ -129,7 +140,8 @@ async def _read_done(console, app, pilot) -> None:
             "spec → spec_approval → plan → implement",
         ),
     ],
-    ids=["gate", "budget-it-cannot-raise", "running", "failed", "stuck", "not-started"],
+    ids=["gate", "budget-it-cannot-raise", "running", "failed", "stuck", "stopped-saying-nothing"]
+    + ["not-started"],
 )
 def test_the_header_says_where_the_item_stands(
     board, monkeypatch, row, title, status, banner, tone, spent, where, chain

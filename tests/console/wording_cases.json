@@ -433,6 +433,11 @@
       "name": "stuck",
       "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
       "banner": { "kind": "stop", "node": "verification", "name": "verification", "text": "The fix loop made no progress in 3 rounds.", "way": "" }
+    },
+    {
+      "name": "stuck-without-a-reason",
+      "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": null } },
+      "banner": { "kind": "stop", "node": "verification", "name": "verification", "text": "", "way": "" }
     }
   ],
   "events": [
