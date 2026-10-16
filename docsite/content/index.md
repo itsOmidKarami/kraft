@@ -99,8 +99,8 @@ width: 1440
 :::::landing-shot
 ---
 src: /assets/mobile.png
-alt: 'The board at a 390px phone viewport: an item waiting at approve spec with a Review button on the card, and a failed item with a Retry button'
-crop: 0 366 390 358
+alt: 'The board at a 390px phone viewport: a failed item with a Retry button, and an item waiting at approve spec with a Review button on the card'
+crop: 0 206 390 366
 width: 390
 ---
 **On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)
