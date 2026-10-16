@@ -1,5 +1,5 @@
 /* The Chains side pane's body. Colours only through theme.css tokens. */
-.pane-group { margin: 14px 0 6px; font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pane-group { margin: 14px 0 6px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .pane-group:first-child { margin-top: 0; }
 .pane-note { margin: 4px 0 8px; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-muted); }
 .pane-note.is-bad { color: var(--bad); }

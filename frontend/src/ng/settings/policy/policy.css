@@ -33,7 +33,7 @@
 .pol-grid.has-used { grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
 .pol-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 30px; border-radius: 6px; font-size: var(--fs-label); }
 .pol-row.is-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
-.pol-colh { padding: 0; font-size: var(--fs-label); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pol-colh { padding: 0; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .pol-k { font-size: var(--fs-label); color: var(--text-sub); overflow-wrap: anywhere; }
 .pol-k.is-bad { color: var(--bad); }
 .pol-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }

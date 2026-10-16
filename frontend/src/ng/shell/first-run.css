@@ -29,7 +29,7 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .ng-firstrun .fr-crumb { font-size: var(--fs-meta); color: var(--text-muted); }
 .fr-head { display: flex; align-items: center; gap: 10px; }
 .fr-head > div { display: flex; flex-direction: column; }
-.fr-head-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-sub); }
+.fr-head-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-sub); }
 .fr-probes.is-todo li > span:first-child { display: inline-flex; align-items: center; gap: 8px; font-family: ui-monospace, Menlo, monospace; }
 .fr-probe-dot { width: 7px; height: 7px; border: 1px solid var(--border); border-radius: 50%; }
 .fr-card { display: grid; grid-template-columns: minmax(0, 1fr) 300px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }

@@ -29,7 +29,7 @@
 .nt-line { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
 .nt-line > .set-event-text { flex: 1; }
 .nt-gap { padding-top: 14px; }
-.nt-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
+.nt-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
 .nt-lead { margin: 2px 0 0; font-size: var(--fs-body); font-weight: 500; }
 .nt-steps { margin: 6px 0 0; padding-left: 20px; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-sub); }
 .nt-input { margin-bottom: 4px; }

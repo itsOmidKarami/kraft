@@ -125,7 +125,7 @@
 .set-event-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .set-event-text code { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); }
 .set-notice { display: flex; gap: 12px; align-items: flex-start; max-width: 420px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-.set-notice-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; background: var(--text); color: var(--bg); font-weight: 600; font-size: var(--fs-meta); }
+.set-notice-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: var(--text); color: var(--bg); font-weight: 600; font-size: var(--fs-meta); }
 .set-notice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-label); }
 .set-notice-title { font-weight: 500; color: var(--text); }
 .set-notice-body { color: var(--text-sub); }
@@ -149,7 +149,7 @@
 .set-links { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .ys-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
-.ys-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
+.ys-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
 
 /* Cards (AreaAccess): a bordered section, its title and aside on one line, a row's help in a column at the right. */
 .set-page.is-cards { gap: 10px; }
@@ -188,7 +188,7 @@
 .set-about-version .set-verdict { margin-left: auto; }
 .set-about-version .set-verdict.is-warn { color: var(--info); }
 .set-version-channel { padding: 1px 7px; border-radius: 5px; background: var(--line); font: 600 var(--fs-label)/1.6 ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--text-sub); }
-.set-about-version .set-command { background: var(--bg); border-radius: 7px; padding: 7px 8px 7px 12px; }
+.set-about-version .set-command { background: var(--bg); border-radius: 6px; padding: 7px 8px 7px 12px; }
 .set-btn.is-bare { border-color: transparent; }
 .set-about-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: var(--fs-label); }
 .set-about-gap { flex: 1; }

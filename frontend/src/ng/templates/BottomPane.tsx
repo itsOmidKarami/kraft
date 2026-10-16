@@ -214,7 +214,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
                 if (t === "escalation" && n?.escalation) return onPick(`${node}.escalation.${(n.escalation as Task).id}`);
                 if (handlerOf(selPath)) onLeave();
               }}>
-                <Icon size={13} aria-hidden />{LABEL[t]}
+                <Icon size={14} aria-hidden />{LABEL[t]}
               </button>
             );
           })}

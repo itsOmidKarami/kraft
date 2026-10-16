@@ -11,7 +11,7 @@
 
 .ph-block { display: flex; flex-direction: column; gap: 8px; }
 .ph-block-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px; }
-.ph-block-head h2 { flex: 1; margin: 0; font-size: var(--fs-label); font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.ph-block-head h2 { flex: 1; margin: 0; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .ph-block-head > span { font-size: var(--fs-label); color: var(--text-muted); }
 
 .ph-facts { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px 14px; margin: 0; font-size: var(--fs-meta); }

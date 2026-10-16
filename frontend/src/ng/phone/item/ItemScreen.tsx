@@ -145,7 +145,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         </div>
         {card && (
           <section className={`ph-statecard ph-tone-${card.tone}`} aria-label={card.title}>
-            <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={15} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
+            <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={16} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
             {card.hint && <p className="ph-statecard-text ph-statecard-fix">{withCode(card.hint)}</p>}

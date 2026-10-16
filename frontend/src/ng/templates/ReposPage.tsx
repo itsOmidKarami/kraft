@@ -119,7 +119,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               <>
                 <div className="rp-bar">
                   <input className="rp-search" type="search" aria-label="Search repos" placeholder="Search repos" value={q} onChange={(e) => setQ(e.target.value)} />
-                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-expanded={connecting}><Plus size={13} aria-hidden /> Connect repo</button>
+                  <button ref={connectBtn} type="button" className="btn btn-secondary" onClick={() => setConnecting((c) => !c)} aria-expanded={connecting}><Plus size={14} aria-hidden /> Connect repo</button>
                 </div>
                 {connecting && (
                   <div className="rp-connect-panel" role="dialog" aria-label="Connect a repo" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setConnecting(false); connectBtn.current?.focus(); } }}>

@@ -6,7 +6,7 @@
 .rp-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
 .rp-search { flex: 1; min-width: 0; box-sizing: border-box; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: var(--fs-label); color: var(--text); }
 .rp-head, .rp-row { display: grid; grid-template-columns: minmax(0, 1.1fr) 80px minmax(0, 96px) minmax(0, 1.3fr) minmax(0, 132px); gap: 10px; align-items: center; padding: 6px 10px; }
-.rp-head { font-size: var(--fs-label); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.rp-head { font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .rp-rows { display: flex; flex-direction: column; gap: 2px; }
 .rp-row { border-radius: 8px; font-size: var(--fs-label); cursor: pointer; }
 .rp-row:hover { background: var(--surface); }
@@ -28,7 +28,7 @@
 .rp-state.is-on { color: var(--ok); }
 .rp-empty { margin: 14px 10px; font-size: var(--fs-label); color: var(--text-muted); }
 .rp-detected { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
-.rp-h2 { margin: 0 0 4px 10px; font-size: var(--fs-label); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.rp-h2 { margin: 0 0 4px 10px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .rp-det { display: flex; align-items: center; gap: 12px; padding: 4px 10px; font-size: var(--fs-label); }
 .rp-det-note { flex: 1; font-size: var(--fs-meta); color: var(--text-muted); }
 .rp-note { margin: 0 0 8px; font-size: var(--fs-meta); line-height: 1.5; color: var(--bad); }
@@ -42,7 +42,7 @@
 .rp-k { padding-top: 2px; color: var(--text-muted); }
 .rp-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .rp-src { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
-.rp-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; font-size: var(--fs-label); color: var(--text-muted); }
+.rp-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--fs-label); color: var(--text-muted); }
 .rp-chip.is-own { color: var(--text-sub); }
 .rp-chip.is-changed { border-color: var(--mark-change-line); color: var(--text); }
 .rp-reset { padding: 0; border: 0; background: transparent; font-size: var(--fs-label); color: var(--text-muted); text-decoration: underline; cursor: pointer; }

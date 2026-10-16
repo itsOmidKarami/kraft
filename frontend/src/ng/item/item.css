@@ -28,7 +28,7 @@
 .item-others:is(:hover, :focus-visible) { color: var(--text); text-decoration: underline; }
 .item-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
 .item-elapsed { display: inline-flex; align-items: center; gap: 4px; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
-.item-badge { padding: 2px 7px; border: 1px solid transparent; border-radius: 4px; font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
+.item-badge { padding: 2px 7px; border: 1px solid transparent; border-radius: 5px; font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
 .item-badge.is-neutral { background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
 .item-badge.is-info { border-color: var(--info); color: var(--info); }
 .item-badge.is-warn { background: color-mix(in oklab, var(--warn) 9%, transparent); color: var(--warn); }

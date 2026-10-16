@@ -194,13 +194,13 @@ export function NotifyPage() {
   const typing = !!url.trim();
   const channels: { id: Channel; icon: ReactNode; name: string; sub: string; active: boolean; events: string[]; extra: string; extraBad?: boolean; testing: boolean; why: string | null; quiet: boolean; test: () => void }[] = [
     {
-      id: "webhook", icon: <Webhook size={15} />, name: CHANNELS.webhook, active: webhookActive, events: notify.events,
+      id: "webhook", icon: <Webhook size={16} />, name: CHANNELS.webhook, active: webhookActive, events: notify.events,
       sub: notify.url_set ? `URL stored · links to ${link || "no address"}` : "No URL set",
       extra: notify.url_set ? (test ? (test.error ? `last attempt ${ago(test.at)} failed` : `last sent ${ago(test.at)} · ${test.status} OK`) : "never sent") : "nothing can be sent",
       extraBad: !notify.url_set || !!test?.error, testing, why: webhookWhy, quiet: !typing, test: () => void sendTest(),
     },
     {
-      id: "browser", icon: <Monitor size={15} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
+      id: "browser", icon: <Monitor size={16} />, name: CHANNELS.browser, active: browserActive, events: browserEvents,
       sub: "Alerts while this tab is in the background. This device only.",
       extra: permission === "granted" ? (browserTest ? browserTestLine.replace(/^last /, "") : browserOn ? "" : "alerts switched off") : PERMISSION_SHORT[permission],
       extraBad: permission === "denied" || !!browserTest?.error, testing: false, why: browserWhy, quiet: true, test: testBrowser,

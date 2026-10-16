@@ -140,7 +140,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                   <section aria-label="Schedules">
                     <div className="ink-head">
                       <h2 className="ink-h2">Schedules</h2>
-                      <Button onClick={() => void addSchedule()}><Plus size={13} aria-hidden /> Add schedule</Button>
+                      <Button onClick={() => void addSchedule()}><Plus size={14} aria-hidden /> Add schedule</Button>
                     </div>
                     <ul className="ink-sched">
                       {schedules.map((s) => {

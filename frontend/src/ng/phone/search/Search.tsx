@@ -104,7 +104,7 @@ export function Search() {
     <>
       <RootHeader title="Search" />
       <div className="ph-search-field">
-        <SearchIcon size={17} aria-hidden="true" />
+        <SearchIcon size={16} aria-hidden="true" />
         <input type="search" className="ph-search-input" aria-label="Search" placeholder="Items, documents, beads" value={q} onChange={(e) => set({ q: e.target.value })} />
       </div>
       <div className="ph-chips" role="group" aria-label="Filters">

@@ -187,7 +187,7 @@ export function AccessPage() {
 
         {items.length > 0 && (
           <div className="set-pending" role="status">
-            <span className="set-pending-icon" aria-hidden><RotateCw size={15} /></span>
+            <span className="set-pending-icon" aria-hidden><RotateCw size={16} /></span>
             <div className="set-pending-text">
               <strong>Restart to apply</strong>
               {items.map((i) => <span key={i.id}>{i.text}</span>)}
@@ -206,7 +206,7 @@ export function AccessPage() {
           <div ref={reach} className="set-modes is-cards" role="radiogroup" aria-label="Reach">
             {REACHES.map((m) => (
               <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => pickBind(m.bind)}>
-                <span className="set-mode-icon" aria-hidden>{m.bind === LOOPBACK ? <Laptop size={15} /> : <Wifi size={15} />}</span>
+                <span className="set-mode-icon" aria-hidden>{m.bind === LOOPBACK ? <Laptop size={16} /> : <Wifi size={16} />}</span>
                 <span className="set-mode-text">
                   <span className="set-mode-title">{m.title}</span>
                   <span className="set-mode-addr">{m.bind}:{back.port}</span>
@@ -260,7 +260,7 @@ export function AccessPage() {
                     {editing === "host" ? (
                       <input ref={field} className="set-input" aria-label="Add a host or IP" placeholder="host or IP" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void addHost())} onBlur={() => void addHost()} />
                     ) : (
-                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={11} aria-hidden /> add</button>
+                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={12} aria-hidden /> add</button>
                     )}
                   </li>
                 </ul>
@@ -268,7 +268,7 @@ export function AccessPage() {
               {access.allowed_hosts.length === 0 && (
                 <span className="set-hint is-warn">
                   {EMPTY_HOSTS}
-                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={11} aria-hidden /> add {suggested}</button></>}
+                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={12} aria-hidden /> add {suggested}</button></>}
                 </span>
               )}
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
