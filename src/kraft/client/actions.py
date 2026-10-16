@@ -328,12 +328,12 @@ async def unblock(work_item_id: str | None = None, dependency: str | None = None
     )
 
 
-async def abandon(reason: str, work_item_id: str | None = None) -> dict:
+async def abandon(reason: str | None, work_item_id: str | None = None) -> dict:
     """Terminal. Removes the worktree, destroying anything uncommitted in it.
-    A reason is required and recorded."""
+    The reason, when given, is recorded."""
     target = context._forbid_self_action(work_item_id)
     return await transport._act(
-        f"/work-items/{transport.segment(target)}/abandon", {"reason": reason}
+        f"/work-items/{transport.segment(target)}/abandon", {"reason": reason} if reason else {}
     )
 
 

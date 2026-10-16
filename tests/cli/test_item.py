@@ -93,15 +93,18 @@ def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, c
 
 
 @pytest.mark.parametrize(
-    ("argv", "sent", "exit_code"),
+    ("argv", "tty", "sent", "warned"),
     [
-        (["item", "abandon", "w1", "--yes"], None, 2),
-        (["item", "abandon", "w1", "--reason", "  ", "--yes"], None, 1),
-        (["item", "abandon", "w1", "--reason", "superseded", "--yes"], "superseded", None),
+        (["item", "abandon", "w1", "--reason", "superseded", "--yes"], False, "superseded", False),
+        (["item", "abandon", "w1", "--yes"], True, "asked for it", False),
+        (["item", "abandon", "w1", "--yes"], False, None, True),
+        (["item", "abandon", "w1", "--reason", "  ", "--yes"], False, None, True),
     ],
-    ids=["no-reason", "blank-reason", "reason"],
+    ids=["reason", "asked-in-a-terminal", "none-in-a-script", "blank"],
 )
-def test_abandon_needs_a_reason_and_sends_it(monkeypatch, capsys, argv, sent, exit_code):
+def test_abandon_sends_its_reason_and_asks_for_one_in_a_terminal(
+    monkeypatch, capsys, argv, tty, sent, warned
+):
     calls = []
 
     async def abandon(reason, item_id=None):
@@ -109,13 +112,11 @@ def test_abandon_needs_a_reason_and_sends_it(monkeypatch, capsys, argv, sent, ex
         return {"id": item_id, "status": "abandoned", "worktree_removed": True}
 
     monkeypatch.setattr(cli.item.client, "abandon", abandon)
-    if exit_code:
-        with pytest.raises(SystemExit) as stopped:
-            cli.main(argv)
-        assert stopped.value.code == exit_code
-    else:
-        cli.main(argv)
-    assert calls == ([sent] if sent else [])
+    monkeypatch.setattr(cli.item.sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "asked for it")
+    cli.main(argv)
+    assert calls == [sent]
+    assert ("no reason recorded" in capsys.readouterr().err) == warned
 
 
 _QUEUED_ANSWER = {"id": "w1", "status": "queued", "slots": {"busy": 3, "limit": 3}}

@@ -147,8 +147,6 @@ def _is_cancelled(item_id: str | None) -> bool:
 
 
 def _cmd_abandon(ns: argparse.Namespace) -> None:
-    if not ns.reason.strip():
-        raise ValueError("an abandon reason is required: say why it is being dropped")
     if not ns.yes:
         # Cancel is already done for an item in `abandoned`, so "cancel it
         # instead" would be advice to do what is done; abandoning it can only
@@ -162,8 +160,15 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
             "abandon deletes the worktree and the item's branch: uncommitted work and "
             f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
+    reason = (ns.reason or "").strip()
+    if not reason and sys.stdin.isatty():
+        reason = input("Why is it being dropped? (kept on the item and its bead) ").strip()
+    if not reason:
+        print("kraft: no reason recorded; pass --reason to say why it was dropped", file=sys.stderr)
     common.emit(
-        asyncio.run(client.abandon(ns.reason, ns.id)), common.item_action("abandoned {id}"), ns.json
+        asyncio.run(client.abandon(reason or None, ns.id)),
+        common.item_action("abandoned {id}"),
+        ns.json,
     )
 
 
@@ -859,8 +864,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     abandon.add_argument("id", nargs="?")
     abandon.add_argument(
         "--reason",
-        required=True,
-        help="why it is being dropped; kept on the event and written to the item's bead",
+        help="why it is being dropped; kept on the event and written to the item's bead "
+        "(asked for in a terminal when left out)",
     )
     abandon.add_argument(
         "--yes",
