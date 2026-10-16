@@ -23,13 +23,23 @@ from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 
 #: The Item's tabs, in `[` and `]` order, with their names.
-TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"))
+TABS = (("overview", "Overview"), ("activity", "Activity"), ("log", "Log"), ("diff", "Diff"))
 #: How many events the Activity reads at a time, newest first.
 PAGE = 50
 #: A `before_seq` past every event: SQLite's largest integer.
 NEWEST = 2**63 - 1
 #: What the view says once its item is gone (spec §7.2).
 GONE = "This item no longer exists. Esc goes back."
+#: A diff line's colour by how it starts, the first match winning: the web's
+#: add and delete colours, git's bold headers and hunk colour.
+DIFF_STYLE = (
+    ("+++", "bold"),
+    ("---", "bold"),
+    ("diff --git", "bold"),
+    ("+", "success"),
+    ("-", "error"),
+    ("@@", "kraft-info"),
+)
 #: A chain node's mark in the Overview's list, by its state.
 MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
 
@@ -127,6 +137,9 @@ class Item(View):
             log = RichLog(id="log", wrap=True, min_width=1, max_lines=2000)
             log.can_focus = False
             yield log
+            diff = RichLog(id="diff", wrap=True, min_width=1)
+            diff.can_focus = False
+            yield diff
         yield Static(Content(GONE), id="item-gone")
 
     def on_mount(self) -> None:
@@ -169,6 +182,8 @@ class Item(View):
                 self.run_worker, self._activity_first, group="tab", exclusive=True
             )
 
+        if tab == "diff" and self.work_item_id is not None and not self._dead:
+            self.call_after_refresh(self.run_worker, self._diff, group="tab", exclusive=True)
         if tab == "log" and self.work_item_id is not None and not self._dead:
             self.call_after_refresh(self.run_worker, self._follow, group="log", exclusive=True)
         else:  # a log nobody sees is not followed
@@ -195,6 +210,8 @@ class Item(View):
         if events and key == self._key:
             return
         self._read()
+        if self.tab == "diff":  # a commit landed, or the worktree went
+            self.run_worker(self._diff, group="tab", exclusive=True)
 
     async def _read_now(self) -> None:
         try:
@@ -379,6 +396,44 @@ class Item(View):
         if self.more:
             log.write(Text("End loads earlier events.", style=muted), scroll_end=False)
         log.scroll_to(y=scrolled, animate=False, immediate=True)
+
+    async def _diff(self) -> None:
+        """Spec §7.2: what has landed on the branch first, under its head, then
+        uncommitted work, then the trailer every diff view ends with (4.3), in
+        the web's add and delete colours. A gone worktree is the server's own
+        words."""
+        log = self.query_one("#diff", RichLog)
+        try:
+            payload = await client.diff(self.work_item_id)
+        except client.ClientError as exc:
+            log.clear()
+            log.write(client.reason_of(str(exc)))
+            return
+        colour = self.app.theme_variables
+        muted, warn = colour["kraft-muted"], colour["warning"]
+        lines: list[Text] = []
+        if payload.get("base_ref") is None:
+            lines.append(Text(render.NO_BASELINE, style=muted))
+        else:
+            landed = (payload.get("landed") or {}).get("diff") or ""
+            if landed:
+                lines.append(Text(render.landed_head(payload), style=muted))
+                lines += [self._diff_line(line) for line in landed.splitlines()]
+                lines += [Text(""), Text(render.UNCOMMITTED_HEAD, style=muted)]
+            body = [self._diff_line(line) for line in (payload.get("diff") or "").splitlines()]
+            empty = render.NOTHING_UNCOMMITTED if landed else render.NO_CHANGES
+            lines += body or [Text(empty, style=muted)]
+        how = {"": "", "dim": muted, "warn": warn}
+        lines += [Text(line, style=how[kind]) for line, kind in render.diff_trailer(payload)]
+        scrolled = log.scroll_y
+        log.clear()
+        for line in lines:
+            log.write(line, scroll_end=False)
+        log.scroll_to(y=scrolled, animate=False, immediate=True)
+
+    def _diff_line(self, line: str) -> Text:
+        style = next((style for start, style in DIFF_STYLE if line.startswith(start)), "")
+        return Text(line, style=self.app.theme_variables.get(style, style))
 
     def _sessions(self) -> list[dict]:
         """The item's sessions, newest first."""

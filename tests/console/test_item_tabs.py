@@ -8,7 +8,7 @@ import pytest
 from support.console_board import GATE, RUNNING, _detail, _iso, _opened, _serve
 from textual.widgets import RichLog
 
-from kraft import client
+from kraft import client, render
 from kraft.console.screens import item as item_view
 
 
@@ -217,3 +217,91 @@ def test_a_log_nobody_sees_is_not_followed(board, monkeypatch):
         return seen
 
     assert console.run(scenario) == [[], []]
+
+
+WARN = "warning"
+LANDED = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old [/]\n+new [/]"
+TRAILER = {
+    "untracked": ["notes.txt"],
+    "truncated": True,
+    "diff_max_bytes": 100,
+    "worktree_path": "/w",
+}
+
+
+def _diff(app) -> list[tuple[str, str]]:
+    """Each line of the Diff, and the colour of its first character."""
+    out = []
+    for line in app.query_one("#diff", RichLog).lines:
+        colour = next((seg.style.color for seg in line if seg.text.strip() and seg.style), None)
+        out.append((line.text.rstrip(), colour.name if colour else ""))
+    return out
+
+
+@pytest.mark.parametrize(
+    ("payload", "lines"),
+    [
+        (
+            {"base_ref": "main", "landed": {"commits": ["c1", "c2"], "diff": LANDED}, "diff": ""}
+            | TRAILER,
+            [
+                (render.landed_head({"landed": {"commits": ["c1", "c2"]}}), "muted"),
+                ("diff --git a/x b/x", ""),
+                ("--- a/x", ""),
+                ("+++ b/x", ""),
+                ("@@ -1 +1 @@", "info"),
+                ("-old [/]", "error"),
+                ("+new [/]", "success"),
+                ("", ""),
+                (render.UNCOMMITTED_HEAD, "muted"),
+                (render.NOTHING_UNCOMMITTED, "muted"),
+                ("", ""),
+                ("untracked (not in the diff above):", "muted"),
+                ("  notes.txt", ""),
+                ("", ""),
+                # Wrapped at the window's width, as every long line is.
+                (
+                    "WARNING: diff truncated by the server at 100 bytes — this is not the whole",
+                    "warning",
+                ),
+                ("change. Read the rest in /w.", WARN),
+            ],
+        ),
+        ({"base_ref": "main", "diff": "+only"}, [("+only", "success")]),
+        ({"base_ref": "main", "diff": ""}, [(render.NO_CHANGES, "muted")]),
+        ({"base_ref": None}, [(render.NO_BASELINE, "muted")]),
+        (
+            client.status_error(409, "the worktree is gone [/]"),
+            [(client.reason_of(str(client.status_error(409, "the worktree is gone [/]"))), "")],
+        ),
+    ],
+    ids=["landed-uncommitted-trailer", "uncommitted-only", "nothing", "no-baseline", "gone"],
+)
+def test_the_diff_shows_what_landed_then_what_did_not_then_its_trailer(
+    board, monkeypatch, payload, lines
+):
+    """Spec §7.2 and §4.3: the landed head and the CLI's own trailer words,
+    built as Rich text in the web's add and delete colours; `[/]` as typed;
+    a worktree that is gone is the server's own error."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    _serve_events(monkeypatch, [])
+
+    async def diff(work_item_id=None, ignore_whitespace=False):
+        if isinstance(payload, Exception):
+            raise payload
+        return payload
+
+    monkeypatch.setattr(client, "diff", diff)
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        await pilot.press("left_square_bracket")
+        await console.until(pilot, lambda: len(_diff(app)) >= len(lines))
+        names = {
+            app.theme_variables[k].lower(): k.removeprefix("kraft-")
+            for k in ("kraft-muted", "kraft-info", "success", "error", "warning")
+        }
+        return [(text, names.get(colour.lower(), colour)) for text, colour in _diff(app)]
+
+    assert console.run(scenario) == lines
