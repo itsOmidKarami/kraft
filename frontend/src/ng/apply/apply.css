@@ -16,8 +16,3 @@
 .apply-row .apply-problem { padding: 0; }
 .apply-muted { font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
 .apply-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
-.apply-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-label); white-space: nowrap; cursor: pointer; text-decoration: none; }
-.apply-btn:hover:not(:disabled) { background: var(--line); }
-.apply-btn.is-primary { border-color: transparent; background: var(--text); color: var(--bg); font-weight: 500; }
-.apply-btn:disabled { opacity: .5; cursor: default; }
-.apply-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

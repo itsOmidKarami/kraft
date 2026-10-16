@@ -1,3 +1,4 @@
+import { hint } from "../ui/Tooltip";
 import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState } from "react";
 import * as api from "../../api";
@@ -25,7 +26,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(title);
   const [error, setError] = useState<string | null>(null);
-  const hint = useId();
+  const editHint = useId();
   const opener = useReturnFocus(editing);
   // Set by Enter or Esc: the blur that follows (the field going away) is not a second answer.
   const settled = useRef(false);
@@ -54,7 +55,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   if (!editing)
     return (
       <h1 className="item-title">
-        <button ref={opener} type="button" className="item-title-btn" title="Rename" onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
+        <button ref={opener} type="button" className="item-title-btn" {...hint("Rename")} onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
       </h1>
     );
   return (
@@ -62,7 +63,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
       <h1 className="item-visually-hidden">{title}</h1>
       <input
         aria-label="Title"
-        aria-describedby={hint}
+        aria-describedby={editHint}
         className="item-title-input"
         autoFocus
         value={text}
@@ -73,7 +74,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
         }}
         onBlur={blur}
       />
-      <span id={hint} className="item-muted">{error ? <span className="item-error" role="alert">{error}</span> : "Enter to save · Esc"}</span>
+      <span id={editHint} className="item-muted">{error ? <span className="item-error" role="alert">{error}</span> : "Enter to save · Esc"}</span>
     </div>
   );
 }

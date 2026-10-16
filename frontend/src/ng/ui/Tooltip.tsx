@@ -10,6 +10,9 @@ export const TIP_DELAY_MS = 400;
  *  setup checks every icon-only button for. */
 export const tip = (label: string, text = label) => ({ "aria-label": label, "data-tip": text }) as const;
 
+/** The tooltip of a button whose visible text already names it: the tip adds information, so a screen reader gets it as the description too. */
+export const hint = (text: string) => ({ "data-tip": text, "aria-description": text }) as const;
+
 const HOST = "[data-tip]";
 
 /** The one tooltip, mounted once per app. It shows the `data-tip` of the button under the pointer or holding
