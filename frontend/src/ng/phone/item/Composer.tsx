@@ -15,7 +15,7 @@ import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar, Facts, SwitchRow } from "../ui/Rows";
 import { running, steerDoor, stopped } from "./steer";
-import { CANCEL_THIS_ITEM } from "../../item/sharedWords";
+import { CANCEL_THIS_ITEM, GOES_IN_THE_RUN_LOG } from "../../item/sharedWords";
 
 export type ComposeKind = "steer" | "reject" | "answer" | "escalate" | "cancel" | "complete";
 export const COMPOSE_KINDS: ComposeKind[] = ["steer", "reject", "answer", "escalate", "cancel", "complete"];
@@ -88,14 +88,14 @@ const SPEC: Record<ComposeKind, Spec> = {
   cancel: {
     title: CANCEL_THIS_ITEM,
     help: () => "The run stops where it is. Everything it produced is kept, and a cancelled item stays cancelled.",
-    placeholder: "Why? It goes in the run log.",
+    placeholder: GOES_IN_THE_RUN_LOG,
     label: "Cancel item",
     danger: true,
   },
   complete: {
     title: "Mark complete",
     help: () => "For work that landed somewhere else, or no longer needs the chain. It stops whatever is running and skips the remaining nodes.",
-    placeholder: "Why? It goes in the run log.",
+    placeholder: GOES_IN_THE_RUN_LOG,
     label: "Mark complete",
   },
 };

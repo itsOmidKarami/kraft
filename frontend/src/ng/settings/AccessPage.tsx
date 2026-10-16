@@ -15,7 +15,7 @@ import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 import { tip } from "../ui/Tooltip";
-import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS } from "./sharedWords";
+import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS, PORT_HINT, NEW_PASSWORD_SIGNS_OUT } from "./sharedWords";
 
 const LOOPBACK = "127.0.0.1";
 const REMOTE_ACCESS = "https://kraft-sdlc.dev/guides/remote-access";
@@ -240,7 +240,7 @@ export function AccessPage() {
         </section>
 
         <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? SAVED.restart : undefined}>
-          <SetRow label="port" error={errors.port} hint="Used by both binds. Takes effect on restart. 1024–65535.">
+          <SetRow label="port" error={errors.port} hint={PORT_HINT}>
             {editing === "port" ? (
               <input ref={field} className="set-input" aria-label="Port" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePort())} onBlur={() => void savePort()} />
             ) : (
@@ -277,7 +277,7 @@ export function AccessPage() {
             </Block>
 
             <Block id="set-password" title="Password" card>
-              <SetRow label="password" error={errors.password} hint="A new password signs every session out.">
+              <SetRow label="password" error={errors.password} hint={NEW_PASSWORD_SIGNS_OUT}>
                 {editing === "password" ? (
                   <span className="set-inline">
                     <input ref={field} className="set-input" type="password" aria-label="New password" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePassword())} />

@@ -106,6 +106,7 @@ describe("the item screen (C)", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
       const sheet = await screen.findByRole("dialog", { name: "Start with unapplied changes?" });
       expect(posts(calls)).toEqual([]);
+      expect(within(sheet).getByText("This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft.")).toBeInTheDocument();
       await userEvent.click(within(sheet).getByRole("button", { name: "Apply and start" }));
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
     });

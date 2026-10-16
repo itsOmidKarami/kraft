@@ -12,3 +12,5 @@ export const REVIEW_THE_CONFLICTS = "Review the conflicts";
 export const BUDGET_RAN_OUT = "The budget ran out";
 export const LOG_UNREADABLE = "The log could not be read.";
 export const WAITING_ON_THE_PROVIDER = "Waiting on the provider";
+export const DRAFT_HOLDS_CHANGES = "This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft.";
+export const GOES_IN_THE_RUN_LOG = "Goes in the run log.";

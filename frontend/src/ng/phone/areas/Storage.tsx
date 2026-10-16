@@ -5,6 +5,7 @@ import type { StoragePreview, StorageUsage } from "../../../types";
 import { sendBulk } from "../../board/bulk";
 import { detailOf, jsonBody, request } from "../../http";
 import { CATEGORIES, cleanAll, COUNTED, HOUSEKEEPING, NOTHING_TO_CLEAN, storageNote } from "../../settings/storageWords";
+import { CLEAN_UP_FINISHED_WORKTREES } from "../../settings/sharedWords";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
@@ -79,7 +80,7 @@ export function StorageScreen() {
       )}
       {sheet.is("clean") && (
         <ConfirmSheet
-          title="Clean up finished worktrees?"
+          title={CLEAN_UP_FINISHED_WORKTREES}
           text={preview ? `${plural(take.length, "item")} cleaned up: moved to Archived, their worktrees deleted. ${lost ? `${plural(lost, "uncommitted file")} will be lost.` : "No uncommitted files."} ${humanSize(preview.used_after_bytes)} used afterwards.` : "Asking the server what this would do…"}
           confirm={{ label: "Clean up", danger: true, disabled: !take.length, run: () => void confirm() }}
           busy={busy || !preview}

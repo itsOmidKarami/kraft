@@ -7,7 +7,7 @@ import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
-import { APPLY_AND_START } from "../sharedWords";
+import { APPLY_AND_START, DRAFT_HOLDS_CHANGES } from "../sharedWords";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -105,7 +105,7 @@ function Review() {
           <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? APPLY_AND_START : "Apply"}</Button>
         </>
       )}>
-      <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain itself and the other items stay as they are.</p>
+      <p className="idr-sub">{start ? `${DRAFT_HOLDS_CHANGES} ` : ""}Only this item changes. The chain itself and the other items stay as they are.</p>
       {blocked && (
         <ul className="idr-probs" aria-label="Problems">
           {d.issues.map((i) => (

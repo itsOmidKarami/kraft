@@ -6,7 +6,7 @@ import { problemAt, type Ctx } from "./ctx";
 import { SectionHead } from "./SectionHead";
 import { LOOP_WINS } from "./sections";
 import { parse, raw, show, sourceWord } from "./units";
-import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK } from "../sharedWords";
+import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK, FINDINGS_BURN_A_FIX_CYCLE } from "../sharedWords";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -101,7 +101,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
       <section className="pol-card" aria-label="Findings">
         <div className="pol-one">
           <span className="pol-k">burns a cycle</span>
-          <span className="pol-chips" role="group" aria-label="Findings that burn a fix cycle">
+          <span className="pol-chips" role="group" aria-label={FINDINGS_BURN_A_FIX_CYCLE}>
             {SEVERITIES.map((s) => (
               <button key={s} type="button" className={`pol-chip${sev.includes(s) ? " is-on" : ""}${sevChange ? " is-changed" : ""}`} aria-pressed={sev.includes(s)} onClick={() => toggleSeverity(s)}>{s}</button>
             ))}

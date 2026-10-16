@@ -25,7 +25,7 @@ import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act,
 import { useDo } from "./useDo";
 import "./item.css";
 import { tip } from "../../ui/Tooltip";
-import { APPLY_AND_START, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT } from "../../item/sharedWords";
+import { APPLY_AND_START, DRAFT_HOLDS_CHANGES, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT } from "../../item/sharedWords";
 
 const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -193,7 +193,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
     return (
       <ChoiceSheet
         title="Start with unapplied changes?"
-        text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
+        text={DRAFT_HOLDS_CHANGES}
         options={[{ value: "apply", label: APPLY_AND_START }, { value: "without", label: "Start without them" }]}
         children={startLines.length > 0 && <pre className="ph-start-lines" aria-label="Changes">{startLines.join("\n")}</pre>}
         onPick={async (v) => {

@@ -14,7 +14,7 @@ import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
 import { yamlOf } from "./yaml";
-import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN } from "../../settings/sharedWords";
+import { SAMPLE_INTAKE_TITLE, ALERTS_ON_THIS_DEVICE, TEST_ALERT_SHOWN, ALERTS_IN_BACKGROUND } from "../../settings/sharedWords";
 
 export { permissionNow };
 const AREA = "/settings/notifications";
@@ -176,7 +176,7 @@ function BrowserAlerts({ tab }: { tab: "overview" | "config" }) {
     return (
       <>
         <Group rows={[
-          { label: "status", value: channelState(browserOn(on, permission)), sub: "Alerts show only while this tab is in the background." },
+          { label: "status", value: channelState(browserOn(on, permission)), sub: ALERTS_IN_BACKGROUND },
           ...(permission === "granted" ? [] : [{ label: "permission", value: PERMISSION_SHORT[permission], sub: PERMISSION_LEAD[permission].title } as RowSpec]),
           { label: "notifies", value: evLine(events) },
         ]} />
