@@ -5,7 +5,7 @@ import * as d from "../templates/draft/draftApi";
 import { libView, LIB_MODEL } from "./fixture";
 import { draftWith, mount, ok, setup, where } from "./testSupport";
 
-const list = () => screen.findByRole("listbox", { name: "Library components" });
+const list = () => screen.findByRole("group", { name: "Library components" });
 
 beforeEach(setup);
 afterEach(() => vi.unstubAllGlobals());
@@ -14,10 +14,10 @@ describe("Library page: the list", () => {
   it("groups the components by kind with counts, each with its used-by words", async () => {
     mount();
     const box = await list();
-    const groups = within(box).getAllByRole("group").map((g) => g.getAttribute("aria-label"));
+    const groups = within(box).getAllByRole("listbox").map((g) => g.getAttribute("aria-label"));
     expect(groups).toEqual(["Nodes", "Steps", "Tasks", "Steering"]);
-    const tasks = within(box).getByRole("group", { name: "Tasks" });
-    expect(within(tasks).getByRole("heading")).toHaveTextContent("Tasks 4");
+    const tasks = within(box).getByRole("listbox", { name: "Tasks" });
+    expect(within(box).getByRole("heading", { name: /^Tasks/ })).toHaveTextContent("Tasks 4");
     await waitFor(() => expect(within(tasks).getByRole("option", { name: /implementer/ })).toHaveTextContent("2 chains"));
     expect(within(tasks).getByRole("option", { name: /verify/ })).toHaveTextContent("unused");
     expect(within(box).getByRole("option", { name: /approval/ })).toHaveTextContent("unpublished");
@@ -67,8 +67,8 @@ describe("Library page: the list", () => {
     const counts = await screen.findByRole("list", { name: "Components per section" });
     await u.click(within(counts).getByRole("link", { name: /tasks/ }));
     const box = await list();
-    expect(within(box).queryByRole("group", { name: "Nodes" })).toBeNull();
-    expect(within(box).getByRole("group", { name: "Tasks" })).toBeInTheDocument();
+    expect(within(box).queryByRole("listbox", { name: "Nodes" })).toBeNull();
+    expect(within(box).getByRole("listbox", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
     await u.click(within(box).getByRole("option", { name: /implementer/ }));
     expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
@@ -78,7 +78,7 @@ describe("Library page: the list", () => {
     expect(where()).toBe("/templates/library/tasks.implementer");
     expect(screen.getByText("Showing tasks only")).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: "Show all" }));
-    expect(within(await list()).getByRole("group", { name: "Nodes" })).toBeInTheDocument();
+    expect(within(await list()).getByRole("listbox", { name: "Nodes" })).toBeInTheDocument();
     expect(screen.queryByText("Showing tasks only")).toBeNull();
   });
 
@@ -113,15 +113,15 @@ describe("Library page: the list", () => {
     await list();
     await u.click(screen.getByRole("button", { name: "Filter kinds" }));
     await u.click(within(screen.getByRole("dialog", { name: "Show kinds" })).getByRole("checkbox", { name: /Steering/ }));
-    expect(within(await list()).queryByRole("group", { name: "Steering" })).toBeNull();
+    expect(within(await list()).queryByRole("listbox", { name: "Steering" })).toBeNull();
     unmount();
     mount();
     await list();
-    expect(screen.queryByRole("group", { name: "Steering" })).toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Steering" })).toBeNull();
     unmount();
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     mount();
-    expect(await screen.findByRole("group", { name: "Steering" })).toBeInTheDocument();
+    expect(await screen.findByRole("listbox", { name: "Steering" })).toBeInTheDocument();
   });
 
   it("offers only the kinds the library has in the filter", async () => {

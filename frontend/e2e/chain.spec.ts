@@ -26,5 +26,5 @@ test("create a work item and watch it complete", async ({ page }) => {
   // Back on the board, the item sits in the Done group.
   await page.goto("/");
   const done = page.getByRole("region", { name: "Done" });
-  await expect(done.getByRole("button", { name: /^make the failing test pass .* completed$/ }).first()).toBeVisible();
+  await expect(done.getByRole("button", { name: /^make the failing test pass completed / }).first()).toBeVisible();
 });

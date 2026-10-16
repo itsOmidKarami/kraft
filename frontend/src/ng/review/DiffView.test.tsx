@@ -127,7 +127,7 @@ describe("DiffView", () => {
 
   it("says in the lines' name how the range moves, with no pencil to start it on the other side", () => {
     render(<View onCompose={vi.fn()} />);
-    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveAccessibleName(/Shift and the arrows move the end of the range, Enter comments/);
+    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveAccessibleName(/Shift and the arrows move the end of the range, Alt and Shift cross to the other side, Enter comments/);
   });
 
   it("picks by keyboard: arrows move, Shift extends on one side, Enter composes", () => {
@@ -154,6 +154,18 @@ describe("DiffView", () => {
     key("ArrowDown", true);
     key("Enter");
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 5, head: 6 });
+  });
+
+  it("Alt and Shift with the arrows step through the other side's lines, a removed line and then its replacement", () => {
+    const onCompose = vi.fn();
+    render(<View onCompose={onCompose} />);
+    const lines = screen.getByRole("group", { name: /^Lines of search\/cache.py/ });
+    const key = (k: string, extra: object = {}) => fireEvent.keyDown(lines, { key: k, ...extra });
+    key("ArrowDown"); // the context line: new 4
+    key("ArrowDown"); // the removed line: old 5
+    key("ArrowDown", { shiftKey: true, altKey: true }); // its replacement, new 5: the range crosses sides
+    key("Enter");
+    expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 5 });
   });
 
   it("after a click on a line number, Enter and c compose on that line (Kraft-9d8b2.50)", async () => {

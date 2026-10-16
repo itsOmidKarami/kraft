@@ -121,7 +121,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
         </div>
       )}
       {tabs && tab && onTab && <div className="pane-tabs"><Tabs id={id} label={`${title} sections`} tabs={tabs} value={tab} onChange={onTab} /></div>}
-      <div className="pane-body" {...(tabs && tab ? { role: "tabpanel", id: `${id}-panel`, "aria-labelledby": `${id}-tab-${tab}` } : {})}>{children}</div>
+      <div className="pane-body" {...(tabs && tab ? { role: "tabpanel", tabIndex: 0, id: `${id}-panel`, "aria-labelledby": `${id}-tab-${tab}` } : {})}>{children}</div>
       {footer && <div className="pane-footer">{footer}</div>}
     </aside>
   );

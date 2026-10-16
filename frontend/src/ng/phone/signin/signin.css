@@ -2,6 +2,8 @@
 .ph-signin-card { display: flex; flex-direction: column; gap: 14px; }
 .ph-signin-brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--fs-meta); font-weight: 600; }
 .ph-signin-where { font: var(--fs-label) ui-monospace, Menlo, monospace; font-weight: 400; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-signin-label { font-size: var(--fs-label); color: var(--text-muted); margin-bottom: -8px; }
+.ph-signin .ph-error svg { vertical-align: -2px; margin-right: 4px; }
 .ph-signin-stay { display: flex; gap: 8px; }
 .ph-signin-opt { flex: 1; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: transparent; font-size: var(--fs-body); color: var(--text-sub); cursor: pointer; }
 .ph-signin-opt.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
