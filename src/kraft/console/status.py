@@ -26,25 +26,44 @@ def running_part(rows: list[dict]) -> str:
     return f"{n} running on their own" if n else "nothing running"
 
 
-def budget_part(budget: dict | None) -> str | None:
-    """`$4.10 of $50.00 today`, or `$4.10 today` with no daily cap."""
-    if not budget or budget.get("spent_usd") is None:
+def _dollars(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def budget_part(budget: object) -> str | None:
+    """`$4.10 of $50.00 today`, or `$4.10 today` with no daily cap. A body of
+    another shape (another server version, a proxy) says nothing."""
+    if not isinstance(budget, dict) or not _dollars(spent := budget.get("spent_usd")):
         return None
     cap = budget.get("cap_usd")
-    of = f" of {words.usd(cap)}" if cap is not None else ""
-    return f"{words.usd(budget['spent_usd'])}{of} today"
-
-
-def agents_part(harnesses: list[dict] | None) -> Content | None:
-    """`claude ● codex ○ +5`: each provider's CLI found (`●`) or missing
-    (`○`), the found ones first; the mark's shape says it, the colour repeats it."""
-    if not harnesses:
+    if cap is not None and not _dollars(cap):
         return None
-    ordered = sorted(harnesses, key=lambda h: not h.get("executable_found"))
+    of = f" of {words.usd(cap)}" if cap is not None else ""
+    return f"{words.usd(spent)}{of} today"
+
+
+def _agent(entry: object) -> tuple[str, bool] | None:
+    """One provider's name and whether its CLI was found, or None for an
+    entry of another shape."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("executable_found"), bool):
+        return None
+    name = entry.get("label") or entry.get("id")
+    return (name, entry["executable_found"]) if isinstance(name, str) and name else None
+
+
+def agents_part(harnesses: object) -> Content | None:
+    """`claude ● codex ○ +5`: each provider's CLI found (`●`) or missing
+    (`○`), the found ones first; the mark's shape says it, the colour repeats
+    it. Nothing for a body of another shape: no part rather than a wrong one."""
+    if not isinstance(harnesses, list) or not harnesses:
+        return None
+    agents = [_agent(entry) for entry in harnesses]
+    if None in agents:
+        return None
+    ordered = sorted(agents, key=lambda agent: not agent[1])
     parts: list[str | tuple[str, str]] = []
-    for h in ordered[:AGENTS_SHOWN]:
-        found = bool(h.get("executable_found"))
-        parts += [f"{h.get('label') or h.get('id')} ", ("●", "$success") if found else "○", " "]
+    for name, found in ordered[:AGENTS_SHOWN]:
+        parts += [f"{name} ", ("●", "$success") if found else "○", " "]
     if (more := len(ordered) - AGENTS_SHOWN) > 0:
         parts.append(f"+{more}")
     return Content.assemble(*parts).rstrip()
@@ -57,8 +76,9 @@ class StatusLine(Horizontal):
     def __init__(self, **kwargs) -> None:
         super().__init__(id="status", **kwargs)
         self.rows: list[dict] = []
-        self.budget: dict | None = None
-        self.harnesses: list[dict] | None = None
+        #: The server's last answers, as sent: the parts check their shape.
+        self.budget: object = None
+        self.harnesses: object = None
 
     def compose(self):
         yield pulse.Spinner(id="status-spin")

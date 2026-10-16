@@ -62,8 +62,25 @@ def _answers(monkeypatch, budget, agents) -> None:
             (60, 16),
             "1 running on their own · ? keys",
         ),
+        # Bodies of another shape (another server version, a proxy): the part goes, nothing raises.
+        (
+            [RUNNING],
+            BUDGET,
+            {"claude": True},
+            (80, 24),
+            "1 running on their own · $4.10 of $50.00 today",
+        ),
+        ([RUNNING], [BUDGET], AGENTS, (80, 24), "1 running on their own · claude ● codex ○"),
+        (
+            [RUNNING],
+            {"spent_usd": "1.0"},
+            AGENTS,
+            (80, 24),
+            "1 running on their own · claude ● codex ○",
+        ),
     ],
-    ids=["all-three", "no-daily-cap", "budget-fails", "agents-fail", "both-fail", "narrow"],
+    ids=["all-three", "no-daily-cap", "budget-fails", "agents-fail", "both-fail", "narrow"]
+    + ["harness-dict", "budget-list", "budget-str"],
 )
 def test_the_status_line_says_its_parts_and_leaves_out_what_failed(
     board, monkeypatch, rows, budget, agents, size, line
@@ -91,13 +108,45 @@ def test_the_status_line_says_its_parts_and_leaves_out_what_failed(
         ([{"id": f"a{n}", "executable_found": n == 4} for n in range(5)], "a4 ● a0 ○ a1 ○ +2"),
         ([], None),
         (None, None),
+        ({"claude": True}, None),
+        ([*AGENTS, "cursor"], None),
+        ([{"id": "claude"}], None),
+        ([{"id": 3, "executable_found": True}], None),
     ],
-    ids=["found-first", "at-most-three", "none-listed", "unread"],
+    ids=["found-first", "at-most-three", "none-listed", "unread"]
+    + ["a-dict", "an-entry-not-a-dict", "no-found-flag", "no-name"],
 )
 def test_the_agents_part_names_found_ones_first_by_mark(harnesses, said):
     """`●` found, `○` missing: the mark's shape carries it, not the colour."""
     part = status.agents_part(harnesses)
     assert (part.plain if part else None) == said
+
+
+@pytest.mark.parametrize(
+    ("budget", "said"),
+    [
+        (BUDGET, "$4.10 of $50.00 today"),
+        ({"spent_usd": 4, "cap_usd": None}, "$4.00 today"),
+        ({"spent_usd": 4.1}, "$4.10 today"),
+        ({"spent_usd": True, "cap_usd": 50}, None),
+        ({"spent_usd": 4.1, "cap_usd": "50"}, None),
+        ({"cap_usd": 50}, None),
+        ([4.1, 50], None),
+        ("$4.10", None),
+    ],
+    ids=[
+        "capped",
+        "no-cap",
+        "cap-missing",
+        "spent-bool",
+        "cap-str",
+        "spent-missing",
+        "a-list",
+        "a-str",
+    ],
+)
+def test_the_budget_part_reads_only_numbers_it_can_trust(budget, said):
+    assert status.budget_part(budget) == said
 
 
 def test_the_spinner_turns_only_while_work_is_happening(board, monkeypatch):
