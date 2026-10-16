@@ -73,6 +73,7 @@ describe("AreaFrame", () => {
   it("disables Review & publish until there is a change or a problem, and opens the area's review pane", async () => {
     mount();
     expect(await screen.findByRole("button", { name: "Review & publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review & publish" })).toHaveAccessibleDescription("published nothing to publish");
     document.body.innerHTML = "";
     mount({ changes: [change] }, true);
     await userEvent.click(await screen.findByRole("button", { name: "Review & publish" }));

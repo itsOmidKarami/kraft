@@ -5,6 +5,7 @@ import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Button } from "../ui/Button";
+import { NOTHING_TO_PUBLISH } from "../ui/reasons";
 import { NotFound } from "../ui/NotFound";
 import { showToast } from "../ui/Toast";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
@@ -159,7 +160,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         {row?.addon && <AddonBadge addon={row.addon} />}
         {draft.view!.draft
           ? <span className="lib-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span>
-          : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>nothing to publish</span></>}
+          : <><span className="lib-published" id={publishedId}>published</span><span className="reason is-quiet" id={`${publishedId}-why`}>{NOTHING_TO_PUBLISH}</span></>}
         {n.problems > 0 && (
           <button type="button" className="lib-problems" title="Step through the problems" onClick={stepProblems}>
             {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}

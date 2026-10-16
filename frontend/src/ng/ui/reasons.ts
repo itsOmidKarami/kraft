@@ -1,4 +1,5 @@
 /** The words for a disabled control, one source for the desktop and phone trees. */
+export const NOTHING_TO_PUBLISH = "nothing to publish";
 export const ADD_TITLE = "Add a title to create it.";
 export const fixProblems = (n: number) => `Fix the ${n} ${n === 1 ? "problem" : "problems"} first.`;
 export const CHAIN_IN_USE = (repos: string[]) => `Can't delete: ${repos.join(", ")} default to it.`;
