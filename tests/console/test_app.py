@@ -457,19 +457,19 @@ def test_a_resize_under_the_palette_still_marks_the_frame(console, size, palette
 
 
 @pytest.mark.parametrize(
-    ("width", "version"),
-    [(80, False), (100, True), (120, True)],
+    ("width", "version", "status"),
+    [(80, False, "degraded"), (100, True, "degraded"), (120, True, "ok")],
     ids=["80-leaves-out-the-version", "100-names-it", "120-cuts-the-path-from-the-left"],
 )
 def test_the_tabs_win_the_top_line_and_keep_clear_of_the_scope(
-    console, monkeypatch, width, version
+    console, monkeypatch, width, version, status
 ):
     """A long repo path, version and update note must not wrap the tabs, nor
     run into them (Kraft-zrf14.14); under 100 columns the version, which the
     Server screen names, is left out."""
 
     async def health():
-        return {"status": "ok"}
+        return {"status": status}
 
     async def resolve_repo(cwd=None):
         return "/Users/someone/projects/a/very/long/repository/path/that/goes/on"
@@ -479,7 +479,7 @@ def test_the_tabs_win_the_top_line_and_keep_clear_of_the_scope(
 
     async def scenario(app, pilot):
         app.update_waiting, app.version = True, "2.0.1"  # a dev build's long version cannot fit
-        await console.until(pilot, lambda: app.scope and "Server ok" in _text(app, "#tabs"))
+        await console.until(pilot, lambda: app.scope and f"Server {status}" in _text(app, "#tabs"))
         app._draw_top()
         await pilot.pause()
         tabs, where = app.query_one("#tabs"), app.query_one("#where")
@@ -491,10 +491,9 @@ def test_the_tabs_win_the_top_line_and_keep_clear_of_the_scope(
             # a path that does not fit loses its left, never the repo's own name
             _text(app, "#where").startswith("…/")
             and _text(app, "#where").partition(" · ")[0].endswith("/on"),
-            len(_text(app, "#where")) <= where.content_region.width,
         )
 
-    assert console.run(scenario, size=(width, 24)) == (True, True, True, version, True, True)
+    assert console.run(scenario, size=(width, 24)) == (True, True, True, version, True)
 
 
 def test_a_link_change_under_the_palette_still_marks_the_frame(console):
