@@ -169,11 +169,11 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm, Note {
+Confirm, Note, Menu {
     align: center middle;
 }
 
-#confirm, #note {
+#confirm, #note, #menu {
     width: 72;
     max-width: 100%;
     height: auto;
@@ -251,4 +251,10 @@ Confirm, Note {
 
 #note Select {
     margin-top: 1;
+}
+
+#menu OptionList {
+    height: auto;
+    margin-top: 1;
+    border: none;
 }

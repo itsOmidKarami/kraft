@@ -135,3 +135,59 @@ def paused(result: dict) -> str:
     stopped = len(result.get("paused_sessions") or [])
     how = f", stopping {stopped} running session{'s' if stopped != 1 else ''}" if stopped else ""
     return f"paused {result['id']}{how}; kraft item resume {result['id']} carries on"
+
+
+def unblocked(result: dict) -> str:
+    """unblock's answer: what the item no longer comes after, and what it
+    still waits on."""
+    dropped = result.get("dropped") or []
+    if not dropped:
+        return f"{result['id']} comes after nothing unfinished: nothing was dropped"
+    line = f"{result['id']} no longer comes after {', '.join(dropped)}"
+    if left := result.get("waiting_on"):
+        line += f"; it still waits on {', '.join(d['id'] for d in left)}"
+    return line
+
+
+def dollars(raw: str) -> float | None:
+    """A cap as typed: dollars, or `none` for an explicit no-cap. ValueError
+    names what it could not read."""
+    if raw.lower() == "none":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"dollars or `none`, not {raw!r}") from None
+
+
+def raised_budget(usd: float | None) -> Callable[[dict], str]:
+    """raise-budget's sentence for a cap of `usd`: raised and retried, or
+    raised and where the retry starts, or that it did not start."""
+    cap = "no cap" if usd is None else f"${usd:g}"
+    return item_action(
+        f"raised the cap on {{id}} to {cap} and retried it",
+        small=lambda r: (
+            f"raised the cap on {r['id']} to {cap}; " + (held(r) or f"retried at {rerun_at(r)}")
+        ),
+    )
+
+
+#: escalate's sentence; its small answer is `escalated`.
+ESCALATED = "asked an agent about {id}"
+
+
+def escalated(result: dict) -> str:
+    return f"asked an agent about {result['id']}'s stop; kraft view show {result['id']} follows it"
+
+
+#: cancel's sentence: what stays, and the verb that deletes it.
+CANCELLED = (
+    "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes deletes them)"
+)
+#: complete's sentence.
+COMPLETED = "marked {id} complete"
+
+
+def skipped(what: str) -> str:
+    """skip's sentence, `{id}` left for the answer: what it passed over."""
+    return f"skipped {what} on {{id}}"

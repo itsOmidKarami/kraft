@@ -355,16 +355,23 @@ class KraftConsole(App):
             self.show(what)
         elif kind == "say":
             self.notify(what, markup=False)
-        elif self.command is not None:
+        else:
+            await self.run_asking(what)
+
+    async def run_asking(self, argv: list[str]) -> None:
+        """Run `kraft <argv>` in the output panel, after the console's own
+        confirm where the verb cannot be undone (spec §7.8). Await it from a
+        worker."""
+        if self.command is not None:
             # Before the question: its answer would be thrown away.
             self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
-        else:
-            asked = runner.ask(what)
-            if asked is not None:
-                sentence, doing = asked
-                if not await self.confirm(f"kraft {shlex.join(what)}", [sentence], running=doing):
-                    return
-            await self.run_command(what)
+            return
+        asked = runner.ask(argv)
+        if asked is not None:
+            sentence, doing = asked
+            if not await self.confirm(f"kraft {shlex.join(argv)}", [sentence], running=doing):
+                return
+        await self.run_command(argv)
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:

@@ -53,12 +53,10 @@ def _node_overrides(pairs: list[str]) -> dict | None:
 
 def _budget(raw: str) -> float | None:
     """`--budget`: dollars, or `none` for an explicit no-cap."""
-    if raw.lower() == "none":
-        return None
     try:
-        return float(raw)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"dollars or `none`, not {raw!r}") from None
+        return answers.dollars(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _cmd_create(ns: argparse.Namespace) -> None:
@@ -149,18 +147,8 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
     )
 
 
-def _unblocked(result: dict) -> str:
-    dropped = result.get("dropped") or []
-    if not dropped:
-        return f"{result['id']} comes after nothing unfinished: nothing was dropped"
-    line = f"{result['id']} no longer comes after {', '.join(dropped)}"
-    if left := result.get("waiting_on"):
-        line += f"; it still waits on {', '.join(d['id'] for d in left)}"
-    return line
-
-
 def _cmd_unblock(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), _unblocked, ns.json)
+    common.emit(asyncio.run(client.unblock(ns.id, ns.dependency)), answers.unblocked, ns.json)
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -283,17 +271,8 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
 
 
 def _cmd_raise_budget(ns: argparse.Namespace) -> None:
-    cap = "no cap" if ns.usd is None else f"${ns.usd:g}"
     common.emit(
-        asyncio.run(client.raise_budget(ns.usd, ns.id)),
-        common.item_action(
-            f"raised the cap on {{id}} to {cap} and retried it",
-            small=lambda r: (
-                f"raised the cap on {r['id']} to {cap}; "
-                + (answers.held(r) or f"retried at {answers.rerun_at(r)}")
-            ),
-        ),
-        ns.json,
+        asyncio.run(client.raise_budget(ns.usd, ns.id)), answers.raised_budget(ns.usd), ns.json
     )
 
 
@@ -314,7 +293,7 @@ def _cmd_skip(ns: argparse.Namespace) -> None:
     what = "" if ns.json else _skipping(ns)
     common.emit(
         asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
-        common.item_action(f"skipped {what} on {{id}}"),
+        common.item_action(answers.skipped(what)),
         ns.json,
     )
 
@@ -323,8 +302,7 @@ def _cmd_complete(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.complete(ns.reason, ns.id, close_beads=ns.close_beads)),
         common.item_action(
-            "marked {id} complete" + ("; its beads are closed" if ns.close_beads else ""),
-            status=False,
+            answers.COMPLETED + ("; its beads are closed" if ns.close_beads else ""), status=False
         ),
         ns.json,
     )
@@ -333,11 +311,7 @@ def _cmd_complete(ns: argparse.Namespace) -> None:
 def _cmd_cancel(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.cancel(ns.reason, ns.id)),
-        common.item_action(
-            "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes "
-            "deletes them)",
-            status=False,
-        ),
+        common.item_action(answers.CANCELLED, status=False),
         ns.json,
     )
 
@@ -357,12 +331,7 @@ def _cmd_reply(ns: argparse.Namespace) -> None:
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
-        common.item_action(
-            "asked an agent about {id}",
-            small=lambda r: (
-                f"asked an agent about {r['id']}'s stop; kraft view show {r['id']} follows it"
-            ),
-        ),
+        common.item_action(answers.ESCALATED, small=answers.escalated),
         ns.json,
     )
 

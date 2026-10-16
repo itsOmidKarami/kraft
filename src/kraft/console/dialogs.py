@@ -13,7 +13,8 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Select, Static
+from textual.widgets import Button, Input, OptionList, Select, Static
+from textual.widgets.option_list import Option
 
 
 class Dialog[R](ModalScreen[R]):
@@ -68,11 +69,15 @@ class Note(Dialog[str | None]):
     to an agent's question. Enter sends it; an empty one only when it is not
     `required` (sent as ""). Esc answers None: nothing is sent."""
 
-    def __init__(self, question: str, lines: Sequence[str] = (), *, required: bool) -> None:
+    def __init__(
+        self, question: str, lines: Sequence[str] = (), *, required: bool, error: str = ""
+    ) -> None:
         super().__init__()
         self.question = question
         self.lines = lines
         self.required = required
+        #: Why the last answer was refused, asked again (the server's words).
+        self.error = error
 
     def compose(self) -> ComposeResult:
         with Vertical(id="note"):
@@ -81,7 +86,7 @@ class Note(Dialog[str | None]):
                 yield Static(Content("\n".join(self.lines)), id="note-lines")
             hint = "Enter sends it · Esc sends nothing"
             yield Input(placeholder=hint if self.required else "optional · " + hint)
-            yield Static(id="note-error")
+            yield Static(Content(self.error), id="note-error")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -121,3 +126,28 @@ class Reject(Note):
 
     def _answer(self, value) -> None:
         super()._answer(None if value is None else (value, self.query_one(Select).value))
+
+
+class Menu(Dialog[str | None]):
+    """The Item's `m` (spec §6): the actions open for the item, by `(name,
+    label)`. Enter picks one; Esc picks nothing."""
+
+    def __init__(self, title: str, entries: Sequence[tuple[str, str]]) -> None:
+        super().__init__()
+        self.title_text = title
+        self.entries = entries
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="menu"):
+            yield Static(Content(self.title_text), id="menu-title")
+            yield OptionList(*(Option(Content(label), id=name) for name, label in self.entries))
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).focus()
+
+    def action_cancel(self) -> None:
+        self._answer(None)
+
+    @on(OptionList.OptionSelected)
+    def _picked(self, event: OptionList.OptionSelected) -> None:
+        self._answer(event.option.id)
