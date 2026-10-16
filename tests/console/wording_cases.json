@@ -1,5 +1,5 @@
 {
-  "_doc": "The web's wording and the console's, held to one set of cases (spec §4.5). tests/console/test_words.py runs them against src/kraft/console/words.py; frontend/src/ng/board/wording.test.ts against model.ts, rowText.ts and format.ts. Each case is a real row shape cut to the fields the function reads, one per branch. A change to either side changes a case here, or the other suite fails.",
+  "_doc": "The web's wording and the console's, held to one set of cases (spec §4.5). tests/console/test_words.py runs them against src/kraft/console/words.py; frontend/src/ng/board/wording.test.ts against model.ts, rowText.ts and format.ts, and frontend/src/ng/item/wording.test.ts against bannerWords.ts. Each case is a real row shape cut to the fields the function reads, one per branch. A change to either side changes a case here, or the other suite fails.",
   "now": "2026-10-15T12:00:00Z",
   "chain": {
     "template_id": "default",
@@ -311,5 +311,104 @@
     ["2026-10-15T13:00:00+00:00", "in 1h"],
     ["2026-10-16T11:00:00+00:00", "in 23h"],
     ["2026-10-16T12:00:00+00:00", "in 1d"]
+  ],
+  "banners": [
+    { "name": "running", "item": { "display_status": "running", "stop": null }, "banner": null },
+    { "name": "needs-you-without-a-stop", "item": { "display_status": "needs_you", "stop": null }, "banner": null },
+    {
+      "name": "gate",
+      "item": { "display_status": "needs_you", "pending_gate": "spec_approval", "stop": { "kind": "gate", "node": "spec", "reason": null } },
+      "banner": { "kind": "gate", "node": "spec_approval", "text": "", "way": "" }
+    },
+    {
+      "name": "gate-without-pending-gate",
+      "item": { "display_status": "needs_you", "pending_gate": null, "stop": { "kind": "gate", "node": "plan_review", "reason": null } },
+      "banner": { "kind": "gate", "node": "plan_review", "text": "", "way": "" }
+    },
+    {
+      "name": "question",
+      "item": { "display_status": "needs_you", "needs_context_question": "Keep [/] in titles?", "stop": { "kind": "question", "node": "implement", "reason": "needs_context: keep [/] in titles?" } },
+      "banner": { "kind": "question", "node": "implement", "text": "Keep [/] in titles?", "way": "" }
+    },
+    {
+      "name": "question-without-its-text",
+      "item": { "display_status": "needs_you", "needs_context_question": null, "stop": { "kind": "question", "node": "implement", "reason": "needs_context: which database?" } },
+      "banner": { "kind": "question", "node": "implement", "text": "which database?", "way": "" }
+    },
+    {
+      "name": "budget-the-item-raises",
+      "item": { "display_status": "needs_you", "actions": ["retry", "raise_budget"], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached: $0.035 spent on this work item, cap $0.030...", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget cap reached: $0.035 spent on this work item, cap $0.030.", "way": "" }
+    },
+    {
+      "name": "budget-without-a-reason",
+      "item": { "display_status": "needs_you", "actions": ["raise_budget"], "stop": { "kind": "budget", "node": "plan", "reason": null, "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "text": "The budget ran out.", "way": "" }
+    },
+    {
+      "name": "budget-raise-not-taken-now",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget cap reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "budget-with-no-doors-listed",
+      "item": { "display_status": "needs_you", "actions": [], "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget cap reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "budget-from-an-older-server",
+      "item": { "display_status": "needs_you", "stop": { "kind": "budget", "node": "plan", "reason": "budget cap reached", "scope": "work_item" } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget cap reached.", "way": "" }
+    },
+    {
+      "name": "budget-the-item-cannot-raise",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": null, "reason": "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", "scope": "daily" } },
+      "banner": { "kind": "limit", "node": "", "text": "Budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", "way": "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap." }
+    },
+    {
+      "name": "budget-on-a-policy-limit",
+      "item": { "display_status": "needs_you", "actions": ["retry"], "stop": { "kind": "budget", "node": "plan", "reason": "budget_usd reached", "limit": { "path": "", "key": "budget_usd", "value": 5, "maximum": null } } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget_usd reached.", "way": "" }
+    },
+    {
+      "name": "policy-limit-without-retry-listed",
+      "item": { "display_status": "needs_you", "actions": ["escalate"], "stop": { "kind": "budget", "node": "plan", "reason": "budget_usd reached", "limit": { "path": "", "key": "budget_usd", "value": 5, "maximum": null } } },
+      "banner": { "kind": "limit", "node": "plan", "text": "Budget_usd reached.", "way": "Kraft takes no raise for it right now." }
+    },
+    {
+      "name": "cap-without-a-reason",
+      "item": { "display_status": "needs_you", "stop": { "kind": "cap", "node": "verification", "reason": null } },
+      "banner": { "kind": "limit", "node": "verification", "text": "A limit was reached.", "way": "" }
+    },
+    {
+      "name": "failed",
+      "item": { "display_status": "failed", "stop": { "kind": "failed", "node": "verification", "reason": "tests failed: 3 of 120" } },
+      "banner": { "kind": "failed", "node": "verification", "text": "Tests failed: 3 of 120.", "way": "" }
+    },
+    {
+      "name": "failed-on-a-forge-login",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: authentication failed", "facts": { "cause": "forge_auth" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "text": "Gh: authentication failed.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
+    },
+    {
+      "name": "failed-stranded",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": null, "facts": { "cause": "stranded" } } },
+      "banner": { "kind": "failed", "node": "implement", "text": "", "way": "" }
+    },
+    {
+      "name": "failed-in-the-repo",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "implement", "reason": "the worktree could not be made" } },
+      "banner": { "kind": "failed", "node": "implement", "text": "The worktree could not be made.", "way": "Check the repo settings." }
+    },
+    {
+      "name": "a-stop-on-a-paused-item",
+      "item": { "display_status": "paused", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "banner": null
+    },
+    {
+      "name": "stuck",
+      "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": "the fix loop made no progress in 3 rounds" } },
+      "banner": { "kind": "stop", "node": "verification", "text": "The fix loop made no progress in 3 rounds.", "way": "" }
+    }
   ]
 }

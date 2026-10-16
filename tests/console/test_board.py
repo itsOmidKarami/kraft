@@ -277,16 +277,18 @@ def test_the_tail_is_amber_only_where_it_needs_you(board):
 
 
 def test_enter_is_offered_only_where_it_does_something(board):
-    """Enter folds Done on its heading and opens a closed peek on an item;
-    with the peek open it does nothing on an item, so the footer must not offer it."""
+    """Enter opens an item, the peek open or not, and folds Done on its
+    heading; on any other heading it does nothing, so the footer must not
+    offer it."""
 
     async def scenario(app, pilot):
         await _settled(board(BOARD), app, pilot)
-        on_item = app.view.check_action("open", ())
         await pilot.press("v")
-        peek_open = app.view.check_action("open", ())
+        on_item = app.view.check_action("open", ())
+        await pilot.press("home")
+        on_heading = app.view.check_action("open", ())
         await pilot.press("end")
-        return on_item, peek_open, app.view.check_action("open", ())
+        return on_item, on_heading, app.view.check_action("open", ())
 
     assert board(BOARD).run(scenario) == (True, False, True)
 
@@ -490,12 +492,11 @@ def test_the_peek_shows_what_the_selection_needs(board, monkeypatch, rows, detai
 
 @pytest.mark.parametrize(
     ("height", "keys", "shown"),
-    [(29, [], False), (30, [], True), (29, ["v"], True), (30, ["v"], False), (29, ["enter"], True)],
-    ids=["closed-under-30", "open-at-30", "v-opens", "v-closes", "enter-opens"],
+    [(29, [], False), (30, [], True), (29, ["v"], True), (30, ["v"], False)],
+    ids=["closed-under-30", "open-at-30", "v-opens", "v-closes"],
 )
 def test_the_peek_starts_closed_on_a_short_window_and_v_toggles_it(board, height, keys, shown):
-    """Spec §7.1: closed under 30 rows, `v` at any size; Enter on an item
-    opens it too, until the Item screen takes Enter over."""
+    """Spec §7.1: closed under 30 rows, `v` at any size."""
 
     async def scenario(app, pilot):
         await _settled(board([RUNNING]), app, pilot)

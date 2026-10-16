@@ -1,0 +1,349 @@
+"""The Item (spec §7.2): one work item's header, its stop banner, where it
+stands on its chain, and its tabs. A pane of the frame's switcher, not a
+pushed screen, so the prompt and the top line stay; Esc goes back."""
+
+from __future__ import annotations
+
+import os
+import time
+from functools import partial
+from typing import ClassVar
+
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
+from textual.containers import Horizontal
+from textual.content import Content
+from textual.widgets import ContentSwitcher, RichLog, Static
+
+from kraft import answers, client, render
+from kraft.console import acts, words
+from kraft.console.dialogs import Reject
+from kraft.console.screens import View
+from kraft.console.screens.board import bar_of, chain_line
+
+#: The Item's tabs, in `[` and `]` order, with their names.
+TABS = (("overview", "Overview"),)
+#: What the view says once its item is gone (spec §7.2).
+GONE = "This item no longer exists. Esc goes back."
+#: A chain node's mark in the Overview's list, by its state.
+MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
+
+
+def usd(amount: float) -> str:
+    """`format.ts`'s `usd`: cents from a dollar up, a tenth of a cent below."""
+    return f"${amount:.2f}" if amount >= 1 else f"${amount:.3f}"
+
+
+def status_words(item: dict) -> str:
+    """The header's status, as the web's badge says it (`headerState`), in
+    sentence case: an item filed paused and never started is "Not started"."""
+    if item.get("display_status") == "paused" and not item.get("current_node_id"):
+        return "Not started"
+    return (item.get("display_status") or "running").replace("_", " ", 1).capitalize()
+
+
+def banner_line(item: dict) -> str | None:
+    """The stop banner (spec §7.2): the server's reason and the way on, in
+    `words.banner_of`'s words and each kind's frame, as the web draws it."""
+    banner = words.banner_of(item)
+    if banner is None:
+        return None
+    node, text, way = banner["node"], banner["text"], banner["way"]
+    at = f"Stopped at {node}. " if node else ""
+    said = {
+        "gate": f"Waiting for your approval at {node}.",
+        "question": f"The agent asks: {text}",
+        "failed": f"Failed at {node}. {text}" if node else f"Failed. {text}",
+        "limit": at + text,
+        "stop": (at + text) if text else (f"Stopped at {node}." if node else "Stopped."),
+    }[banner["kind"]]
+    return f"{said} {way}".strip()
+
+
+class Item(View):
+    label = "Item"
+    BINDINGS: ClassVar[list[BindingType]] = [
+        # Long content scrolls by keys: the view keeps the focus (spec §6).
+        Binding("down,j", "scroll('down')", "down", show=False),
+        Binding("up,k", "scroll('up')", "up", show=False),
+        Binding("pagedown", "scroll('page_down')", "page down", show=False),
+        Binding("pageup", "scroll('page_up')", "page up", show=False),
+        Binding("home", "scroll('home')", "top", show=False),
+        Binding("end", "scroll('end')", "end", show=False),
+        Binding("a", "approve", "approve"),
+        Binding("r", "reject", "reject"),
+        Binding("p", "pause_or_resume", "pause/resume"),
+        Binding("t", "retry", "retry"),
+    ]
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.work_item_id: str | None = None
+        #: The detail read (`get_work_item(full=True)`); None until it answers.
+        self.item: dict | None = None
+        self.tab = TABS[0][0]
+        self.crumb = "Board"
+        #: The gate whose document the Overview shows, and that document's
+        #: digest: approve sends the digest of what was read (spec §7.2).
+        self.read_gate: str | None = None
+        self.digest: str | None = None
+        #: `(updated_at, actions)` of the last read: a live event that leaves
+        #: them alone reads nothing.
+        self._key: tuple | None = None
+        #: The item answered 404: nothing is read until `open` shows another.
+        self._dead = False
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="item-top"):
+            yield Static(id="item-title")
+            yield Static(id="item-where")
+        with Horizontal(id="item-state"):
+            yield Static(id="item-status")
+            yield Static(id="item-spent")
+        yield Static(id="item-banner")
+        yield Static(id="item-chain")
+        yield Static(id="item-tabs")
+        with ContentSwitcher(initial=self.tab, id="item-panes"):
+            # Focus stays with the view, which scrolls these by its keys.
+            overview = RichLog(id="overview", wrap=True, min_width=1)
+            overview.can_focus = False
+            yield overview
+        yield Static(Content(GONE), id="item-gone")
+
+    def on_mount(self) -> None:
+        self.query_one("#item-gone").display = False
+
+    def open(self, work_item_id: str) -> None:
+        """Show `work_item_id`, on the Overview, read afresh."""
+        # The read still answering for the item shown before must not draw it.
+        self.workers.cancel_group(self, "read")
+        self.work_item_id, self.item, self._key = work_item_id, None, None
+        self._dead = False
+        # Where it was opened from: the top view showing, never a guess.
+        from kraft.console.screens import VIEWS  # defined after this module loads
+
+        self.crumb = VIEWS[self.app._last_top].label
+        self.read_gate = self.digest = None
+        self.tab = TABS[0][0]
+        self.query_one("#item-gone").display = False
+        self.query_one("#item-title", Static).update(Content(f"{self.crumb} › {work_item_id[:8]}"))
+        for part in ("#item-where", "#item-status", "#item-spent", "#item-chain"):
+            self.query_one(part, Static).update("")
+        self.query_one("#item-banner").display = False
+        self.query_one("#overview", RichLog).clear()
+        self._draw_tabs()
+        self.refresh_bindings()
+        # After the next refresh: a pane just shown has no width until it is
+        # laid out, and a RichLog wraps what it is given then at one cell.
+        self.call_after_refresh(self._read)
+
+    def _read(self) -> None:
+        # Exclusive: a read still answering for an older state is dropped.
+        self.run_worker(self._read_now, group="read", exclusive=True)
+
+    def rows_changed(self, rows: list[dict], events: list[dict]) -> None:
+        # A hidden Item still hears every event: it reads nothing then.
+        if not self.display or self.work_item_id is None or self._dead:
+            return
+        row = next((r for r in rows if r["id"] == self.work_item_id), None)
+        key = (row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
+        if events and key == self._key:
+            return
+        self._read()
+
+    async def _read_now(self) -> None:
+        try:
+            item = await client.get_work_item(self.work_item_id, full=True)
+        except client.ClientError as exc:
+            if exc.kind == client.Failure.NOT_FOUND:
+                self._gone()
+            else:
+                self.app.notify_refusal(exc)
+            return
+        if item.get("id") != self.work_item_id:  # an answer for another item
+            return
+        self.item = item
+        self._key = (item.get("updated_at"), tuple(item.get("actions") or ()))
+        self._draw_head(item)
+        try:
+            await self._overview(item)
+        except client.ClientError as exc:
+            log = self.query_one("#overview", RichLog)
+            log.clear()  # one copy of the error, not one per failed read
+            log.write(client.reason_of(str(exc)))
+        self.refresh_bindings()
+
+    def _gone(self) -> None:
+        """Archived or abandoned while open (spec §7.2): say so; nothing acts."""
+        # Further events read nothing for an item that is not there.
+        self.item, self._dead = None, True
+        self.query_one("#item-gone").display = True
+        self.query_one("#item-panes").display = False
+        self.refresh_bindings()
+
+    def _draw_head(self, item: dict) -> None:
+        self.query_one("#item-panes").display = True
+        title = " ".join((item.get("title") or "").split())
+        self.query_one("#item-title", Static).update(
+            Content.assemble((f"{self.crumb} › ", "$kraft-muted"), f"{item['id'][:8]}  ", title)
+        )
+        repo = os.path.basename((item.get("repo") or "").rstrip("/"))
+        self.query_one("#item-where", Static).update(
+            Content.styled(f"{repo} · {words.chain_of(item)}", "$kraft-muted")
+        )
+        now = time.time()
+        colour = bar_of(item)
+        self.query_one("#item-status", Static).update(
+            Content.assemble(
+                ("● ", colour),
+                (status_words(item), colour),
+                (f" · {words.reason_tail(item, now)}", "$kraft-muted"),
+            )
+        )
+        cap = item.get("budget_cap") or {}
+        money = ""
+        if cap.get("spent_usd") is not None:
+            of = f" of {usd(cap['cap_usd'])}" if cap.get("cap_usd") is not None else ""
+            money = f"{usd(cap['spent_usd'])}{of} · "
+        age = words.ago(item.get("updated_at"), now).removesuffix(" ago")
+        self.query_one("#item-spent", Static).update(Content.styled(money + age, "$kraft-muted"))
+        said = banner_line(item)
+        banner = self.query_one("#item-banner", Static)
+        banner.display = said is not None
+        if said is not None:
+            tone = "$error" if item.get("display_status") == "failed" else "$warning"
+            banner.update(Content.assemble(("▌ ", tone), said))
+        self._draw_chain()
+
+    def _draw_chain(self) -> None:
+        # The frame's width: this view fills it, and may not be laid out yet.
+        if self.item is not None:
+            marks = words.chain_marks(self.item)
+            self.query_one("#item-chain", Static).update(chain_line(marks, self.app.size.width - 2))
+
+    def on_resize(self) -> None:
+        self._draw_chain()
+
+    def _draw_tabs(self) -> None:
+        parts: list[str | tuple[str, str]] = []
+        for key, name in TABS:
+            parts += [(f" {name} ", "bold $primary" if key == self.tab else "$kraft-muted"), " "]
+        self.query_one("#item-tabs", Static).update(Content.assemble(*parts))
+
+    async def _overview(self, item: dict) -> None:
+        """With a gate pending, its document, whole and scrollable, and why
+        approve waits; else where the item stands. Then every node."""
+        log = self.query_one("#overview", RichLog)
+        # Nothing is read until the document answers: approve stays shut for
+        # the length of the reads, and never offers the last version's digest.
+        self.read_gate = self.digest = None
+        self.refresh_bindings()
+        lines: list[str | Text] = []
+        stop = item.get("stop") or {}
+        gate = item.get("pending_gate")
+        muted = self.app.theme_variables["kraft-muted"]
+        if item.get("display_status") == "needs_you" and stop.get("kind") == "gate" and gate:
+            doors = item.get("actions") or []
+            if "approve" not in doors and (waits := await acts.approve_waits(item["id"])):
+                lines.append(Text(waits, style=self.app.theme_variables["warning"]))
+            try:
+                document = await client.artifact(item["id"])
+            except client.ClientError as exc:
+                if exc.kind != client.Failure.NOT_FOUND:
+                    raise
+                document = None
+            if document is None:
+                lines.append(Text("This gate has no document.", style=muted))
+                self.digest = None
+            else:
+                lines += (document.get("content") or "").splitlines()
+                if warning := render.artifact_truncated(document):
+                    lines += ["", Text(warning, style=self.app.theme_variables["warning"])]
+                self.digest = document.get("digest")
+            self.read_gate = gate
+        else:
+            lines.append(words.reason_tail(item, time.time()))
+        lines += ["", Text("Chain", style=f"bold {muted}")]
+        styles = {
+            "done": muted,
+            "current": f"bold {self.app.theme_variables['primary']}",
+            "hot": f"bold {self.app.theme_variables['primary']}",
+            "todo": "",
+        }
+        for mark in words.chain_marks(item):
+            gate_word = " (gate)" if mark["gate"] else ""
+            lines.append(
+                Text(
+                    f" {MARK[mark['state']]} {mark['node']}{gate_word}", style=styles[mark["state"]]
+                )
+            )
+        log.clear()
+        for line in lines:
+            # From the top: a document opens at its start, not its end.
+            log.write(line, scroll_end=False)
+        # A live read redraws it; a clear keeps the log's scroll, and the
+        # reader stays where they were (pinned by a test).
+
+    def _pane(self) -> RichLog:
+        return self.query_one(f"#{self.tab}", RichLog)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "approve":
+            # Only once the document it approves has been read (its digest).
+            item = self.item
+            return acts.opens(action, item) and self.read_gate == item.get("pending_gate")
+        if action in acts.DOORS:
+            return acts.opens(action, self.item)
+        return True
+
+    def action_scroll(self, how: str) -> None:
+        getattr(self._pane(), f"scroll_{how}")(animate=False)
+
+    def action_approve(self) -> None:
+        if item := self.item:
+            digest = self.digest
+            # Shut until the next read answers: a second `a` would approve twice.
+            self.read_gate = self.digest = None
+            self.refresh_bindings()
+            self.run_worker(partial(self._approve, item, digest), group="act")
+
+    async def _approve(self, item: dict, digest: str | None) -> None:
+        gate = item["pending_gate"]
+        await acts.act(
+            self.app,
+            client.approve_gate(gate, item["id"], digest),
+            answers.item_action(f"approved {gate} on {{id}}"),
+        )
+
+    def action_reject(self) -> None:
+        if item := self.item:
+            self.run_worker(
+                partial(acts.reject, self.app, item, self._reject_dialog(item)), group="act"
+            )
+
+    def _reject_dialog(self, item: dict) -> Reject | None:
+        """The note with where the work goes back to: the exec nodes before
+        the gate, its fix target chosen. None (the plain note, the server's
+        own target) when the target is not one of them."""
+        nodes = (item.get("chain_definition") or {}).get("nodes") or []
+        gate = item.get("pending_gate")
+        at = next((k for k, node in enumerate(nodes) if node.get("id") == gate), 0)
+        before = [node["id"] for node in nodes[:at] if node.get("kind") != "gate"]
+        to = (item.get("fix_target") or {}).get("node")
+        if to not in before:
+            return None
+        return Reject(
+            f"Reject {gate} on {item['id'][:8]}",
+            ["Say what is wrong: the note goes to the agent that redoes it, at the node below."],
+            nodes=before,
+            to=to,
+        )
+
+    def action_pause_or_resume(self) -> None:
+        if item := self.item:
+            self.run_worker(partial(acts.pause_or_resume, self.app, item), group="act")
+
+    def action_retry(self) -> None:
+        if item := self.item:
+            self.run_worker(partial(acts.retry, self.app, item), group="act")

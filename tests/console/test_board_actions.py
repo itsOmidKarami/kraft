@@ -299,3 +299,19 @@ def test_an_action_is_not_sent_when_the_item_cannot_be_read(board, monkeypatch, 
         [client.reason_of(str(client.status_error(404, "no such work item [/]")))],
         False,
     )
+
+
+@pytest.mark.parametrize(
+    ("row", "offered"),
+    [(GATE, True), (GATE | {"actions": ["reject"]}, False), (RUNNING, False)],
+    ids=["approve-open", "must-fix-keeps-it-shut", "no-gate"],
+)
+def test_a_is_offered_on_the_board_only_where_approve_is_open(board, row, offered):
+    """`a` opens the Overview, so it is in the footer only where the server
+    lists `approve` (spec §6): the shared `DOORS` hold it to that."""
+
+    async def scenario(app, pilot):
+        await _settled(board([row]), app, pilot)
+        return app.view.check_action("approve", ())
+
+    assert board([row]).run(scenario) is offered

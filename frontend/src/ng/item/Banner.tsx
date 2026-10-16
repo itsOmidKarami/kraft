@@ -6,12 +6,10 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
-import { admits, budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
+import { bannerOf } from "./bannerWords";
+import { admits, offersRaise } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
-
-/** A stop's reason as a sentence of its own: a capital first letter and a full stop. */
-const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replace(/\.*$/, "")}.`;
 
 /** The reason banner (Decisions §4): only when the item needs you at a gate
  *  or a cap; the action is the filled button. A gate's is Review and decide, its review (GR-5). */
@@ -20,9 +18,10 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
   const [raising, setRaising] = useState(false);
   useLimitAsked(item.id, () => setRaising(true));
   const stop = item.stop;
-  if (item.display_status !== "needs_you" || !stop) return null;
-  if (stop.kind === "gate") {
-    const gate = item.pending_gate ?? stop.node ?? "";
+  const words = bannerOf(item);
+  if (item.display_status !== "needs_you" || !stop || !words) return null;
+  if (words.kind === "gate") {
+    const gate = words.node;
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
@@ -31,15 +30,15 @@ export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRa
       </div>
     );
   }
-  if (stop.kind === "cap" || stop.kind === "budget")
+  if (words.kind === "limit")
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
         <span className="item-banner-text">
           {/* Where first: the reason can be two sentences, and a node tacked on after them read as part of the last. */}
-          {stop.node && <>Stopped at <code>{stop.node}</code>. </>}
-          {sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"))}
-          {stop.kind === "budget" && !offersRaise(item) && <> {budgetRaise(item) ? RAISE_REFUSED : NOT_RAISABLE}</>}
+          {words.node && <>Stopped at <code>{words.node}</code>. </>}
+          {words.text}
+          {words.way && <> {words.way}</>}
         </span>
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,
             and a budget stop on the item's own cap that Config's budget editor. A budget the item cannot raise says so, and the header's Retry is the way on. */}

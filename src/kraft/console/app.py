@@ -32,7 +32,7 @@ from kraft.console.dialogs import Confirm, Dialog
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt, commands
-from kraft.console.screens import VIEWS, Board, View
+from kraft.console.screens import VIEWS, Board, Item, View
 from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
@@ -233,8 +233,8 @@ class KraftConsole(App):
         items = [
             (
                 f"{row['id'][:8]}  {' '.join((row.get('title') or '').split())}",
-                "Select it on the Board",
-                partial(self.go_to_item, row["id"]),
+                "Open it",
+                partial(self.open_item, row["id"]),
             )
             for row in self.rows
             if row.get("display_status") != "archived"
@@ -245,11 +245,11 @@ class KraftConsole(App):
         ]
         return screens + items + verbs
 
-    def go_to_item(self, work_item_id: str) -> None:
-        """The item selected on the Board, its peek open; the Item screen
-        (PR 4) opens it instead."""
-        self.show("board")
-        self.query_one("#board", Board).select(work_item_id)
+    def open_item(self, work_item_id: str) -> None:
+        """The Item view on `work_item_id` (spec §7.2): Enter and `a` on the
+        Board, and Ctrl+P's items. Esc comes back to the last top view."""
+        self.show("item")
+        self.query_one("#item", Item).open(work_item_id)
 
     def type_command(self, line: str) -> None:
         self.action_prompt()
