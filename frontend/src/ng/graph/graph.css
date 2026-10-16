@@ -312,7 +312,7 @@
 .scope-chip-name { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--text); }
 .scope-chip.is-skipped .scope-chip-name, .scope-chip.is-waiting .scope-chip-name { color: var(--text-muted); }
 .scope-meta { color: var(--text-muted); }
-.scope-new { padding: 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-size: var(--fs-label); }
+.scope-new { padding: 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: var(--fs-label); }
 /* Reduced motion (the canvas carries `is-calm`, from matchMedia: the contract allows no other media query): nothing glides, and the frame and its rows crossfade. */
 .is-calm .scope-frame { animation: scope-in .12s linear; }
 .is-calm .scope-frame.is-out { transition: opacity .12s linear; }

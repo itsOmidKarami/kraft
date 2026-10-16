@@ -63,7 +63,7 @@
 .board-row-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .board-title { font-size: var(--fs-body); font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-meta { display: flex; min-width: 0; overflow: hidden; gap: 5px; font-size: var(--fs-meta); color: var(--text-muted); white-space: nowrap; }
-/* What gives way, in order: the reason tail; the repo and chain only cap their own length; the id and the age never
+/* The reason leads the line and gives way first; the repo and chain only cap their own length; the id and the age never
    shrink (R10). The meta line clips at the very end for a row narrower than that. */
 .board-meta-repo { flex: none; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
 .board-meta-chain { flex: none; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; }

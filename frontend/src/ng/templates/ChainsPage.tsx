@@ -296,6 +296,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   return (
     <ReadOnly.Provider value={readOnly}>
     <div className="tpl-page" ref={frame}>
+      <h1 className="tpl-sr">Chain {liveId}</h1>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
         <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} copy={readOnly} />

@@ -62,6 +62,9 @@ FLOORS = {
 #: Status colours are both a fill on the ground and text on a card.
 STATUS = ("ok", "warn", "bad", "info")
 STATUS_FLOORS = ((3.0, "bg"), (4.5, "surface"))
+#: A status chip tints its ground with 9% of its own colour, which lowers the contrast of the text on it by about
+#: 0.5 in light mode (dark mode's tint raises it): this floor on --surface-2 keeps the chip's text at 4.5.
+CHIP_FLOOR = (5.1, "surface-2")
 ACCENT_FLOOR = (4.5, ("bg", "surface"))
 
 
@@ -168,7 +171,7 @@ def neutrals(surface: str, mode: str, amount: str, log: list[str]) -> dict[str, 
     faint = mix(t["text-muted"], t["bg"], 0.55)
     t["text-faint"] = nudge(faint, [t[x] for x in on], floor, dark, f"{where} text-faint", log)
     for role, (L, C, hh) in status.items():
-        for floor, on in STATUS_FLOORS:
+        for floor, on in STATUS_FLOORS + (() if dark else (CHIP_FLOOR,)):
             t[role] = nudge(oklch(L, C, hh), [t[on]], floor, dark, f"{where} {role}", log)
             L = hex_oklab(t[role])[0]
     floor, on = FLOORS["stroke"]

@@ -19,14 +19,22 @@ export interface RowProps {
   onOpen: (id: string) => void;
   onCheck: (id: string) => void;
   onAction: (item: WorkItem, action: RowAction) => void;
+  /** On the board's list, which is one Tab stop: set, this row is the stop or is not, and its box and action leave the tab order (the list's keys reach them). Unset, every control tabs. */
+  stop?: boolean;
+  /** The meta line leaves out what the view already says: the one repo in view, the chain a group is. */
+  hideRepo?: boolean;
+  hideChain?: boolean;
   /** The archived view's own action and tail (H): Restore, "archived by you". */
   own?: { label: string; run: () => void; tail: string; age: string };
 }
 
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
-export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own }: RowProps) {
+export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own, stop, hideRepo, hideChain }: RowProps) {
   const g = glyphOf(item);
+  const ticks = ticksOf(item);
+  const roved = stop !== undefined;
+  const off = roved ? -1 : undefined;
   const act = own ? null : admittedRowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
@@ -47,30 +55,29 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   };
   return (
     <div className={`board-row${selected ? " is-sel" : checked ? " is-checked" : ""}${offline ? " is-off" : ""}`} data-row={item.id}>
-      <input type="checkbox" className="board-check" checked={checked} onChange={() => onCheck(item.id)} aria-label={`Select ${item.title}`} />
+      <input type="checkbox" className="board-check" checked={checked} onChange={() => onCheck(item.id)} aria-label={`Select ${item.title}`} tabIndex={off} />
       <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} sel={selected} />
-      <button type="button" className="board-row-main" aria-current={selected || undefined} onClick={click} onDoubleClick={() => onOpen(item.id)} onKeyDown={key} onKeyUp={(e) => e.key === " " && e.preventDefault()}>
+      <button type="button" className="board-row-main" tabIndex={roved ? (stop ? 0 : -1) : undefined} aria-current={selected || undefined} onClick={click} onDoubleClick={() => onOpen(item.id)} onKeyDown={key} onKeyUp={(e) => e.key === " " && e.preventDefault()}>
         <span className="board-title" id={titleId} title={item.title}>{item.title}</span>
         <span className="board-meta">
-          <span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span>
-          <span className="board-sep" aria-hidden>·</span>
-          <span className="board-meta-id">{id}</span>
-          <span className="board-sep" aria-hidden>·</span>
-          <span className="board-meta-chain">{chainOf(item)}</span>
-          <span className="board-sep" aria-hidden>·</span>
-          <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
-          <span className="board-sep" aria-hidden>·</span>
           <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
             {Cue && <Cue size={12} aria-hidden className="board-cue" />}
             <span className="board-tail-text">{own?.tail ?? reasonTail(item, now)}</span>
           </span>
+          {!hideRepo && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span></>}
+          <span className="board-sep" aria-hidden>·</span>
+          <span className="board-meta-id">{id}</span>
+          {!hideChain && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-chain">{chainOf(item)}</span></>}
+          <span className="board-sep" aria-hidden>·</span>
+          <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
+          {ticks.length > 0 && <span className="board-visually-hidden">, {ticks.filter((t) => t.state === "done").length} of {ticks.length} nodes done</span>}
         </span>
       </button>
-      <Ticks ticks={ticksOf(item)} />
+      <Ticks ticks={ticks} />
       <span className="board-act">
-        {own && <button type="button" className="btn btn-secondary board-act-btn" aria-describedby={titleId} disabled={offline} onClick={own.run}>{own.label}</button>}
+        {own && <button type="button" className="btn btn-secondary board-act-btn" aria-describedby={titleId} disabled={offline} tabIndex={off} onClick={own.run}>{own.label}</button>}
         {act && (
-          <button type="button" className={`btn btn-${actionVariant(act)} board-act-btn`} aria-describedby={titleId} disabled={offline} onClick={() => onAction(item, act)}>
+          <button type="button" className={`btn btn-${actionVariant(act)} board-act-btn`} aria-describedby={titleId} disabled={offline} tabIndex={off} onClick={() => onAction(item, act)}>
             {act.label}
           </button>
         )}

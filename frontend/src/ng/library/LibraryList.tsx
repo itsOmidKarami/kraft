@@ -158,21 +158,21 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
           <LinkButton onClick={onShowAll}>Show all</LinkButton>
         </p>
       )}
-      <div className="lib-rows" role="listbox" aria-label="Library components">
+      <div className="lib-rows" role="group" aria-label="Library components">
         {!rows.length && <Empty className="lib-empty">The library is empty. + New to add the first component.</Empty>}
         {!!rows.length && !shown.length && <NoMatch className="lib-empty" query={q} onClear={() => setQ("")} />}
         {SECTIONS.map((s) => {
           const inGroup = shown.filter((x) => x.section === s);
           if (!inGroup.length) return null;
           return (
-            <div key={s} role="group" aria-label={SECTION_LABEL[s]}>
+            <div key={s}>
               <h2 className="lib-group">
                 <button type="button" className="lib-group-btn" aria-expanded={!isFolded(s)} onClick={() => setFolded((f) => new Set(f.has(s) ? [...f].filter((x) => x !== s) : [...f, s]))}>
                   {isFolded(s) ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
                   {SECTION_LABEL[s]} <span className="lib-count">{inGroup.length}</span>
                 </button>
               </h2>
-              {!isFolded(s) && inGroup.map((row) => (
+              {!isFolded(s) && <div role="listbox" aria-label={SECTION_LABEL[s]}>{inGroup.map((row) => (
                 <button
                   key={row.id}
                   ref={roving.ref(row.id)}
@@ -191,7 +191,7 @@ export function LibraryList({ rows, selected, only, onShowAll, onSelect, onAdd }
                   {row.mark && <span className={`lib-mark is-${row.mark}`} role="img" aria-label={row.mark === "add" ? "added in the draft" : "changed in the draft"} />}
                   {row.used && <span className={`lib-used${row.used === "unused" ? " is-unused" : ""}`}>{row.used}</span>}
                 </button>
-              ))}
+              ))}</div>}
             </div>
           );
         })}
