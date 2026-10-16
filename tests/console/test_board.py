@@ -119,12 +119,12 @@ async def _settled(console, app, pilot) -> None:
             "/r",
             [
                 "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes…  approve spec                               12m",
-                "▌m03d77b1  item m03d77b1          failed at verificati…                       1h",
+                "▌a91c03fe  Board critique fixe…  approve spec                              12m",
+                "▌m03d77b1  item m03d77b1         failed at verificat…                       1h",
                 "RUNNING 1",
-                "▌k7f2e9a0  Docs per major         implement              docs                 4m",
+                "▌k7f2e9a0  Docs per major        implement             docs                 4m",
                 "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0          created paused                             30m",
+                "▌n0n0n0n0  item n0n0n0n0         created paused                            30m",
                 "DONE 1 ›",
             ],
         ),
@@ -133,13 +133,13 @@ async def _settled(console, app, pilot) -> None:
             None,
             [
                 "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes…  approve spec           r                   12m",
-                "▌m03d77b1  item m03d77b1          failed at verificati…  r                    1h",
+                "▌a91c03fe  Board critique fixe…  approve spec          r                   12m",
+                "▌m03d77b1  item m03d77b1         failed at verificat…  r                    1h",
                 "RUNNING 2",
-                "▌e1e1e1e1  item e1e1e1e1          implement              other                2m",
-                "▌k7f2e9a0  Docs per major         implement              r · docs             4m",
+                "▌e1e1e1e1  item e1e1e1e1         implement             other                2m",
+                "▌k7f2e9a0  Docs per major        implement             r · docs             4m",
                 "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0          created paused         r                   30m",
+                "▌n0n0n0n0  item n0n0n0n0         created paused        r                   30m",
                 "DONE 1 ›",
             ],
         ),
@@ -148,12 +148,12 @@ async def _settled(console, app, pilot) -> None:
             "/r",
             [
                 "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes [/]      approve spec",
-                "▌m03d77b1  item m03d77b1                 failed at verification",
+                "▌a91c03fe  Board critique fixes [/]     approve spec",
+                "▌m03d77b1  item m03d77b1                failed at verification",
                 "RUNNING 1",
-                "▌k7f2e9a0  Docs per major                implement",
+                "▌k7f2e9a0  Docs per major               implement",
                 "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0                 created paused",
+                "▌n0n0n0n0  item n0n0n0n0                created paused",
                 "DONE 1 ›",
             ],
         ),
@@ -198,7 +198,7 @@ def test_amber_marks_only_what_needs_you(row, bar):
 @pytest.mark.parametrize(
     ("rows", "keys", "lines"),
     [
-        ([], [], [board_view.EMPTY]),
+        ([], [], ["Nothing filed yet. /item create files one."]),
         (
             [RUNNING],
             [],
@@ -283,3 +283,78 @@ def test_a_title_with_markup_in_it_draws_as_typed(console, stream, tmp_path):
 
     [row] = console.run(scenario)
     assert "Fix the [/] parser" in row
+
+
+LONG = [_row(f"{n:08x}", "running", n + 1) for n in range(40)]
+
+
+def test_a_board_taller_than_the_window_still_fits_its_columns(board, monkeypatch):
+    """The scrollbar's room is kept from the first draw, so rows sized before
+    it appeared are not clipped by it (the age would read `12` for `12m`)."""
+    sized = []
+    real = board_view.row_line
+
+    def spy(row, width, *args, **kwargs):
+        sized.append(width)
+        return real(row, width, *args, **kwargs)
+
+    monkeypatch.setattr(board_view, "row_line", spy)
+
+    async def scenario(app, pilot):
+        await _settled(board(LONG), app, pilot)
+        return sized[0], app.query_one("#rows", OptionList).scrollable_content_region.width
+
+    first, final = board(LONG).run(scenario)
+    assert first == final
+
+
+def test_a_refresh_leaves_the_reader_where_they_scrolled(board):
+    """A live event redraws the list; the viewport stays where it was."""
+
+    async def scenario(app, pilot):
+        await _settled(board(LONG), app, pilot)
+        await pilot.press("end", "pageup", "pageup")
+        await pilot.pause()
+        before = app.query_one("#rows", OptionList).scroll_y
+        app.view.rows_changed(list(LONG), [{"seq": 1}])
+        await pilot.pause()
+        return before, app.query_one("#rows", OptionList).scroll_y
+
+    before, after = board(LONG).run(scenario)
+    assert before > 0
+    assert after == before
+
+
+def test_the_tail_is_amber_only_where_it_needs_you(board):
+    """Spec §5.2: a Needs-you tail takes its bar's colour, the rest are muted;
+    "Nothing needs you" is the ok colour."""
+    now = NOW
+
+    def style_of(row, text):
+        line = board_view.row_line(row, 80, now, everywhere=False, narrow=False)
+        [span] = [s for s in line.spans if line.plain[s.start : s.end].strip() == text]
+        return str(span.style)
+
+    assert style_of(GATE, "approve spec") == "$warning"
+    assert style_of(RUNNING, "implement") == "$kraft-muted"
+    assert style_of(FAILED, "failed at verificati…") == "$error"
+
+    async def scenario(app, pilot):
+        await _settled(board([RUNNING]), app, pilot)
+        [option] = [o for o in app.query_one("#rows", OptionList).options if o.disabled]
+        [span] = option.prompt.spans
+        return option.prompt.plain, str(span.style)
+
+    assert board([RUNNING]).run(scenario) == ("Nothing needs you", "$success")
+
+
+def test_enter_is_offered_only_on_done_s_heading(board):
+    """Enter does nothing on an item in this PR, so the footer must not offer it."""
+
+    async def scenario(app, pilot):
+        await _settled(board(BOARD), app, pilot)
+        on_item = app.view.check_action("open", ())
+        await pilot.press("end")
+        return on_item, app.view.check_action("open", ())
+
+    assert board(BOARD).run(scenario) == (False, True)

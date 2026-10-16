@@ -107,6 +107,7 @@ Screen.-tiny #tiny {
     max-height: 100%;
     border: none;
     padding: 0;
+    scrollbar-gutter: stable;
     background: $background;
 }
 

@@ -181,6 +181,78 @@
       "row": { "display_status": "pondering", "current_node_id": "plan" },
       "group": "running",
       "tail": ""
+    },
+    {
+      "name": "no-status",
+      "row": {"current_node_id": "plan"},
+      "group": "running",
+      "tail": ""
+    },
+    {
+      "name": "null-status",
+      "row": {"display_status": null, "current_node_id": "plan"},
+      "group": "running",
+      "tail": ""
+    },
+    {
+      "name": "stop-node-beats-current-node",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"kind": "stuck", "node": "verification", "reason": null}},
+      "group": "needs",
+      "tail": "waiting for you at verification"
+    },
+    {
+      "name": "failed-with-no-node-at-all",
+      "row": {"display_status": "failed", "stop": null},
+      "group": "needs",
+      "tail": "failed at "
+    },
+    {
+      "name": "needs-you-with-no-stop",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": null},
+      "group": "needs",
+      "tail": "waiting for you at implement"
+    },
+    {
+      "name": "needs-you-with-a-stop-of-no-kind",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"node": "implement", "reason": "look at this"}},
+      "group": "needs",
+      "tail": "look at this"
+    },
+    {
+      "name": "question-without-the-prefix",
+      "row": {"display_status": "needs_you", "current_node_id": "implement", "stop": {"kind": "question", "node": "implement", "reason": "which database?"}},
+      "group": "needs",
+      "tail": "agent asks: which database?"
+    },
+    {
+      "name": "progress-without-tasks",
+      "row": {"display_status": "running", "current_node_id": "implement", "progress": {"current": 1, "total": 3}},
+      "group": "running",
+      "tail": "implement \u00b7 task 1 of 3"
+    },
+    {
+      "name": "progress-with-empty-tasks",
+      "row": {"display_status": "running", "current_node_id": "implement", "progress": {"current": 1, "total": 3, "tasks": []}},
+      "group": "running",
+      "tail": "implement \u00b7 task 1 of 3"
+    },
+    {
+      "name": "fallback-to-nothing-usable",
+      "row": {"display_status": "running", "current_node_id": "plan", "fallback": {"to": 5}},
+      "group": "running",
+      "tail": "plan"
+    },
+    {
+      "name": "fallback-to-an-empty-object",
+      "row": {"display_status": "running", "current_node_id": "plan", "fallback": {"to": {}}},
+      "group": "running",
+      "tail": "plan"
+    },
+    {
+      "name": "waiting-with-both-times",
+      "row": {"display_status": "waiting", "current_node_id": "merge_request", "stop": {"kind": "wait", "node": "merge_request", "resume_at": "2026-10-15T12:05:00+00:00"}, "retry_at": "2026-10-15T15:00:00+00:00"},
+      "group": "running",
+      "tail": "merge request \u00b7 next check in 5m"
     }
   ],
   "order": {
@@ -199,7 +271,11 @@
     ["2026-10-15T11:59:30+00:00", "just now"],
     ["2026-10-15T11:48:00.123456+00:00", "11m ago"],
     ["2026-10-15T09:00:00+00:00", "3h ago"],
-    ["2026-10-11T12:00:00+00:00", "4d ago"]
+    ["2026-10-11T12:00:00+00:00", "4d ago"],
+    ["2026-10-15T11:01:00+00:00", "59m ago"],
+    ["2026-10-15T11:00:00+00:00", "1h ago"],
+    ["2026-10-14T13:00:00+00:00", "23h ago"],
+    ["2026-10-14T12:00:00+00:00", "1d ago"]
   ],
   "until": [
     [null, ""],
@@ -208,6 +284,10 @@
     ["2026-10-15T12:00:30+00:00", "in 1m"],
     ["2026-10-15T12:05:00+00:00", "in 5m"],
     ["2026-10-15T15:00:00+00:00", "in 3h"],
-    ["2026-10-17T12:00:00+00:00", "in 2d"]
+    ["2026-10-17T12:00:00+00:00", "in 2d"],
+    ["2026-10-15T12:59:00+00:00", "in 59m"],
+    ["2026-10-15T13:00:00+00:00", "in 1h"],
+    ["2026-10-16T11:00:00+00:00", "in 23h"],
+    ["2026-10-16T12:00:00+00:00", "in 1d"]
   ]
 }

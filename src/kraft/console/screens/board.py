@@ -134,10 +134,16 @@ class Board(View):
             and self._matches(row)
         ]
         options = self._options(shown, rows.scrollable_content_region.width)
+        scrolled = rows.scroll_y
         rows.set_options(options)
         ids = [option.id for option in options]
         first = next((k for k, i in enumerate(ids) if i and not i.startswith("group:")), 0)
         rows.highlighted = ids.index(keep) if keep and keep in ids else first if options else None
+        # set_options resets the scroll: put the reader back where they were,
+        # unless that would hide the cursor.
+        rows.scroll_to(y=scrolled, animate=False, immediate=True)
+        if rows.highlighted is not None:
+            rows.scroll_to_highlight()
         self.refresh_bindings()
 
     def _matches(self, row: dict) -> bool:
@@ -187,6 +193,9 @@ class Board(View):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # `s` only where there is a repo to come back to.
+        if action == "open":  # Enter only folds Done in 3a
+            option = self.query_one("#rows", OptionList).highlighted_option
+            return option is not None and option.id == "group:done"
         return self.app.scope is not None if action == "scope" else True
 
     @on(Input.Changed, "#board-filter")
