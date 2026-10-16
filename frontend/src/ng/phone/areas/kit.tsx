@@ -6,6 +6,7 @@ import { breakable } from "../ui/breakable";
 import { notListed, unlisted } from "../../ui/Combobox";
 import { ChoiceSheet, EditSheet, useSheet, type Listed, type Option } from "../nav/Sheet";
 import "./areas.css";
+import { Badge } from "../ui/Badge";
 
 /** What a phone says when an area's file does not load: its YAML view is read-only here, so the repair is elsewhere. */
 export const repairElsewhere = (file: string) => `The phone's YAML view is read-only. Fix ${file} on the desktop (Settings, YAML), or in the file on the machine running Kraft.`;
@@ -59,7 +60,7 @@ function RowBody({ r }: { r: RowSpec }) {
         {r.error && <span className="ph-row-error" role="alert">{r.error}</span>}
       </span>
       {r.selected && <span className="ph-row-check" aria-hidden="true">✓</span>}
-      {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <span key={c.label} className={`ph-chipword${c.tone ? ` ph-tone-${c.tone}` : ""}`}>{c.label}</span>)}</span>}
+      {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <Badge key={c.label} tone={c.tone}>{c.label}</Badge>)}</span>}
       {r.value != null && r.value !== "" && (
         <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono || r.figure ? " ph-mono" : ""}${r.figure ? " ph-row-figure" : ""}`}>
           {r.mono ? breakable(r.value) : r.value}

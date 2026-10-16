@@ -91,9 +91,9 @@ describe("ng CSS", () => {
     expect(css).toMatch(/\.rv-file-note\s*{[^}]*flex:\s*0 100 auto;[^}]*text-overflow:\s*ellipsis/);
   });
 
-  it("gives a phone row with chips and a value its label on a line of its own, and keeps the review tag whole", () => {
+  it("gives a phone row with chips and a value its label on a line of its own, and keeps the badge whole", () => {
     expect(readFileSync(join(here, "phone/areas/areas.css"), "utf-8")).toMatch(/\.ph-row:has\(> \.ph-chips-end\):has\(> \.ph-row-value\) > \.ph-row-text\s*{[^}]*flex-basis:\s*100%/);
-    expect(readFileSync(join(here, "phone/item/item.css"), "utf-8")).toMatch(/\.ph-pillbadge\s*{[^}]*white-space:\s*nowrap/);
+    expect(readFileSync(join(here, "phone/ui/ui.css"), "utf-8")).toMatch(/\.ph-badge-tag\s*{[^}]*white-space:\s*nowrap/);
   });
 
   it("keeps the Policy page's \"set below policy\" column at every width", () => {

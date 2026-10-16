@@ -27,6 +27,7 @@ import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
 import "./review.css";
 import { LINES_COMMENTED_ON, ON_THE_WHOLE_CHANGE } from "../../review/sharedWords";
+import { Badge } from "../ui/Badge";
 
 /** The agent reviewer's verdict at a gate, from its own event (never invented). */
 function autoVerdict(events: KraftEvent[], gate: string) {
@@ -122,7 +123,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
 
   return (
     <>
-      <ScreenHeader id={gate && <>{capitalise(gateName(item.chain_definition.nodes, gate))}{waiting && <> <span className="ph-pillbadge">NEEDS YOU</span></>}</>} />
+      <ScreenHeader id={gate && <>{capitalise(gateName(item.chain_definition.nodes, gate))}{waiting && <> <Badge tone="warn">NEEDS YOU</Badge></>}</>} />
       <div className="ph-content">
         <div className="ph-review-head">
           <h1 className="ph-review-title">{hasDoc && artifact?.state === "ready" ? artifact.data.title : item.title}</h1>

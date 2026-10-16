@@ -1,3 +1,4 @@
+import { Button } from "../../ui/Button";
 import { offlineWords, reload, useOffline, useReloadOnReconnect } from "../../offline";
 
 /** Over every screen: the list read failed or the live connection dropped. */
@@ -8,7 +9,7 @@ export function OfflineBanner() {
   return (
     <div className="ph-offline-banner" role="alert">
       <p>{offlineWords(loadError)}</p>
-      <button type="button" className="ph-pill" onClick={() => void reload().catch(() => {})}>Retry now</button>
+      <Button className="ph-btn" onClick={() => void reload().catch(() => {})}>Retry now</Button>
     </div>
   );
 }

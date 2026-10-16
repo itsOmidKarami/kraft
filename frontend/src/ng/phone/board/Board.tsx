@@ -19,6 +19,7 @@ import { NoMatch } from "../../ui/NoMatch";
 import { useListLoad, useNow } from "./useListLoad";
 import { OLDER_SERVER, olderServer, restartWords, useHealth } from "../../shell/health";
 import "./board.css";
+import { Chip } from "../ui/Chip";
 
 const CHIPS = [
   { f: "all", label: "All" },
@@ -103,24 +104,24 @@ export function Board() {
   return (
     <>
       <RootHeader title="Board">
-        <button type="button" className="ph-pill" onClick={() => sheet.open("repo")}>
+        <Chip onClick={() => sheet.open("repo")}>
           {repo ? repoName(repo) : "All repos"}
           <ChevronDown size={14} aria-hidden="true" />
-        </button>
+        </Chip>
         <span className="ph-spacer" />
         <Link to="/work-items/new" className="ph-fab" {...tip("New work item")}><Plus size={20} aria-hidden="true" /></Link>
       </RootHeader>
       <div className="ph-chips" role="group" aria-label="Show">
         {CHIPS.map((c) => (
-          <button key={c.f} type="button" className={`ph-chip${f === c.f ? " ph-is-on" : ""}`} aria-pressed={f === c.f} onClick={() => set({ f: c.f === "all" ? "" : c.f })}>
+          <Chip key={c.f} pressed={f === c.f} onClick={() => set({ f: c.f === "all" ? "" : c.f })}>
             {c.label}<span className="ph-chip-n">{counts[c.f]}</span>
-          </button>
+          </Chip>
         ))}
       </div>
       <div className="ph-chips ph-filters" role="group" aria-label="Filter">
-        <button type="button" className={`ph-pill${chain ? " ph-is-set" : ""}`} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chain}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className={`ph-pill${gate ? " ph-is-set" : ""}`} onClick={() => sheet.open("gate")}>{gate ? gateChip(gateLabel) : "Gate"}<ChevronDown size={14} aria-hidden="true" /></button>
-        <button type="button" className={`ph-pill${stop ? " ph-is-set" : ""}`} onClick={() => sheet.open("stop")}>{stop ? stopChip(stopLabel) : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></button>
+        <Chip set={!!chain} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chain}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip set={!!gate} onClick={() => sheet.open("gate")}>{gate ? gateChip(gateLabel) : "Gate"}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip set={!!stop} onClick={() => sheet.open("stop")}>{stop ? stopChip(stopLabel) : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></Chip>
       </div>
       <div className="ph-content ph-board">
         {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
