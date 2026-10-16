@@ -1,7 +1,8 @@
 import type { HTMLAttributes } from "react";
+import type { Tone } from "./tone";
 import "./ui.css";
 
-export type Tone = "neutral" | "info" | "warn" | "bad" | "ok" | "muted" | "change";
+export type { Tone };
 
 /** A read-only label: a status, kind, count or name. Without a tone it is outlined; `warn`
  *  still means only "needs a human", and `change` marks a draft or changed value (never amber).
