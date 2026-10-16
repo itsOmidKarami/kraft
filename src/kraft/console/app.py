@@ -46,6 +46,9 @@ NARROW = 80
 #: How long a confirm waits for the server to list its running items before
 #: it asks without them, as `kraft admin stop` does (`cli.admin._LIST_TIMEOUT`).
 CONFIRM_LIST_S = 2.0
+#: From this many columns the top line also names the version; under it the
+#: Server screen does (Kraft-zrf14.14: at 80 the tabs ran into the scope).
+WIDE = 100
 #: Said after `kraft admin update` installed a version the console did not start on.
 UPDATED = "Kraft was updated; restart the console to use the new version."
 
@@ -425,6 +428,7 @@ class KraftConsole(App):
         # The frame, not whatever is on top: Ctrl+P's palette is a pushed screen.
         self.default_screen.set_class(width < MIN_SIZE[0] or height < MIN_SIZE[1], "-tiny")
         self.default_screen.set_class(width < NARROW, "-narrow")
+        self._draw_top(width)
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
         self.rows = rows
@@ -497,7 +501,7 @@ class KraftConsole(App):
             self.default_screen.add_class("-updated")
         self.run_worker(self.check_update, name="update")
 
-    def _draw_top(self) -> None:
+    def _draw_top(self, width: int | None = None) -> None:
         live = self.link is Link.LIVE
         tabs: list[str | tuple[str, str]] = []
         for name, count in self._tabs():
@@ -514,8 +518,11 @@ class KraftConsole(App):
             )
         )
         where = home_relative(self.repo) if self.repo else "all repos"
+        # `width` from a resize: inside one, `self.size` is still the old size.
+        wide = (width or self.size.width) >= WIDE
+        version = f" · v{self.version}" if wide else ""
         update_note = " · update available" if self.update_waiting else ""
-        self.query_one("#where", Static).update(Content(f"{where} · v{self.version}{update_note}"))
+        self.query_one("#where", Static).update(Content(f"{where}{version}{update_note}"))
 
     def _tabs(self) -> list[tuple[str, str | tuple[str, str]]]:
         """Each top view's tab with its count (spec §5.4): how many need you

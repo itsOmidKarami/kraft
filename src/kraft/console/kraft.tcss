@@ -17,6 +17,7 @@ Screen {
 
 #where {
     width: 1fr;
+    padding-left: 2;
     text-align: right;
     text-wrap: nowrap;
     text-overflow: ellipsis;
