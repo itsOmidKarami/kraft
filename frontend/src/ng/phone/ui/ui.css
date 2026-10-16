@@ -28,16 +28,16 @@
 .ph-actionbar > .ph-btn.btn { padding-inline: 8px; }
 .ph-row:focus-visible, .ph-tabstrip-tab:focus-visible, .ph-unset-btn:focus-visible { outline-offset: -2px; }
 
-.ph-badge-tag { display: inline-block; flex: none; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; font: 600 var(--fs-label)/1.4 system-ui, sans-serif; letter-spacing: .04em; white-space: nowrap; }
-.ph-badge-tag.ph-tone-neutral { background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
+.ph-badge-tag { display: inline-block; flex: none; padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; font: 600 var(--fs-label)/1.4 system-ui, sans-serif; letter-spacing: .04em; white-space: nowrap; color: var(--text-sub); }
+.ph-badge-tag.ph-tone-neutral { border-color: transparent; background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
 .ph-badge-tag.ph-tone-info { border-color: var(--info); color: var(--info); }
-.ph-badge-tag.ph-tone-warn { background: color-mix(in oklab, var(--warn) 9%, transparent); color: var(--warn); }
-.ph-badge-tag.ph-tone-bad { background: color-mix(in oklab, var(--bad) 9%, transparent); color: var(--bad); }
-.ph-badge-tag.ph-tone-ok { background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
-.ph-badge-tag.ph-tone-muted { background: var(--surface-2); color: var(--text-sub); }
+.ph-badge-tag.ph-tone-warn { border-color: transparent; background: color-mix(in oklab, var(--warn) 9%, transparent); color: var(--warn); }
+.ph-badge-tag.ph-tone-bad { border-color: transparent; background: color-mix(in oklab, var(--bad) 9%, transparent); color: var(--bad); }
+.ph-badge-tag.ph-tone-ok { border-color: transparent; background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
+.ph-badge-tag.ph-tone-muted { border-color: transparent; background: var(--surface-2); color: var(--text-sub); }
 
 .ph-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font-size: var(--fs-meta); color: var(--text-sub); cursor: pointer; }
 .ph-chip.ph-is-set { border-color: var(--text-muted); color: var(--text); }
 .ph-chip:focus-visible { outline-offset: -2px; }
 .ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
-.ph-badge-tag.ph-tone-change { background: color-mix(in oklab, var(--mark-change) 9%, transparent); color: var(--mark-change); }
+.ph-badge-tag.ph-tone-change { border-color: transparent; background: color-mix(in oklab, var(--mark-change) 9%, transparent); color: var(--mark-change); }

@@ -191,7 +191,7 @@ export function DraftItemPage() {
   return (
     <div className="draft-page" ref={page}>
       <HeaderActions>
-        <Badge id={tagId} mono tone={d.title.trim() ? "ok" : "change"}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</Badge>
+        <Badge id={tagId} mono tone={d.title.trim() ? "muted" : "change"}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</Badge>
         <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
         <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} onCreate={create} />
       </HeaderActions>
