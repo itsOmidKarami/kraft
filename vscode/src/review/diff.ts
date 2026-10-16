@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { reportError } from "../actions";
 import type { Api } from "../core/api";
 import { commandItemId, leftUri, parseRenames, parseReviewUri, reviewFiles, rightUri } from "../core/review";
+import { nameOf } from "../core/board";
 import type { Store } from "../core/store";
 
 const run = promisify(execFile);
@@ -69,10 +70,10 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
     if (!id) return;
     try {
       const diff = await api.getDiff(id);
-      if (!diff.base_ref) return void vscode.window.showInformationMessage(`${id} has no base to compare against yet.`);
+      if (!diff.base_ref) return void vscode.window.showInformationMessage(`${nameOf(store, id)} has no base to compare against yet.`);
       state.worktrees.set(id, diff.worktree_path!);
       const files = reviewFiles(diff);
-      if (files.length === 0) return void vscode.window.showInformationMessage(`${id} has no changes.`);
+      if (files.length === 0) return void vscode.window.showInformationMessage(`${nameOf(store, id)} has no changes.`);
       const renames = diff.worktree_path ? await renamesOf(diff.worktree_path, diff.base_ref) : new Map<string, string>();
       state.lastOpened = { id, files };
       // Uncommitted and untracked: their branch side is the working tree, ahead of HEAD.
@@ -85,7 +86,7 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
         vscode.Uri.parse(rightUri(id, f)),
       ]);
       const note = diff.truncated || diff.landed?.truncated ? " (the daemon truncated its diff; every file is still listed)" : "";
-      await vscode.commands.executeCommand("vscode.changes", `Kraft ${id}: ${store.item(id)?.title ?? ""}${note}`, resources);
+      await vscode.commands.executeCommand("vscode.changes", `Kraft: ${store.item(id)?.title ?? "changes"}${note}`, resources);
       openedL.forEach((cb) => cb(id));
     } catch (e) {
       await reportError(e, store, id);

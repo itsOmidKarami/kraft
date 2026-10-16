@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus } from "../../../frontend/src/types";
-import { Announcer, toastActions } from "../../src/core/announcer";
+import { Announcer, toastActions, toastLevel, toastPlan } from "../../src/core/announcer";
 import { announceable } from "../../src/core/board";
 import { WorkspaceScope, type ScopeDeps } from "../../src/core/repoScope";
 import { item, stopped } from "./fixtures/item";
@@ -11,14 +11,14 @@ const question = stopped("question", { stop: { kind: "question", node: "implemen
 describe("Announcer", () => {
   it("announces a gate once", () => {
     const a = new Announcer(() => "all");
-    expect(a.consider(gate("spec"))).toEqual({ kind: "gate", id: "K-1", gate: "spec" });
+    expect(a.consider(gate("spec"))).toEqual({ kind: "gate", id: "K-1", gate: "spec", text: "approve spec" });
     expect(a.consider(gate("spec"))).toBeUndefined();
   });
 
   it("announces the next gate on the same item", () => {
     const a = new Announcer(() => "all");
     a.consider(gate("spec"));
-    expect(a.consider(gate("plan"))).toEqual({ kind: "gate", id: "K-1", gate: "plan" });
+    expect(a.consider(gate("plan"))).toEqual({ kind: "gate", id: "K-1", gate: "plan", text: "approve plan" });
   });
 
   it("re-announces a needs-you stop only after the item left it", () => {
@@ -114,4 +114,25 @@ describe("toastActions", () => {
     ["a failed item keeps Retry", item({ display_status: "failed", status: "needs_human" }), false, [web, retry]],
     ["a read-only window keeps only the web door on a failure", item({ display_status: "failed", status: "needs_human" }), true, [web]],
   ])("%s", (_, it_, readOnly, want) => expect(toastActions(it_, readOnly)).toEqual(want));
+});
+
+it.each([
+  ["a failed item", item({ display_status: "failed", stop: { kind: "failed", node: "implementation", reason: "x", resume_at: null } }), "warning"],
+  ["a cap", stopped("cap"), "warning"],
+  ["a budget stop", stopped("budget"), "warning"],
+  ["a stop that needs a human", stopped("conflict"), "warning"],
+  ["a question", question, "information"],
+  ["a gate", gate("spec"), "information"],
+])("toastLevel: %s", (_, it_, want) => expect(toastLevel(it_)).toBe(want));
+
+describe("toastPlan", () => {
+  const g = (id: string) => [item({ id }), { kind: "gate", id, gate: "g", text: "approve g" }] as const;
+  const fail = [item({ id: "F", display_status: "failed", stop: { kind: "failed", node: "n", reason: "x", resume_at: null } }), { kind: "needs", id: "F", text: "failed at n" }] as const;
+  it.each([
+    ["none: nothing", [], { each: [] }],
+    ["one: as it is", [g("a")], { each: [g("a")] }],
+    ["two gates: one summary, Next Gate and Show Board offered", [g("a"), g("b")], { summary: "2 items need you", level: "information", buttons: ["Next Gate", "Show Board"] }],
+    ["a fault among them: a warning", [g("a"), fail], { summary: "2 items need you", level: "warning", buttons: ["Next Gate", "Show Board"] }],
+    ["stops only: Show Board only", [fail, fail], { summary: "2 items need you", level: "warning", buttons: ["Show Board"] }],
+  ])("%s", (_, found, want) => expect(toastPlan(found.map((f) => [...f]) as never)).toEqual(want));
 });

@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
+import { gateWords } from "../../../frontend/src/ng/board/rowText";
 import { drafts, outcomes } from "../../../frontend/src/ng/review/finish";
 import { reportError } from "../actions";
 import { ApiError, type Api, type Artifact, type FixTarget, type ReviewResult } from "../core/api";
+import { nameOf } from "../core/board";
 import { approveOrRead, isStaleRevision } from "../core/approve";
 import { mutating } from "../core/guard";
 import { approveFlow } from "../core/mustFix";
@@ -29,6 +31,7 @@ export function registerReviewSubmit(
   show: (id: string, gate: string, a: Artifact) => Promise<void>,
   openArtifact: (id: string, gate?: string) => Promise<boolean>,
   reveal: (id: string, tid: string) => Promise<boolean | undefined>,
+  confirmApprove: (id: string, gate: string) => Promise<boolean>,
   previewId: (arg: unknown) => string | undefined,
 ) {
   const info = (msg: string) => void vscode.window.showInformationMessage(msg);
@@ -63,13 +66,13 @@ export function registerReviewSubmit(
     }
     const choices = outcomeChoices(detail, fix, unknown);
     if ("refused" in choices) return warn(choices.refused), not("refused");
-    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${id} now.`), not("refused");
+    if (choice && !choices.includes(choice.outcome)) return warn(`${OUTCOME_LABEL[choice.outcome]} is not available on ${nameOf(store, id)} now.`), not("refused");
     let { outcome, summary } = choice ?? {};
     if (!outcome) {
       const rows = outcomes(detail!, gate, threads, fix);
       const picked = await vscode.window.showQuickPick(
         choices.map((o) => ({ label: OUTCOME_LABEL[o], detail: rows.find((r) => r.key === o)?.parts.map((p) => p.t).join(""), o })),
-        { placeHolder: `Submit your review of ${id}` },
+        { placeHolder: `Submit your review of ${nameOf(store, id)}` },
       );
       if (!picked) return not("cancelled");
       outcome = picked.o;
@@ -81,7 +84,7 @@ export function registerReviewSubmit(
       const at = gate ? { gate } : { current: detail!.current_node_id ?? "" };
       const restart = restartChoices(detail!.chain_definition?.nodes ?? [], at, fix!);
       if ("refused" in restart) return warn(restart.refused), not("refused");
-      const picked = await vscode.window.showQuickPick(restart, { title: `Request changes on ${id}: restart at` });
+      const picked = await vscode.window.showQuickPick(restart, { title: `Request changes on ${nameOf(store, id)}: restart at` });
       if (!picked) return not("cancelled");
       node = nodeToSend(picked);
       fixNode = picked.node;
@@ -101,20 +104,20 @@ export function registerReviewSubmit(
           // Again here: a thread may have been labelled must-fix while the pickers were open.
           threads: () => cache.load(id),
           refuse: (refusal) => showRefusal(id, refusal, reveal),
-          readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), undefined, undefined, async (digest) => {
+          readOrSend: () => approveOrRead(api, shown, id, g, (a) => show(id, g, a), () => confirmApprove(id, g), undefined, async (digest) => {
             sent = await api.submitReview(id, g, { outcome: "approve", ...(summary && { summary }), digest });
             return true;
           }),
         });
         if (r === "refused") return not("must-fix");
-        if (r === "read-first") return info(`Read ${g} first: the document is open.`), not("read-first");
+        if (r === "read-first") return info(`Read the ${gateWords(g)} on ${nameOf(store, id)} first: the document is open.`), not("read-first");
         if (r === "cancelled" || !sent) return not("cancelled");
-        info(submitMessage("approve", sent, { id, n, gate: g, fixNode: null, paused: false }));
+        info(submitMessage("approve", sent, { title: detail!.title, n, gate: g, fixNode: null, paused: false }));
       } else {
         const r = await api.submitReview(id, gate, { outcome, ...(summary && { summary }), ...(outcome === "request_changes" && node && { node }) });
         // The gate's document will be revised: the render shown so far no longer binds an approve.
         if (gate && outcome === "request_changes") shown.forget(id);
-        info(submitMessage(outcome, r, { id, n, gate, fixNode, paused: detail!.status === "paused" }));
+        info(submitMessage(outcome, r, { title: detail!.title, n, gate, fixNode, paused: detail!.status === "paused" }));
       }
     } catch (e) {
       // A failed re-open has already said why; one toast is enough.
@@ -164,7 +167,7 @@ export function registerReviewSubmit(
       const id = idOf(arg);
       if (!id) return;
       const threads = cache.get(id);
-      if (arg instanceof vscode.Uri && threads && !hasDrafts(threads)) return info(`${id} has no draft comments to submit.`);
+      if (arg instanceof vscode.Uri && threads && !hasDrafts(threads)) return info(`${nameOf(store, id)} has no draft comments to submit.`);
       return submit(id);
     })),
     vscode.commands.registerCommand("kraft.review.discard", mutating("kraft.review.discard", refusal, warn, (arg?: unknown) => {

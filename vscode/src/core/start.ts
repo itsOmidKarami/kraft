@@ -60,3 +60,9 @@ export function oneAtATime(onBusy: () => void): <T>(fn: () => PromiseLike<T>) =>
     return new Promise<T>((ok) => ok(fn())).finally(() => (busy = false));
   };
 }
+
+/** Where Kraft is installed from: the install page of the docs. */
+export const INSTALL_URL = "https://kraft-sdlc.dev/get-started/install";
+
+/** The buttons on a failed start's toast: a binary that is not there offers both a way to get it and a way to point at it. */
+export const startButtons = (err: StartError): string[] => (err.code === "ENOENT" ? ["Get Kraft", "Open Settings"] : []);

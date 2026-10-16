@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ApiError, type Api, type BulkResult, type ItemAction, type WorkItem } from "./core/api";
-import { steerPrompt } from "./core/board";
+import { nameOf, steerPrompt } from "./core/board";
 import { parseUsd } from "./core/budget";
 import { bulkPlan, bulkSummary, type BulkVerb } from "./core/bulk";
 import type { Store } from "./core/store";
@@ -23,7 +23,15 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
   try {
     switch (action) {
       case "pause": await api.pause(item.id); break;
-      case "archive": await api.archive(item.id); break;
+      case "archive": {
+        // Archiving deletes the worktree, as the bulk one says; with none on disk there is nothing to lose.
+        if (item.worktree_exists) {
+          const ok = await vscode.window.showWarningMessage(`Archive ${item.title}? Its worktree is deleted.`, { modal: true }, "Archive");
+          if (ok !== "Archive") return;
+        }
+        await api.archive(item.id);
+        break;
+      }
       case "unblock": await api.unblock(item.id); break;
       case "restore": await api.restore(item.id); break;
       case "resume":
@@ -36,8 +44,8 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
       case "cancel":
       case "complete": {
         const ask = action === "cancel"
-          ? { prompt: `Why cancel ${item.id}? (recorded on the item)`, empty: "Cancelling needs a reason." }
-          : { prompt: `Why mark ${item.id} complete? (recorded on the item)`, empty: "Completing needs a reason." };
+          ? { prompt: `Why cancel ${item.title}? (recorded on the item)`, empty: "Cancelling needs a reason." }
+          : { prompt: `Why mark ${item.title} complete? (recorded on the item)`, empty: "Completing needs a reason." };
         const reason = await vscode.window.showInputBox({
           prompt: ask.prompt,
           validateInput: (v) => (v.trim() ? undefined : ask.empty),
@@ -49,7 +57,7 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
       case "raise_budget": {
         const why = item.stop?.reason ? `${item.stop.reason}. ` : "";
         const raw = await vscode.window.showInputBox({
-          prompt: `${why}New spend cap for ${item.id} in dollars, or none`,
+          prompt: `${why}New spend cap for ${item.title} in dollars, or none`,
           validateInput: (v) => {
             const parsed = parseUsd(v);
             return "error" in parsed ? parsed.error : undefined;
@@ -62,13 +70,13 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
         break;
       }
       case "skip": {
-        const ok = await vscode.window.showWarningMessage(`Skip ${item.id}'s current step?`, { modal: true }, "Skip");
+        const ok = await vscode.window.showWarningMessage(`Skip ${item.title}'s current step?`, { modal: true }, "Skip");
         if (ok !== "Skip") return;
         await api.skip(item.id);
         break;
       }
       case "escalate": {
-        const message = await vscode.window.showInputBox({ prompt: `What should Kraft-Agent help with on ${item.id}?` });
+        const message = await vscode.window.showInputBox({ prompt: `What should Kraft-Agent help with on ${item.title}?` });
         if (!message) return;
         await api.escalate(item.id, message);
         break;
@@ -86,8 +94,10 @@ export async function runAction(api: Api, store: Store, item: WorkItem, action: 
  *  the server has no bulk resume. */
 export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: WorkItem[]): Promise<void> {
   const { ids, skipped } = bulkPlan(verb, items);
-  if (verb === "archive" && ids.length > 1) {
-    const ok = await vscode.window.showWarningMessage(`Archive ${ids.length} items? Their worktrees are deleted.`, { modal: true }, "Archive");
+  const doomed = verb === "archive" ? items.filter((i) => ids.includes(i.id) && i.worktree_exists) : [];
+  if (doomed.length) {
+    const what = ids.length > 1 ? `${ids.length} items? Their worktrees are` : `${nameOf(store, ids[0])}? Its worktree is`;
+    const ok = await vscode.window.showWarningMessage(`Archive ${what} deleted.`, { modal: true }, "Archive");
     if (ok !== "Archive") return;
   }
   const results: BulkResult[] = [];
@@ -114,8 +124,8 @@ export async function runBulk(api: Api, store: Store, verb: BulkVerb, items: Wor
   } finally {
     await Promise.all(ids.map((id) => store.refresh(id).catch(() => {})));
   }
-  const line = bulkSummary(verb, results, skipped);
-  log.info(line);
+  const line = bulkSummary(verb, results, skipped, (id) => nameOf(store, id));
+  log.info(bulkSummary(verb, results, skipped));
   if (skipped.length || results.some((r) => !r.ok)) void vscode.window.showWarningMessage(line);
   else void vscode.window.showInformationMessage(line);
 }

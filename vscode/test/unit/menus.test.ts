@@ -6,11 +6,12 @@ import { MUTATING } from "../../src/core/guard";
 import { PRIMARY_COMMAND, primaryToken, type Primary } from "../../src/core/primary";
 
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8"));
-type Entry = { command: string; when?: string };
+type Entry = { command: string; when?: string; group?: string };
 const board: Entry[] = pkg.contributes.menus["view/item/context"];
 const palette: Entry[] = pkg.contributes.menus.commandPalette;
 /** The token a board entry's `when` keys off `contextValueOf`, if any. */
 const token = (e: Entry) => e.when?.match(/viewItem =~ \/\\b(\w+)\\b\//)?.[1];
+const openMenu: Entry[] = pkg.contributes.menus["kraft.openMenu"];
 const keyed = board.filter((e) => token(e) !== undefined);
 
 describe("the board's item menu", () => {
@@ -29,13 +30,29 @@ describe("the board's item menu", () => {
     // Approve and Reject act on the gate document showing; a review's drafts and its diff only from their own places.
     const gateDoc = new Set(["kraft.approve", "kraft.reject"]);
     const ownPlace = new Set(["kraft.review.submit", "kraft.review.discard", "kraft.reviewChanges"]);
-    const rows = new Set(board.filter((e) => e.when?.startsWith("view == kraft.board")).map((e) => e.command));
+    const rows = new Set([...board, ...openMenu].filter((e) => e.command && e.when?.startsWith("view == kraft.board")).map((e) => e.command));
     const want = (command: string) =>
       gateDoc.has(command) ? "resourceScheme == kraft-artifact || kraft.artifactPreview"
         : ownPlace.has(command) ? "false"
           : MUTATING.has(command) ? "kraft.connected && !kraft.readOnly" : "kraft.connected";
     expect([...rows].map((command) => palette.find((e) => e.command === command)))
       .toEqual([...rows].map((command) => ({ command, when: want(command) })));
+  });
+});
+
+describe("the Open submenu", () => {
+  it("hangs off item rows and holds the opens with their own conditions", () => {
+    expect(pkg.contributes.submenus).toEqual([{ id: "kraft.openMenu", label: "Open" }]);
+    expect(board).toContainEqual({ submenu: "kraft.openMenu", when: "view == kraft.board && viewItem =~ /^item:/", group: "3_open" });
+    expect(openMenu.map((e) => [e.command, token(e)])).toEqual([
+      ["kraft.openWorktree", "worktree"], ["kraft.openInWebUi", undefined], ["kraft.showWorkerLog", undefined],
+      ["kraft.openMergeRequest", "mr"], ["kraft.openSpec", "attSpec"], ["kraft.openPlan", "attPlan"], ["kraft.reviewChanges", undefined],
+    ]);
+  });
+
+  it("leaves no open at the top level but the inline buttons and the gate document", () => {
+    const top = board.filter((e) => e.group !== "inline" && e.command?.match(/kraft\.(open|show|reviewChanges)/)).map((e) => e.command);
+    expect(top).toEqual(["kraft.openArtifact"]);
   });
 });
 

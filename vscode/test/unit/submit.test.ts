@@ -30,20 +30,22 @@ it.each<[Outcome, number, string | undefined, boolean]>([
 ])("canSend(%s, %i, %j) is %s", (o, n, s, want) => expect(canSend(o, n, s)).toBe(want));
 
 describe("submitMessage", () => {
-  const ctx = { id: "K-1", n: 2, gate: "spec" as string | null, fixNode: "implement" as string | null, paused: false };
+  const ctx = { title: "Cache embeddings", n: 2, gate: "spec" as string | null, fixNode: "implement" as string | null, paused: false };
   const gateless = (action: "retried" | "rerun" | "queued"): ReviewResult =>
     ({ review_id: "r", outcome: "request_changes", gate: null, target: "implement", target_reason: "requested", action });
   it.each<{ id: string; outcome: Outcome; r: ReviewResult; c?: Partial<typeof ctx>; want: string }>([
     { id: "comment at a gate", outcome: "comment", r: { review_id: "r", outcome: "comment", gate: "spec", reply_agent: true }, want: "2 threads sent · gate stays open" },
     { id: "comment, one thread, no gate", outcome: "comment", r: { review_id: "r", outcome: "comment", gate: null, reply_agent: false }, c: { n: 1 }, want: "1 thread sent · the item keeps going" },
-    { id: "approve", outcome: "approve", r: item(), want: "Approved · spec passed" },
+    { id: "approve, item moved on", outcome: "approve", r: item(), c: { gate: "spec_approval" }, want: "Approved: Cache embeddings · approve spec · now implementation" },
+    { id: "approve, still at the gate", outcome: "approve", r: item({ current_node_id: "spec_approval" }), c: { gate: "spec_approval" }, want: "Approved: Cache embeddings · approve spec" },
+    { id: "approve, item done", outcome: "approve", r: item({ display_status: "done" }), c: { gate: "final_review" }, want: "Approved: Cache embeddings · approve final review · done" },
     { id: "request changes at a gate", outcome: "request_changes", r: item(), want: "Requested changes · 2 threads sent to implement" },
     { id: "at a gate, no fix node known", outcome: "request_changes", r: item(), c: { fixNode: null }, want: "Requested changes · 2 threads sent to the fix node" },
     { id: "gateless rerun", outcome: "request_changes", r: gateless("rerun"), c: { gate: null }, want: "Requested changes · 2 threads sent to implement · running again" },
     { id: "gateless retried", outcome: "request_changes", r: gateless("retried"), c: { gate: null }, want: "Requested changes · 2 threads sent to implement · retried" },
     {
       id: "queued on a paused item", outcome: "request_changes", r: gateless("queued"), c: { gate: null, paused: true },
-      want: "Requested changes · 2 threads sent to implement · queued. K-1 stays paused until you resume it.",
+      want: "Requested changes · 2 threads sent to implement · queued. Cache embeddings stays paused until you resume it.",
     },
   ])("$id", ({ outcome, r, c, want }) => expect(submitMessage(outcome, r, { ...ctx, ...c })).toBe(want));
 });

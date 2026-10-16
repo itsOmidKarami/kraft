@@ -6,7 +6,7 @@ import { registerBoard } from "./board";
 import { Api, type WorkItem } from "./core/api";
 import type { BudgetToday } from "../../frontend/src/types";
 import type { Announcer } from "./core/announcer";
-import { needsYou, needsYouCount } from "./core/board";
+import { nameOf, needsYou, needsYouCount } from "./core/board";
 import { registerConnectRepo, registerRepoScope, scopeDeps } from "./repoScope";
 import { registerFileWork } from "./fileWork";
 import { registerWorkerLog } from "./workerLog";
@@ -30,7 +30,7 @@ import { registerMigration } from "./review/migrate";
 import { registerFindings } from "./review/findings";
 import { readOnlyReason } from "./core/version";
 import { refusal, tooltip, whenTrusted, type ReadOnlyState } from "./core/readOnly";
-import { acceptHealth, every, onceEach, statusMenu, statusText, statusTooltip } from "./core/health";
+import { acceptHealth, every, onceEach, statusLabel, statusMenu, statusText, statusTooltip, statusWaiting } from "./core/health";
 import { initLog, log } from "./log";
 
 export interface KraftApi {
@@ -84,9 +84,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  status.name = "Kraft";
   // The text alone: a board or scope change re-renders it without refetching spend.
   const renderText = () => {
-    status.text = statusText(connected, refusal(state()) !== null, needsYouCount(store.items(), include));
+    const needs = needsYouCount(store.items(), include);
+    status.text = statusText(connected, refusal(state()) !== null, needs);
+    status.backgroundColor = statusWaiting(connected, needs) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+    status.accessibilityInformation = { label: statusLabel(connected, needs), role: "button" };
   };
   const setStatus = (now: boolean) => {
     connected = now;
@@ -182,9 +186,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const preview = registerArtifactPreview(context);
   const diff = registerDiff(context, store, api, () => runDir, (arg) => preview.target(arg)?.id);
   const comments = registerComments(context, store, api, () => refusal(state()), diff, cache, include, (cb) => scope.onChange(cb));
-  migrate = registerMigration(context, api, () => refusal(state()), cache).migrate;
+  migrate = registerMigration(context, api, () => refusal(state()), cache, (id) => nameOf(store, id)).migrate;
   const gates = registerGates(context, store, api, () => refusal(state()), include, scope, cache, comments.reveal, preview);
-  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, (arg) => preview.target(arg)?.id);
+  const submit = registerReviewSubmit(context, store, api, () => refusal(state()), cache, gates.shown, gates.show, gates.openArtifact, comments.reveal, gates.confirmApprove, (arg) => preview.target(arg)?.id);
   const review = Object.assign(diff, comments, submit);
   registerFindings(context, store);
   // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.

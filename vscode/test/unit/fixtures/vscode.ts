@@ -29,8 +29,12 @@ export class TabInputWebview {
   constructor(public viewType: string) {}
 }
 
-export class ThemeIcon {
+export class ThemeColor {
   constructor(public id: string) {}
+}
+
+export class ThemeIcon {
+  constructor(public id: string, public color?: ThemeColor) {}
 }
 
 export const commands = {
@@ -73,6 +77,7 @@ export const workspace = {
 
 export const env = { openExternal: async () => true };
 export const Uri = {
+  [Symbol.hasInstance]: (x: unknown) => typeof (x as { scheme?: unknown })?.scheme === "string",
   parse: (s: string) => ({ toString: () => s }),
   file: (s: string) => ({ fsPath: s }),
   from: (c: { scheme: string; path: string }) => ({ ...c, toString: () => `${c.scheme}:${c.path}` }),

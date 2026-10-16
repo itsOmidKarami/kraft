@@ -170,14 +170,14 @@ describe("previewLine", () => {
 
 describe("outcomeMessage", () => {
   it.each([
-    ["filed paused", false, { id: "K-1", status: "paused" }, "Filed K-1 paused. Nothing spends tokens until you start it."],
-    ["started", true, { id: "K-1", status: "active" }, "Filed K-1 and started it."],
+    ["filed paused", false, { id: "K-1", status: "paused" }, "Filed Cache layer paused. Nothing spends tokens until you start it."],
+    ["started", true, { id: "K-1", status: "active" }, "Filed Cache layer and started it."],
     ["queued on slots", true, { id: "K-1", status: "queued", slots: { busy: 2, limit: 2 } },
-      "Filed K-1, queued: 2 of 2 slots are busy. It starts when one frees."],
+      "Filed Cache layer, queued: 2 of 2 slots are busy. It starts when one frees."],
     ["queued on storage", true, { id: "K-1", status: "queued", slots: { busy: 0, limit: 2, storage: { used_bytes: 2 * 1024 ** 3, limit_bytes: 2 * 1024 ** 3 } } },
-      "Filed K-1, queued: 2 GB counted against the 2 GB limit. It starts when space frees."],
-    ["an answer it does not know, said as it is", true, { id: "K-1", status: "someday" }, "Filed K-1: it is someday."],
-  ])("%s", (_, start, c, want) => expect(outcomeMessage(start, c as Created)).toBe(want));
+      "Filed Cache layer, queued: 2 GB counted against the 2 GB limit. It starts when space frees."],
+    ["an answer it does not know, said as it is", true, { id: "K-1", status: "someday" }, "Filed Cache layer: it is someday."],
+  ])("%s", (_, start, c, want) => expect(outcomeMessage(start, c as Created, "Cache layer")).toBe(want));
 });
 
 describe("warnings", () => {

@@ -26,6 +26,18 @@ it.each<[string, () => Promise<boolean>, (api: never, store: Store) => Promise<v
   expect([[...api.skip.mock.calls, ...api.abandon.mock.calls], vi.mocked(store.refresh).mock.calls, error.mock.calls]).toEqual([[["S-1"]], [["S-1"]], []]);
 });
 
+// An item is named by its title, not its id.
+it.each<[string, "skip" | "cancel" | "escalate", "showWarningMessage" | "showInputBox", string]>([
+  ["a Skip's question", "skip", "showWarningMessage", "Skip Cache layer's current step?"],
+  ["a Cancel's reason prompt", "cancel", "showInputBox", "Why cancel Cache layer? (recorded on the item)"],
+  ["an escalation's prompt", "escalate", "showInputBox", "What should Kraft-Agent help with on Cache layer?"],
+])("%s names the item by its title", async (_, action, ask, want) => {
+  const store = { refresh: vi.fn(async () => true), item: () => undefined } as unknown as Store;
+  const asked = vi.spyOn(vscode.window, ask).mockResolvedValue(undefined as never);
+  await runAction({} as never, store, item({ id: "S-1", title: "Cache layer" }), action);
+  expect(asked.mock.calls.map((c) => (typeof c[0] === "string" ? c[0] : (c[0] as { prompt: string }).prompt))).toEqual([want]);
+});
+
 // `kraft admin restart` on a Kraft attached to a terminal stops it and exits 1; the
 // terminal running it closes with its message, so the extension says what happened.
 // It also exits 1 with Kraft still up (no to its running-agents question, nothing
@@ -49,4 +61,17 @@ it.each<[string, { code: number | undefined } | undefined, boolean, boolean, str
   const closed = ours ? Object.assign(term, { exitStatus }) : { exitStatus };
   for (const cb of closes) await cb(closed);
   expect([warn.mock.calls, exec.mock.calls]).toEqual([said, ran]);
+});
+
+// Archive deletes the worktree, as the bulk archive says: one confirms too, unless there is no worktree.
+it.each<[string, boolean, string | undefined, string[], number]>([
+  ["with a worktree, confirmed", true, "Archive", ["Archive Cache embeddings? Its worktree is deleted."], 1],
+  ["with a worktree, declined", true, undefined, ["Archive Cache embeddings? Its worktree is deleted."], 0],
+  ["without a worktree: no question", false, undefined, [], 1],
+])("a single archive %s", async (_, worktree, answer, asked, archived) => {
+  const api = { archive: vi.fn(async () => {}) };
+  const store = { refresh: vi.fn(async () => true) } as unknown as Store;
+  const ask = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(answer as never);
+  await runAction(api as never, store, item({ id: "A-1", title: "Cache embeddings", worktree_exists: worktree }), "archive");
+  expect([ask.mock.calls.map((c) => c[0]), api.archive.mock.calls.length]).toEqual([asked, archived]);
 });

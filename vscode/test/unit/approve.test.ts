@@ -1,6 +1,6 @@
-import { beforeEach, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ApiError } from "../../src/core/api";
-import { approveGate, approveOrRead, isStaleRevision } from "../../src/core/approve";
+import { approvedMessage, approveGate, approveOrRead, confirmConsequence, gateConsequence, isStaleRevision } from "../../src/core/approve";
 import { ShownRenders } from "../../src/core/shown";
 
 const withDigest = { title: "t", content: "c", truncated: false, path: "p", digest: "d2" };
@@ -111,4 +111,35 @@ it("read-first still opens the document before any send", async () => {
   expect(await approveOrRead(api, shown, "A", "revise", show, undefined, undefined, send)).toBe("read-first");
   expect(show).toHaveBeenCalled();
   expect(send).not.toHaveBeenCalled();
+});
+
+it.each<[string, string, { current_node_id: string | null; display_status?: string; pending_gate?: string | null } | null, string]>([
+  ["no item to read", "spec_approval", null, "Approved: T · approve spec"],
+  ["still at the gate", "spec_approval", { current_node_id: "plan", pending_gate: "spec_approval" }, "Approved: T · approve spec"],
+  ["moved to the next node", "spec_approval", { current_node_id: "plan" }, "Approved: T · approve spec · now plan"],
+  ["done", "final_review", { current_node_id: null, display_status: "done" }, "Approved: T · approve final review · done"],
+])("approvedMessage: %s", (_, gate, after, want) => expect(approvedMessage("T", gate, after as never)).toBe(want));
+
+const node = (id: string, kind: "exec" | "gate", tasks: string[] = []) => ({ id, kind, tasks, gate_after: kind === "gate" ? id : null });
+it.each<[string, ReturnType<typeof node>[], string, "merge" | "push" | null]>([
+  ["a merge node after the gate", [node("final_review", "gate"), node("mark_ready", "exec", ["ready"]), node("merge", "exec", ["merge"])], "final_review", "merge"],
+  ["a push task after the gate", [node("ship_gate", "gate"), node("publish", "exec", ["publish/push"])], "ship_gate", "push"],
+  ["the next gate comes first", [node("spec_approval", "gate"), node("plan", "exec"), node("plan_approval", "gate"), node("merge", "exec")], "spec_approval", null],
+  ["no such gate", [node("merge", "exec")], "nope", null],
+])("gateConsequence: %s", (_, nodes, gate, want) =>
+  expect(gateConsequence({ chain_definition: { template_id: "t", nodes } } as never, gate)).toBe(want));
+
+describe("confirmConsequence", () => {
+  const chain = (task: string) => ({ title: "Cache layer", chain_definition: { template_id: "t", nodes: [node("g", "gate"), node("x", "exec", [task])] } }) as never;
+  it.each<[string, unknown, string, boolean | undefined, boolean, string[]]>([
+    ["a merging gate asks with its own button", chain("merge"), "g", true, true, ["Approve and merge Cache layer into the target branch?|Approve and Merge"]],
+    ["a pushing gate asks with its own button", chain("push"), "g", true, true, ["Approve and push Cache layer?|Approve and Push"]],
+    ["declined", chain("merge"), "g", false, false, ["Approve and merge Cache layer into the target branch?|Approve and Merge"]],
+    ["an ordinary gate: no question", chain("lint"), "g", undefined, true, []],
+    ["an item not on the board: no question", undefined, "g", undefined, true, []],
+  ])("%s", async (_, item, gate, answer, want, asked) => {
+    const seen: string[] = [];
+    expect(await confirmConsequence(item as never, gate, async (q, b) => (seen.push(`${q}|${b}`), answer ?? false))).toBe(want);
+    expect(seen).toEqual(asked);
+  });
 });
