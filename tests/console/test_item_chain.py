@@ -384,6 +384,54 @@ def test_nothing_is_read_or_drawn_while_the_tab_is_not_shown(board, monkeypatch)
     assert console.run(scenario) == (([], []), 1)
 
 
+def test_a_hidden_item_draws_nothing_and_draws_again_when_shown(board, monkeypatch):
+    """The Chain tab of an Item another view has hidden is not drawn, and the
+    view shown again draws it as it now stands."""
+    detail = _done()
+    _serve(monkeypatch, detail, calls=[])
+    _serve_events(monkeypatch, [])
+    console = board([detail])
+
+    async def scenario(app, pilot):
+        await _chain_tab(console, app, pilot)
+        view, before = app.view, _words(app)
+        app.show("server")
+        await pilot.pause()
+        view.chain_at = 0
+        view._write_chain()
+        hidden = _words(app)
+        app.show("item")
+        await console.until(pilot, lambda: _words(app) != before)
+        return hidden == before, [line for line in _words(app) if "▸" in line]
+
+    assert console.run(scenario) == (True, ["▸✓ spec $0.400 · 4m"])
+
+
+def test_a_rejection_note_belongs_to_the_pass_it_sent_back_even_when_older_events_are_cut(
+    board, monkeypatch
+):
+    """Notes are matched to passes from the newest back: with only the newest
+    rejection read, the older pass says nothing rather than the wrong note."""
+    detail = _flow(
+        _session("implement", "author", 1, 40, **{"pass": 2}),
+        _session("implement", "author", 2, 20, **{"pass": 3}),
+        node_passes={
+            "implement": [
+                {"pass": 1},
+                {"pass": 2, "reason": "reject", "gate": "spec_approval"},
+                {"pass": 3, "reason": "reject", "gate": "spec_approval"},
+            ]
+        },
+    )
+    events = [_event(9, "gate_rejected", 15, gate="spec_approval", note="the newest")]
+    lines, _ = _run(board, monkeypatch, detail, events, keys=["enter"])
+    heads = [line for line in lines if line.startswith("pass")]
+    assert heads == [
+        "pass 3 of 3 after changes were requested at approve spec: the newest",
+        "pass 2 of 3 after changes were requested at approve spec",
+    ]
+
+
 def test_a_live_read_redraws_the_open_node(board, monkeypatch):
     """The tab is read again with the item: a session that ends while a node is
     open shows its new status."""
