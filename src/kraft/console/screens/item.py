@@ -10,6 +10,7 @@ from functools import partial
 from typing import ClassVar
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal
@@ -111,8 +112,14 @@ class Item(View):
         Binding("pageup", "scroll('page_up')", "page up", show=False),
         Binding("home", "scroll('home')", "top", show=False),
         Binding("end", "scroll('end')", "end", show=False),
-        Binding("left_square_bracket", "tab(-1)", "tab"),
-        Binding("right_square_bracket", "tab(1)", "tab", show=False),
+        # Arrows and Tab are what people try first; the brackets stay. One
+        # footer entry (←'s); →'s blank key_display keeps `?` from listing it twice.
+        Binding("left", "tab(-1)", "tabs", key_display="←→"),
+        Binding("right", "tab(1)", "tabs", show=False, key_display=" "),
+        Binding("left_square_bracket", "tab(-1)", "tabs", show=False),
+        Binding("right_square_bracket", "tab(1)", "tabs", show=False),
+        Binding("shift+tab", "tab(-1)", "tabs", show=False),
+        Binding("tab", "tab(1)", "tabs", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
         *acts.P_KEYS,
@@ -422,14 +429,11 @@ class Item(View):
         """Where an item with no gate pending stands, and the way on: an
         agent's question whole, the keys that move it on (`acts.way_on`, the
         peek's own sentences), and for a failed one where its session is. A
-        stop's reason is the banner's, not repeated here."""
+        stop's reason is the banner's and the status line's, not repeated here."""
         banner = words.banner_of(item)
-        if banner is None:
-            said = [words.reason_tail(item, time.time())]
-        elif banner["kind"] == "question":
-            said = ["The agent asks:", banner["text"]]
-        else:
-            said = []
+        # No banner: the header's status line already says where it stands.
+        asks = banner is not None and banner["kind"] == "question"
+        said = ["The agent asks:", banner["text"]] if banner and asks else []
         way = acts.way_on(item)
         if item.get("display_status") == "failed" and item.get("worker_sessions"):
             way.append(LOG_POINTER)
@@ -623,6 +627,17 @@ class Item(View):
             # Its own group: a live line arriving meanwhile must not cancel it.
             self.run_worker(self._activity_older, group="older", exclusive=True)
         getattr(self._pane(), f"scroll_{how}")(animate=False)
+
+    def on_click(self, event: events.Click) -> None:
+        """A click on a tab's name opens it."""
+        if event.widget is None or event.widget.id != "item-tabs":
+            return
+        start = 0
+        for key, name in TABS:
+            start += len(name) + 3  # " Name " and the space after it
+            if event.x < start:
+                self.show_tab(key)
+                return
 
     def action_tab(self, step: int) -> None:
         keys = [key for key, _ in TABS]

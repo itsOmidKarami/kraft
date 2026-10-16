@@ -406,6 +406,18 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
         ),
         ([PAUSED], _detail(PAUSED), None, ["paused at implement · 12m ago", "", "p resumes it."]),
         (
+            [PAUSED | {"actions": []}],
+            _detail(PAUSED | {"actions": []}),
+            None,
+            [
+                "paused at implement · 12m ago",
+                "",
+                # The peek is narrow: the line wraps.
+                "Kraft offers no action for it now; Enter opens it; m there shows what it",
+                "allows.",
+            ],
+        ),
+        (
             [BLOCKED],
             _detail(
                 BLOCKED,
@@ -445,6 +457,7 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
         "failed",
         "over-budget",
         "paused",
+        "paused-no-door",
         "blocked",
         "running",
         "running-before-output",

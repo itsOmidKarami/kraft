@@ -111,9 +111,9 @@ class Prompt(Input):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         # Explicit: Textual's suggester alone accepts on Right, not Tab.
-        Binding("tab", "complete", "complete", show=False),
-        Binding("up", "recall", "previous command", show=False),
-        Binding("escape", "leave", "leave the prompt", show=False),
+        Binding("tab", "complete", "complete"),
+        Binding("up", "recall", "previous"),
+        Binding("escape", "leave", "leave"),
     ]
 
     def __init__(self) -> None:

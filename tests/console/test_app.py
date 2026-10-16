@@ -387,6 +387,16 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
     assert (theme, side) == ("kraft-light", console_app.theme.LIGHT["side"])
 
 
+def test_the_palettes_keys_command_opens_krafts_dialog_not_textuals_panel(console):
+    async def scenario(app, pilot):
+        commands = [c for c in app.get_system_commands(app.screen) if c.title == "Keys"]
+        commands[0].callback()
+        await pilot.pause()
+        return len(commands), isinstance(app.screen, Keys), len(app.query("HelpPanel"))
+
+    assert console.run(scenario) == (1, True, 0)
+
+
 @pytest.mark.parametrize("name", list(VIEWS))
 def test_no_key_does_two_things_on_one_view(name):
     """Spec §6: no key means two things on one view, and no upper and lower
@@ -396,7 +406,10 @@ def test_no_key_does_two_things_on_one_view(name):
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
-            key = binding.key.removeprefix("shift+").lower()
+            # `shift+r` is kitty's name for `R`; `shift+tab` is a key of its own.
+            key = binding.key.lower()
+            if len(key.removeprefix("shift+")) == 1:
+                key = key.removeprefix("shift+")
             one = "pause_or_resume" if binding in acts.P_KEYS else binding.action
             actions.setdefault(key, set()).add(one)
     assert {key: found for key, found in actions.items() if len(found) > 1} == {}

@@ -4,6 +4,7 @@ recalling, Esc out, and what a typed line does once Enter sends it."""
 from __future__ import annotations
 
 import pytest
+from textual.widgets._footer import FooterKey
 
 from kraft import client
 from kraft.console import runner
@@ -186,3 +187,16 @@ def test_a_busy_console_does_not_ask_first(console, kraft_is):
         False,
         ["A command is still running: Ctrl+O shows it, x stops it."],
     )
+
+
+def test_the_footer_names_the_prompts_own_keys(console):
+    """With the prompt focused the footer is not blank: it says how to leave,
+    complete and recall."""
+
+    async def scenario(app, pilot):
+        await pilot.press("slash")
+        await pilot.pause()
+        return [(k.key_display, k.description) for k in app.query(FooterKey)]
+
+    footer = console.run(scenario)
+    assert {("esc", "leave"), ("tab", "complete"), ("↑", "previous")} <= set(footer)

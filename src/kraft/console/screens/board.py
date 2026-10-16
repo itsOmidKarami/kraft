@@ -443,7 +443,7 @@ class Board(View):
                 body.write(line, scroll_end=False)
 
         tail_words = words.reason_tail(item, now)
-        way = ["", *found] if (found := acts.way_on(item)) else []
+        way = ["", *found] if (found := acts.way_on(item, peek=True)) else []
         if status == "needs_you" and stop.get("kind") == "gate":
             chain = self.query_one("#peek-chain", Static)
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))

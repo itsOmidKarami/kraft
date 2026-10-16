@@ -24,6 +24,7 @@ from support.console_board import (
     _text,
 )
 from textual.widgets import RichLog
+from textual.widgets._footer import FooterKey
 
 from kraft import client
 from kraft.console import words
@@ -180,10 +181,22 @@ def test_the_header_says_where_the_item_stands(
         ),
         (FAILED, [], ["t retries it.", "", "Chain"], None),
         (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER, "", "Chain"], None),
-        (PAUSED, [], ["paused at implement", "", "p resumes it.", ""], "resume"),
-        (RUNNING, [], ["implement", "", "Chain"], "pause"),
+        (PAUSED, [], ["p resumes it.", "", "Chain"], "resume"),
+        (RUNNING, [], ["Chain"], "pause"),
+        (
+            PAUSED | {"actions": []},
+            [],
+            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            None,
+        ),
+        (
+            FAILED | {"actions": []},
+            [],
+            ["Kraft offers no action for it now; m shows what it allows.", "", "Chain"],
+            None,
+        ),
     ],
-    ids=["question", "failed", "failed-with-a-session", "paused", "running-keeps-its-line"],
+    ids=["question", "failed", "failed-with-a-session", "paused", "running-says-nothing", "paused-no-door", "failed-no-door"],
 )
 def test_a_stopped_item_says_the_way_on_and_p_says_what_it_does(
     board, monkeypatch, row, sessions, first, p
@@ -575,3 +588,61 @@ def test_a_read_for_the_item_shown_before_is_dropped(board, monkeypatch):
     assert stale == ("Board › b2b2b2b2", False)
     assert title == "Board › b2b2b2b2  Second"
     assert sent == [("approve_gate", ("plan_review", "b2b2b2b2", "d1g3st"), {})]
+
+
+@pytest.mark.parametrize(
+    ("keys", "tab"),
+    [
+        (["right"], "activity"),
+        (["left"], "diff"),
+        (["tab"], "activity"),
+        (["shift+tab"], "diff"),
+        (["right", "right", "left"], "activity"),
+    ],
+    ids=["right", "left-wraps", "tab", "shift-tab-wraps", "back-and-forth"],
+)
+def test_arrows_and_tab_switch_the_items_tabs(board, monkeypatch, keys, tab):
+    """What a first-time user tries: ← →, Tab and Shift+Tab step the tabs, as
+    `[` and `]` do (the tests/console/test_item_tabs.py pin)."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press(*keys)
+        return app.view.tab
+
+    assert console.run(scenario) == tab
+
+
+def test_clicking_a_tabs_name_opens_it(board, monkeypatch):
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        shown = []
+        # " Overview  Activity  Log  Diff": Log's name starts at column 22.
+        for x in (25, 14):
+            await pilot.click("#item-tabs", offset=(x, 0))
+            shown.append(app.view.tab)
+        return shown
+
+    assert console.run(scenario) == ["log", "activity"]
+
+
+def test_the_footer_and_the_keys_dialog_name_the_tab_keys(board, monkeypatch):
+    """One footer entry, `←→ tabs`; `?` lists every key that switches them."""
+    _serve(monkeypatch, _detail(GATE), calls=[])
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.pause()
+        footer = [(k.key_display, k.description) for k in app.query(FooterKey)]
+        return footer, dict((label, keys) for keys, label in app.screen_keys())
+
+    footer, keys = console.run(scenario)
+    assert ("←→", "tabs") in footer
+    assert not any(label in ("tab", "tabs") and key != "←→" for key, label in footer)
+    assert keys["tabs"] == "←→ [ ] tab"

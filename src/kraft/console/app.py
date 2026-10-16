@@ -516,15 +516,17 @@ class KraftConsole(App):
             ):
                 continue
             shown = found.setdefault(binding.description, [])
-            if (key := self.get_key_display(binding)) not in shown:
+            if (key := self.get_key_display(binding).strip()) and key not in shown:
                 shown.append(key)
         return [(" ".join(keys), label) for label, keys in found.items()]
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
-        # Textual's own theme picker lists its themes; Kraft has two.
+        # Textual's theme picker lists its themes (Kraft has two), and its
+        # "Keys" opens a panel of the framework's own bindings: `?` is Kraft's.
         for command in super().get_system_commands(screen):
-            if command.title != "Theme":
+            if command.title not in ("Theme", "Keys"):
                 yield command
+        yield SystemCommand("Keys", "Kraft's keys for this screen", self.action_keys)
         yield SystemCommand("Dark", "Kraft's dark look", lambda: self._use("kraft-dark"))
         yield SystemCommand("Light", "Kraft's light look", lambda: self._use("kraft-light"))
 
