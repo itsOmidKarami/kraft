@@ -12,8 +12,9 @@ here too. Four verbs are CLI-only for a person: `kraft item abandon`,
 These pages name each screen, what it is for, and the buttons on it. To look
 around before you install, open [the demo](/demo/): this
 web UI on sample data, running in your browser with no server and no agents.
-What you do there changes the items until you reload the page, and nothing is
-saved.
+Its running items move along their chains on their own and stop at each gate
+for you to answer. What you do there changes the items until you reload the
+page, and nothing is saved.
 
 ## In this section
 

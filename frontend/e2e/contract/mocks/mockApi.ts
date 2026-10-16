@@ -3,6 +3,7 @@ import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchF
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
+import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
 import draftViews from "./draftViews.json" with { type: "json" };
 
@@ -46,6 +47,9 @@ export interface MockOptions {
   /** Told of every event an action appends (transitions.ts), as the server's event socket would send it. The demo
    *  forwards each to its open sockets; the contract suite's socket stays silent. */
   onEvent?: (e: Ev) => void;
+  /** Live motion (motion.ts): the board's running items walk their chains on a timer and stop at gates, and a fresh
+   *  item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
+  motion?: boolean | MotionOptions;
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -239,7 +243,7 @@ const json = (body: unknown, status = 200): Answer => ({ status, contentType: "a
  * (transitions.ts), for the page's life: the list, the detail and the events all read the one bundle.
  * Most other mutating verbs return a plausible 200 so a Submit never crashes, and change nothing.
  */
-export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
+export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { motion: Motion | null } {
   let restarted = 0;
   const hs = opts.harnesses ? harnessesServer() : null;
   let listReads = 0;
@@ -269,7 +273,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
   const T = transitions(S, { now: opts.now, mustFix, onEvent: opts.onEvent });
   const send = (r: { status: number; body: unknown }) => json(r.body, r.status);
   let seq = 0;
-  return async (req) => {
+  const serve: MockServer = async (req) => {
     const url = new URL(req.url);
     const p = url.pathname.replace(/^.*?\/api/, "");
     const method = req.method;
@@ -715,4 +719,6 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
 
     return json({ detail: `mock: unhandled ${method} ${p}` }, 404);
   };
+  // The demo's handle on its motion, to pause it while the tab is hidden; null without `motion`.
+  return Object.assign(serve, { motion: opts.motion ? motion(S, T, opts.motion === true ? {} : opts.motion) : null });
 }

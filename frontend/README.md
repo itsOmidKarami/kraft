@@ -64,7 +64,14 @@ answers the contract suite gets. `demo/shim.ts` puts them under the page:
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
 (`mocks/transitions.ts`), and each event it appends goes out on the events
-socket (`broadcast`), so the board moves as the item does. A reload starts
+socket (`broadcast`), so the board moves as the item does. The board moves
+on its own too: `MockOptions.motion` (`mocks/motion.ts`), which only the
+demo sets, walks each running item one step along its chain every 8–15
+seconds through the same transitions. An agent node runs a session, a node
+with no agent task runs through, and a gate stops the item until the
+visitor answers it. A finished chain is Done. When nothing on the board is
+running and no gate waits, it files a fresh item, so a gate always comes
+round again. `whileShown` pauses it while the tab is hidden. A reload starts
 from the sample data again. The routers take the build's base
 (`import.meta.env.BASE_URL`), `/` everywhere but here. A change to what the
 demo shows is a change to the contract's mocks, so it is checked there.

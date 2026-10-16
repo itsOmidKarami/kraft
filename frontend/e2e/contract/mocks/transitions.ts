@@ -1,5 +1,5 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, hex, type ItemBundle, type Scenario } from "./fixtures";
+import { documentsFor, hex, logLines, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
 import { buildNgItem } from "./ngItems";
 
@@ -65,6 +65,8 @@ function notPaused(item: any): string {
 const py = (s: string) => `'${s}'`;
 const usd = (v: number | null) => (v === null ? "no cap" : `$${Number(v.toPrecision(6))}`);
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** A sum of dollars without the float's tail ($2.4100000001). */
+const dollars = (v: number) => Math.round(v * 10_000) / 10_000;
 
 /** What a new item is made from: a sample item before it ran, with nothing on it that says it did. Built on its
  *  own, not taken from the scenario, so no edit to a sample item reaches it and the empty scenario has one too. */
@@ -446,6 +448,122 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       settle(b.item);
       return ok({ id, status: b.item.status, bead_id: null }, 201);
     },
+
+    /* The walk's writes: what the executor does to a running item, in the store's order and words. No route calls
+       these; the demo's live motion (motion.ts) does. Each refuses an unknown or ended item, as the doors above do. */
+
+    /** `store.enter_node`: the item stands on `node`, its step and plan progress cleared until a session reports. */
+    enterNode(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
+      Object.assign(it, { current_node_id: node, step: null, progress: null });
+      append(id, "node_started", { node_id: node });
+      tally(b);
+      return ok(settle(it));
+    },
+    /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. */
+    createSession(id: string, node: string, hookPoint: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
+      const sid = sessionId();
+      b.sessions.push({
+        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
+        created_at: now(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
+      });
+      b.logs[sid] = logLines(sid, 12, false);
+      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.session_running`: the session's process is up, and the item's step is the one its task is in. */
+    sessionRunning(id: string, sid: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (s.status !== "pending") return no(409, `session ${sid} is ${s.status}, not pending`);
+      Object.assign(s, { status: "running", started_at: now() });
+      // `board._step_of`: only a node of more than one step has a step to name.
+      const steps: string[][] = (it.chain_definition?.nodes ?? []).find((n: any) => n.id === s.node_id)?.steps ?? [];
+      const at = steps.findIndex((g) => g.includes(s.hook_point));
+      const [, name, task] = String(s.hook_point).split(".");
+      it.step = steps.length > 1 && at >= 0 ? { index: at + 1, count: steps.length, name, task } : null;
+      if (it.summary) it.summary = { ...it.summary, step: it.step ? { index: it.step.index, count: it.step.count } : null };
+      append(id, "worker_session_started", { session_id: sid, node_id: s.node_id, hook_point: s.hook_point, round: s.round, attempt: s.attempt, thread: s.thread, pid: 40_000 + sessions });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.session_exited`: the session done, with the usage it reported on the way out, added to the item's spend. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number }): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
+      const at = now();
+      const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      Object.assign(s, { status: "done", exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
+      const u = it.usage;
+      if (u) {
+        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
+        const row = u.by_node.find((r: any) => r.node === s.node_id);
+        u.total = add(u.total);
+        u.by_node = row ? u.by_node.map((r: any) => (r === row ? add(r) : r))
+          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
+      }
+      if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
+      append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
+      settle(it);
+      return ok({ id, session_id: sid });
+    },
+    /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. */
+    completeNode(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
+      append(id, "node_completed", { node_id: node });
+      tally(b);
+      return ok(settle(it));
+    },
+    /** `store.request_gate`: the item stops at `gate` for a person, with the document the gate is about
+     *  (`executor.gate_artifact`: `items/<id>/docs/<artifact>.md`). */
+    requestGate(id: string, gate: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const node = (it.chain_definition?.nodes ?? []).find((n: any) => n.id === gate && n.kind === "gate");
+      if (!node) return no(404, `unknown gate ${py(gate)}`);
+      Object.assign(it, {
+        status: "needs_human", current_node_id: gate, pending_gate: gate, gate_artifact: node.artifact ? `items/${id}/docs/${node.artifact}.md` : null,
+        step: null, stop: { kind: "gate", node: gate, task: null, attempt: 1, resume_at: null, reason: null, facts: {} },
+      });
+      append(id, "gate_requested", { gate, node_id: gate });
+      return ok(settle(it));
+    },
+    /** `store.mark_completed`: the chain ran to its end. */
+    markCompleted(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      Object.assign(it, { status: "completed", stop: null, pending_gate: null, gate_artifact: null, step: null, retry_at: null });
+      append(id, "work_item_completed");
+      return ok(settle(it));
+    },
+  };
+  /** `board._summary`'s counts: the chain's nodes that completed, and how many of those are gates. */
+  const tally = (b: ItemBundle) => {
+    const it = b.item;
+    if (!it.summary) return;
+    const done = new Set(b.events.filter((e) => e.type === "node_completed").map((e) => e.payload.node_id));
+    const nodes: any[] = it.chain_definition?.nodes ?? [];
+    it.summary = { ...it.summary, nodes_done: nodes.filter((n) => done.has(n.id)).length, gates_passed: nodes.filter((n) => n.kind === "gate" && done.has(n.id)).length };
   };
   const move = (id: string, out: string[], into: string[], where: "front" | "back") => {
     const at = out.indexOf(id);
