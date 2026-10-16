@@ -382,8 +382,8 @@ def test_a_hidden_item_draws_nothing_and_draws_again_when_shown(board, monkeypat
         (
             "plan",
             [
-                _rejected(6, 50, "plan", "back to plan"),
-                _rejected(7, 30, "implement", "back to implement"),
+                _rejected(6, 60, "plan", "back to plan"),
+                _rejected(7, 50, "implement", "back to implement"),
             ],
             [
                 "pass 2 of 2 after changes were requested at approve final review: back to plan",
