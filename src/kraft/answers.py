@@ -107,6 +107,20 @@ def held(result: dict) -> str | None:
     return queued(result) or blocked(result)
 
 
+def filed(result: dict) -> str | None:
+    """What a create that asked to start says when every slot was busy:
+    queued for one, or filed paused until one frees. None for any other
+    create. `kraft item create` prints it under the item; the console's New
+    item says it in its toast."""
+    slots = result.get("slots")
+    if not slots:
+        return None
+    return held(result) or (
+        f"filed paused: {slots['busy']} of {slots['limit']} slots are busy. "
+        f"Start it when one frees: kraft item resume {result['id']}"
+    )
+
+
 def resumed(result: dict) -> str:
     """resume's usual answer: the node it went on from, and the agent tasks
     a steer reached. No node is an item that had never started."""

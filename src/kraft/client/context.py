@@ -23,6 +23,21 @@ def absolute_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
 
 
+def attachment_paths(spec: str | None, plan: str | None) -> list[dict] | None:
+    """A spec and a plan to attach, as `create_work_item` takes them, each
+    made absolute against the caller's cwd. The server joins a relative path
+    onto a candidate root (the repo, or the worktree the call is made from),
+    never onto the cwd, so `specs/x.md` from a subdirectory of either would
+    miss both; absolute, it is still accepted only if it lands inside one of
+    them. None for neither."""
+    found = [
+        {"kind": kind, "path": str(Path(value).expanduser().resolve())}
+        for kind, value in (("spec", spec), ("plan", plan))
+        if value
+    ]
+    return found or None
+
+
 def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
     """`(work_item_id, origin)` for the session calling us.
 
