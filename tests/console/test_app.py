@@ -18,6 +18,7 @@ from kraft import cli, client
 from kraft.console import app as console_app
 from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
+from kraft.console.dialogs import Confirm
 from kraft.console.live import Link
 from kraft.console.screens import VIEWS, View
 
@@ -486,7 +487,10 @@ def test_a_link_change_under_the_palette_still_marks_the_frame(console):
 
 
 #: Each dialog the console pushes over its frame, opened.
-DIALOGS = {"output": lambda app: app.action_output()}
+DIALOGS = {
+    "output": lambda app: app.action_output(),
+    "confirm": lambda app: app.push_screen(Confirm("kraft admin stop", [])),
+}
 
 
 @pytest.mark.parametrize("dialog", list(DIALOGS))

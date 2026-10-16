@@ -10,7 +10,7 @@ import contextlib
 import os
 import signal
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -23,11 +23,13 @@ from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Static
 
-from kraft import client, config, update
+from kraft import answers, client, config, update
 from kraft.console import runner, theme
+from kraft.console.dialogs import Confirm
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.screens import VIEWS, View
+from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
 TABS = ("board", "server", "addons", "repos")
@@ -36,6 +38,9 @@ MIN_SIZE = (60, 16)
 #: Below this many columns the rows drop chain and age, and the footer keeps
 #: only `? keys`: the console still works as a side pane.
 NARROW = 80
+#: How long a confirm waits for the server to list its running items before
+#: it asks without them, as `kraft admin stop` does (`cli.admin._LIST_TIMEOUT`).
+CONFIRM_LIST_S = 2.0
 
 
 def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
@@ -230,6 +235,22 @@ class KraftConsole(App):
         else:
             self._stopping = run
             run.stop()
+
+    async def confirm(
+        self, question: str, lines: Sequence[str] = (), *, running: str | None = None
+    ) -> bool:
+        """Ask before what cannot be undone (spec §7.8). With `running`, the
+        word for what ends the agents ("restarting"), the running items are
+        listed too. Await it from a worker: it waits for the answer."""
+        lines = list(lines)
+        if running is not None:
+            try:
+                async with asyncio.timeout(CONFIRM_LIST_S):
+                    items = await client.list_work_items(WorkItemStatus.ACTIVE)
+            except (client.ClientError, TimeoutError):
+                items = []  # a server that does not answer has none to list
+            lines += answers.running_agents_warning(running, items)
+        return await self.push_screen_wait(Confirm(question, lines))
 
     async def on_unmount(self) -> None:
         # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.

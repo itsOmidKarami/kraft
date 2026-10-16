@@ -23,7 +23,7 @@ import httpx
 import uvicorn
 import yaml
 
-from kraft import client, config, permission_hooks, pidfile, render
+from kraft import answers, client, config, permission_hooks, pidfile, render
 from kraft.cli import addon, common, templates
 from kraft.paths import (
     BUNDLED,
@@ -1180,22 +1180,10 @@ def _confirm_running_agents(
         return
     except Exception:
         return
-    if not items:
+    lines = answers.running_agents_warning(doing, items)
+    if not lines:
         return
-    print(
-        f"kraft: {doing} the server ends the agent of any active item ({len(items)}):",
-        file=sys.stderr,
-    )
-    for item in items:
-        print(
-            f"  {item['id']}  {item.get('current_node_id') or '-'}  {item['title']}",
-            file=sys.stderr,
-        )
-    print(
-        "  each one stops when Kraft starts again; retry it then. To avoid that, "
-        "pause them first (kraft item pause ID) and resume them after.",
-        file=sys.stderr,
-    )
+    print(f"kraft: {lines[0]}", *lines[1:], sep="\n", file=sys.stderr)
     if not ask or getattr(ns, "yes", False) or not sys.stdin.isatty():
         return
     if _ask("Go on? [y/N] ").strip().lower() not in ("y", "yes"):

@@ -115,3 +115,29 @@ OutputPanel {
     padding: 0 2;
     color: $kraft-muted;
 }
+
+Confirm {
+    align: center middle;
+}
+
+#confirm {
+    width: 72;
+    max-width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: solid $kraft-line;
+}
+
+#listing {
+    margin: 1 0;
+    color: $kraft-muted;
+}
+
+#confirm Horizontal {
+    height: auto;
+}
+
+#confirm Button {
+    margin-right: 2;
+}
