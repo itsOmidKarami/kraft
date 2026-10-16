@@ -270,8 +270,9 @@ def kraft_links(root: Path) -> list[str]:
         text=True,
         check=False,
     ).stdout.split()
-    # /demo is built beside the pages (see _FILE_ROOTS), so it is no page to resolve.
-    return [p for p in map(site_path, found) if not p.startswith(_FILE_ROOTS[-1].rstrip("/"))]
+    # /assets, /diagrams and /demo are files built beside the pages, not pages to resolve.
+    paths = map(site_path, found)
+    return [p for p in paths if not (p.partition("#")[0] + "/").startswith(_FILE_ROOTS)]
 
 
 def check(root: Path) -> list[str]:
