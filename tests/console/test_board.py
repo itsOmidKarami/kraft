@@ -540,21 +540,50 @@ def test_holding_j_reads_only_where_the_cursor_stops(board, monkeypatch):
     assert board(rows).run(scenario, size=(80, 40)) == (1, [], [rows[4]["id"]])
 
 
-def test_the_peek_stops_when_its_view_is_hidden_and_starts_when_shown(board):
-    """The Board stays mounted behind other tabs: its `server.log` follower
-    must not keep polling there."""
+def test_the_peek_stops_when_its_view_is_hidden_and_starts_when_shown(board, monkeypatch):
+    """The Board stays mounted behind other tabs and still gets live events:
+    it must read nothing and follow nothing there, and read once on return."""
+    rows = [RUNNING]
+    read: list[str] = []
+    timers: list[SimpleNamespace] = []
+
+    def set_timer(self, delay, callback=None, **kwargs):
+        timer = SimpleNamespace(stopped=False, callback=callback)
+        timer.stop = lambda: setattr(timer, "stopped", True)
+        timers.append(timer)
+        return timer
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        read.append(work_item_id)
+        return _detail(RUNNING)
+
+    def fire() -> None:
+        for timer in [t for t in timers if not t.stopped]:
+            timer.stopped = True
+            timer.callback()
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(board_view.Board, "set_timer", set_timer)
 
     async def scenario(app, pilot):
-        await board([]).until(pilot, lambda: app._scoped)
-        running = lambda: [w for w in app.workers if w.group == "peek" and w.is_running]  # noqa: E731
-        await board([]).until(pilot, running)
+        await _settled(board(rows), app, pilot)
+        fire()
+        await board(rows).until(pilot, lambda: len(read) == 1)
         app.show("server")
-        await board([]).until(pilot, lambda: not running())
+        await pilot.pause()
+        newer = [RUNNING | {"updated_at": _iso(0)}]
+        app.query_one("#board").rows_changed(newer, [{"seq": 1}])
+        app._live_event(newer, [{"seq": 2}])
+        fire()  # whatever the events armed
+        await pilot.pause()
+        idle = (len(read), [w for w in app.workers if w.group == "peek" and w.is_running])
         app.show("board")
-        await board([]).until(pilot, running)
-        return True
+        await pilot.pause()
+        fire()
+        await board(rows).until(pilot, lambda: len(read) == 2)
+        return idle
 
-    assert board([]).run(scenario, size=(80, 40))
+    assert board(rows).run(scenario, size=(80, 40)) == (1, [])
 
 
 def test_a_later_selection_is_not_painted_over_by_the_earlier_log(board, monkeypatch):
@@ -634,3 +663,42 @@ def test_a_live_refresh_rereads_the_peek_only_when_its_item_changed(board, monke
         return quiet, app.focused is app.view
 
     assert board([RUNNING]).run(scenario, size=(80, 40)) == ([RUNNING["id"]], True)
+
+
+@pytest.mark.parametrize(
+    ("change", "reads"),
+    [({}, 1), ({"updated_at": _iso(0)}, 2), ({"actions": ["approve", "reject"]}, 2)],
+    ids=["nothing", "updated", "a-door-opened"],
+)
+def test_the_peek_reads_again_when_the_item_or_its_doors_changed(board, monkeypatch, change, reads):
+    """Resolving a thread opens approve without touching `updated_at`: the
+    peek would keep saying approve waits."""
+    read: list[str] = []
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        read.append(work_item_id)
+        return _detail(GATE)
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+
+    async def threads(work_item_id=None, open_only=False):
+        return []
+
+    async def artifact(work_item_id=None):
+        return {"content": ""}
+
+    monkeypatch.setattr(client, "threads", threads)
+    monkeypatch.setattr(client, "artifact", artifact)
+    monkeypatch.setattr(board_view, "PEEK_WAIT_S", 0.01)
+    gate = GATE | {"actions": ["reject"]}
+
+    async def scenario(app, pilot):
+        await _settled(board([gate]), app, pilot)
+        await board([gate]).until(pilot, lambda: read)
+        app.view.rows_changed([gate | change], [{"seq": 1}])
+        if reads > 1:
+            await board([gate]).until(pilot, lambda: len(read) == reads)
+        await pilot.pause()
+        return len(read)
+
+    assert board([gate]).run(scenario, size=(80, 40)) == reads

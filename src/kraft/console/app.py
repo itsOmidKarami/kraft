@@ -232,7 +232,7 @@ class KraftConsole(App):
         screens = [(VIEWS[name].label, SCREEN, partial(self.show, name)) for name in TABS]
         items = [
             (
-                f"{row['id'][:8]}  {' '.join(row['title'].split())}",
+                f"{row['id'][:8]}  {' '.join((row.get('title') or '').split())}",
                 "Select it on the Board",
                 partial(self.go_to_item, row["id"]),
             )
@@ -279,7 +279,7 @@ class KraftConsole(App):
         # screen it ran on, and must then only stop waiting. Quitting cancels
         # this one too, and `on_unmount` ends the command then.
         done = asyncio.Future[int]()
-        self.run_worker(self._run(run, panel, done), group="command")
+        self.run_worker(partial(self._run, run, panel, done), group="command")
         return await asyncio.shield(done)
 
     async def _run(self, run: runner.Run, panel: OutputPanel, done: asyncio.Future[int]) -> None:
@@ -309,7 +309,7 @@ class KraftConsole(App):
         if run is self._stopping:
             # `end()` waits up to QUIT_GRACE_S: say so, or the press seems to do nothing.
             self.get_screen("output", OutputPanel).note("stopping…")
-            self.run_worker(run.end())
+            self.run_worker(run.end)
         else:
             self._stopping = run
             run.stop()
@@ -342,12 +342,12 @@ class KraftConsole(App):
         prompt.focus()
 
     def action_output(self) -> None:
-        self.run_worker(self._show_panel())
+        self.run_worker(self._show_panel)
 
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:
         if event.value.strip(" /"):
-            self.run_worker(self._run_typed(event.value), group="typed")
+            self.run_worker(partial(self._run_typed, event.value), group="typed")
 
     async def _run_typed(self, line: str) -> None:
         kind, what = runner.route(line)
@@ -368,7 +368,7 @@ class KraftConsole(App):
 
     @on(Button.Pressed, "#start")
     def _start(self) -> None:
-        self.run_worker(self._start_server(), group="typed")
+        self.run_worker(self._start_server, group="typed")
 
     async def _start_server(self) -> None:
         if await self.run_command(["admin", "start", "--detach"]) == 0:

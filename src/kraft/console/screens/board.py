@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import time
+from functools import partial
 from typing import ClassVar
 
 from rich.text import Text
@@ -198,7 +199,7 @@ class Board(View):
 
     def rows_changed(self, rows: list[dict], events: list[dict]) -> None:
         self.rows = rows
-        if not events:  # the stream reconnected: read the peek again too
+        if not events:  # reconnected, or read again on purpose: so is the peek
             self._peeked = ()
         self.draw()
 
@@ -362,16 +363,16 @@ class Board(View):
 
     def action_reject(self) -> None:
         if row := self.selected:
-            self.run_worker(self._reject(row), group="act")
+            self.run_worker(partial(self._reject, row), group="act")
 
     def action_pause_or_resume(self) -> None:
         if row := self.selected:
             resume = "resume" in (row.get("actions") or [])
-            self.run_worker(self._resume(row) if resume else self._pause(row), group="act")
+            self.run_worker(partial(self._resume if resume else self._pause, row), group="act")
 
     def action_retry(self) -> None:
         if row := self.selected:
-            self.run_worker(self._retry(row), group="act")
+            self.run_worker(partial(self._retry, row), group="act")
 
     async def _reject(self, row: dict) -> None:
         gate = row.get("pending_gate") or "the gate"
@@ -398,7 +399,7 @@ class Board(View):
         asked = None
         if (row.get("stop") or {}).get("kind") == "question":
             asked = Note("Answer the agent", [words.reason_tail(row, time.time())], required=True)
-        elif "steer" in (row.get("actions") or []):
+        elif "steer" in (row.get("actions") or []) and await self._may_steer(row):
             asked = Note(f"Resume {row['id'][:8]}", [STEER], required=False)
         steer = await self.app.push_screen_wait(asked) if asked else ""
         if steer is not None:
@@ -406,12 +407,25 @@ class Board(View):
             await self._act(client.resume(steer or None, row["id"]), said)
 
     async def _retry(self, row: dict) -> None:
-        steer = await self.app.push_screen_wait(
-            Note(f"Retry {row['id'][:8]}", [STEER], required=False)
-        )
+        steer = ""
+        if await self._may_steer(row):
+            steer = await self.app.push_screen_wait(
+                Note(f"Retry {row['id'][:8]}", [STEER], required=False)
+            )
         if steer is not None:
             said = answers.item_action("retried {id}", small=answers.retried)
             await self._act(client.retry(steer or None, row["id"]), said)
+
+    async def _may_steer(self, row: dict) -> bool:
+        """Whether the server would place a steer for this item. It answers a
+        steer with nowhere to go with a 409, and says so on the detail's
+        `steerable`: where it does not, no dialog is offered."""
+        try:
+            item = await client.get_work_item(row["id"], full=True)
+        except client.ClientError as exc:
+            self.app.notify_refusal(exc)
+            return False
+        return item.get("steerable") is not False
 
     async def _act(self, call, said) -> None:
         """Send one action and toast what the server answered, in the CLI's
@@ -421,8 +435,8 @@ class Board(View):
             result = await call
         except client.ClientError as exc:
             self.app.notify_refusal(exc)
-            # The board read with no events reads as a reconnect: this view
-            # draws again and the peek reads the item again.
+            # A board read with no events: this view draws again and the peek
+            # reads the item again.
             self.app.live.reread()
             return
         self.app.notify(said(result), markup=False)
@@ -445,15 +459,17 @@ class Board(View):
         self._timer = self.set_timer(PEEK_WAIT_S, self._peek_now)
 
     def _peek_now(self) -> None:
-        if not self.query_one("#peek").display:
+        # A hidden Board still gets live events: it reads nothing then.
+        if not (self.display and self.query_one("#peek").display):
             return
         row = self.selected
-        key = (row["id"], row.get("updated_at")) if row else None
+        # `actions` too: resolving a thread opens approve without touching `updated_at`.
+        key = (row["id"], row.get("updated_at"), tuple(row.get("actions") or ())) if row else None
         if key == self._peeked:
             return
         self._peeked = key
         # Exclusive: a log still being followed for the last selection stops.
-        self.run_worker(self._peek(row), group="peek", exclusive=True)
+        self.run_worker(partial(self._peek, row), group="peek", exclusive=True)
 
     async def _peek(self, row: dict | None) -> None:
         head = self.query_one("#peek-head", Static)

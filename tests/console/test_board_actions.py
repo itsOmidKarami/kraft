@@ -115,6 +115,11 @@ def test_a_key_acts_through_its_dialog_and_says_what_the_server_did(
     for name in ("reject_gate", "pause", "resume", "retry"):
         monkeypatch.setattr(client, name, fake(name))
 
+    async def get_work_item(work_item_id=None, *, full=False):
+        return _detail(row, steerable=True)
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+
     async def scenario(app, pilot):
         await _settled(board([row]), app, pilot)
         for k, key in enumerate(keys):
@@ -165,7 +170,11 @@ def test_an_action_goes_to_the_item_its_dialog_opened_for(
         calls.append((name, sent))
         return {"id": row["id"]}
 
+    async def get_work_item(work_item_id=None, *, full=False):
+        return _detail(row, steerable=True)
+
     monkeypatch.setattr(client, name, call)
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
 
     async def scenario(app, pilot):
         await _settled(board([GATE, FAILED, RUNNING]), app, pilot)
@@ -181,7 +190,9 @@ def test_an_action_goes_to_the_item_its_dialog_opened_for(
     assert board([GATE, FAILED, RUNNING]).run(scenario) == [(name, args)]
 
 
-@pytest.mark.parametrize(("height", "reads"), [(40, 2), (24, 0)], ids=["peek-open", "peek-closed"])
+@pytest.mark.parametrize(
+    ("height", "reads"), [(40, True), (24, False)], ids=["peek-open", "peek-closed"]
+)
 def test_a_refused_action_reads_the_board_and_the_item_again(board, monkeypatch, height, reads):
     """The server's refusal may mean the row is stale: the board is read once
     more (no event announces it) and, if the peek is open, the item too."""
@@ -215,7 +226,40 @@ def test_a_refused_action_reads_the_board_and_the_item_again(board, monkeypatch,
         await pilot.press("t", "enter")
         await console.until(pilot, lambda: board_reads)
         if reads:
-            await console.until(pilot, lambda: len(detail_reads) > before)
+            await console.until(pilot, lambda: len(detail_reads) >= before + 2)
         return len(detail_reads) - before
 
-    assert console.run(scenario, size=(80, height)) == (1 if reads else 0)
+    # The steer check reads the item once; an open peek reads it once more.
+    assert console.run(scenario, size=(80, height)) == (2 if reads else 1)
+
+
+@pytest.mark.parametrize(
+    ("row", "key", "name", "args"),
+    [
+        (FAILED, "t", "retry", (None, "m03d77b1")),
+        (PAUSED | {"actions": ["resume", "steer"]}, "p", "resume", (None, "p1p1p1p1")),
+    ],
+    ids=["retry", "resume"],
+)
+def test_a_steer_the_server_cannot_place_is_not_asked_for(board, monkeypatch, row, key, name, args):
+    """The server answers a steer with no agent task to reach with a 409 and
+    says so on the detail's `steerable`: no dialog, and none is sent."""
+    calls: list[tuple] = []
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        return _detail(row, steerable=False)
+
+    async def call(*sent):
+        calls.append((name, sent))
+        return {"id": row["id"], "node_id": "implement"}
+
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    monkeypatch.setattr(client, name, call)
+
+    async def scenario(app, pilot):
+        await _settled(board([row]), app, pilot)
+        await pilot.press(key)
+        await board([row]).until(pilot, lambda: calls)
+        return calls, isinstance(app.screen, Note)
+
+    assert board([row]).run(scenario) == ([(name, args)], False)

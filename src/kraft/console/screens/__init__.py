@@ -31,7 +31,8 @@ class View(Vertical, can_focus=True):
 
     def rows_changed(self, rows: list[dict], events: list[dict]) -> None:
         """The board was read again after `events`; empty `events` means the
-        stream reconnected, so read again whatever this view shows."""
+        stream reconnected or a read was asked for (`Live.reread`), so read
+        again whatever this view shows."""
 
     def health_changed(self, health: dict | None) -> None:
         """`/health` answered (None: it did not)."""
