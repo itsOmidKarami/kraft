@@ -6,6 +6,7 @@ import { useReason } from "../ui/Reason";
 import { ARCHIVE_ONLY_ENDED } from "../ui/reasons";
 import { showToast } from "../ui/Toast";
 import { CANCEL_WINDOW_MS, cancelLater, items, sendBulk, useBulk, VERB } from "./bulk";
+import { LinkButton } from "../ui/LinkButton";
 
 const ended = (i: WorkItem) => i.display_status === "done" || i.display_status === "cancelled";
 
@@ -94,7 +95,7 @@ export function BulkBar({ checked, byId, offline, onChecked }: { checked: WorkIt
             </button>
           </>
         )}
-        <button type="button" className="bulk-clear" onClick={() => { setConfirm(false); onChecked([]); }}>Clear</button>
+        <LinkButton onClick={() => { setConfirm(false); onChecked([]); }}>Clear</LinkButton>
       </div>
     </div>
   );

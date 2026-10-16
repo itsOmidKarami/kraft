@@ -7,6 +7,7 @@ import { languageOf, tokenizeSide } from "./tokenize";
 import { sendOnModEnter } from "../keys";
 import { lineRef, rangeName, threadRange } from "./range";
 import { LINES_COMMENTED_ON } from "./sharedWords";
+import { LinkButton } from "../ui/LinkButton";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -107,9 +108,9 @@ export function Thread({ thread, oldLines, quote, onChanged, onEdit }: {
       {first?.suggestion && <SuggestionBlock s={first.suggestion} old={oldLines(first.suggestion.start_line, first.suggestion.end_line)} />}
       {thread.draft && (
         <div className="rv-links">
-          <button type="button" className="rv-link" onClick={() => onEdit(thread)}>Edit</button>
+          <LinkButton onClick={() => onEdit(thread)}>Edit</LinkButton>
           <span aria-hidden="true">·</span>
-          <button type="button" className="rv-link" onClick={() => run(() => send(`/threads/${thread.id}`, { method: "DELETE" }))}>Delete</button>
+          <LinkButton onClick={() => run(() => send(`/threads/${thread.id}`, { method: "DELETE" }))}>Delete</LinkButton>
         </div>
       )}
       {rest.map((c) => (
@@ -134,9 +135,9 @@ export function Thread({ thread, oldLines, quote, onChanged, onEdit }: {
           {c.suggestion && <SuggestionBlock s={c.suggestion} old={oldLines(c.suggestion.start_line, c.suggestion.end_line)} />}
           {c.draft && editing !== c.id && (
             <div className="rv-links">
-              <button type="button" className="rv-link" onClick={() => { setEditing(c.id); setEditText(c.body); }}>Edit</button>
+              <LinkButton onClick={() => { setEditing(c.id); setEditText(c.body); }}>Edit</LinkButton>
               <span aria-hidden="true">·</span>
-              <button type="button" className="rv-link" onClick={() => run(() => send(`/comments/${c.id}`, { method: "DELETE" }))}>Delete</button>
+              <LinkButton onClick={() => run(() => send(`/comments/${c.id}`, { method: "DELETE" }))}>Delete</LinkButton>
             </div>
           )}
         </div>

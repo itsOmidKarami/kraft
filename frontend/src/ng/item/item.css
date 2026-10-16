@@ -68,10 +68,6 @@
 .item-brief-links { margin-top: 4px; font-size: var(--fs-label); color: var(--text-muted); }
 .item-brief-edit { display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin-top: 10px; }
 .item-brief-edit .item-actions .item-muted { margin-right: auto; }
-.item-link { padding: 0; border: 0; background: transparent; color: var(--text-sub); font: inherit; font-size: var(--fs-label); cursor: pointer; }
-.item-link:is(:hover, :focus-visible) { color: var(--text); text-decoration: underline; }
-.item-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
-.item-link.is-strong { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .item-diffline { margin: 10px 0 0; font-size: var(--fs-meta); color: var(--text-sub); }
 .item-add { color: var(--ok); font-family: ui-monospace, Menlo, monospace; }
 .item-del { color: var(--bad); font-family: ui-monospace, Menlo, monospace; }
@@ -107,7 +103,6 @@
 .item-tail { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .item-tail-lines { align-self: stretch; margin: 0; padding: 6px 8px; list-style: none; border-radius: 6px; background: var(--bg); font: var(--fs-label)/1.45 ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .item-tail-lines li { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
-.item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }
 @media (max-height: 719px) { .item-card-facts { max-height: 64px; overflow-y: auto; } }
 
 /* The chain pane (Decisions §3, §5). */
@@ -117,7 +112,6 @@
 .ip-facts dt { font-family: inherit; font-size: var(--fs-meta); color: var(--text-muted); }
 .ip-facts dd { color: var(--text); }
 .is-mono { font-family: ui-monospace, Menlo, monospace; }
-.item-link.is-mono { font-size: var(--fs-meta); }
 .ip-recent { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-meta); }
 .ip-recent li { display: grid; grid-template-columns: 56px 1fr; gap: 10px; align-items: baseline; }
 .ip-attached { display: block; }
@@ -219,7 +213,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-turn { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
 .ip-turn.is-here { border-color: color-mix(in oklab, var(--warn) 50%, transparent); }
 .ip-turn-head { display: flex; align-items: center; gap: 10px; font-size: var(--fs-meta); color: var(--text); }
-.ip-turn-head .item-link { margin-left: auto; font-size: var(--fs-meta); }
+.ip-turn-head .link-btn { margin-left: auto; font-size: var(--fs-meta); }
 .ip-turn-who { margin: 0; font-size: var(--fs-meta); color: var(--warn); }
 .ip-turn-text { margin: 0; font-size: var(--fs-meta); color: var(--text); line-height: 1.45; }
 .ip-findings { margin: 4px 0 0; padding-left: 16px; font-size: var(--fs-label); color: var(--text-sub); }
@@ -260,3 +254,4 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 /* The cap stop's limit editor (RaiseLimit). */
 .rl-dialog.dialog { box-sizing: border-box; width: min(420px, 100%); }
 .rl-form { display: flex; flex-direction: column; gap: 12px; }
+.item-select { margin-left: 6px; }

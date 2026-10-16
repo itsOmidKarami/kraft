@@ -4,6 +4,7 @@ import { nameOf } from "../../board/rowText";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { LinkButton } from "../../ui/LinkButton";
 
 /** The node pane's Overview (Decisions §5): progress, fix loop, on failure,
  *  then, its numbers (GAP §2 #17), and its steps, each selecting itself. */
@@ -21,7 +22,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
         {paths.length > 0 && <div><dt>progress</dt><dd>{done} of {paths.length} tasks · {steps.length} {steps.length === 1 ? "step" : "steps"}</dd></div>}
         {node.fix_loop && <div><dt>fix loop</dt><dd>{rounds ? `round ${rounds.latest}${rounds.total ? ` of ${rounds.total}` : ""}` : "not looped"}</dd></div>}
         {node.on_failure?.length ? <div><dt>on failure</dt><dd>{node.on_failure.map(taskName).join(", ")}</dd></div> : null}
-        {next && <div><dt>then</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onNode(next.id)}>{next.id}</button></dd></div>}
+        {next && <div><dt>then</dt><dd><LinkButton strong mono onClick={() => onNode(next.id)}>{next.id}</LinkButton></dd></div>}
         {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · <span data-tip={tokenTip(by)}>{tokenText(by)} tokens</span> · {usd(by.cost_usd, by.cost_complete)}</dd></div>}
       </dl>
       {steps.length > 0 && (
@@ -69,7 +70,7 @@ export function NodeConfig({ item, node, onReset, controls }: { item: ItemDetail
       {o && Object.keys(o).length > 0 && (
         <>
           <h3 className="ip-h">Changed for this item</h3>
-          <p className="ip-override"><span className="is-mono">{Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")}</span> <button type="button" className="item-link" onClick={onReset}>reset</button></p>
+          <p className="ip-override"><span className="is-mono">{Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")}</span> <LinkButton onClick={onReset}>reset</LinkButton></p>
         </>
       )}
     </>

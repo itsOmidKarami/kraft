@@ -19,6 +19,7 @@ import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 import { tip } from "../../ui/Tooltip";
 import { BUDGET_IN_DOLLARS } from "../sharedWords";
+import { LinkButton } from "../../ui/LinkButton";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -50,7 +51,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
       <dl className="item-facts ip-facts">
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
-        {live && item.current_node_id && <div><dt>current</dt><dd><button type="button" className="item-link is-strong" onClick={() => onSelect(item.current_node_id!)}>{nameOf(item.chain_definition.nodes, item.current_node_id)}</button></dd></div>}
+        {live && item.current_node_id && <div><dt>current</dt><dd><LinkButton strong onClick={() => onSelect(item.current_node_id!)}>{nameOf(item.chain_definition.nodes, item.current_node_id)}</LinkButton></dd></div>}
         {!!item.attachments?.length && (
           <div>
             <dt title="attached at intake">attached</dt>
@@ -63,9 +64,9 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
                 return (
                   <span key={a.kind} className="ip-attached">
                     {a.kind}{" "}
-                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => onDoc(doc)}>{name}</button>
+                    {doc && onDoc ? <LinkButton mono title={a.path} aria-label={label} onClick={() => onDoc(doc)}>{name}</LinkButton>
                       // Not indexed yet (before start nothing is): it reads from the copy Kraft kept at intake.
-                      : <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => setAttached(a.kind)}>{name}</button>}
+                      : <LinkButton mono title={a.path} aria-label={label} onClick={() => setAttached(a.kind)}>{name}</LinkButton>}
                   </span>
                 );
               })}
@@ -88,7 +89,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
           ))}
         </ol>
       ) : <p className="item-muted">Nothing yet.</p>}
-      {story.length > RECENT && !all && <button type="button" className="item-link ip-recent-more" onClick={onMore ?? (() => setAll(true))}>{onMore ? "All activity" : `Show ${story.length - RECENT} earlier`}</button>}
+      {story.length > RECENT && !all && <LinkButton className="ip-recent-more" onClick={onMore ?? (() => setAll(true))}>{onMore ? "All activity" : `Show ${story.length - RECENT} earlier`}</LinkButton>}
     </>
   );
 }
@@ -253,10 +254,10 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           {ownCap && <li><span className="is-mono">budget</span> {item.budget_usd != null ? usd(item.budget_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
           {ownPolicy.map(([k, v]) => <li key={k}><span className="is-mono">{k}</span> {v} <span className="item-muted">· item policy</span></li>)}
           {agent.length > 0 && (
-            <li><span className="is-mono">every agent task</span> {agent.map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· item-wide</span> <button type="button" className="item-link" onClick={() => reset({ agent_overrides: {} })}>reset</button></li>
+            <li><span className="is-mono">every agent task</span> {agent.map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· item-wide</span> <LinkButton onClick={() => reset({ agent_overrides: {} })}>reset</LinkButton></li>
           )}
           {overrides.map(([node, o]) => (
-            <li key={node}><span className="is-mono">{node}</span> {Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· node</span> <button type="button" className="item-link" onClick={() => reset({ node_overrides: { [node]: {} } })}>reset</button></li>
+            <li key={node}><span className="is-mono">{node}</span> {Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· node</span> <LinkButton onClick={() => reset({ node_overrides: { [node]: {} } })}>reset</LinkButton></li>
           ))}
           {draftRows.map((r) => <li key={r.path}><span className="is-mono">{r.path}</span> {r.text} <span className="item-muted">applied by the draft</span></li>)}
           {pending.map((l) => <li key={`${l.index}-${l.text}`}><span className="is-mono">{l.text.replace(/^[~+»-] /, "").replace(/\s+/g, " ")}</span> <span className="item-draft">· in the draft, not applied yet</span></li>)}

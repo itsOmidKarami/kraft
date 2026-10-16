@@ -12,9 +12,7 @@
 .board-page-head { flex: none; max-width: 1180px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 14px 14px 0; }
 .board-page-head h1 { margin: 0 0 2px; font-size: var(--fs-h2); font-weight: 600; }
 .board-page-head p { margin: 0; font-size: var(--fs-meta); color: var(--text-sub); }
-.board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: var(--fs-label); color: var(--text-sub); }
-.board-more:hover { background: var(--surface-2); color: var(--text); }
-.board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-more { margin: 2px 0 0 54px; }
 /* `clip`, not `hidden`: no scroll box, so nothing reads it as cut-off text. */
 .board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
@@ -52,9 +50,6 @@
 .board-note a:is(:hover, :focus-visible) { color: var(--text-sub); }
 .board-note a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .board-head-gap { flex: 1; }
-.board-select-all { padding: 2px 8px; border: 0; border-radius: 5px; background: transparent; font: inherit; font-size: var(--fs-meta); letter-spacing: 0; text-transform: none; color: var(--text-sub); cursor: pointer; }
-.board-select-all:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
-.board-select-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* A row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks, one action. */
 .board-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 4px 14px; align-items: center; padding: 8px 14px; border-radius: 8px; }
@@ -131,9 +126,6 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .bulk-confirm-text { max-width: 340px; line-height: 1.45; color: var(--bad); }
 .bulk-reason { width: 200px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: var(--fs-label); color: var(--text); }
 .bulk-reason:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.bulk-clear { padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text-sub); cursor: pointer; }
-.bulk-clear:is(:hover, :focus-visible) { color: var(--text); }
-.bulk-clear:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .bulk-results { align-items: flex-start; max-width: 640px; }
 .bulk-results-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .bulk-results ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; max-height: 120px; overflow: auto; color: var(--text-sub); }

@@ -4,6 +4,7 @@ import { parse, show, type FieldKind } from "../../templates/fields";
 import { Combobox } from "../../ui/Combobox";
 import { IconButton } from "../../ui/IconButton";
 import type { Given } from "../chainValues";
+import { Select } from "../../ui/Select";
 
 type Props = {
   label: string;
@@ -113,10 +114,10 @@ function Editor({ label, kind, options, suggest, placeholder, onSave, onCancel }
   const blur = () => { if (!done.current) onSave(text, false); };
   if (options?.length)
     return (
-      <select autoFocus aria-label={label} className="cfg-edit" value={text} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)}>
+      <Select autoFocus aria-label={label} mono value={text} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)}>
         <option value="">not set</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
+      </Select>
     );
   if (kind === "long") return <textarea autoFocus aria-label={label} className="cfg-edit is-long" rows={4} placeholder={placeholder} value={text} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)} />;
   if (suggest?.length)

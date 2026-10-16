@@ -8,6 +8,7 @@ import { request } from "../http";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { sendOnModEnter } from "../keys";
+import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 
 /** When an in-place editor closes and focus fell to the page, put it back on the control that opened it; a blur that moved on stays where it went. */
 function useReturnFocus(editing: boolean) {
@@ -120,9 +121,9 @@ export function Brief({ id, brief, ended = false, onSaved }: { id: string; brief
     <div className="item-brief">
       {brief ? <p ref={p} className={more ? "item-brief-text is-open" : "item-brief-text"}>{more ? brief : plainMarkdown(brief)}</p> : null}
       <div className="item-brief-links">
-        {(long || more) && <button type="button" className="item-link" aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</button>}
+        {(long || more) && <LinkButton aria-expanded={more} onClick={() => setMore((m) => !m)}>{more ? "less" : "more"}</LinkButton>}
         {(long || more) && !ended && <span aria-hidden> · </span>}
-        {!ended && <button ref={opener} type="button" className="item-link" onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</button>}
+        {!ended && <LinkButton ref={opener} onClick={() => setEditing(true)}>{brief ? "edit" : "Add a brief"}</LinkButton>}
       </div>
     </div>
   );
@@ -175,7 +176,7 @@ export function DiffLine({ id, version, files, review = true }: { id: string; ve
     <p className="item-diffline">
       {files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{add}</span> <span className="item-del">−{del}</span>
       {threads > 0 && <><span aria-hidden> · </span>{threads} open {threads === 1 ? "thread" : "threads"}</>}
-      {review && <><span aria-hidden> · </span><Link className="item-link is-strong" to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link></>}
+      {review && <><span aria-hidden> · </span><Link className={linkButtonClass({ strong: true })} to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link></>}
     </p>
   );
 }

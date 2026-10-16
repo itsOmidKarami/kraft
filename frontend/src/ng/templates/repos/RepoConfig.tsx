@@ -13,6 +13,7 @@ import { FIELDS, forgeOptions, GROUPS, YAML_ONLY, patchFor, sourceOf, valueOf, t
 import { Fold, Head } from "../panes/controls";
 import { problemsOf, repoName, type RepoView } from "./types";
 import { showToast } from "../../ui/Toast";
+import { LinkButton } from "../../ui/LinkButton";
 
 const key = (p: Problem) => `${p.repo}|${p.field}|${p.message}`;
 
@@ -70,7 +71,7 @@ export function RepoConfig({ draft, repo, chains, onYaml }: { draft: ConfigDraft
           <div key={key} className="rp-row-cfg">
             <span className="rp-k">{label}</span>
             <span className="rp-v">{yamlValue(repo.entry[key])}</span>
-            <span className="rp-src"><button type="button" className="rp-reset" aria-label={`Edit ${label} in YAML`} onClick={onYaml}>Edit in YAML</button></span>
+            <span className="rp-src"><LinkButton inline aria-label={`Edit ${label} in YAML`} onClick={onYaml}>Edit in YAML</LinkButton></span>
           </div>
         ))}
       </section>
@@ -133,7 +134,7 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
       <span className="rp-src">
         <span className={`rp-chip${changed ? " is-changed" : source === "this repo" ? " is-own" : ""}`}>{changed ? "changed" : source}</span>
         {set && source === "this repo" && f.key !== "default_chain" && (
-          <button type="button" className="rp-reset" aria-label={`Reset ${f.label}`} onClick={() => void send(null)}>Reset</button>
+          <LinkButton inline aria-label={`Reset ${f.label}`} onClick={() => void send(null)}>Reset</LinkButton>
         )}
       </span>
     </div>

@@ -27,6 +27,7 @@ import { groupOf } from "./model";
 import { capitalise, gateName, reasonTail } from "./rowText";
 import "../item/item.css";
 import { PAUSE_THIS_ITEM } from "./sharedWords";
+import { LinkButton } from "../ui/LinkButton";
 
 export type PeekTab = "overview" | "activity" | "config";
 
@@ -170,7 +171,7 @@ function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain
           );
         })}
       </ol>
-      {more && <button type="button" className="board-more peek-earlier" onClick={() => load(events[events.length - 1].seq, events)}>Show earlier</button>}
+      {more && <LinkButton className="board-more peek-earlier" onClick={() => load(events[events.length - 1].seq, events)}>Show earlier</LinkButton>}
     </div>
   );
 }

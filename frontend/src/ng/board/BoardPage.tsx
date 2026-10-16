@@ -31,6 +31,7 @@ import { autoArchiveNote } from "../ui/archivedWords";
 import { countIn } from "./counts";
 import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
+import { LinkButton } from "../ui/LinkButton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -349,7 +350,7 @@ export function BoardPage() {
                   )}
                   <span className="board-head-gap" />
                   {g.total > 0 && (
-                    <button type="button" className="board-select-all" onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</button>
+                    <LinkButton onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</LinkButton>
                   )}
                 </h2>
                 {g.rows.map((i) => (
@@ -368,7 +369,7 @@ export function BoardPage() {
                   />
                 ))}
                 {g.done && g.rows.length < g.total && (
-                  <button type="button" className="board-more" onClick={() => setAllDone(true)}>show all {g.total}</button>
+                  <LinkButton className="board-more" onClick={() => setAllDone(true)}>show all {g.total}</LinkButton>
                 )}
               </section>
             ))}

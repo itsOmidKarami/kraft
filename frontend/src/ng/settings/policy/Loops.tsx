@@ -7,6 +7,7 @@ import { SectionHead } from "./SectionHead";
 import { LOOP_WINS } from "./sections";
 import { parse, raw, show, sourceWord } from "./units";
 import { LOOP_VALUE_BLANK, EVERY_FIX_LOOP, STUCK_ITEM_OFF, WHEN_STUCK, FINDINGS_BURN_A_FIX_CYCLE } from "../sharedWords";
+import { LinkButton } from "../../ui/LinkButton";
 
 /** Loops (Decisions §12): fix-loop defaults and maxima, which findings start another cycle, and what happens when an item is stuck. */
 export function Loops({ ctx }: { ctx: Ctx }) {
@@ -76,7 +77,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
                 <span className="pol-from">{sourceWord(l.wall_clock_s.source)}</span>
               </span>
               {entry(l.key)
-                ? <button type="button" className="pol-link" aria-label={`Remove the loops entry for ${l.node}`} onClick={() => void draft.ops([{ op: "remove_loop", key: l.key }])}>Remove entry</button>
+                ? <LinkButton inline aria-label={`Remove the loops entry for ${l.node}`} onClick={() => void draft.ops([{ op: "remove_loop", key: l.key }])}>Remove entry</LinkButton>
                 : <span />}
             </div>
           ))}
@@ -90,7 +91,7 @@ export function Loops({ ctx }: { ctx: Ctx }) {
                 <span className="pol-k is-bad">{e.key}</span>
                 <span className="pol-help">{show("count", e.attempts)} attempts · {show("s-as-min", e.wall_clock_s)}</span>
                 <span className="pol-help is-bad">{ctx.problems.find((x) => x.field === `loops.${e.key}` || x.path === `loops.${e.key}`)?.message ?? "names no fix loop in the library"}</span>
-                <button type="button" className="pol-link" aria-label={`Remove the loops entry ${e.key}`} onClick={() => void draft.ops([{ op: "remove_loop", key: e.key }])}>Remove</button>
+                <LinkButton inline aria-label={`Remove the loops entry ${e.key}`} onClick={() => void draft.ops([{ op: "remove_loop", key: e.key }])}>Remove</LinkButton>
               </div>
             ))}
             </div>
