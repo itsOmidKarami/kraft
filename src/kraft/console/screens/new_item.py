@@ -77,7 +77,7 @@ class NewItem(Dialog[dict | None]):
                         value = self.repo if name == "repo" else ""
                         yield Input(value, placeholder=HINTS[name], compact=True, id=f"new-{name}")
             yield Checkbox(
-                "Auto-gate: an agent reviews the auto-escalate gates first",
+                "Auto-gate: an agent reviews gates first",
                 True,
                 compact=True,
                 id="new-auto-gate",

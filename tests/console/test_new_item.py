@@ -180,9 +180,9 @@ def test_the_form_files_what_it_holds(board, monkeypatch, tmp_path, fields, sent
         ("", FILED, 1, "A title is required.", 0),
         (
             "t",
-            client.status_error(422, "spec /x/s.md [/] is not inside the repo"),
+            client.status_error(422, "spec /x/\x1b[2Ks.md [/] is not inside the repo"),
             1,
-            "422: spec /x/s.md [/] is not inside the repo",
+            "422: spec /x/\\x1b[2Ks.md [/] is not inside the repo",
             1,
         ),
         (
@@ -229,9 +229,69 @@ def test_the_form_fits_80x24(board, monkeypatch):
             form.region.contains_region(form.query_one(f"#new-{b}", Button).region)
             for b in ("go", "no")
         ]
-        return inside, app.focused.id
+        rows = [row.size.height for row in form.query(".new-field")]
+        return inside, app.focused.id, form.query_one(TextArea).size.height, rows
 
-    assert console.run(scenario) == ([True, True], "new-title")
+    assert console.run(scenario) == ([True, True], "new-title", 3, [1, 3, 1, 1, 1, 1, 1])
+
+
+def test_nothing_clips_at_the_minimum_size(board, monkeypatch):
+    """At 60x16 (`MIN_SIZE`) no checkbox label is cut short."""
+    _recording(monkeypatch, FILED)
+    console = board([])
+
+    async def scenario(app, pilot):
+        form = await _opened(console, app, pilot)
+        await pilot.pause()
+        return [
+            box.get_content_width(box.size, box.size)
+            <= form.query_one("#new-item").content_region.right - box.region.x
+            for box in form.query(Checkbox)
+        ]
+
+    assert console.run(scenario, size=(60, 16)) == [True, True]
+
+
+@pytest.mark.parametrize(
+    "then", ["file-again", "esc"], ids=["refused-then-filed-again", "esc-while-filing"]
+)
+def test_a_refused_form_files_again_and_esc_closes_it_mid_filing(board, monkeypatch, then):
+    """After a refusal the same form files again (the 422's whole point);
+    Esc closes it while a create is on its way, and nothing more draws."""
+    held = asyncio.Event()
+    answers = [client.status_error(422, "spec is not inside the repo"), FILED]
+    calls: list[str] = []
+
+    async def create_work_item(title, **fields):
+        calls.append(title)
+        if then == "esc":
+            await held.wait()
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(client, "create_work_item", create_work_item)
+    console = board([])
+
+    async def scenario(app, pilot):
+        form = await _opened(console, app, pilot)
+        form.query_one("#new-title", Input).value = "t"
+        form.query_one("#new-go", Button).press()
+        if then == "esc":
+            await console.until(pilot, lambda: calls)
+            await pilot.press("escape")
+            await console.until(pilot, lambda: app.screen is app.default_screen)
+            held.set()
+            await pilot.pause()
+            return len(calls), app.view.id, len(app.screen.query("Toast"))
+        await console.until(pilot, lambda: "422" in str(form.query_one("#new-said").render()))
+        form.query_one("#new-go", Button).press()
+        await console.until(pilot, lambda: app.view.id == "item")
+        return len(calls), app.view.id, 0
+
+    want = (1, "board", 0) if then == "esc" else (2, "item", 0)
+    assert console.run(scenario, notifications=True) == want
 
 
 @pytest.mark.parametrize(
@@ -267,7 +327,9 @@ def test_n_opens_the_form_from_any_view_but_never_over_a_dialog(
         elif before:
             await pilot.press(before)
         if before == "confirm-action":
-            app.action_new_item()  # the palette's way in: no key to stop at the dialog
+            # a direct call, as a palette entry or another caller would make:
+            # only the guard stops it
+            app.action_new_item()
         else:
             await pilot.press("n")
         if opens:
