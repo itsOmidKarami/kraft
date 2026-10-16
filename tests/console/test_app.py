@@ -730,7 +730,7 @@ def test_the_top_line_leads_with_the_brand_and_lights_the_dot_one_beat(board):
         brand, pill, calm = style_of(app, "◆ "), style_of(app, " Board 1 "), style_of(app, "● live")
         app._live_event([GATE], [{"seq": 1, "type": "node_started"}])
         lit = style_of(app, "● live")
-        await console.until(pilot, lambda: style_of(app, "● live") == calm, 1.0)
+        await console.until(pilot, lambda: style_of(app, "● live") == calm)
         return brand, pill, calm, lit
 
     assert console.run(scenario) == (
