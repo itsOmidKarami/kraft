@@ -10,6 +10,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from rich.logging import RichHandler
 from support import api as api_support
 from support import harness, real_binaries
 from support.fake_beads import Bd, FakeBeads
@@ -480,6 +481,8 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     # Tests that specifically exercise the redirect delenv this and wrap the
     # call in `capfd.disabled()`.
     monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
+    # And `_serve()` points every `RichHandler` at a server.log; undone after.
+    monkeypatch.setattr(RichHandler, "emit", RichHandler.emit)
 
 
 @pytest.fixture

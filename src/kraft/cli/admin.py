@@ -888,8 +888,11 @@ def _log_plain(log_file, *, terminal: bool = True) -> None:
                 emit(self, record)
             finally:
                 _Tee.terminal_only.on = False
-        log_file.write(plain.format(record) + "\n")
-        log_file.flush()
+        try:  # a handler never raises into the logging call, as Rich's own emit
+            log_file.write(plain.format(record) + "\n")
+            log_file.flush()
+        except Exception:
+            self.handleError(record)
 
     RichHandler.emit = emit_both  # type: ignore[method-assign]
 

@@ -18,7 +18,6 @@ from kraft import cli
 def test_server_log_is_one_line_per_record_and_terminal_keeps_rich(tmp_path, monkeypatch, terminal):
     """The MCP SDK's RichHandler wraps a record to the terminal's width; the
     file must not get that. A traceback stays whole after its record's line."""
-    monkeypatch.setattr(RichHandler, "emit", RichHandler.emit)  # restored after
     monkeypatch.setattr(sys, "stdout", sys.stdout)
     monkeypatch.setattr(sys, "stderr", io.StringIO())
     shown = sys.stderr
