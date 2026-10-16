@@ -21,6 +21,7 @@ class ChainEvent(StrEnum):
     RUN_FORKED = "run_forked"
     BASE_CHANGE_RESTART = "base_change_restart"
     WORKTREE_REBASE_VERIFIED = "worktree_rebase_verified"
+    WORKTREE_REFRESH_SKIPPED = "worktree_refresh_skipped"
     READ_ONLY_VIOLATED = "read_only_violated"
     FIX_CYCLE_STARTED = "fix_cycle_started"
     FIX_CYCLE_FINISHED = "fix_cycle_finished"
@@ -49,6 +50,7 @@ CHAIN_EVENT_TRAITS = total(
         ChainEvent.RUN_FORKED: EventTraits(restarts_run=True),
         ChainEvent.BASE_CHANGE_RESTART: EventTraits(restarts_run=True),
         ChainEvent.WORKTREE_REBASE_VERIFIED: _PLAIN,
+        ChainEvent.WORKTREE_REFRESH_SKIPPED: _PLAIN,
         ChainEvent.READ_ONLY_VIOLATED: _PLAIN,
         ChainEvent.FIX_CYCLE_STARTED: _PLAIN,
         ChainEvent.FIX_CYCLE_FINISHED: _PLAIN,

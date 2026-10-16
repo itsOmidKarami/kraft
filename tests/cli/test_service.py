@@ -112,6 +112,14 @@ def test_launchd_plist_content(tmp_path, monkeypatch):
     assert "<string>start</string>" in text
     assert "<key>KeepAlive</key>" in text and "<true/>" in text
     assert f"<string>{tmp_path / 'kraft-home'}</string>" in text
+    # Past the drain and a cut-short rebase's undo, not launchd's 20s default.
+    assert plistlib.loads(path.read_bytes())["ExitTimeOut"] >= _stop_budget()
+
+
+def _stop_budget() -> float:
+    from kraft import builtins
+
+    return cli.admin._GRACEFUL_SHUTDOWN_S + builtins.REBASE_UNDO_MAX_S
 
 
 def test_systemd_unit_content(tmp_path, monkeypatch):
@@ -123,6 +131,8 @@ def test_systemd_unit_content(tmp_path, monkeypatch):
     assert "ExecStart=/usr/local/bin/kraft admin start" in text
     assert "Restart=always" in text
     assert f'Environment="KRAFT_HOME={tmp_path / "kraft-home"}"' in text
+    [timeout] = [ln for ln in text.splitlines() if ln.startswith("TimeoutStopSec=")]
+    assert int(timeout.split("=")[1]) >= _stop_budget()
 
 
 def test_service_files_survive_a_special_character_in_the_environment(tmp_path, monkeypatch):

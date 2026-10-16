@@ -42,6 +42,12 @@ from kraft.paths import (
 from kraft.policy import CarriedPolicy
 from kraft.vocab import WorkItemStatus
 
+#: Seconds uvicorn gives in-flight requests and open sockets once told to stop.
+_GRACEFUL_SHUTDOWN_S = 10
+
+#: Seconds `kraft admin stop` waits before it looks for a rebase being undone.
+_STOP_WAIT_S = 15
+
 #: launchd label / systemd unit name. One daemon, one name -- not
 #: per-instance, since the spec is about supervising *the* daemon.
 _LAUNCHD_LABEL = "com.kraft.daemon"
@@ -108,6 +114,16 @@ def _systemd_unit_path() -> Path:
     return base / "systemd" / "user" / _SYSTEMD_UNIT
 
 
+def _service_stop_timeout_s() -> int:
+    """Seconds the service manager lets the server stop before it kills it:
+    past the graceful drain and the longest undo of a cut-short rebase
+    (`builtins.REBASE_UNDO_MAX_S`), with a margin. The managers' own default
+    (20s on launchd, 90s on systemd) would kill a server mid-abort."""
+    from kraft import builtins
+
+    return int(_GRACEFUL_SHUTDOWN_S + builtins.REBASE_UNDO_MAX_S) + 6
+
+
 def _write_launchd_plist(kraft_bin: str) -> Path:
     path = _launchd_plist_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +136,7 @@ def _write_launchd_plist(kraft_bin: str) -> Path:
                 "ProgramArguments": [kraft_bin, "admin", "start"],
                 "KeepAlive": True,
                 "RunAtLoad": True,
+                "ExitTimeOut": _service_stop_timeout_s(),
                 "EnvironmentVariables": _instance_env(),
             }
         )
@@ -148,6 +165,7 @@ def _write_systemd_unit(kraft_bin: str) -> Path:
         f"ExecStart={kraft_bin} admin start\n"
         "Restart=always\n"
         "RestartSec=2\n"
+        f"TimeoutStopSec={_service_stop_timeout_s()}\n"
         f"{env_lines}"
         "\n"
         "[Install]\n"
@@ -1043,7 +1061,7 @@ def _serve() -> None:
                 # endpoint that forgets, and an in-flight HTTP request that
                 # hangs. 10s is comfortably above the slowest ordinary request
                 # (a forge call).
-                timeout_graceful_shutdown=10,
+                timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_S,
             )
         )
         server.run()
@@ -1254,7 +1272,7 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
         _confirm_running_agents(ns, "stopping", ask=False)
     os.kill(pid, signal.SIGTERM)
     # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
-    # it is waiting on (`_serve`, timeout_graceful_shutdown=10).
+    # it is waiting on (`_serve`, `_GRACEFUL_SHUTDOWN_S`).
     #
     # `_read_pid` returns None only once the pid it names is actually gone
     # (it signals 0 on every read), so this waits for the real exit, not for
@@ -1262,14 +1280,59 @@ def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     # whole graceful drain. A supervised daemon (launchd KeepAlive / systemd
     # Restart=always, task 5) rewrites the pidfile with a fresh pid well
     # inside this poll, which is the other way out.
-    for _ in range(150):
+    worktrees = RunDirs(pid_path.parent).worktrees
+    deadline = time.monotonic() + _STOP_WAIT_S
+    told = False
+    while True:
         current = _read_pid(pid_path)
         if current is None or current != pid:
             print(f"kraft: stopped (pid {pid})")
             return
+        if time.monotonic() >= deadline:
+            # A server cut off mid-rebase undoes it on the way out, which
+            # takes up to `REBASE_UNDO_MAX_S` more: waiting it out is what
+            # leaves the worktree clean. Only then; nothing else is worth it.
+            if not told and not _rebase_under_way(worktrees):
+                print(f"kraft: pid {pid} did not stop within {_STOP_WAIT_S}s", file=sys.stderr)
+                raise SystemExit(1)
+            from kraft import builtins
+
+            limit = _STOP_WAIT_S + builtins.REBASE_UNDO_MAX_S
+            if not told:
+                print(
+                    f"kraft: pid {pid} is still stopping: a git rebase is being undone "
+                    f"(waiting up to {limit:g}s)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                told = True
+                deadline += builtins.REBASE_UNDO_MAX_S
+            else:
+                print(f"kraft: pid {pid} did not stop within {limit:g}s", file=sys.stderr)
+                raise SystemExit(1)
         time.sleep(0.1)
-    print(f"kraft: pid {pid} did not stop within 15s", file=sys.stderr)
-    raise SystemExit(1)
+
+
+def _rebase_under_way(worktrees: Path) -> bool:
+    """Whether any item's worktree is mid-rebase (a `rebase-merge` or
+    `rebase-apply` in its git dir), which a stopping server is undoing. Read
+    from the worktrees' own `.git` files: no git runs against a repository the
+    server is still writing."""
+    try:
+        entries = list(worktrees.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        try:
+            pointer = (entry / ".git").read_text().strip()
+        except OSError:
+            continue
+        if not pointer.startswith("gitdir:"):
+            continue
+        gitdir = Path(pointer.removeprefix("gitdir:").strip())
+        if any(os.path.lexists(gitdir / d) for d in ("rebase-merge", "rebase-apply")):
+            return True
+    return False
 
 
 def _service_installed() -> bool:

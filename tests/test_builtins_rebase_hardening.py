@@ -255,6 +255,9 @@ async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
     assert git_read(worktree, "rev-parse", "HEAD") == work
     assert (worktree / "uv.lock").read_text() == "by the setup\n"
     assert not kraft_builtins.set_aside_dir(worktree).exists()
+    # What the killed checkout wrote and never staged is gone: the next rebase
+    # would refuse over it. The setup's lockfile is the one untracked file left.
+    assert git_read(worktree, "ls-files", "--others", "--exclude-standard") == "uv.lock"
 
 
 @pytest.mark.parametrize("why", ["still-there-after-sigkill", "the-stop-itself-failed"])
@@ -312,3 +315,58 @@ async def test_a_shutdown_ends_a_running_git_group_and_everything_it_started(hun
     assert done.returncode == -signal.SIGTERM
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+@pytest.mark.parametrize(
+    ("untracked", "removed"),
+    [
+        ({"base.txt": "from base\n"}, ["base.txt"]),
+        ({"base.txt": "an agent's own\n"}, []),
+        ({"unrelated.txt": "from base\n"}, []),
+        ({"sub/base.txt": "from base\n"}, ["sub/base.txt"]),
+    ],
+    ids=["equal-to-the-base-blob", "differs-from-it", "not-in-the-base", "in-a-directory"],
+)
+def test_only_what_a_killed_checkout_wrote_is_removed(repo, untracked, removed):
+    """After an aborted rebase, a path the rebase did not find untracked and
+    whose bytes are the onto commit's own blob goes; a differing one, one the
+    base has no file at, and one that was there before all stay."""
+    wtree.commit(repo, "base.txt", "from base\n", "base file")
+    wtree.commit(repo, "sub/base.txt", "from base\n", "base file in a directory")
+    onto = git_read(repo, "rev-parse", "HEAD")
+    git(repo, "rm", "-q", "base.txt", "sub/base.txt")
+    git(repo, "commit", "-qm", "before the base had them")
+    (repo / "kept-before.txt").write_text("from base\n")
+    before = kraft_builtins._untracked(repo)
+    for name, text in untracked.items():
+        (repo / name).parent.mkdir(exist_ok=True)
+        (repo / name).write_text(text)
+
+    gone = kraft_builtins._remove_rebase_leftovers(repo, before, onto)
+
+    assert gone == removed
+    assert (repo / "kept-before.txt").exists()
+    assert {n for n in untracked if (repo / n).exists()} == set(untracked) - set(removed)
+
+
+async def test_a_hung_worktree_checkout_is_killed_at_its_cap_and_leaves_no_worktree(
+    database, run_dirs, repo, hung, monkeypatch
+):
+    """Kraft-9d8b2.81: `git worktree add` ran without a time cap, so a checkout
+    filter that hangs held the item active with nothing happening, and
+    survived a stop. Past the cap the group is killed, the item stops with
+    the cause, and no half-made directory is left for the retry to take for a
+    finished worktree."""
+    monkeypatch.setattr(kraft_builtins, "WORKTREE_ADD_TIMEOUT_S", 1.0)
+    hook = repo / ".git" / "hooks" / "post-checkout"
+    hook.write_text("#!/bin/sh\n" + wtree.sleep_recorded(hung, 60))
+    hook.chmod(0o755)
+    await wtree.make_item(database, repo)
+
+    with pytest.raises(RuntimeError, match="git worktree add timed out after 1s"):
+        await wtree.ensure(database, run_dirs, repo)
+
+    [pid] = hung.read_text().split()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid), 0)
+    assert not (run_dirs.worktrees / "w1").exists()
