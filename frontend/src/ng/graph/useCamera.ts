@@ -34,13 +34,13 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const dragged = useRef(false);
   const camRef = useRef(cam);
   camRef.current = cam;
-  const bounds = useRef({ world, view });
-  bounds.current = { world, view };
+  const bounds = useRef({ world, view, cover });
+  bounds.current = { world, view, cover };
   /** A pan or zoom by hand: kept on the world, and fit or current let go. */
   const free = useCallback((f: (c: Cam) => Cam) => {
     setCam((c) => {
-      const { world: w, view: v } = bounds.current;
-      return v ? clampCam(f(c), w, v) : f(c);
+      const { world: w, view: v, cover: hidden } = bounds.current;
+      return v ? clampCam(f(c), w, v, hidden) : f(c);
     });
     setMode("free");
   }, []);

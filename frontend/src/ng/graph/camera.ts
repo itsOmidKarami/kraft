@@ -64,13 +64,14 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
 export const PAN_SLACK = 40;
 
 /** Keep a moved view on its world: one smaller than the view stays wholly inside it, a bigger one shows at most
- *  `PAN_SLACK` px of empty canvas past an edge. Fit and current frame themselves; this is for pans and zooms. */
-export function clampCam(cam: Cam, world: { W: number; H: number }, view: Size): Cam {
-  const axis = (t: number, size: number, v: number) => {
+ *  `PAN_SLACK` px of empty canvas past an edge. `cover`, the px an overlaid pane hides on the right, lets the world's
+ *  right end slide out from under it. Fit and current frame themselves; this is for pans and zooms. */
+export function clampCam(cam: Cam, world: { W: number; H: number }, view: Size, cover = 0): Cam {
+  const axis = (t: number, size: number, v: number, hidden: number) => {
     const room = v - size * cam.s;
-    return Math.min(Math.max(t, Math.min(0, room - PAN_SLACK)), Math.max(room, PAN_SLACK));
+    return Math.min(Math.max(t, Math.min(0, room - hidden - PAN_SLACK)), Math.max(room, PAN_SLACK));
   };
-  return { s: cam.s, tx: axis(cam.tx, world.W, view.w), ty: axis(cam.ty, world.H, view.h) };
+  return { s: cam.s, tx: axis(cam.tx, world.W, view.w, cover), ty: axis(cam.ty, world.H, view.h, 0) };
 }
 
 /** 100%, the current node centred across and 30% down the view. */

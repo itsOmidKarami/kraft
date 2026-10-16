@@ -66,8 +66,10 @@ describe("camera maths", () => {
     ["a world wider than the view shows at most 40px of empty canvas past an edge", { tx: 300, ty: 0, s: 1 }, { tx: 40, ty: 0 }],
     ["…at either edge", { tx: -5000, ty: 0, s: 1 }, { tx: 1040 - 2000 - 40, ty: 0 }],
     ["a view inside its bounds is left alone", { tx: -500, ty: 100, s: 1 }, { tx: -500, ty: 100 }],
-  ])("bounds a pan: %s", (_, cam, want) => {
-    expect(clampCam(cam, { W: 2000, H: 250 }, { w: 1040, h: 440 })).toEqual({ ...want, s: 1 });
+    // Under 1024 the pane overlays the canvas (Kraft-gvfm2): the chain's end can still come out from under it.
+    ["an overlaid pane's width more at the right end", { tx: -5000, ty: 0, s: 1 }, { tx: 1040 - 2000 - 380 - 40, ty: 0 }, 380],
+  ])("bounds a pan: %s", (_, cam, want, cover = 0) => {
+    expect(clampCam(cam, { W: 2000, H: 250 }, { w: 1040, h: 440 }, cover)).toEqual({ ...want, s: 1 });
   });
   it("pans just enough to show a box, 24px in from the edge, and not at all when it shows", () => {
     const cam = { tx: 0, ty: 0, s: 0.5 }, view = { w: 400, h: 300 };
@@ -118,6 +120,12 @@ describe("useCamera", () => {
     act(() => h.result.current.pan(-100));
     expect(h.result.current.mode).toBe("free");
     expect(h.result.current.cam.tx).toBe(-80 - 100);
+    // A pan stops 40px past the chain's end, or past an overlaid pane's edge when one covers the right (1200px wide at 0.3).
+    act(() => h.result.current.pan(-5000));
+    expect(h.result.current.cam.tx).toBe(1040 - 1200 - 40);
+    const { h: covered } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit", cover: 380 });
+    act(() => covered.result.current.pan(-5000));
+    expect(covered.result.current.cam.tx).toBe(1040 - 1200 - 380 - 40);
   });
   it("keeps the current node clear of an overlaid pane, while fit keeps the full width (Kraft-gvfm2)", () => {
 
