@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ago, until } from "../../format";
+import { ago, elapsed, until } from "../../format";
 import type { WorkItem } from "../../types";
 import { groupOf, sorter } from "./model";
 import { chainMarks, reasonTail } from "./rowText";
@@ -15,6 +15,7 @@ type Cases = {
   order: { rows: Partial<WorkItem>[]; sorted: string[] };
   ago: [string | null, string][];
   until: [string | null, string][];
+  elapsed: [number, string][];
 };
 const CASES: Cases = JSON.parse(readFileSync(new URL("../../../../tests/console/wording_cases.json", import.meta.url), "utf-8"));
 const NOW = Date.parse(CASES.now);
@@ -34,5 +35,9 @@ describe("the board's wording, as the console ports it", () => {
 
   it.each([["ago", ago], ["until", until]] as const)("%s reads a time as the console does", (scale, said) => {
     expect(CASES[scale].map(([iso]) => said(iso, NOW))).toEqual(CASES[scale].map(([, want]) => want));
+  });
+
+  it("elapsed reads a duration as the console does", () => {
+    expect(CASES.elapsed.map(([s]) => elapsed(s * 1000))).toEqual(CASES.elapsed.map(([, want]) => want));
   });
 });

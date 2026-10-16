@@ -53,3 +53,8 @@ def test_an_event_reads_as_on_the_web(case):
 def test_an_events_age_reads_as_on_the_web():
     ages = CASES["event_ages"]
     assert [words.event_age(iso, NOW) for iso, _ in ages] == [want for _, want in ages]
+
+
+def test_a_duration_reads_as_on_the_web():
+    durations = CASES["elapsed"]
+    assert [words.elapsed(s) for s, _ in durations] == [want for _, want in durations]

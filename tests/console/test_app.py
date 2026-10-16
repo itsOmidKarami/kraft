@@ -456,8 +456,17 @@ def test_a_resize_under_the_palette_still_marks_the_frame(console, size, palette
     assert console.run(scenario) is True
 
 
-def test_the_tabs_win_the_top_line_at_80_columns(console, monkeypatch):
-    """A long repo path, version and update note must not wrap the tabs."""
+@pytest.mark.parametrize(
+    ("width", "version"),
+    [(80, False), (100, True)],
+    ids=["80-leaves-out-the-version", "100-names-it"],
+)
+def test_the_tabs_win_the_top_line_and_keep_clear_of_the_scope(
+    console, monkeypatch, width, version
+):
+    """A long repo path, version and update note must not wrap the tabs, nor
+    run into them (Kraft-zrf14.14); under 100 columns the version, which the
+    Server screen names, is left out."""
 
     async def health():
         return {"status": "degraded"}
@@ -473,10 +482,15 @@ def test_the_tabs_win_the_top_line_at_80_columns(console, monkeypatch):
         await console.until(pilot, lambda: app.scope and "degraded" in _text(app, "#tabs"))
         app._draw_top()
         await pilot.pause()
-        tabs = app.query_one("#tabs")
-        return tabs.region.width >= len(_text(app, "#tabs")), "Repos" in _text(app, "#tabs")
+        tabs, where = app.query_one("#tabs"), app.query_one("#where")
+        return (
+            tabs.region.width >= len(_text(app, "#tabs")),
+            "Repos" in _text(app, "#tabs"),
+            where.content_region.x - tabs.region.right >= 2,
+            f"v{app.version}" in _text(app, "#where"),
+        )
 
-    assert console.run(scenario) == (True, True)
+    assert console.run(scenario, size=(width, 24)) == (True, True, True, version)
 
 
 def test_a_link_change_under_the_palette_still_marks_the_frame(console):
@@ -508,7 +522,9 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
         monkeypatch.setattr(
             owner, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
         )
-    monkeypatch.setattr(View, "health_changed", lambda self, health: seen.add(("health", self.id)))
+        monkeypatch.setattr(
+            owner, "health_changed", lambda self, health: seen.add(("health", self.id))
+        )
 
     async def scenario(app, pilot):
         DIALOGS[dialog](app)
@@ -609,3 +625,26 @@ def test_a_dialog_survives_the_output_panel_being_asked_for(
         return still, asked.result
 
     assert console.run(scenario) == (True, answer)
+
+
+def test_widening_the_window_names_the_version_with_no_live_event(console, monkeypatch, stream):
+    """Resizing across `WIDE` redraws the top line itself; nothing else is
+    drawing it here (the stream is quiet, the health poll never answers)."""
+
+    async def health():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client, "health", health)
+
+    async def scenario(app, pilot):
+        # The start's own reads draw the top line too: let them finish first.
+        await console.until(
+            pilot, lambda: all(w.is_finished for w in app.workers if w.name == "update")
+        )
+        await pilot.pause()
+        before = f"v{app.version}" in _text(app, "#where")
+        await pilot.resize_terminal(100, 24)
+        await console.until(pilot, lambda: f"v{app.version}" in _text(app, "#where"))
+        return before
+
+    assert console.run(scenario) is False

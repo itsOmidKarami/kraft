@@ -207,7 +207,12 @@ async def update_available(channel: str | None = None) -> dict:
     """What the About page reads: the installed version, the newest release on
     `channel` (the installed one's when None) and whether this is behind;
     `behind` is None when the feed could not be read."""
-    return await transport._get("/update", channel=channel)
+    body = await transport._get("/update", channel=channel)
+    if not isinstance(body, dict):
+        raise transport.ClientError(
+            "kraft 200: the answer was not a JSON object", kind=transport.Failure.BAD_RESPONSE
+        )
+    return body
 
 
 async def cancel_preview(work_item_id: str | None = None) -> dict:

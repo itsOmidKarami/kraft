@@ -195,3 +195,33 @@ COMPLETED = "marked {id} complete"
 def skipped(what: str) -> str:
     """skip's sentence, `{id}` left for the answer: what it passed over."""
     return f"skipped {what} on {{id}}"
+
+
+def reload_summary(result: dict) -> str:
+    """What a reload took and what it refused: `kraft admin reload` prints it,
+    the console's `l` on the Server says it."""
+    refused = result.get("refused_policy")
+    refused_intake = result.get("refused_intake")
+    files = [n for n, bad in (("policy.yaml", refused), ("intake.yaml", refused_intake)) if not bad]
+    also = f" and {' and '.join(files)}" if files else ""
+    lines = [f"reloaded {len(result.get('valid', []))} template(s){also}"]
+    for name, reason in (result.get("invalid_templates") or {}).items():
+        lines.append(f"  invalid: {name}: {reason}")
+    if refused:
+        lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
+    if refused_intake:
+        # `ConfigError` names the file itself.
+        lines.append(
+            f"  refused: {refused_intake} (the running auto-intake and schedules are kept)"
+        )
+    return "\n".join(lines)
+
+
+def reload_refused(result: dict) -> bool:
+    """Whether a reload left a template invalid or refused a file: `kraft
+    admin reload` exits 1, and the console says it in the error colour."""
+    return bool(
+        result.get("invalid_templates")
+        or result.get("refused_policy")
+        or result.get("refused_intake")
+    )
