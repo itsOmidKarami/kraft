@@ -421,8 +421,9 @@ class Board(View):
             result = await call
         except client.ClientError as exc:
             self.app.notify_refusal(exc)
-            self._peeked = ()
-            self._peek_soon()
+            # The board read with no events reads as a reconnect: this view
+            # draws again and the peek reads the item again.
+            self.app.live.reread()
             return
         self.app.notify(said(result), markup=False)
 

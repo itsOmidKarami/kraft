@@ -18,6 +18,7 @@ from support.console_board import (
     PAUSED,
     QUESTION,
     RUNNING,
+    _detail,
     _ids,
     _iso,
     _lines,
@@ -30,7 +31,6 @@ from textual.widgets import OptionList
 
 from kraft import client
 from kraft.console import tail
-from kraft.console.dialogs import Note
 from kraft.console.screens import board as board_view
 
 
@@ -339,11 +339,6 @@ def test_the_chain_line_is_a_window_around_where_the_item_stands(at, states, wid
     assert board_view.chain_line(marks, width).plain == line
 
 
-def _detail(row: dict, **fields) -> dict:
-    """The detail read (`get_work_item(full=True)`) of `row`."""
-    return {**row, "status": "active", "worker_sessions": [], "dependencies": [], **fields}
-
-
 BLOCKED = _row("b1b1b1b1", "blocked", current_node_id=None)
 OVER_BUDGET = _row(
     "u1u1u1u1",
@@ -639,123 +634,3 @@ def test_a_live_refresh_rereads_the_peek_only_when_its_item_changed(board, monke
         return quiet, app.focused is app.view
 
     assert board([RUNNING]).run(scenario, size=(80, 40)) == ([RUNNING["id"]], True)
-
-
-#: What a lifecycle route answers with the item's whole row (`is_item_row`).
-WHOLE = {"status": "active", "chain_definition": {}}
-PAUSED_STEER = PAUSED | {"actions": ["resume", "steer"]}
-
-
-@pytest.mark.parametrize(
-    ("row", "keys", "answer", "sent", "said"),
-    [
-        (
-            GATE,
-            ["r", *"vague", "enter"],
-            GATE | WHOLE,
-            ("reject_gate", ("vague", "spec_approval", "a91c03fe")),
-            "rejected spec_approval on a91c03fe; the item is now running",
-        ),
-        (GATE, ["r", "enter"], None, None, None),
-        (GATE, ["r", *"vague", "escape"], None, None, None),
-        (
-            RUNNING,
-            ["p"],
-            {"id": "k7f2e9a0", "paused_sessions": ["s1"]},
-            ("pause", ("k7f2e9a0",)),
-            "paused k7f2e9a0, stopping 1 running session; kraft item resume k7f2e9a0 carries on",
-        ),
-        (
-            PAUSED_STEER,
-            ["p", *"sqlite", "enter"],
-            {"id": "p1p1p1p1", "node_id": "implement", "steered": ["implement.main.author"]},
-            ("resume", ("sqlite", "p1p1p1p1")),
-            "resumed p1p1p1p1 at implement; steered implement.main.author",
-        ),
-        (
-            PAUSED,
-            ["p"],
-            {"id": "p1p1p1p1", "status": "queued", "slots": {"busy": 3, "limit": 3}},
-            ("resume", (None, "p1p1p1p1")),
-            "queued p1p1p1p1: 3 of 3 slots are busy. It starts when one frees; "
-            "kraft item pause p1p1p1p1 takes it out of the queue",
-        ),
-        (
-            QUESTION,
-            ["p", "enter", *"postgres", "enter"],
-            {"id": "q1q1q1q1", "node_id": "implement", "steered": []},
-            ("resume", ("postgres", "q1q1q1q1")),
-            "resumed q1q1q1q1 at implement",
-        ),
-        (
-            FAILED,
-            ["t", "enter"],
-            {"id": "m03d77b1", "node_id": "verification", "attempt": 2},
-            ("retry", (None, "m03d77b1")),
-            "retried m03d77b1 at verification, attempt 2",
-        ),
-        (RUNNING, ["r"], None, None, None),
-        (
-            FAILED,
-            ["t", "enter"],
-            client.status_error(409, "the item moved on: [/] it is running"),
-            ("retry", (None, "m03d77b1")),
-            "409: the item moved on: [/] it is running",
-        ),
-    ],
-    ids=[
-        "reject",
-        "reject-needs-a-note",
-        "esc-sends-nothing",
-        "pause",
-        "resume-with-a-steer",
-        "resume-that-queued",
-        "answer-a-question",
-        "retry",
-        "not-open",
-        "refused",
-    ],
-)
-def test_a_key_acts_through_its_dialog_and_says_what_the_server_did(
-    board, monkeypatch, row, keys, answer, sent, said
-):
-    """`r`, `p` and `t` send what their dialog collected and toast the CLI's
-    sentence for the answer: "queued" for a resume the board had no slot for,
-    never "resumed". A note is required where the server needs one; Esc sends
-    nothing; a key the server does not list does nothing at all; a refusal is
-    the server's own words, `[/]` and all."""
-    calls: list[tuple] = []
-
-    def fake(name):
-        async def call(*args, **kwargs):
-            calls.append((name, args))
-            if isinstance(answer, Exception):
-                raise answer
-            return answer
-
-        return call
-
-    for name in ("reject_gate", "pause", "resume", "retry"):
-        monkeypatch.setattr(client, name, fake(name))
-
-    async def scenario(app, pilot):
-        await _settled(board([row]), app, pilot)
-        for k, key in enumerate(keys):
-            await pilot.press(key)
-            if key in "rpt" and keys[k + 1 :]:  # what follows is typed into its dialog
-                await board([row]).until(pilot, lambda: isinstance(app.screen, Note))
-        toasts = lambda: [str(toast.render()) for toast in app.screen.query("Toast")]  # noqa: E731
-        if said:
-            await board([row]).until(pilot, lambda: toasts())
-        else:  # nothing to wait for: let the keys be handled, then look
-            await pilot.pause()
-            await pilot.pause()
-        return calls, toasts(), isinstance(app.screen, Note)
-
-    # Only an empty note leaves its dialog open: Enter does not send it.
-    waiting = keys == ["r", "enter"]
-    assert board([row]).run(scenario, notifications=True) == (
-        [sent] if sent else [],
-        [said] if said else [],
-        waiting,
-    )

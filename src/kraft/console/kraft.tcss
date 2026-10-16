@@ -191,6 +191,10 @@ Confirm, Note {
     margin-top: 1;
 }
 
+#note-error {
+    color: $error;
+}
+
 #confirm Horizontal {
     height: auto;
 }

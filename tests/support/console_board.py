@@ -96,3 +96,8 @@ QUESTION = _row(
     actions=["resume", "steer"],
 )
 PAUSED = _row("p1p1p1p1", "paused", 12, actions=["resume"])
+
+
+def _detail(row: dict, **fields) -> dict:
+    """The detail read (`get_work_item(full=True)`) of `row`."""
+    return {**row, "status": "active", "worker_sessions": [], "dependencies": [], **fields}

@@ -80,6 +80,7 @@ class Note(Dialog[str | None]):
                 yield Static(Content("\n".join(self.lines)), id="note-lines")
             hint = "Enter sends it · Esc sends nothing"
             yield Input(placeholder=hint if self.required else "optional · " + hint)
+            yield Static(id="note-error")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -92,3 +93,9 @@ class Note(Dialog[str | None]):
         text = event.value.strip()
         if text or not self.required:
             self._answer(text)
+        else:
+            self.query_one("#note-error", Static).update(Content("A note is required."))
+
+    @on(Input.Changed)
+    def _typed(self) -> None:
+        self.query_one("#note-error", Static).update("")

@@ -77,6 +77,11 @@ class Live:
         known to answer again."""
         self._retry.set()
 
+    def reread(self) -> None:
+        """Read the board again now, as after an event: a refused action
+        leaves the row it was about possibly stale, and no event says so."""
+        self._wake.set()
+
     async def _follow(self) -> None:
         failures = 0
         # Failures in a row from a server that answered, which a retry is not

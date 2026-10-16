@@ -9,7 +9,7 @@ import pytest
 
 from kraft import client
 from kraft.console import app as console_app
-from kraft.console.dialogs import Confirm
+from kraft.console.dialogs import Confirm, Note
 from kraft.vocab import WorkItemStatus
 
 ACTIVE = [{"id": "a1b2", "title": "Fix the [/] parser", "current_node_id": "implement"}]
@@ -82,3 +82,18 @@ def test_a_second_answer_before_the_pop_completes_is_ignored(console):
         return asked.result
 
     assert console.run(scenario) is False
+
+
+def test_a_required_note_that_is_blank_says_so_and_keeps_asking(console):
+    async def scenario(app, pilot):
+        asked = app.run_worker(app.push_screen_wait(Note("Reject spec", required=True)))
+        await console.until(pilot, lambda: isinstance(app.screen, Note))
+        await pilot.press("enter")
+        await pilot.pause()
+        said = str(app.screen.query_one("#note-error").render())
+        still = isinstance(app.screen, Note)
+        await pilot.press("w", "enter")
+        await console.until(pilot, lambda: asked.is_finished)
+        return said, still, asked.result
+
+    assert console.run(scenario) == ("A note is required.", True, "w")
