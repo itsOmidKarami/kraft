@@ -11,7 +11,7 @@ import { SAVED } from "../../settings/savedWords";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, useSaves, type RowSpec } from "./kit";
 import { RESTART_KRAFT, RESTART_NEEDED } from "../../apply/sharedWords";
-import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS } from "../../settings/sharedWords";
+import { ASKED_FOR_ON_NETWORK, SESSION_EXPIRY_HINT, NO_SIGN_IN_NEEDED, NOT_USED_ON_LOOPBACK, LOOPBACK_ONLY, REVOKE_THIS_SESSION, SESSION_EXPIRY, SESSION_REVOKED, SIGN_OUT_OF_THIS, PORT_HINT, NEW_PASSWORD_SIGNS_OUT } from "../../settings/sharedWords";
 
 const LOOPBACK = "127.0.0.1";
 const EXPIRIES = [1, 7, 30];
@@ -136,7 +136,7 @@ export function AccessScreen() {
       {envNote("bind") && <p className="ph-note">{envNote("bind")}</p>}
       <Group
         title="Port"
-        foot="Used by both binds. Takes effect on restart."
+        foot={PORT_HINT}
         rows={[{ label: "port", value: String(access.port), sub: envNote("port"), ...mark("port"), onEdit: () => edit({ kind: "text", title: "Port", help: "1024 to 65535.", value: String(access.port), set: async (v) => { const p = portProblem(v); if (p) return p; return Number(v) === access.port ? null : put("port", { port: Number(v) }); } }) }]}
       />
       {lan ? (
@@ -150,7 +150,7 @@ export function AccessScreen() {
           <Group
             title="Password"
             rows={[
-              { label: "password", value: access.password_set ? "•••••••• set" : "not set", sub: "A new password signs every session out, this one too.", ...mark("password"), onEdit: () => edit({ kind: "text", title: access.password_set ? "Change password" : "Set a password", help: "Every session is signed out, this one too.", value: "", secret: true, set: async (v) => (v ? put("password", { password: v }) : "Enter a password.") }) },
+              { label: "password", value: access.password_set ? "•••••••• set" : "not set", sub: NEW_PASSWORD_SIGNS_OUT, ...mark("password"), onEdit: () => edit({ kind: "text", title: access.password_set ? "Change password" : "Set a password", help: "Every session is signed out, this one too.", value: "", secret: true, set: async (v) => (v ? put("password", { password: v }) : "Enter a password.") }) },
               { label: "session expiry", value: `${access.session_expiry_days} ${access.session_expiry_days === 1 ? "day" : "days"}`, sub: SESSION_EXPIRY_HINT, ...mark("expiry"), onEdit: () => edit({ kind: "choice", title: SESSION_EXPIRY, value: String(access.session_expiry_days), options: EXPIRIES.map((d) => ({ value: String(d), label: `${d} ${d === 1 ? "day" : "days"}` })), set: (v) => put("expiry", { session_expiry_days: Number(v) }) }) },
             ]}
           />

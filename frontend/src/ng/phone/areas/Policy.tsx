@@ -13,7 +13,7 @@ import { problemText } from "../../templates/problems";
 import { TabStrip } from "../ui/Rows";
 import { AreaScreen } from "./AreaScreen";
 import { Group, repairElsewhere, useEditor, type Edit, type RowSpec } from "./kit";
-import { LOOP_VALUE_BLANK, BOARD_AND_FORGE, EVERY_FIX_LOOP, STUCK_ITEM_OFF, POLICY_SECTION, WHEN_STUCK } from "../../settings/sharedWords";
+import { LOOP_VALUE_BLANK, BOARD_AND_FORGE, EVERY_FIX_LOOP, STUCK_ITEM_OFF, POLICY_SECTION, WHEN_STUCK, FINDINGS_BURN_A_FIX_CYCLE } from "../../settings/sharedWords";
 
 const isSection = (s: string | undefined): s is Section => SECTIONS.some((x) => x.id === s);
 const was = (c: Change | undefined) => (c ? c.summary.split(" → ")[0] : undefined);
@@ -229,7 +229,7 @@ function Loops(e: Edits) {
           onEdit: () => edit({ kind: "menu", title: x.key, options: [{ value: "rm", label: "Remove the entry", danger: true }], pick: () => removeLoop(x.key) }),
         }))} />
       )}
-      <Group title="Findings that burn a cycle" note="Severities that start another fix cycle. The rest are shown at the gate without looping." rows={SEVERITIES.map((s): RowSpec => ({
+      <Group title={FINDINGS_BURN_A_FIX_CYCLE} note="Severities that start another fix cycle. The rest are shown at the gate without looping." rows={SEVERITIES.map((s): RowSpec => ({
         key: s, label: s, sw: sev.includes(s), changed: ctx.changes.has(SEVERITY_KEY.key),
         onSwitch: () => void sendValue(draft, SEVERITY_KEY, SEVERITIES.filter((x) => (x === s ? !sev.includes(x) : sev.includes(x)))),
       }))} />

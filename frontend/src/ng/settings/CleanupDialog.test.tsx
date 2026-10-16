@@ -30,7 +30,7 @@ afterEach(() => {
 describe("CleanupDialog", () => {
   it("says what is freed, what is lost and what stays before anything is removed", async () => {
     const { calls, sent } = mount({ "POST /storage/preview": [200, storagePreview()] });
-    const dialog = await screen.findByRole("dialog", { name: "Clean up worktrees" });
+    const dialog = await screen.findByRole("dialog", { name: "Clean up finished worktrees?" });
     expect(await within(dialog).findByText(/Frees 3 GB/)).toBeInTheDocument();
     expect(within(dialog).getByText(/9 GB used afterwards: still over the quota of 8 GB, under the limit of 10 GB/)).toBeInTheDocument();
     const [cache, spike] = within(dialog).getAllByRole("listitem");
