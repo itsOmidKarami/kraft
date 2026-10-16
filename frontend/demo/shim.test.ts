@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ABORT, HANG, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
-import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
+import { buildScenario } from "../e2e/contract/mocks/fixtures";
+import { ABORT, HANG, mockServer, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
+import { useStore } from "../src/store";
+import { connectEvents } from "../src/ws";
+import { broadcast, DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
 
 /** A server that answers every request with `reply` and records what it was asked. */
 const recording = (reply: Reply) => {
@@ -129,6 +132,46 @@ describe("patchWebSocket", () => {
     patchWebSocket();
     new WebSocket("ws://localhost:5174/?token=x");
     expect(Real).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("broadcast", () => {
+  it.each([
+    ["an open socket gets the event", "open", ['{"seq":4243,"type":"pause_requested"}']],
+    ["a socket still connecting gets nothing", "connecting", []],
+    ["a closed socket gets nothing", "closed", []],
+  ])("%s", async (_, state, want) => {
+    const ws = new DemoSocket("ws://localhost/api/ws/events");
+    const got: string[] = [];
+    ws.onmessage = (e) => got.push(e.data);
+    if (state !== "connecting") await new Promise((r) => (ws.onopen = r));
+    if (state === "closed") {
+      const closed = new Promise((r) => (ws.onclose = r));
+      ws.close();
+      await closed;
+    }
+    broadcast({ seq: 4243, type: "pause_requested" });
+    expect(got).toEqual(want);
+    ws.close();
+  });
+
+  it("moves the board's row when an action's event is forwarded", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("WebSocket", vi.fn());
+    const S = buildScenario("default");
+    patchFetch(mockServer(S, { ngBoard: true, onEvent: broadcast }));
+    patchWebSocket();
+    await useStore.getState().bootstrap();
+    const id = S.ngBoard.find((x) => S.bundles[x].item.bead_id === "kraft-91bc")!;
+    const shown = () => useStore.getState().workItems[id].display_status;
+    expect(shown()).toBe("running");
+    const stop = connectEvents();
+    await vi.waitFor(() => expect(useStore.getState().connection).toBe("open"));
+    // The page's own write, as the peek's Pause makes it: nothing re-reads the list after it.
+    await fetch(`/api/work-items/${id}/pause`, { method: "POST", body: "{}" });
+    await vi.waitFor(() => expect(shown()).toBe("paused"));
+    expect(useStore.getState().eventsByItem[id].at(-1)?.type).toBe("worker_session_paused");
+    stop();
   });
 });
 

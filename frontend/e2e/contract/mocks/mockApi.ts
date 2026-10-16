@@ -3,7 +3,7 @@ import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchF
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
-import { listRow, transitions } from "./transitions";
+import { listRow, transitions, type Ev } from "./transitions";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -43,6 +43,9 @@ export interface MockOptions {
   version?: string;
   /** The instant an action's events and `updated_at` record (transitions.ts). Unset: the page's clock. */
   now?: () => string;
+  /** Told of every event an action appends (transitions.ts), as the server's event socket would send it. The demo
+   *  forwards each to its open sockets; the contract suite's socket stays silent. */
+  onEvent?: (e: Ev) => void;
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -263,7 +266,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
   const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
   const mustFix = (wid: string) => threadsOf(wid).filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id);
   // Every item action, the bulk door's included, goes through these: one item, read by the list and the detail alike.
-  const T = transitions(S, { now: opts.now, mustFix });
+  const T = transitions(S, { now: opts.now, mustFix, onEvent: opts.onEvent });
   const send = (r: { status: number; body: unknown }) => json(r.body, r.status);
   let seq = 0;
   return async (req) => {
@@ -307,10 +310,9 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
       const r = ngDryRun(req.json() ?? {});
       return json(r.body, r.status);
     }
-    // ux2-W6: a create from the composer files a new item, cloned from the board's never-started row.
+    // ux2-W6: a create from the composer files a new item, on the chain its dry run showed.
     if (p === "/work-items" && method === "POST" && !q.get("dry_run") && opts.ngBoard) {
-      const from = S.ngBoard.find((id) => S.bundles[id].item.bead_id === "kraft-f5d3") ?? S.ngBoard[0] ?? S.ng.paused;
-      return send(T.create(req.json() ?? {}, from));
+      return send(T.create(req.json() ?? {}));
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
       const nodes = S.items[0]?.chain_definition?.nodes ?? [];
@@ -337,7 +339,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     }
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
+      if (!b) return json({ detail: "unknown work item" }, 404);
       if (method === "PATCH") return send(T.patch(m[1], req.json() ?? {}));
       return json({ ...b.item, worker_sessions: b.sessions });
     }
@@ -396,12 +398,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     // gate's approve and reject, and with none pending request_changes reruns the node it names.
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)(?:\/gates\/([^/]+))?\/review$/))) {
       const wid = m[1];
-      const b = S.bundles[wid];
-      if (!b) return json({ detail: "work item not found" }, 404);
-      const it = b.item;
+      const stop = T.reviewRefusal(wid, m[2] && decodeURIComponent(m[2]));
+      if (stop) return send(stop);
+      const it = S.bundles[wid].item;
       const { outcome, summary, node } = req.json() ?? {};
-      if (m[2] && it.pending_gate !== m[2]) return json({ detail: `gate '${m[2]}' is not pending` }, 409);
-      const gate: string | null = m[2] ?? it.pending_gate ?? null;
+      const gate: string | null = m[2] ? decodeURIComponent(m[2]) : it.pending_gate ?? null;
       if (!gate && outcome === "approve") return json({ detail: "nothing to approve: no gate is pending" }, 409);
       const publish = () => {
         for (const t of threadsOf(wid)) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
@@ -413,16 +414,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
         if (r.status === 200) publish();
         return send(r);
       }
-      // `_request_changes_now`: a stopped item retries at the target, a running one reruns it, anything else waits for it.
       const target = node ?? it.fix_target?.node ?? fixTargetFor(null).node;
-      const action = it.status === "needs_human" ? "retried" : ["active", "waiting"].includes(it.status) && target === it.current_node_id ? "rerun" : "queued";
-      if (action === "retried") {
-        const r = T.retry(wid);
-        if (r.status !== 200) return send(r);
-      }
-      if (action === "rerun") { T.pause(wid); T.resume(wid); }
+      const r = T.requestChanges(wid, target, summary || "Changes requested.");
+      if (r.status !== 200) return send(r);
       publish();
-      return json({ review_id: "r2", outcome, gate: null, target, target_reason: "current node", action });
+      return json({ review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: r.body.action });
     }
     if ((m = p.match(/^\/comments\/([^/]+)$/))) {
       const c = findComment(m[1]);
@@ -440,7 +436,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/cancel-preview$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
+      if (!b) return json({ detail: "unknown work item" }, 404);
       const it = b.item;
       return json({
         running: it.current_node_id ? { node: it.current_node_id, task: it.current_node_id, attempt: 1 } : null,
@@ -456,7 +452,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     /* the item chain draft (B15, ux2-W11): none unless `opts.itemDraft` seeds the running item's; then a small stateful server */
     if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
       const b = S.bundles[m[1]];
-      if (!b) return json({ detail: "work item not found" }, 404);
+      if (!b) return json({ detail: "unknown work item" }, 404);
       const cur = b.item.current_node_id ?? null;
       const stored = (): any[] => {
         if (!itemDrafts.has(m![1])) itemDrafts.set(m![1], opts.itemDraft && opts.itemDraft !== "none" && m![1] === S.ng.running ? clone(ITEM_DRAFT_SEEDS[opts.itemDraft]) : []);
@@ -509,7 +505,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
       const mr = S.bundles[m[1]].item.mr_ref;
       T.append(m[1], "mr_reopened", { ref: mr?.number ?? null, url: mr?.url ?? null });
     }
-    if ((m = p.match(/^\/work-items\/([^/]+)\/(reopen-mr|open-worktree|escalate\/stop)$/))) {
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/escalate\/stop$/))) return send(T.stopEscalation(m[1]));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(reopen-mr|open-worktree)$/))) {
       return json({ id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }
 

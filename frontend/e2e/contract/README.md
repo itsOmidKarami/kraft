@@ -44,8 +44,11 @@ Results print as a list. A failure's trace and screenshot land in
 2. When the row needs data the base scenario lacks, add a seed beside the
    other `with*` helpers in `mocks/fixtures.ts` and pass it as `tweak`:
    `app(page, url, { tweak: withReviewer })`. Do not build data in the spec.
-   An action's events and `updated_at` record the frozen page clock's instant (`MockOptions.now`, which
-   `playwright.ts` sets to `NG_NOW`).
+   An action's events and `updated_at` record the frozen page clock's
+   instant (`MockOptions.now`, which `playwright.ts` sets to `NG_NOW`). The
+   events go nowhere here: the socket stays silent, so a row reads what an
+   action did by reading again. The demo hands them to its socket
+   (`MockOptions.onEvent`).
 3. A new screen or state that can hold an icon-only control goes in
    `screens.ts`.
 4. Prove the row: break the code it covers, see that row fail, restore the

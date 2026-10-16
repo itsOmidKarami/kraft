@@ -63,10 +63,11 @@ answers the contract suite gets. `demo/shim.ts` puts them under the page:
 `fetch` and the events socket for `/api/**`, the clock moved to the scenario's
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
-(`mocks/transitions.ts`), and a reload starts from the sample data again. The routers take the
-build's base (`import.meta.env.BASE_URL`), `/` everywhere but here. A change to
-what the demo shows is a change to the contract's mocks, so it is checked
-there.
+(`mocks/transitions.ts`), and each event it appends goes out on the events
+socket (`broadcast`), so the board moves as the item does. A reload starts
+from the sample data again. The routers take the build's base
+(`import.meta.env.BASE_URL`), `/` everywhere but here. A change to what the
+demo shows is a change to the contract's mocks, so it is checked there.
 
 ## Layout of `src/`
 

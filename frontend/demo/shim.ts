@@ -43,7 +43,11 @@ export function patchFetch(serve: MockServer, win: Window & typeof globalThis = 
   };
 }
 
-/** The events socket with no server behind it: it opens, stays silent, and closes when asked, so the shell reads "live". */
+/** The DemoSockets not yet closed: where `broadcast` sends. */
+const sockets = new Set<DemoSocket>();
+
+/** The events socket with no server behind it: it opens, closes when asked, and carries the events the mock's
+ *  actions append (`broadcast`), so the shell reads "live" and the board moves when an item does. */
 export class DemoSocket extends EventTarget {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -61,6 +65,7 @@ export class DemoSocket extends EventTarget {
 
   constructor(readonly url: string) {
     super();
+    sockets.add(this);
     setTimeout(() => {
       if (this.readyState !== DemoSocket.CONNECTING) return;
       this.readyState = DemoSocket.OPEN;
@@ -75,14 +80,26 @@ export class DemoSocket extends EventTarget {
     this.readyState = DemoSocket.CLOSING;
     setTimeout(() => {
       this.readyState = DemoSocket.CLOSED;
+      sockets.delete(this);
       this.fire(new CloseEvent("close", { code: 1000, wasClean: true }));
     }, 0);
+  }
+
+  /** One frame from the server, as a `message`. */
+  receive(data: string) {
+    this.fire(new MessageEvent("message", { data }));
   }
 
   private fire(e: Event) {
     this.dispatchEvent(e);
     (this[`on${e.type}` as "onopen"] as ((e: Event) => void) | null)?.(e);
   }
+}
+
+/** An event row to every open DemoSocket, as the server's socket sends it; one connecting or closing gets nothing. */
+export function broadcast(event: unknown) {
+  const data = JSON.stringify(event);
+  for (const s of sockets) if (s.readyState === DemoSocket.OPEN) s.receive(data);
 }
 
 /** `new WebSocket(...)` for /api/** makes a DemoSocket; any other (Vite's dev reload socket) is the real one. */

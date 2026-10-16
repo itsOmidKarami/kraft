@@ -2,7 +2,7 @@ import { buildScenario } from "../e2e/contract/mocks/fixtures";
 import { mockServer } from "../e2e/contract/mocks/mockApi";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { showBadge } from "./badge";
-import { patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
+import { broadcast, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
 
 /**
  * The dashboard demo: the shipped SPA on the UI contract's scenario, answered in the
@@ -10,7 +10,8 @@ import { patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock }
  * it; `npm run build:demo` builds it, and each docs version serves its own at <base>demo/.
  */
 // The release this demo was built from, up to date, instead of the scenario's old version and its update notice.
-const serve = mockServer(buildScenario("default"), { ngBoard: true, areas: "default", harnesses: "floor", version: __KRAFT_DEMO_VERSION__ });
+// Each event an action appends goes out on the events socket, so the board moves as the item does.
+const serve = mockServer(buildScenario("default"), { ngBoard: true, areas: "default", harnesses: "floor", version: __KRAFT_DEMO_VERSION__, onEvent: broadcast });
 
 shiftClock(Date.parse(NG_NOW));
 patchFetch(serve);
