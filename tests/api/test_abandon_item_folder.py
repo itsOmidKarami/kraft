@@ -126,13 +126,20 @@ def test_abandon_records_why_and_settles_the_items_beads(
     ]
 
 
-@pytest.mark.parametrize("body", [{}, {"reason": "  "}], ids=["missing", "blank"])
-def test_abandon_without_a_reason_is_refused_and_changes_nothing(client, repo, body):
+@pytest.mark.parametrize("body", [None, {}, {"reason": "  "}], ids=["no-body", "missing", "blank"])
+def test_abandon_without_a_reason_still_abandons_and_records_none(client, repo, fake_beads, body):
+    """A caller from before reasons were kept still abandons: no reason on the
+    event or the detail, and the item's own bead is closed saying only that."""
     wid = client.post(
         "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
     ).json()["id"]
+    own = client.get(f"/api/work-items/{wid}").json()["bead_id"]
 
     r = client.post(f"/api/work-items/{wid}/abandon", json=body)
 
-    assert r.status_code == 422, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+    assert r.status_code == 200, r.text
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert (detail["status"], detail["ended_reason"]) == ("abandoned", None)
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    assert [e["payload"] for e in events if e["type"] == "work_item_abandoned"] == [{}]
+    assert fake_beads.all()[own]["close_reason"] == "abandoned"
