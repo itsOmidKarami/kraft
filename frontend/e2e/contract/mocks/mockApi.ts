@@ -47,8 +47,8 @@ export interface MockOptions {
   /** Told of every event an action appends (transitions.ts), as the server's event socket would send it. The demo
    *  forwards each to its open sockets; the contract suite's socket stays silent. */
   onEvent?: (e: Ev) => void;
-  /** Live motion (motion.ts): the board's running items walk their chains on a timer and stop at gates, and a fresh
-   *  item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
+  /** Live motion (motion.ts): the board's active items walk their chains on a timer and stop at gates, a waiting one
+   *  goes on once its retry time passes, and a fresh item is filed when the board goes quiet. Off unless set; only the demo sets it. An object paces it, for tests. */
   motion?: boolean | MotionOptions;
 }
 

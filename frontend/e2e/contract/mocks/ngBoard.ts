@@ -1,5 +1,5 @@
 import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
-import { buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
+import { buildNeverStarted, buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
 
 /**
  * The board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
@@ -10,7 +10,8 @@ import { buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
  * (transitions.ts `listRow`, whose `stop` carries no `facts`, as W4's list sends it).
  */
 
-type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; tweak?: (i: any) => void };
+/** `fresh`: filed paused and never started, so it has no history at all (only `work_item_created`), whatever `sc` ran. */
+type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; fresh?: boolean; tweak?: (i: any) => void };
 
 const R = (name: string) => `/Users/dev/code/${name}`;
 const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorepo/services/${name}-with-a-long-checkout-path`;
@@ -30,9 +31,7 @@ const ROWS: Row[] = [
   } },
   { sc: "waiting", title: "Document the policy sandbox settings", repo: "kraft-docs", bead: "kraft-e410", age: 14, chain: "docs_only" },
   { sc: "escalated", title: "Lint fan-out for multi-repo chains", repo: "kraft-plugins", bead: "kraft-2c77", age: 31 },
-  { sc: "running", title: "Spike: stream logs over SSE", repo: "kraft-core", bead: "kraft-f5d3", age: 180, tweak: (i) => {
-    i.status = "paused"; i.display_status = "paused"; i.current_node_id = null; i.stop = null;
-  } },
+  { sc: "paused", title: "Spike: stream logs over SSE", repo: "kraft-core", bead: "kraft-f5d3", age: 180, fresh: true },
   { sc: "done", title: "Release notes for 0.14", repo: "kraft-docs", bead: "kraft-3a90", age: 120, chain: "docs_only" },
   { sc: "done", title: "Remove the legacy poller flags", repo: "kraft-core", bead: "kraft-1b6e", age: 1440 },
   { sc: "cancelled", title: "Rename the harness profiles", repo: "kraft-core", bead: "kraft-88ca", age: 2880 },
@@ -53,7 +52,7 @@ const LONG_TAIL = " so the board has to ellipsize a title that runs far past the
 function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<string, ItemBundle>): string[] {
   const long = variant === "long";
   return rows.map((r, n) => {
-    const b = buildNgItem(r.sc, seed0 + n, long ? "long" : "default");
+    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default") : buildNgItem(r.sc, seed0 + n, long ? "long" : "default");
     const i = b.item;
     i.id = hex(seed0 + n);
     i.title = long ? r.title + LONG_TAIL : r.title;
@@ -67,6 +66,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
     r.tweak?.(i);
     for (const s of b.sessions) s.work_item_id = i.id;
     for (const e of b.events) e.work_item_id = i.id;
+    if (r.fresh) b.events.push({ seq: 1, work_item_id: i.id, type: "work_item_created", payload: { title: i.title, repo: i.repo, chain_template: i.chain_template }, node_id: null, created_at: i.created_at });
     bundles[i.id] = b;
     return i.id;
   });

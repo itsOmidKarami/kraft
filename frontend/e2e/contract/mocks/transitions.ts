@@ -1,7 +1,7 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
 import { documentsFor, hex, logLines, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
-import { buildNgItem } from "./ngItems";
+import { buildNeverStarted } from "./ngItems";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -89,22 +89,17 @@ function notPaused(item: any): string {
 const py = (s: string) => `'${s}'`;
 const usd = (v: number | null) => (v === null ? "no cap" : `$${Number(v.toPrecision(6))}`);
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** `kraft.usage.usd`: dollars as the budget meter prints them, cents from $1 up and a tenth of a cent under it. */
+const meter = (n: number) => `$${n.toFixed(n >= 1 ? 2 : 3)}`;
+/** `kraft.usage.cap_usd`: a cap as it was set, with more digits where it has more. */
+const capUsd = (n: number) => (String(n).split(".")[1]?.length ?? 0) > (n >= 1 ? 2 : 3) ? `$${n}` : meter(n);
 /** A sum of dollars without the float's tail ($2.4100000001). */
 const dollars = (v: number) => Math.round(v * 10_000) / 10_000;
 
 /** What a new item is made from: a sample item before it ran, with nothing on it that says it did. Built on its
  *  own, not taken from the scenario, so no edit to a sample item reaches it and the empty scenario has one too. */
 function template(): ItemBundle {
-  const b = buildNgItem("paused", 9999, "default");
-  const it = b.item;
-  Object.assign(it, {
-    current_node_id: null, pending_steer_context: null, stop: null, escalation_threads: [], concerns: [], deferred_findings: [],
-    worktree_path: null, head_sha: null, branch: null, mr_ref: null, progress: null, rate_limit: null, retry_at: null,
-    attempts: [], last_review_sha: null, fix_target: null, needs_context_question: null,
-    budget_cap: { ...it.budget_cap, source: "policy", spent_usd: 0 },
-    usage: { total: { tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },
-  });
-  return { item: it, sessions: [], events: [], logs: {}, threads: [], beads: [] };
+  return buildNeverStarted(9999, "default");
 }
 
 export interface TransitionOptions {
@@ -186,6 +181,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const run = (it: any) => Object.assign(it, { status: "active", stop: null, pending_gate: null, gate_artifact: null, needs_context_question: null, retry_at: null });
 
   const t = {
+    /** The instant the doors record: the mock's clock, which live motion reads a `retry_at` against. */
+    now,
     /** The newest event seq, as GET /work-items' `cursor` answers it. */
     cursor: () => seq,
     append,
@@ -516,7 +513,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       tally(b);
       return ok(settle(it));
     },
-    /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. */
+    /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. Every task kind has
+     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`. */
     createSession(id: string, node: string, hookPoint: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
@@ -525,7 +523,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const sid = sessionId();
       b.sessions.push({
         id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
-        created_at: now(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
+        created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
       b.logs[sid] = logLines(sid, 12, false);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
@@ -551,8 +549,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       settle(it);
       return ok({ id, session_id: sid });
     },
-    /** `store.session_exited`: the session done, with the usage it reported on the way out, added to the item's spend. */
-    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number }): Result {
+    /** `store.session_exited`: the session done, with the usage an agent reported on the way out, added to the item's
+     *  spend. A builtin, forge or command task reports none (`usage` null): only its wall time. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
@@ -561,6 +560,12 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
       const at = now();
       const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      if (!usage) {
+        Object.assign(s, { status: "done", exited_at: at, wall_ms });
+        append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
+        settle(it);
+        return ok({ id, session_id: sid });
+      }
       Object.assign(s, { status: "done", exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
       const u = it.usage;
       if (u) {
@@ -575,13 +580,17 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       settle(it);
       return ok({ id, session_id: sid });
     },
-    /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. */
+    /** `store.complete_node`: the node done; the item still stands on it until the walk enters the next. Once per node
+     *  per run fork, as the store writes it: a node re-entered (a resume, a rejection's rerun) and completed again
+     *  writes nothing, until a retry forks the run (`work_item_retried`). */
     completeNode(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
       if (!nodeIds(it).includes(node)) return no(409, `node ${py(node)} is not in this chain`);
-      append(id, "node_completed", { node_id: node });
+      const fork = b.events.map((e) => e.type).lastIndexOf("work_item_retried");
+      const done = b.events.slice(fork + 1).some((e) => e.type === "node_completed" && e.payload.node_id === node);
+      if (!done) append(id, "node_completed", { node_id: node });
       tally(b);
       return ok(settle(it));
     },
@@ -598,6 +607,30 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         step: null, stop: { kind: "gate", node: gate, task: null, attempt: 1, resume_at: null, reason: null, facts: {} },
       });
       append(id, "gate_requested", { gate, node_id: gate });
+      return ok(settle(it));
+    },
+    /** `stops.stop_for_budget`: a spend cap reached before an agent task launches. The item stops on `node`
+     *  (`store.mark_needs_human`, kind `budget`) in `stops.budget_reason`'s words for a work item's cap. */
+    stopForBudget(id: string, node: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      const spent = it.budget_cap?.spent_usd ?? 0;
+      const cap = it.budget_cap?.cap_usd ?? 0;
+      const reason = `budget cap reached: ${meter(spent)} spent on this work item, cap ${capUsd(cap)}. Nothing new was started; a running agent was not interrupted.`;
+      const budget = { scope: "work_item", spent_usd: spent, cap_usd: cap };
+      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {} } });
+      append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
+      return ok(settle(it));
+    },
+    /** `store.mark_reentered`: a waiting or rate-limited item its poller re-enters once its `retry_at` passes, back to
+     *  active with no event of its own (the walk's `node_started` narrates the re-entry). */
+    reenter(id: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { it } = x;
+      if (it.status !== "waiting" && it.status !== "rate_limited") return no(409, `work item is ${it.status}, not waiting`);
+      Object.assign(it, { status: "active", retry_at: null, stop: null, rate_limit: null });
       return ok(settle(it));
     },
     /** `store.mark_completed`: the chain ran to its end. */
