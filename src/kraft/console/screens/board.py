@@ -85,6 +85,44 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     return Content.assemble(*parts)
 
 
+def chain_line(marks: list[dict], width: int) -> Content:
+    """The chain as a window around where the item stands (spec §6): what fits
+    on either side, `+N …` and `… +N` counting what is hidden. An ended chain
+    shows its end, one not started its start. The item's place is `●` in the
+    accent (spec §5.2); done nodes are faint."""
+    if not marks:
+        return Content("")
+    names = [m["node"] + (" ●" if m["state"] in ("current", "hot") else "") for m in marks]
+    last = len(marks) - 1
+    at = next(
+        (k for k, m in enumerate(marks) if m["state"] in ("current", "hot")),
+        last if marks[-1]["state"] == "done" else 0,
+    )
+
+    def size(lo: int, hi: int) -> int:
+        shown = sum(len(name) for name in names[lo : hi + 1]) + 3 * (hi - lo)
+        return (
+            shown + (len(f"+{lo} … ") if lo else 0) + (len(f" … +{last - hi}") if hi < last else 0)
+        )
+
+    lo = hi = at
+    grown = True
+    while grown:
+        grown = False
+        if hi < last and size(lo, hi + 1) <= width:
+            hi, grown = hi + 1, True
+        if lo > 0 and size(lo - 1, hi) <= width:
+            lo, grown = lo - 1, True
+    style = {"done": "$kraft-faint", "current": "bold $primary", "hot": "bold $primary", "todo": ""}
+    parts: list[str | tuple[str, str]] = [(f"+{lo} … ", "$kraft-faint")] if lo else []
+    for k in range(lo, hi + 1):
+        parts += [(" → ", "$kraft-faint")] if k > lo else []
+        parts.append((names[k], style[marks[k]["state"]]))
+    if hi < last:
+        parts.append((f" … +{last - hi}", "$kraft-faint"))
+    return Content.assemble(*parts)
+
+
 class Board(View):
     label = "Board"
     BINDINGS: ClassVar[list[BindingType]] = [

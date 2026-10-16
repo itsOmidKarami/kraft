@@ -1,12 +1,22 @@
 {
   "_doc": "The web's wording and the console's, held to one set of cases (spec §4.5). tests/console/test_words.py runs them against src/kraft/console/words.py; frontend/src/ng/board/wording.test.ts against model.ts, rowText.ts and format.ts. Each case is a real row shape cut to the fields the function reads, one per branch. A change to either side changes a case here, or the other suite fails.",
   "now": "2026-10-15T12:00:00Z",
+  "chain": {
+    "template_id": "default",
+    "nodes": [
+      { "id": "spec", "kind": "exec" },
+      { "id": "spec_approval", "kind": "gate" },
+      { "id": "plan", "kind": "exec" },
+      { "id": "implement", "kind": "exec" }
+    ]
+  },
   "rows": [
     {
       "name": "gate",
       "row": { "display_status": "needs_you", "current_node_id": "spec_approval", "pending_gate": "spec_approval", "stop": { "kind": "gate", "node": "spec_approval", "reason": null } },
       "group": "needs",
-      "tail": "approve spec"
+      "tail": "approve spec",
+      "marks": ["done", "hot", "todo", "todo"]
     },
     {
       "name": "gate-without-pending-gate",
@@ -60,13 +70,15 @@
       "name": "paused-mid-chain",
       "row": { "display_status": "paused", "current_node_id": "implement" },
       "group": "needs",
-      "tail": "paused at implement"
+      "tail": "paused at implement",
+      "marks": ["done", "done", "done", "hot"]
     },
     {
       "name": "filed-paused",
       "row": { "display_status": "paused", "current_node_id": null },
       "group": "not_started",
-      "tail": "created paused"
+      "tail": "created paused",
+      "marks": ["todo", "todo", "todo", "todo"]
     },
     {
       "name": "blocked-mid-chain",
@@ -84,7 +96,8 @@
       "name": "running-step-with-task",
       "row": { "display_status": "running", "current_node_id": "implement", "step": { "index": 2, "count": 3, "name": "main", "task": "author" } },
       "group": "running",
-      "tail": "2 of 3 · main › author"
+      "tail": "2 of 3 · main › author",
+      "marks": ["done", "done", "done", "current"]
     },
     {
       "name": "running-step",
@@ -150,13 +163,15 @@
       "name": "escalated",
       "row": { "display_status": "escalated", "current_node_id": "plan" },
       "group": "running",
-      "tail": "escalation running"
+      "tail": "escalation running",
+      "marks": ["done", "done", "hot", "todo"]
     },
     {
       "name": "merged",
       "row": { "display_status": "done", "current_node_id": "implement", "mr_ref": { "number": 42, "url": "https://example.com/mr/42" } },
       "group": "done",
-      "tail": "merged !42"
+      "tail": "merged !42",
+      "marks": ["done", "done", "done", "done"]
     },
     {
       "name": "completed",
@@ -181,6 +196,13 @@
       "row": { "display_status": "pondering", "current_node_id": "plan" },
       "group": "running",
       "tail": ""
+    },
+    {
+      "name": "on-a-node-the-chain-lacks",
+      "row": { "display_status": "running", "current_node_id": "gone" },
+      "group": "running",
+      "tail": "gone",
+      "marks": ["todo", "todo", "todo", "todo"]
     },
     {
       "name": "no-status",

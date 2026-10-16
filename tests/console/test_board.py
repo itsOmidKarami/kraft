@@ -381,3 +381,28 @@ def test_a_board_longer_than_the_window_keeps_the_cursor_near_a_vanished_item(bo
     assert now != gone
     assert abs(moved) <= 1
     assert abs(scroll) <= 2
+
+
+#: Seven nodes, so a narrow line has to leave some out on both sides.
+SEVEN = [{"node": name, "gate": False, "state": "todo"} for name in "abcdefg"]
+
+
+@pytest.mark.parametrize(
+    ("at", "states", "width", "line"),
+    [
+        (3, None, 80, "a → b → c → d ● → e → f → g"),
+        (3, None, 20, "+3 … d ● → e … +2"),
+        (0, None, 14, "a ● → b … +5"),
+        (None, "done", 14, "+4 … e → f → g"),
+        (None, "todo", 14, "a → b → c … +4"),
+    ],
+    ids=["all-fits", "window", "at-the-start", "ended", "not-started"],
+)
+def test_the_chain_line_is_a_window_around_where_the_item_stands(at, states, width, line):
+    """Spec §6: what fits on either side, `+N …` and `… +N` counting what is
+    hidden; an ended chain shows its end, one not started its start."""
+    marks = [
+        {**m, "state": states or ("done" if k < at else "current" if k == at else "todo")}
+        for k, m in enumerate(SEVEN)
+    ]
+    assert board_view.chain_line(marks, width).plain == line

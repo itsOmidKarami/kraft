@@ -163,6 +163,27 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
             return ""
 
 
+def chain_marks(row: dict) -> list[dict]:
+    """`chainMarks`: each node of the item's chain, done, the one it stands
+    on (`hot` when it needs you), or still to run; gates marked."""
+    nodes = (row.get("chain_definition") or {}).get("nodes") or []
+    ended = row.get("display_status") in ("done", "cancelled", "archived")
+    at = next((k for k, n in enumerate(nodes) if n.get("id") == row.get("current_node_id")), -1)
+    hot = group_of(row) == "needs" or row.get("display_status") == "escalated"
+
+    def state(k: int) -> str:
+        if ended or 0 <= at and k < at:
+            return "done"
+        if k == at:
+            return "hot" if hot else "current"
+        return "todo"
+
+    return [
+        {"node": n.get("id"), "gate": n.get("kind") == "gate", "state": state(k)}
+        for k, n in enumerate(nodes)
+    ]
+
+
 def _seconds(iso: str | None) -> float | None:
     if not iso:
         return None
