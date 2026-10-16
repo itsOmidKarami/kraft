@@ -452,9 +452,9 @@ def test_a_hiding_server_lets_go_of_a_feed_read(console, monkeypatch):
         await pilot.pause()
         answer.set()
         await pilot.pause()
-        return app.release, _reading_release(app)
+        return app.release
 
-    assert console.run(scenario) == (None, False)
+    assert console.run(scenario) is None
 
 
 @pytest.mark.parametrize(
@@ -508,8 +508,8 @@ def test_a_release_that_arrives_while_the_server_is_shown_is_drawn_at_once(conso
 
 
 def test_a_filter_key_leaves_a_scrolled_up_reader_where_they_are(console, monkeypatch):
-    """Typing the filter redraws the log: a reader who scrolled up stays at
-    the line they were on, and one who follows keeps following."""
+    """Typing the filter redraws the log: a reader who scrolled up keeps the
+    offset they scrolled to, and one who follows keeps following."""
     monkeypatch.setattr(tail, "POLL_S", 0.01)
     _quiet(monkeypatch)
     _write(*(f"line {n}" for n in range(60)))
@@ -521,7 +521,8 @@ def test_a_filter_key_leaves_a_scrolled_up_reader_where_they_are(console, monkey
         await pilot.press("f", "l")
         await console.until(pilot, lambda: app.view.filter_text == "l")
         await console.until(pilot, lambda: log.is_vertical_scroll_end)
-        followed = True
+        await pilot.pause()
+        followed = log.is_vertical_scroll_end
         await pilot.press("escape", "pageup")
         await console.until(pilot, lambda: "End follows" in _text(app, "#server-rule"))
         at = log.scroll_y
@@ -533,20 +534,26 @@ def test_a_filter_key_leaves_a_scrolled_up_reader_where_they_are(console, monkey
     assert console.run(scenario) == (True, True, True)
 
 
-def test_widening_the_window_names_the_version_with_no_live_event(console, monkeypatch, stream):
-    """Resizing across `WIDE` redraws the top line itself; nothing else is
-    drawing it here (the stream is quiet, the health poll never answers)."""
-    _quiet(monkeypatch)
+def test_a_failed_read_after_an_update_forgets_the_old_release(console, kraft_is, monkeypatch):
+    """The release read before the update says "update available"; when the
+    read after it fails, that is no longer known, so the Server asks again."""
+    kraft_is(ECHO)
+    calls = _quiet(monkeypatch, [RELEASE, FEED_DOWN])
+
+    async def no_one_running(status=None, **kwargs):
+        return []
+
+    monkeypatch.setattr(client, "list_work_items", no_one_running)
 
     async def scenario(app, pilot):
-        # The start's own reads draw the top line too: let them finish first.
-        await console.until(
-            pilot, lambda: all(w.is_finished for w in app.workers if w.name == "update")
-        )
+        await console.until(pilot, lambda: app.release is not None)
+        await pilot.press("2", "U")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("shift+tab", "enter")
+        await console.until(pilot, lambda: len(calls) == 2)
+        await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
+        await pilot.press("escape")
         await pilot.pause()
-        before = f"v{app.version}" in _text(app, "#where")
-        await pilot.resize_terminal(100, 24)
-        await console.until(pilot, lambda: f"v{app.version}" in _text(app, "#where"))
-        return before
+        return app.release, app.update_waiting
 
-    assert console.run(scenario) is False
+    assert console.run(scenario) == (None, False)

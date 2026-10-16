@@ -625,3 +625,26 @@ def test_a_dialog_survives_the_output_panel_being_asked_for(
         return still, asked.result
 
     assert console.run(scenario) == (True, answer)
+
+
+def test_widening_the_window_names_the_version_with_no_live_event(console, monkeypatch, stream):
+    """Resizing across `WIDE` redraws the top line itself; nothing else is
+    drawing it here (the stream is quiet, the health poll never answers)."""
+
+    async def health():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client, "health", health)
+
+    async def scenario(app, pilot):
+        # The start's own reads draw the top line too: let them finish first.
+        await console.until(
+            pilot, lambda: all(w.is_finished for w in app.workers if w.name == "update")
+        )
+        await pilot.pause()
+        before = f"v{app.version}" in _text(app, "#where")
+        await pilot.resize_terminal(100, 24)
+        await console.until(pilot, lambda: f"v{app.version}" in _text(app, "#where"))
+        return before
+
+    assert console.run(scenario) is False

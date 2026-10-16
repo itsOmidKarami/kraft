@@ -483,7 +483,7 @@ class KraftConsole(App):
     async def check_update(self) -> None:
         """Read the release feed through the server, keeping the answer for
         the Server view; a failure leaves the last one (the Server reads
-        again when shown)."""
+        again when shown, until a read first succeeds)."""
         try:
             found = await client.update_available()
         except client.ClientError:
@@ -505,6 +505,8 @@ class KraftConsole(App):
         if update.installed() != self.version:
             self.updated = True
             self.default_screen.add_class("-updated")
+        # A failed read must not leave the old answer standing: the Server reads again.
+        self.release, self.update_waiting = None, False
         self.run_worker(self.check_update, name="update")
 
     def _draw_top(self, width: int | None = None) -> None:
