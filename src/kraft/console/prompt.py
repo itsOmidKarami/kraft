@@ -93,4 +93,10 @@ class Prompt(Input):
     def action_leave(self) -> None:
         self.value = ""
         self._back = 0
-        self.app.view.focus()
+        # No server: the view is hidden and Enter should press Start server (spec §6).
+        frame = self.app.default_screen
+        start = self.app.query_one_optional("#start")
+        if start is not None and frame.has_class("-no-server"):
+            frame.set_focus(start)
+        else:
+            self.app.view.focus()

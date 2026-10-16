@@ -135,3 +135,42 @@ def test_enter_runs_the_line_opens_its_view_or_says_why_not(
         return app.view.id, toasts, console.output(app)[: len(ran)]
 
     assert console.run(scenario, notifications=True) == (view, toast, ran)
+
+
+def test_esc_with_no_server_lands_on_start_server(console, monkeypatch):
+    """The view is hidden then: Enter must press the button (spec §6)."""
+
+    async def gone(**kwargs):
+        raise client.transport._unreachable()
+
+    monkeypatch.setattr(client, "board_rows", gone)
+
+    async def scenario(app, pilot):
+        await console.until(pilot, lambda: app.default_screen.has_class("-no-server"))
+        await pilot.press("slash", "escape")
+        return app.focused is app.query_one("#start")
+
+    assert console.run(scenario) is True
+
+
+def test_a_busy_console_does_not_ask_first(console, kraft_is):
+    """A confirm whose answer would be thrown away is no confirm."""
+    kraft_is("import time; time.sleep(30)")
+
+    async def scenario(app, pilot):
+        app.run_worker(app.run_command(["view", "list"]))
+        await console.until(pilot, lambda: app.command is not None)
+        await pilot.press("escape")
+        await pilot.press("slash")
+        app.query_one(Prompt).value = "/admin stop"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        asked = isinstance(app.screen, Confirm)
+        toasts = [str(t.render()) for t in app.screen.query("Toast")]
+        await app.command.end()
+        return asked, toasts
+
+    assert console.run(scenario, notifications=True) == (
+        False,
+        ["A command is still running: Ctrl+O shows it, x stops it."],
+    )

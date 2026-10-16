@@ -38,6 +38,9 @@ from kraft.console import runner
         ("/view events a91c --follow", ("say", runner.FOLLOW_LATER)),
         ("/view logs a91c", ("run", ["view", "logs", "a91c"])),
         ("/admin update -y --restart --yes", ("run", ["admin", "update", "--restart"])),
+        ("/admin update --ye --restart", ("run", ["admin", "update", "--restart"])),
+        ("/view logs a91c --fol", ("say", runner.FOLLOW_LATER)),
+        ("/admin start --det", ("run", ["admin", "start", "--det"])),
     ],
     ids=[
         "slash",
@@ -62,6 +65,9 @@ from kraft.console import runner
         "events-follow",
         "logs-without-follow",
         "update-never-yes",
+        "update-yes-abbrev",
+        "follow-abbrev",
+        "detach-abbrev",
     ],
 )
 def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):
@@ -88,6 +94,12 @@ def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):
         ),
         (["item", "abandon", "a91c"], None),
         (["item", "abandon", "a91c", "--yes"], runner.CONFIRMS[("item", "abandon")]),
+        (["item", "abandon", "a91c", "--ye"], runner.CONFIRMS[("item", "abandon")]),
+        (["item", "archive", "--y"], runner.CONFIRMS[("item", "archive")]),
+        (
+            ["admin", "update", "--res"],
+            ("This installs the newest Kraft release.", "restarting"),
+        ),
         (["item", "archive", "--yes"], runner.CONFIRMS[("item", "archive")]),
         (["admin", "addon", "uninstall", "x@y"], ("This uninstalls the add-on.", None)),
         (["admin", "addon", "list"], None),
@@ -102,6 +114,9 @@ def test_a_typed_line_runs_opens_a_view_or_says_why_not(line, does):
         "cancel",
         "abandon-preview",
         "abandon",
+        "abandon-abbrev",
+        "archive-abbrev",
+        "update-restart-abbrev",
         "archive",
         "addon-uninstall",
         "addon-list",

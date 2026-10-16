@@ -286,6 +286,9 @@ class KraftConsole(App):
             self.show(what)
         elif kind == "say":
             self.notify(what, markup=False)
+        elif self.command is not None:
+            # Before the question: its answer would be thrown away.
+            self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
         else:
             asked = runner.ask(what)
             if asked is not None:

@@ -56,6 +56,19 @@ CONFIRMS = {
 }
 
 
+def _given(words: list[str], long: str, short: str | None = None) -> bool:
+    """Whether `words` pass the flag `long` (or `short`). argparse takes any
+    unambiguous prefix of a long flag (`--ye` is `--yes`) and `--flag=value`;
+    the checks below must see what the CLI will."""
+    for word in words:
+        flag = word.partition("=")[0]
+        if word == short or flag == long:
+            return True
+        if flag.startswith("--") and len(flag) > 2 and long.startswith(flag):
+            return True
+    return False
+
+
 def route(line: str) -> tuple[str, str | list[str]]:
     """What a typed line does: `("run", argv)` for `kraft <argv>`, `("show",
     view)` to open a view instead, or `("say", sentence)` to refuse it. A
@@ -72,18 +85,18 @@ def route(line: str) -> tuple[str, str | list[str]]:
         return "show", "addons"
     if len(words) == 1 and words[0] in GROUPS:
         return "show", GROUPS[words[0]]
-    if not words or (head == ("admin", "start") and not {"-d", "--detach"} & set(words)):
+    if not words or (head == ("admin", "start") and not _given(words, "--detach", "-d")):
         return "say", ATTACHED
     for prefix, why in REFUSED.items():
         if tuple(words[: len(prefix)]) == prefix:
             return "say", why
     if head == ("view", "watch"):
         return "show", "board"
-    if head in FOLLOWED and {"-f", "--follow"} & set(words):
+    if head in FOLLOWED and _given(words, "--follow", "-f"):
         return "say", FOLLOW_LATER
     if head == ("admin", "update"):
         # Never `-y`: its own refusals (add-ons it would drop, a 0.x config) still show.
-        words = [word for word in words if word not in ("-y", "--yes")]
+        words = [w for w in words if not _given([w], "--yes", "-y")]
     return "run", words
 
 
@@ -95,9 +108,9 @@ def ask(argv: list[str]) -> tuple[str, str | None] | None:
     if found is None:
         return None
     sentence, doing = found
-    if argv[:2] in (["item", "archive"], ["item", "abandon"]) and "--yes" not in argv:
+    if argv[:2] in (["item", "archive"], ["item", "abandon"]) and not _given(argv, "--yes"):
         return None  # without --yes the CLI only previews; nothing is lost
-    if argv[:2] == ["admin", "update"] and "--restart" in argv:
+    if argv[:2] == ["admin", "update"] and _given(argv, "--restart"):
         doing = "restarting"
     return sentence, doing
 
