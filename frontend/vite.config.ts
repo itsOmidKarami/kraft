@@ -76,7 +76,9 @@ export default defineConfig(({ mode }) => ({
     ? {
         root: "demo",
         // The release the demo's sidebar and About name: KRAFT_DEMO_VERSION (a
-        // release's demo, built outside a git checkout), else the newest tag, else "dev".
+        // release's demo, built outside a git checkout), else the nearest tag
+        // behind this commit (main's demo: that tag and what has merged since,
+        // an rc tag included), else "dev".
         define: { __KRAFT_DEMO_VERSION__: JSON.stringify(process.env.KRAFT_DEMO_VERSION || demoVersion()) },
         base: process.env.KRAFT_DEMO_BASE ?? "/demo/",
         publicDir: "../public",

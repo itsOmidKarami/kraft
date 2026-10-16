@@ -20,8 +20,9 @@ const toResponse = (a: Answer) =>
 export function patchFetch(serve: MockServer, win: Window & typeof globalThis = window) {
   const real = win.fetch.bind(win);
   win.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    // Decided before any Request is built: building one from a Request takes its body, and the network needs it.
+    if (!isApi(new URL(input instanceof Request ? input.url : String(input), location.href))) return real(input, init);
     const request = new Request(input instanceof Request ? input : new URL(String(input), location.href), init);
-    if (!isApi(new URL(request.url))) return real(input, init);
     const text = request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
     const reply = await serve({
       method: request.method,
@@ -32,7 +33,12 @@ export function patchFetch(serve: MockServer, win: Window & typeof globalThis = 
     });
     // What a refused connection rejects with, so api.ts says the server is unreachable as it would.
     if (reply === ABORT) throw new TypeError("Failed to fetch");
-    if (reply === HANG) return new Promise<Response>((_, reject) => request.signal.addEventListener("abort", () => reject(request.signal.reason)));
+    if (reply === HANG) {
+      return new Promise<Response>((_, reject) => {
+        if (request.signal.aborted) reject(request.signal.reason);
+        else request.signal.addEventListener("abort", () => reject(request.signal.reason));
+      });
+    }
     return toResponse(reply);
   };
 }
@@ -119,14 +125,21 @@ export function serveApiLinks(doc: Document = document) {
     const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!a || e.defaultPrevented || !isApi(new URL(a.href))) return;
     e.preventDefault();
+    const download = a.hasAttribute("download");
+    // A new tab is opened in the click itself, while it still counts as the person's: after the
+    // awaits below a browser takes window.open for a popup and blocks it.
+    const newTab = !download && ((a.target && a.target !== "_self") || e.metaKey || e.ctrlKey || e.shiftKey);
+    const tab = newTab ? window.open("", "_blank") : null;
+    if (tab) tab.opener = null;
     const res = await fetch(a.href);
     const href = URL.createObjectURL(await res.blob());
-    if (a.hasAttribute("download")) {
+    if (download) {
       const save = doc.createElement("a");
       save.href = href;
       save.download = a.download;
       save.click();
-    } else window.open(href, a.target || "_self", "noopener");
+    } else if (tab) tab.location.href = href;
+    else if (!newTab) location.assign(href);
     setTimeout(() => URL.revokeObjectURL(href), 60_000);
   });
 }

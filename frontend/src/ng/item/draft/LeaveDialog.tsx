@@ -5,6 +5,7 @@ import { Dialog } from "../../ui/Dialog";
 import { showToast } from "../../ui/Toast";
 import { useApply } from "./apply";
 import { useDraft } from "./context";
+import { withoutBase } from "../../base";
 
 /** The click guard (Decided 16): with a draft, a click on an in-app link that
  *  leaves this item opens the dialog first; a hard unload gets the browser's own
@@ -24,11 +25,13 @@ export function LeaveGuard() {
       const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
       const url = new URL(a.href, window.location.href);
-      if (url.origin !== window.location.origin) return;
-      if (url.pathname === own || url.pathname.startsWith(`${own}/`)) return;
+      // The router's path, without the base the app is served under; outside it is not a page of the app.
+      const path = url.origin === window.location.origin ? withoutBase(url.pathname) : null;
+      if (path === null) return;
+      if (path === own || path.startsWith(`${own}/`)) return;
       e.preventDefault();
       e.stopPropagation();
-      setTo(url.pathname + url.search);
+      setTo(path + url.search);
     };
     const onUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();

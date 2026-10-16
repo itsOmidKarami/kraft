@@ -38,6 +38,8 @@ export interface MockOptions {
   itemDraft?: "none" | "changes" | "problems";
   /** ux2-W12: the Library's draft. `draft`: three changes, one a new component. */
   ngLibrary?: "draft";
+  /** The release the server says it runs, in /health and /update, up to date. Unset: the scenario's, an update behind. */
+  version?: string;
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -264,7 +266,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
 
     if (p === "/health") {
       if (restarted && restarted++ <= 3) return ABORT;
-      return json(S.settings.health);
+      return json(opts.version ? { ...S.settings.health, version: opts.version, installed: opts.version } : S.settings.health);
     }
     if (opts.locked) {
       if (p === "/login" && method === "POST") {
@@ -688,7 +690,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer {
     if (p === "/apply/restart") { restarted = 1; return { status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }; }
     if (p === "/update" || p === "/update/check") {
       const at = new Date(Date.now() - 3_600_000).toISOString();
-      return json({ installed: "1.4.0", latest: "v1.5.0", channel: "stable", python: "3.14", behind: true, checked_at: at });
+      const v = opts.version;
+      return json({ installed: v ?? "1.4.0", latest: v ? `v${v}` : "v1.5.0", channel: "stable", python: "3.14", behind: !v, checked_at: at });
     }
     if (p === "/intake") return json(st.intake);
     if (p === "/access") return json(st.access);

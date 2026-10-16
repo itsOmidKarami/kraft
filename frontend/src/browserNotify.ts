@@ -1,5 +1,6 @@
 import type { KraftEvent } from "./types";
 import type { EventType } from "./types/vocab.generated";
+import { withBase } from "./ng/base";
 
 /** The states Kraft is blocked on a person. Anything else gets muted
  *  within a week, and a muted channel is the same as no channel. Shared
@@ -58,9 +59,9 @@ export function maybeNotify(ev: KraftEvent, title: string): void {
   if (!event || !enabledEvents().includes(event.id)) return;
 
   const text = notificationText(event, title);
-  const n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: "/icon.svg" });
+  const n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: withBase("/icon.svg") });
   n.onclick = () => {
     window.focus();
-    location.href = "/work-items/" + ev.work_item_id;
+    location.href = withBase(`/work-items/${ev.work_item_id}`);
   };
 }

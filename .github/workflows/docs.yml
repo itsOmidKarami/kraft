@@ -24,9 +24,12 @@ on:
       # checkout on the UI contract's mocked API (frontend/demo/main.ts).
       - "frontend/demo/**"
       - "frontend/src/**"
+      - "frontend/public/**"
       - "frontend/e2e/contract/mocks/**"
       - "frontend/vite.config.ts"
+      - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "dev/third_party_licenses.mjs"
       - "dev/build_docs_site.sh"
       - "dev/docs_versions.py"
       - "dev/check_llm_docs.py"

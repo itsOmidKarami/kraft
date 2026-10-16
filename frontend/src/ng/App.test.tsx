@@ -12,6 +12,7 @@ vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents:
 afterEach(() => {
   window.history.pushState({}, "", "/");
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("ng App", () => {
@@ -59,7 +60,6 @@ describe("ng App", () => {
     window.history.pushState({}, "", "/demo/settings/storage");
     render(<App />);
     expect(await screen.findByRole("heading", { level: 1, name: "Storage" })).toBeInTheDocument();
-    vi.unstubAllEnvs();
   });
 
   it("routes /settings/storage to the Storage page, not the placeholder", async () => {

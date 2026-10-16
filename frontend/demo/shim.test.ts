@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ABORT, HANG, type MockServer, type Reply } from "../e2e/contract/mocks/mockApi";
-import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, shiftClock } from "./shim";
+import { DemoSocket, patchFetch, patchWebSocket, restoreAddress, serveApiLinks, shiftClock } from "./shim";
 
 /** A server that answers every request with `reply` and records what it was asked. */
 const recording = (reply: Reply) => {
@@ -55,6 +55,22 @@ describe("patchFetch", () => {
     await expect(pending).rejects.toBeDefined();
   });
 
+  it("hands the network a Request it has not read, body and all", async () => {
+    const real = vi.fn(async (input: Request) => new Response(await input.text()));
+    vi.stubGlobal("fetch", real);
+    patchFetch(recording({ status: 200 }).serve);
+    const res = await fetch(new Request("https://example.com/upload", { method: "POST", body: "payload" }));
+    expect(await res.text()).toBe("payload");
+  });
+
+  it("rejects at once when the request was aborted before the mock hung", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    patchFetch(recording(HANG).serve);
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(fetch("/api/work-items", { signal: ctl.signal })).rejects.toBeDefined();
+  });
+
   it.each([
     ["another origin", "https://example.com/api/health"],
     ["a path outside /api/", "/demo/assets/app.js"],
@@ -65,6 +81,29 @@ describe("patchFetch", () => {
     patchFetch(serve);
     expect(await (await fetch(url)).text()).toBe("net");
     expect(seen).toEqual([]);
+  });
+});
+
+describe("serveApiLinks", () => {
+  it.each([
+    ["a link to a new tab", { target: "_blank" }, {}],
+    ["a ctrl-click on a plain link", {}, { ctrlKey: true }],
+  ])("opens %s in the click itself, while it is still the person's, then shows the answer there", async (_, attrs, keys) => {
+    vi.stubGlobal("fetch", vi.fn());
+    patchFetch(recording({ status: 200, contentType: "text/plain", body: "a log" }).serve);
+    const tab = { opener: window as unknown, location: { href: "" } };
+    const open = vi.fn(() => tab);
+    vi.stubGlobal("open", open);
+    const blob = vi.fn(() => "blob:the-log");
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: blob, revokeObjectURL: vi.fn() }));
+    const doc = document.implementation.createHTMLDocument();
+    serveApiLinks(doc);
+    const a = Object.assign(doc.createElement("a"), { href: `${location.origin}/api/work-items/w1/sessions/s1/log`, ...attrs });
+    doc.body.append(a);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...keys }));
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    await vi.waitFor(() => expect(tab.location.href).toBe("blob:the-log"));
+    expect(tab.opener).toBeNull();
   });
 });
 
