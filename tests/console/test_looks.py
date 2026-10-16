@@ -94,9 +94,10 @@ def test_a_diffs_file_headers_are_muted_and_its_changes_lead(console, line, styl
     assert drawn == colours.get(style, style)
 
 
-def test_a_group_heading_is_muted_caps_with_its_count_in_the_groups_colour(board):
-    """The rows outweigh the headings: no bold, the label muted, the count
-    the colour of what it counts, faint at 0."""
+def test_a_group_heading_is_a_title_in_the_accent_with_its_count_in_the_groups_colour(board):
+    """A heading is the panel's titled separator: no bold, the label in the
+    accent, the count the colour of what it counts, faint at 0. Empty groups
+    share one line, joined in the frame's colour."""
     console = board([GATE])
 
     async def scenario(app, pilot):
@@ -106,15 +107,25 @@ def test_a_group_heading_is_muted_caps_with_its_count_in_the_groups_colour(board
             option.id: [
                 (span.style, option.prompt.plain[span.start : span.end])
                 for span in option.prompt.spans
+                if span.end > span.start
             ]
             for option in options
-            if option.id in ("group:needs", "group:running")
+            if option.id in ("group:needs", "group:done")
         }
 
-    headings = console.run(scenario)
-    assert headings == {
-        "group:needs": [("$kraft-muted", "NEEDS YOU"), ("$warning", "1"), ("$kraft-muted", "")],
-        "group:running": [("$kraft-muted", "RUNNING"), ("$kraft-faint", "0"), ("$kraft-muted", "")],
+    empty = [("$kraft-faint", "0")]
+    assert console.run(scenario) == {
+        "group:needs": [("$kraft-accent", "Needs you"), ("$warning", "1")],
+        "group:done": [
+            ("$kraft-accent", "Running"),
+            *empty,
+            ("$kraft-frame", " ─ "),
+            ("$kraft-accent", "Not started"),
+            *empty,
+            ("$kraft-frame", " ─ "),
+            ("$kraft-accent", "Done"),
+            *empty,
+        ],
     }
 
 

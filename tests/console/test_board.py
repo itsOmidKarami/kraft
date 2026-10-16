@@ -41,43 +41,43 @@ from kraft.console.screens import board as board_view
             (80, 24),
             "/r",
             [
-                "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes…  approve spec                              12m",
-                "▌m03d77b1  item m03d77b1          failed at verification                     1h",
-                "RUNNING 1",
-                "▌k7f2e9a0  Docs per major         implement                   docs           4m",
-                "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0          created paused                            30m",
-                "DONE 1 ›",
+                "Needs you 2",
+                "▌ a91c03fe  Board critique fixe…  approve spec                              12m",
+                "▌ m03d77b1  item m03d77b1         failed at verification                     1h",
+                "Running 1",
+                "▌ k7f2e9a0  Docs per major        implement                   docs           4m",
+                "Not started 1",
+                "▌ n0n0n0n0  item n0n0n0n0         created paused                            30m",
+                "Done 1 ›",
             ],
         ),
         (
             (80, 24),
             None,
             [
-                "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fi…  approve spec             r                   12m",
-                "▌m03d77b1  item m03d77b1       failed at verification   r                    1h",
-                "RUNNING 2",
-                "▌e1e1e1e1  item e1e1e1e1       implement                other                2m",
-                "▌k7f2e9a0  Docs per major      implement                r · docs             4m",
-                "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0       created paused           r                   30m",
-                "DONE 1 ›",
+                "Needs you 2",
+                "▌ a91c03fe  Board critique fi…  approve spec            r                   12m",
+                "▌ m03d77b1  item m03d77b1       failed at verification  r                    1h",
+                "Running 2",
+                "▌ e1e1e1e1  item e1e1e1e1       implement               other                2m",
+                "▌ k7f2e9a0  Docs per major      implement               r · docs             4m",
+                "Not started 1",
+                "▌ n0n0n0n0  item n0n0n0n0       created paused          r                   30m",
+                "Done 1 ›",
             ],
         ),
         (
             (70, 24),
             "/r",
             [
-                "NEEDS YOU 2",
-                "▌a91c03fe  Board critique fixes [/]   approve spec",
-                "▌m03d77b1  item m03d77b1              failed at verification",
-                "RUNNING 1",
-                "▌k7f2e9a0  Docs per major             implement",
-                "NOT STARTED 1",
-                "▌n0n0n0n0  item n0n0n0n0              created paused",
-                "DONE 1 ›",
+                "Needs you 2",
+                "▌ a91c03fe  Board critique fixes [/]  approve spec",
+                "▌ m03d77b1  item m03d77b1             failed at verification",
+                "Running 1",
+                "▌ k7f2e9a0  Docs per major            implement",
+                "Not started 1",
+                "▌ n0n0n0n0  item n0n0n0n0             created paused",
+                "Done 1 ›",
             ],
         ),
     ],
@@ -87,7 +87,8 @@ def test_the_board_draws_the_webs_groups_in_a_fixed_grid(board, size, repo, line
     """Needs you first, sorted as the web sorts; one line a row, in columns
     that a long title or tail cuts with "…" rather than pushes; the repo only
     with every repo shown, a chain only when it is not the default; archived
-    items never; Done folded to its count. Narrow drops the chain and age."""
+    items never; Done folded to its count. Narrow drops the chain and age. A
+    running row's age is since it last changed, as every other row's."""
 
     async def scenario(app, pilot):
         await _settled(board(BOARD, repo), app, pilot)
@@ -125,14 +126,14 @@ def test_amber_marks_only_what_needs_you(row, bar):
         (
             [RUNNING],
             [],
-            ["NEEDS YOU 0", "Nothing needs you. 1 running on their own.", "RUNNING 1", "k7f2e9a0"]
-            + ["NOT STARTED 0", "DONE 0"],
+            ["Needs you 0", "Nothing needs you. 1 running on their own.", "Running 1", "k7f2e9a0"]
+            + ["Not started 0 ─ Done 0"],
         ),
         (
             [FILED],
             [],
-            ["NEEDS YOU 0", "Nothing needs you, and nothing is running.", "RUNNING 0"]
-            + ["NOT STARTED 1", "n0n0n0n0", "DONE 0"],
+            ["Needs you 0", "Nothing needs you, and nothing is running."]
+            + ["Running 0 ─ Not started 1", "n0n0n0n0", "Done 0"],
         ),
         ([RUNNING], ["f", *"zzz"], ["nothing here for this filter"]),
     ],
@@ -147,7 +148,7 @@ def test_an_empty_board_says_why(board, rows, keys, lines):
         await _settled(board(rows), app, pilot)
         await pilot.press(*keys)
         await pilot.pause()
-        return [line.split("  ")[0].lstrip("▌") for line in _lines(app)]
+        return [line.split("  ")[0].removeprefix("▌ ") for line in _lines(app)]
 
     assert board(rows).run(scenario) == lines
 
@@ -211,11 +212,12 @@ def test_a_title_with_markup_in_it_draws_as_typed(console, stream, tmp_path):
         stream.send({"seq": 1_000, "type": "work_item_created", "work_item_id": created["id"]})
         await console.until(pilot, lambda: _peek(app))
         rows = [line for line in _lines(app) if created["id"][:8] in line]
-        return created["id"], rows, str(app.query_one("#peek-head").render()), _peek(app)
+        head = f"{app.query_one('#peek').border_title} | {app.query_one('#peek-head').render()}"
+        return created["id"], rows, head, _peek(app)
 
     wid, [row], head, peek = console.run(scenario, size=(80, 40))
-    assert "Fix the [/] parser" in row
-    assert head.startswith(wid[:8])
+    assert "Fix the [/] par" in row  # the panel's sides take four cells of the title
+    assert head.startswith(f"{wid[:8]} · Not started | ")
     assert head.endswith(" · default · created paused")
     assert peek[0] == "created paused · just now"
 
@@ -406,6 +408,18 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
         ),
         ([PAUSED], _detail(PAUSED), None, ["paused at implement · 12m ago", "", "p resumes it."]),
         (
+            [PAUSED | {"actions": []}],
+            _detail(PAUSED | {"actions": []}),
+            None,
+            [
+                "paused at implement · 12m ago",
+                "",
+                # The peek is narrow: the line wraps.
+                "Kraft offers no action for it now; Enter opens it; m there shows what it",
+                "allows.",
+            ],
+        ),
+        (
             [BLOCKED],
             _detail(
                 BLOCKED,
@@ -445,6 +459,7 @@ DOC = {"content": "# Spec\nGoal: fix the eleven findings.", "digest": None}
         "failed",
         "over-budget",
         "paused",
+        "paused-no-door",
         "blocked",
         "running",
         "running-before-output",

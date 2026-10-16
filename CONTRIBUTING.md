@@ -461,6 +461,14 @@ so the landing page still names the stages the way that release did. If a
 page of a frozen major ever shows text from a newer component, add the
 component to that list.
 
+Each version also has the dashboard demo of its own code beside its pages:
+the web UI on sample data, with no server (`frontend/demo/`). `main`'s is at
+`/next/demo/`, a release's at `/demo/` or `/vN/demo/`, built from that tag's
+frontend with an `npm ci` of its lockfile, because the demo's mocks describe
+that release's API. A tag from before the demo has none. Link to it as
+`/demo/`, like a page: each build gives it its own base, and
+`docsite/app/plugins/demo.ts` loads it from the server rather than the router.
+
 If a frozen major stops building with `main`'s components, build it with its
 own tag's site code instead:
 `KRAFT_DOCS_OWN_SITE="v1" dev/build_docs_site.sh OUT_DIR` runs an `npm ci` of

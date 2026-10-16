@@ -192,10 +192,11 @@ def _page_problems(cr, content: Path, map_text: str, text: str) -> list[str]:
         ("", "[a](/guides/vscode#_2-connect) and [b](/get-started/)"),
         ("", "[a](#here)"),
         ("", "![a](/assets/shot.png) and [b](/diagrams/x.svg) and [c](https://x.dev/y#z)"),
+        ("", "[the demo](/demo/)"),
         # The map forwards only an address that is no longer a page.
         ("/guides/old: /guides/vscode\n", "[a](/guides/vscode#install)"),
     ],
-    ids=["heading", "digit-heading", "in-page", "not-a-page", "map-leaves-a-live-page"],
+    ids=["heading", "digit-heading", "in-page", "not-a-page", "the-demo", "map-leaves-a-live-page"],
 )
 def test_a_link_between_pages_that_lands_passes(cr, content, map_text, text):
     assert _page_problems(cr, content, map_text, text) == []

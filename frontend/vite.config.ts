@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import react from "@vitejs/plugin-react";
@@ -56,11 +57,39 @@ const licenses: Plugin = {
   },
 };
 
-export default defineConfig({
+const demoVersion = () => {
+  try {
+    return execFileSync("git", ["describe", "--tags", "--abbrev=0"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().replace(/^v/, "");
+  } catch {
+    return "dev";
+  }
+};
+
+// `--mode demo` (npm run build:demo, `just demo`): the dashboard demo in demo/, the
+// SPA on the UI contract's mocked API, built to dist-demo/. Served under /demo/
+// unless KRAFT_DEMO_BASE names another address: dev/build_docs_site.sh puts each
+// version's at its own (/next/demo/ for main). No proxy: nothing it asks for
+// leaves the page.
+export default defineConfig(({ mode }) => ({
   plugins: [react(), licenses],
-  base: "/",
-  build: { outDir: "dist" },
-  server: { port: 5173, proxy },
+  ...(mode === "demo"
+    ? {
+        root: "demo",
+        // The release the demo's sidebar and About name: KRAFT_DEMO_VERSION (a
+        // release's demo, built outside a git checkout), else the nearest tag
+        // behind this commit (main's demo: that tag and what has merged since,
+        // an rc tag included), else "dev".
+        define: { __KRAFT_DEMO_VERSION__: JSON.stringify(process.env.KRAFT_DEMO_VERSION || demoVersion()) },
+        base: process.env.KRAFT_DEMO_BASE ?? "/demo/",
+        publicDir: "../public",
+        build: { outDir: "../dist-demo", emptyOutDir: true },
+        server: { port: 5174 },
+      }
+    : {
+        base: "/",
+        build: { outDir: "dist" },
+        server: { port: 5173, proxy },
+      }),
   test: {
     environment: "jsdom",
     globals: true,
@@ -69,4 +98,4 @@ export default defineConfig({
     exclude: ["e2e/**", "node_modules/**"],
     execArgv,
   },
-});
+}));

@@ -9,7 +9,10 @@ Kraft's web UI is the server's own page: start `kraft` and open `http://127.0.0.
 here too. Four verbs are CLI-only for a person: `kraft item abandon`,
 `kraft item set-attachments`, `kraft item mr-label` and `kraft item set-chain`.
 
-These pages name each screen, what it is for, and the buttons on it.
+These pages name each screen, what it is for, and the buttons on it. To look
+around before you install, open [the demo](/demo/): this
+web UI on sample data, running in your browser with no server and no agents.
+Nothing you change there is saved.
 
 ## In this section
 

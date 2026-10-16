@@ -20,6 +20,12 @@
 # tag's nuxt.config.ts (so its canonical, og:url and sitemap URLs name that
 # origin, not kraft-sdlc.dev), and a noindex tag added here after the build.
 # CONTRIBUTING.md, "Versions of the docs", has the rest.
+#
+# Each version gets the dashboard demo (frontend/demo/) of the same code beside
+# its pages, at BASE/demo/: main's from this checkout (frontend/node_modules
+# needed too), a release's from its own tag with an `npm ci` of the tag's
+# lockfile. A tag from before the demo existed gets none, and its pages do not
+# link to one.
 set -euo pipefail
 
 OUT=${1:?usage: dev/build_docs_site.sh OUT_DIR}
@@ -40,9 +46,17 @@ generate() { # DOCSITE_DIR ID BASE DEST
   cp -RL "$1/.output/public/." "$4/"
 }
 
+# The web UI on its mocked API, as static files (frontend/demo/main.ts), served
+# at BASE/demo/. VERSION is the release its sidebar names; empty, the newest tag.
+build_demo() { # FRONTEND_DIR BASE DEST [VERSION]
+  (cd "$1" && KRAFT_DEMO_BASE="${2}demo/" KRAFT_DEMO_VERSION="${4:-}" \
+    npx vite build --mode demo --outDir "$3" --emptyOutDir </dev/null)
+}
+
 if [ -z "$PLAN" ]; then
   echo "::warning::no stable vX.Y.Z tag; building main alone at /"
   generate "$ROOT/docsite" "" / "$OUT"
+  build_demo "$ROOT/frontend" / "$OUT/demo"
   exit 0
 fi
 
@@ -88,6 +102,21 @@ build_tag() { # ID BASE TAG DEST
   generate "$w/docsite" "$1" "$2" "$4"
 }
 
+# A release's demo, from the tag's own frontend: the mocks it was tested
+# against describe the API of that release, not main's.
+build_tag_demo() { # ID BASE TAG DEST
+  if ! git -C "$ROOT" cat-file -e "$3:frontend/demo/main.ts" 2>/dev/null; then
+    echo "no dashboard demo in $3: none at ${2}demo/"
+    return 0
+  fi
+  local w="$TMP/$1-demo"
+  mkdir -p "$w"
+  # dev/ too: vite.config.ts reads the license notices from dev/third_party_licenses.mjs.
+  git -C "$ROOT" archive "$3" frontend dev | tar -xf - -C "$w"
+  (cd "$w/frontend" && npm ci --no-audit --no-fund </dev/null)
+  build_demo "$w/frontend" "$2" "$4/demo" "${3#v}"
+}
+
 # The escape hatch: the tag's own site code and lockfile. Its nuxt.config.ts
 # takes the base from KRAFT_DOCS_BASE and knows nothing of the version list,
 # so it draws no version menu.
@@ -110,10 +139,13 @@ while read -r id base tag <&3; do
   started=$SECONDS
   if [ "$id" = next ]; then
     generate "$ROOT/docsite" "$id" "$base" "$dest"
+    build_demo "$ROOT/frontend" "$base" "$dest/demo"
   elif [[ " ${KRAFT_DOCS_OWN_SITE:-} " == *" $id "* ]]; then
     build_own_site "$id" "$base" "$tag" "$dest"
+    build_tag_demo "$id" "$base" "$tag" "$dest"
   else
     build_tag "$id" "$base" "$tag" "$dest"
+    build_tag_demo "$id" "$base" "$tag" "$dest"
   fi
   echo "built $id ($tag) at $dest in $((SECONDS - started))s"
 done 3<<<"$PLAN"

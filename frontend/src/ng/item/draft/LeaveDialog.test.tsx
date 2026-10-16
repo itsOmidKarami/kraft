@@ -5,7 +5,10 @@ import { LeaveGuard } from "./LeaveDialog";
 import { ReviewDialog } from "./ReviewDialog";
 import { answer, mountDraft, ov, sent } from "./testkit";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 const DRAFT = "GET /work-items/w1/draft";
 const ops = [ov("merge_request", undefined, { time_cap_minutes: 9 })];
 const stay = (e: React.MouseEvent) => e.preventDefault();
@@ -29,6 +32,17 @@ describe("LeaveGuard", () => {
     expect(await screen.findByRole("dialog", { name: "You have unapplied changes to this item" })).toBeInTheDocument();
     expect(screen.getByText(/1 change is saved as a draft/)).toBeInTheDocument();
     expect(screen.getByTestId("at")).toHaveTextContent("/work-items/w1");
+  });
+
+  it("under a base path (the docs demo's), lets a link inside the item through and goes to a link out by its router path", async () => {
+    vi.stubEnv("BASE_URL", "/next/demo/");
+    const { calls } = mountDraft(<><a href="/next/demo/work-items/w1/review" onClick={stay}>inside</a><a href="/next/demo/settings" onClick={stay}>out</a><LeaveGuard /></>, { [DRAFT]: answer(ops), "POST /work-items/w1/draft/apply": answer([]) });
+    await ready(calls);
+    await userEvent.click(screen.getByRole("link", { name: "inside" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("link", { name: "out" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Apply & continue" }));
+    await waitFor(() => expect(screen.getByTestId("at")).toHaveTextContent(/^\/settings$/));
   });
 
   it("guards a link to another item too", async () => {

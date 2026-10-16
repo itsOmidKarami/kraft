@@ -4,7 +4,9 @@ the CLI's own parser and ↑ recalling this session's commands."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
+import io
 import os
 from collections.abc import Iterable
 from typing import ClassVar
@@ -93,6 +95,55 @@ def complete(line: str, ids: Iterable[str]) -> tuple[str, list[str]]:
     return lead + " ".join([*done, word]), found if len(found) > 1 else []
 
 
+#: `item` verbs that never act on a work item: they file one, or answer a thread.
+NO_ITEM = frozenset({"create", "reply", "resolve", "reopen"})
+#: An `item` verb on an item's page that could not be given its id.
+NEEDS_ID = (
+    "Type the item's id: without one, item {verb} acts on the worktree the console was opened in."
+)
+
+
+def _parsed(argv: list[str]) -> dict | None:
+    """`argv` as the CLI parses it, or None where the CLI would refuse it (its
+    usage error is its own to print, not here over the screen)."""
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            return vars(_parser().parse_args(argv))
+        except (SystemExit, argparse.ArgumentError):
+            return None
+
+
+def for_item(argv: list[str], work_item_id: str) -> tuple[list[str], str | None]:
+    """`argv` acting on `work_item_id`, where an `item` verb takes an item and
+    none was typed: as its `id` positional, its `--id`, or its `ids`. Else the
+    sentence that refuses it: a verb left without an id would act on the item
+    of the console's directory, never the one on screen."""
+    if argv[:1] != ["item"] or len(argv) < 2 or argv[1] in NO_ITEM:
+        return argv, None
+    verb = _verbs(_verbs(_parser())["item"]).get(argv[1])
+    if verb is None:
+        return argv, None  # no such verb: the CLI says so
+    refused = NEEDS_ID.format(verb=argv[1])
+    takes = {a.dest: a for a in verb._actions if a.dest in ("id", "ids")}
+    if not takes:
+        return argv, refused
+    parsed = _parsed(argv)
+    if parsed is None:
+        return argv, None  # malformed: the CLI's own usage error, which acts on nothing
+    if parsed.get("id") is not None or parsed.get("ids"):
+        return argv, None
+    head, rest = argv[:2], argv[2:]
+    flag = takes["id"].option_strings if "id" in takes else []
+    tries = [[*head, flag[0], work_item_id, *rest]] if flag else []
+    tries += [[*head, work_item_id, *rest], [*argv, work_item_id]]
+    for tried in tries:
+        # The first place the CLI reads it as the item, argparse filling positionals in order.
+        got = _parsed(tried)
+        if got and work_item_id in (got.get("id"), *(got.get("ids") or [])):
+            return tried, None
+    return argv, refused
+
+
 def commands() -> list[str]:
     """Every verb the CLI takes, as typed after `kraft`: `item approve`,
     `admin addon install`."""
@@ -111,13 +162,13 @@ class Prompt(Input):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         # Explicit: Textual's suggester alone accepts on Right, not Tab.
-        Binding("tab", "complete", "complete", show=False),
-        Binding("up", "recall", "previous command", show=False),
-        Binding("escape", "leave", "leave the prompt", show=False),
+        Binding("tab", "complete", "complete"),
+        Binding("up", "recall", "previous"),
+        Binding("escape", "leave", "leave"),
     ]
 
     def __init__(self) -> None:
-        super().__init__(placeholder="/ runs a kraft command", id="prompt", select_on_focus=False)
+        super().__init__(placeholder="/command…", id="prompt", select_on_focus=False)
         self.history: list[str] = []
         self._back = 0
 

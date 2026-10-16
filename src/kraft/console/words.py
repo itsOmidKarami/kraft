@@ -275,6 +275,19 @@ def elapsed(seconds: float) -> str:
     return f"{d}d {h % 24}h" if h % 24 else f"{d}d"
 
 
+def status_words(item: dict) -> str:
+    """The header's status, as the web's badge says it (`headerState`), in
+    sentence case: an item filed paused and never started is "Not started"."""
+    if item.get("display_status") == "paused" and not item.get("current_node_id"):
+        return "Not started"
+    return (item.get("display_status") or "running").replace("_", " ", 1).capitalize()
+
+
+def usd(amount: float) -> str:
+    """`format.ts`'s `usd`: cents from a dollar up, a tenth of a cent below."""
+    return f"${amount:.2f}" if amount >= 1 else f"${amount:.3f}"
+
+
 #: `status.ts`: a budget stop the item could raise, but not now.
 RAISE_REFUSED = "Kraft takes no raise for it right now."
 #: `status.ts`: a budget stop the item cannot raise.

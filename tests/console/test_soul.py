@@ -154,8 +154,8 @@ def test_approving_leads_with_the_mark_and_lights_where_the_item_went(board, mon
     toasts, before, lit, after = console.run(scenario, notifications=True)
     assert toasts == ["✓ approved spec_approval on a91c03fe"]
     assert before is False
-    assert "bold $background on $primary" in lit
-    assert "bold $background on $primary" not in after and "bold $primary" in after
+    assert "bold $background on $kraft-accent" in lit
+    assert "bold $background on $kraft-accent" not in after and "bold $kraft-accent" in after
 
 
 MERGED = RUNNING | {"display_status": "done", "mr_ref": {"number": 42, "url": "u"}}

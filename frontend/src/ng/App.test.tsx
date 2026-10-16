@@ -12,6 +12,7 @@ vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents:
 afterEach(() => {
   window.history.pushState({}, "", "/");
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("ng App", () => {
@@ -51,6 +52,14 @@ describe("ng App", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review changes: Cache embeddings" })).toBeInTheDocument();
     vi.restoreAllMocks();
+  });
+
+  it("routes under the build's base path, as the docs site serves the demo at /demo/", async () => {
+    vi.stubEnv("BASE_URL", "/demo/");
+    stubFetch({ "GET /storage": [200, storageUsage()] });
+    window.history.pushState({}, "", "/demo/settings/storage");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Storage" })).toBeInTheDocument();
   });
 
   it("routes /settings/storage to the Storage page, not the placeholder", async () => {

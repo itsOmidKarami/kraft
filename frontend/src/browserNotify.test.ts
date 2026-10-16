@@ -20,6 +20,7 @@ class FakeNotification {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   localStorage.clear();
   FakeNotification.permission = "granted";
   FakeNotification.instances = [];
@@ -81,6 +82,13 @@ describe("maybeNotify", () => {
     expect(n.options.tag).toBe("w42");
     expect(n.options.body).toContain("decision is waiting");
     expect(n.options.icon).toBe("/icon.svg");
+  });
+
+  it("names the icon under the base the app is served at (the docs demo's)", () => {
+    vi.stubEnv("BASE_URL", "/next/demo/");
+    setEnabled(true);
+    maybeNotify(ev("gate_requested", { work_item_id: "w42" }), "My Item");
+    expect(FakeNotification.instances[0].options.icon).toBe("/next/demo/icon.svg");
   });
 
   it("fires for work_item_needs_human", () => {

@@ -99,6 +99,19 @@ const missingPage = `<style>
 </main>
 </div>`
 
+// Each version's dashboard demo, beside its pages at <base>demo/
+// (dev/build_docs_site.sh), is a single-page app with no file for most of its
+// addresses (/next/demo/work-items/<id>), so a reload or a shared link there
+// gets this 404.html, the one for every version. It sends such an address back
+// to its demo's own page as ?to=, which frontend/demo/shim.ts's restoreAddress
+// puts back before the router reads it. Before anything else in the head, so
+// the 404 never paints.
+const demoBases = (versions.length ? versions.map(v => v.base) : ['/']).map(b => `${b}demo/`)
+// JSON inside a <script>: < > / and the two JS line separators as \u escapes,
+// so no value can close the element or the string it sits in.
+const scriptJson = (value: unknown) => JSON.stringify(value).replace(/[<>\/\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+const demoReturn = `<script>(function(l){${scriptJson(demoBases)}.some(function(b){if(l.pathname.indexOf(b)!==0)return false;if(l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash));return true})})(location)</script>`
+
 // A browser breaks a line after a space or a hyphen and after nothing else in
 // `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
 // (and the phone contents bar's) was cut inside a word ("approv" / "e": 267
@@ -262,6 +275,7 @@ export default defineNuxtConfig({
         if (moved) route.contents = forwardingPage(...moved)
         if (route.route === '/404.html' && typeof route.contents === 'string') {
           route.contents = route.contents.replace(/(<div id="__nuxt"[^>]*>)<\/div>/, (_, open) => `${open}${missingPage}</div>`)
+          route.contents = route.contents.replace(/<head[^>]*>/, head => `${head}${demoReturn}`)
           // The shell's <head> gets its title and the <html> its language from
           // the app, which a reader without JavaScript never runs.
           if (!/<title>/.test(route.contents)) route.contents = route.contents.replace('</head>', '<title>No page at this address - Kraft</title></head>')
@@ -280,8 +294,11 @@ export default defineNuxtConfig({
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
-      // to indexing.
+      // to indexing. Nor this build's dashboard demo: a folder of static files
+      // beside the pages that the docs link to, not a page of the site.
       ignore: [
+        /^\/demo(\/|$)/,
+        new RegExp(`^${withBase('/demo')}(/|$)`),
         '/200.html',
         ...versions.filter(v => v.id !== version).map(v => new RegExp(v.base === '/' ? '^/$' : `^${v.base}`)),
       ],

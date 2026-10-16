@@ -18,7 +18,7 @@ ModalScreen {
     scrollbar-size-vertical: 1;
 }
 
-#peek-body, #output-log, #confirm-scroll {
+#output-log, #confirm-scroll {
     scrollbar-background: $surface;
     scrollbar-background-hover: $surface;
     scrollbar-background-active: $surface;
@@ -76,7 +76,7 @@ ContentSwitcher {
     height: 1fr;
 }
 
-#down, #tiny, #narrow-keys {
+#down, #tiny {
     display: none;
 }
 
@@ -101,25 +101,71 @@ Screen.-no-server #start {
     display: block;
 }
 
-/* Docked, so it stays above the footer when the no-server message replaces the views. */
-#prompt {
+/* The prompt in its frame, the status line under it, then the footer. */
+#dock {
     dock: bottom;
+    height: auto;
     margin-bottom: 1;
+}
+
+#prompt-box {
+    height: 3;
+    padding: 0 1;
+    border: round $kraft-frame;
+    background: $background;
+}
+
+#prompt-box:focus-within {
+    border: round $kraft-accent;
+}
+
+#prompt-mark {
+    width: 2;
+    color: $kraft-accent;
+    text-style: bold;
+}
+
+#prompt {
+    width: 1fr;
+    height: 1;
     border: none;
+    padding: 0;
+    background: $background;
+}
+
+/* A short window keeps its rows for the work: the prompt is one line. */
+Screen.-compact #prompt-box {
+    height: 1;
+    border: none;
+    background: $kraft-side;
+}
+
+Screen.-compact #prompt {
+    background: $kraft-side;
+}
+
+#status {
     height: 1;
     padding: 0 1;
-    background: $kraft-side;
+}
+
+#status-spin {
+    margin: 0 1 0 1;
+}
+
+#status-text {
+    width: 1fr;
+    padding-left: 1;
+    text-wrap: nowrap;
 }
 
 Screen.-narrow Footer {
     display: none;
 }
 
-Screen.-narrow #narrow-keys {
-    display: block;
-    dock: bottom;
-    height: 1;
-    color: $kraft-muted;
+/* The status line names `? keys` where the footer is hidden. */
+Screen.-narrow #dock {
+    margin-bottom: 0;
 }
 
 /* Too small to draw anything well: say so instead of drawing it clipped. */
@@ -132,8 +178,7 @@ Screen.-tiny #since,
 Screen.-tiny #updated,
 Screen.-tiny #down,
 Screen.-tiny #start,
-Screen.-tiny #prompt,
-Screen.-tiny #narrow-keys {
+Screen.-tiny #dock {
     display: none;
 }
 
@@ -159,6 +204,23 @@ Screen.-tiny #tiny {
     background: $background;
 }
 
+/* The Board's panel draws its own sides, the scroll position on the right
+ * one. It is as tall as its rows; with the peek open, the peek takes the rest. */
+#rows {
+    height: auto;
+    scrollbar-size-vertical: 0;
+    /* Never shown (overflow-x is hidden), but an auto height counts it. */
+    scrollbar-size-horizontal: 0;
+}
+
+Board.-peek #rows {
+    max-height: 67%;
+}
+
+Screen.-compact #rows {
+    scrollbar-size-vertical: 1;
+}
+
 #rows > .option-list--option-highlighted,
 #repo-rows > .option-list--option-highlighted,
 #addon-rows > .option-list--option-highlighted {
@@ -166,14 +228,18 @@ Screen.-tiny #tiny {
     text-style: bold;
 }
 
-/* The peek: the bottom third of the Board, on the surface. */
+/* The peek: the bottom third of the Board, its own panel titled with the
+ * item and its state. */
 #peek {
-    height: 33%;
-    background: $surface;
-    border-top: solid $kraft-line;
+    height: 1fr;
+    min-height: 8;
+    background: $background;
+    border: round $kraft-frame;
+    border-title-color: $kraft-accent;
+    border-title-style: bold;
 }
 
-#peek-head, #peek-chain {
+#peek-head, #peek-chain, #peek-work {
     height: 1;
     padding: 0 1;
     text-wrap: nowrap;
@@ -183,7 +249,22 @@ Screen.-tiny #tiny {
 #peek-body {
     height: 1fr;
     padding: 0 1;
-    background: $surface;
+    background: $background;
+}
+
+/* Panels in a short window: no top or bottom edge, the title on a rule. */
+Screen.-compact #peek, Screen.-compact View.panel {
+    border: none;
+    border-top: solid $kraft-frame;
+}
+
+/* Server, Repos, Add-ons: each one panel, titled in its border. */
+View.panel {
+    padding: 0 1;
+    border: round $kraft-frame;
+    border-title-color: $kraft-accent;
+    border-title-style: bold;
+    border-subtitle-color: $kraft-muted;
 }
 
 /* The output panel: above the prompt and footer, which stay in sight. */
@@ -223,10 +304,6 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
     align: center middle;
 }
 
-.keys-head {
-    text-style: bold;
-}
-
 #keys-here {
     margin-bottom: 1;
 }
@@ -237,7 +314,13 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
     height: auto;
     padding: 1 2;
     background: $surface;
-    border: solid $kraft-line;
+    border: round $kraft-frame;
+}
+
+/* A dialog's title, in the accent. */
+#question, #note-question, #menu-title, #connect-title, #new-item-heading, .keys-head {
+    color: $kraft-accent;
+    text-style: bold;
 }
 
 /* After the dialogs' shared width: the keys need less, and scroll in a
@@ -282,7 +365,18 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
     margin-right: 2;
 }
 
-/* The Item: two header lines, the banner when stopped, the chain, the tabs. */
+/* The Item: its header in a panel (two lines, the working line while it
+ * runs, the banner when stopped, the chain, the tabs), then the tab's pane. */
+#item-head {
+    height: auto;
+    border: round $kraft-frame;
+    border-subtitle-color: $kraft-muted;
+}
+
+Screen.-compact #item-head {
+    border: none;
+}
+
 #item-top, #item-state {
     height: 1;
 }
@@ -298,7 +392,7 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
     padding: 0 1;
 }
 
-#item-title, #item-status, #item-chain, #item-tabs, #item-banner, #item-gone {
+#item-title, #item-status, #item-chain, #item-tabs, #item-banner, #item-gone, #item-work {
     padding: 0 1;
 }
 
@@ -315,6 +409,10 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
 }
 
 #item-tabs {
+    height: 1;
+}
+
+Screen.-compact #item-tabs {
     border-bottom: solid $kraft-line;
     height: 2;
 }
@@ -345,10 +443,7 @@ Confirm, Note, Menu, Connect, NewItem, Keys {
 }
 
 #server-rule {
-    height: 2;
-    padding: 0 1;
-    border-top: solid $kraft-line;
-    color: $kraft-muted;
+    margin-top: 1;
 }
 
 #server-log {

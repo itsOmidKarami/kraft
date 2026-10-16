@@ -64,15 +64,23 @@ P_KEYS = [
 ]
 
 
-def way_on(item: dict) -> list[str]:
+def way_on(item: dict, *, peek: bool = False) -> list[str]:
     """The keys that move a stopped or paused item on, a sentence each: the
-    peek's and the Item's Overview's, from one place."""
+    peek's and the Item's Overview's, from one place. When the server offers
+    none, a line saying so, and where `m` shows what it does allow (`peek`:
+    on the Board, `m` is on the Item)."""
     doors = item.get("actions") or []
     lines = {"answer": ["p answers it."], "resume": ["p resumes it."]}.get(p_word(item) or "", [])
     if "retry" in doors:
         lines.append("t retries it.")
     if "raise_budget" in doors:
         lines.append(f"/item raise-budget {item['id']} --usd N raises its budget.")
+    if not lines and item.get("display_status") in ("paused", "failed", "needs_you"):
+        lines.append(
+            "Kraft offers no action for it now; "
+            + ("Enter opens it; m there" if peek else "m")
+            + " shows what it allows."
+        )
     return lines
 
 

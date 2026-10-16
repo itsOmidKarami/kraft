@@ -18,6 +18,7 @@ import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
 import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 import { REMOVE_FROM_QUEUE_TITLE } from "../sharedWords";
+import { withBase } from "../../base";
 import { Badge } from "../../ui/Badge";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
@@ -162,7 +163,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)), ...(gone && { disabled: true, sub: neverStarted(item) ? "not started yet" : ended ? "worktree removed" : "worktree removed · Retry recreates it" }) },
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
-    { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
+    { label: "Copy link", onSelect: () => copy(`${window.location.origin}${withBase(`/work-items/${item.id}`)}`, "link") },
     ...menuDoors(item).map((): MenuItem => ({ label: "Duplicate as new item", onSelect: duplicate })),
     // No main button (the server admits none of its ways on): the panel's doors, which would be under it, stay reachable here.
     ...(hs.main ? [] : hs.panel.filter((it) => it !== "archive" || archivable(item)).map((it): MenuItem => ({ label: PANEL_LABEL[it], onSelect: () => onItem(it) }))),

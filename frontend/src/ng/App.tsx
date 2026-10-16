@@ -58,7 +58,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   }
   if (phone) return <PhoneApp />;
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ShippedHash />
       <Routes>
         {Gallery && <Route path="/_gallery" element={<Suspense fallback={null}><Gallery /></Suspense>} />}
