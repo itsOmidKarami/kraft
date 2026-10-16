@@ -499,8 +499,9 @@ def event_line(event: dict, nodes: list[dict] | None = None) -> str | None:
             note = f": {_cut(_s(p.get('note')), 50)}" if p.get("note") else ""
             return f"{gate} · rejected{note}"
         case "gate_reopened":
+            reason = p.get("reason")
             why = {"retry": " by the retry", "conflict_resolved": " after a conflict was resolved"}
-            return f"{gate} · reopened{why.get(p.get('reason'), '')}"
+            return f"{gate} · reopened{why.get(reason, '') if isinstance(reason, str) else ''}"
         case "fix_cycle_started":
             return f"{node} · fix loop round {_round(p.get('cycle'))}"
         case "fix_cycle_finished":
