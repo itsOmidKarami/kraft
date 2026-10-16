@@ -52,6 +52,9 @@ const ROWS: Row[] = [
   { sc: "done", title: "Pin the SDK schema version", repo: "kraft-vscode", bead: "kraft-0e7a", age: 5760 },
   { sc: "done", title: "Split the intake poller from the API process", repo: "kraft-api", bead: "kraft-6fb3", age: 7200 },
   { sc: "done", title: "Fix off-by-one in log tail", repo: "kraft-core", bead: "kraft-41d8", age: 8640 },
+  // Last, so every row above keeps its seed and so its id.
+  { sc: "queued", title: "Index the review threads for search", repo: "kraft-api", bead: "kraft-7c40", age: 3 },
+  { sc: "blocked", title: "Tail worker logs in the console", repo: "kraft-core", bead: "kraft-b2e7", age: 9 },
 ];
 
 const ARCHIVED: Row[] = [
