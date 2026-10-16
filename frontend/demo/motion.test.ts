@@ -317,10 +317,10 @@ describe("the clock and the purse", () => {
     ["a rate limit is retried on its node, its count up", () => {}, [
       ["work_item_retried", { node_id: "verification", loop: null, steer: RESUME_PROMPT, escalated: false, seeded: false }],
       ["node_started", { node_id: "verification" }], ["worker_session_created", expect.anything()], ["worker_session_started", expect.anything()],
-    ], { status: "active", display_status: "running", retry_at: null, stop: null, rate_limit: { count: 3, cap: 5 } }],
+    ], { status: "active", display_status: "running", retry_at: null, stop: null, rate_limit: null }],
     ["a rate limit past its retries stops for a person", (it) => { it.rate_limit = { count: 5, cap: 5 }; }, [
       ["work_item_needs_human", { node_id: "verification", reason: "rate_limit retries exhausted after 5 attempt(s)", kind: "cap" }],
-    ], { status: "needs_human", display_status: "needs_you", stop: expect.objectContaining({ kind: "cap" }) }],
+    ], { status: "needs_human", display_status: "needs_you", stop: expect.objectContaining({ kind: "cap" }), rate_limit: null }],
     // A CI wait is re-entered with no event of its own (`waits.py`, `store.mark_reentered`).
     ["a CI wait is re-entered", (it) => { Object.assign(it, { status: "waiting", stop: { ...it.stop, kind: "wait" } }); }, [
       ["node_started", { node_id: "verification" }], ["worker_session_created", expect.anything()], ["worker_session_started", expect.anything()],
@@ -334,6 +334,17 @@ describe("the clock and the purse", () => {
     at = "2026-09-13T10:13:43.000Z";
     expect(ticks(1, id)).toEqual(want);
     expect(S.bundles[id].item).toMatchObject(item);
+  });
+
+  it("the rate-limit relaunch leaves a pending rewind waiting: it is taken once the node completes", async () => {
+    let at = NG_NOW;
+    const { S, ticks, call } = started(undefined, () => at);
+    const id = board(S, WAITING);
+    expect((await call("POST", `/work-items/${id}/review`, { outcome: "request_changes", node: "implementation" })).body.action).toBe("queued");
+    at = "2026-09-13T10:13:43.000Z";
+    expect(types(ticks(1, id)).slice(0, 2)).toEqual(["work_item_retried", "node_started"]);
+    expect(S.bundles[id].item.current_node_id).toBe("verification");
+    expect(ticks(1, id).slice(1, 3)).toEqual([["node_completed", { node_id: "verification" }], ["node_started", { node_id: "implementation" }]]);
   });
 
   it("stops for a spend cap before the next agent task, and raising it lets it go on", async () => {
@@ -359,9 +370,20 @@ describe("the clock and the purse", () => {
     const id = board(S, RUNNING);
     await call("POST", `/work-items/${id}/pause`);
     await call("POST", `/work-items/${id}/resume`, { steer: "bound it" });
+    const queued = S.bundles[id].sessions.at(-1)!;
     S.bundles[id].item.budget_cap.cap_usd = 2.41;
-    expect(types(ticks(1, id))).toEqual(["node_started", "work_item_needs_human"]);
+    // Stopped before the attempt launched: it is taken back, and the steer it would have carried reported undelivered.
+    expect(ticks(1, id)).toEqual([
+      ["node_started", { node_id: "verification" }],
+      ["work_item_needs_human", expect.objectContaining({ node_id: "verification", kind: "budget" })],
+      ["steer_undelivered", { steer: "bound it" }],
+    ]);
     expect(S.bundles[id].item.stop).toMatchObject({ kind: "budget", node: "verification", scope: "work_item" });
+    expect(S.bundles[id].sessions.some((s) => s.id === queued.id)).toBe(false);
+    // A raise retries it with no steer: a fresh attempt of the node's agent task.
+    await call("POST", `/work-items/${id}/budget/raise`, { budget_usd: 8 });
+    expect(S.bundles[id].events.filter((e) => e.type === "work_item_retried").at(-1)?.payload.steer).toBeNull();
+    expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
   });
 });
 

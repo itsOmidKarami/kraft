@@ -175,8 +175,13 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     const queued = live.find((s) => s.status === "pending" && isAgent(b, s));
     if (queued) {
       T.enterNode(id, node);
-      if (overBudget(b)) T.stopForBudget(id, node);
-      else T.sessionRunning(id, queued.id);
+      if (!overBudget(b)) { T.sessionRunning(id, queued.id); return; }
+      // Stopped before it launched: the attempt never was, and the steer it would have carried is reported
+      // undelivered after the stop, as the walk reports it. A retry after the raise starts with no steer.
+      T.withdrawSession(id, queued.id);
+      T.stopForBudget(id, node);
+      const steer = [...b.events].reverse().find((e) => e.type === "work_item_resumed")?.payload.steer;
+      if (typeof steer === "string" && steer) T.steerUndelivered(id, steer);
       return;
     }
     if (live.length) {

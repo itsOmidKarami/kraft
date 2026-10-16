@@ -11,21 +11,31 @@ import { buildNeverStarted, buildNgItem, NG_NODES, type NgScenario } from "./ngI
  */
 
 /** `fresh`: filed paused and never started, so it has no history at all (only `work_item_created`), whatever `sc` ran. */
-type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; fresh?: boolean; tweak?: (i: any) => void };
+type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; fresh?: boolean; tweak?: (i: any, b: ItemBundle) => void };
 
 const R = (name: string) => `/Users/dev/code/${name}`;
 const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorepo/services/${name}-with-a-long-checkout-path`;
+
+/** The capped sample stopped instead by its $5 spend cap: its stop, its last event and its spend all say so. `board._stop`
+ *  names a budget stop's scope; `work_item` is the item's own cap, the one `/budget/raise` takes. */
+function spendCapped(i: any, b: ItemBundle) {
+  const reason = "Spend cap reached · $5.00 of $5.00";
+  i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
+  const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
+  last.payload = { node_id: last.payload.node_id, reason, kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } };
+  // Its sessions' costs scaled to the $5 it spent, and its usage read off them again.
+  const was = b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
+  for (const s of b.sessions) s.cost_usd = Math.round(((s.cost_usd ?? 0) * 5 / was) * 10_000) / 10_000;
+  const sum = (ss: any[]) => Math.round(ss.reduce((a, s) => a + (s.cost_usd ?? 0), 0) * 10_000) / 10_000;
+  i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)) })) };
+  i.budget_cap = { ...i.budget_cap, spent_usd: 5 };
+}
 
 const ROWS: Row[] = [
   { sc: "needs-gate", title: "Design the caching layer for document search", repo: "kraft-plugins", bead: "kraft-cb59", age: 4 },
   { sc: "capped", title: "Fix flaky retry test in the worker pool", repo: "kraft-core", bead: "kraft-7d21", age: 22 },
   { sc: "needs-you", title: "Add rate limit headers to the public API", repo: "kraft-api", bead: "kraft-a3f0", age: 60 },
-  { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, tweak: (i) => {
-    // `board._stop` names a budget stop's scope; `work_item` is the item's own cap, which `/budget/raise` takes.
-    i.stop = { ...i.stop, kind: "budget", reason: "Spend cap reached · $5.00 of $5.00", scope: "work_item" };
-    // What its stop says it spent: a raise must go above it (`/budget/raise`), and the walk stops at the cap again.
-    i.budget_cap = { ...i.budget_cap, spent_usd: 5 };
-  } },
+  { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, tweak: spendCapped },
   { sc: "failed", title: "Retry on 429 from the forge API", repo: "kraft-api", bead: "kraft-b108", age: 40 },
   { sc: "paused", title: "Trim the review prompts for the docs chain", repo: "kraft-docs", bead: "kraft-4e19", age: 75, chain: "docs_only" },
   { sc: "running", title: "Bump the VS Code extension to schema v4", repo: "kraft-vscode", bead: "kraft-91bc", age: 6, tweak: (i) => {
@@ -66,7 +76,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
     i.updated_at = t(130 - r.age);
     i.created_at = t(130 - r.age - 90);
     if (i.archived_at) i.archived_at = t(130 - r.age + 30);
-    r.tweak?.(i);
+    r.tweak?.(i, b);
     for (const s of b.sessions) s.work_item_id = i.id;
     for (const e of b.events) e.work_item_id = i.id;
     if (r.fresh) b.events.push({ seq: 1, work_item_id: i.id, type: "work_item_created", payload: { title: i.title, repo: i.repo, chain_template: i.chain_template }, node_id: null, created_at: i.created_at });

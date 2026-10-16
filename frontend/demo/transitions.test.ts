@@ -352,6 +352,30 @@ describe("the review doors", () => {
   });
 });
 
+describe("samples and answers as the server shapes them", () => {
+  it("an item that ran and lost its worktree answers its diff and its comparison with the 404", async () => {
+    const { S, call } = server();
+    const id = idOf(S, "kraft-91bc");
+    S.bundles[id].item.worktree_exists = false;
+    for (const route of ["diff", "compare"]) expect(await call("GET", `/work-items/${id}/${route}`)).toEqual({ status: 404, body: { detail: "this work item's worktree was removed from disk" } });
+  });
+
+  it("a node retry answers the node as its path", async () => {
+    const { S, call } = server();
+    expect((await call("POST", `/work-items/${idOf(S, "kraft-b108")}/retry`, {})).body).toMatchObject({ node_id: "merge_request", path: "merge_request" });
+  });
+
+  it("the spend-capped sample says so in its stop, its last event and its spend", () => {
+    const { S } = server();
+    const b = S.bundles[idOf(S, "kraft-58e2")];
+    expect(b.item.stop).toMatchObject({ kind: "budget", scope: "work_item" });
+    expect(b.item.stop.facts).toEqual({});
+    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "verification", reason: "Spend cap reached · $5.00 of $5.00", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
+    const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
+    expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
+  });
+});
+
 describe("a created item", () => {
   it.each([
     ["filed paused", false, "paused", "paused"],
@@ -387,10 +411,11 @@ describe("a created item", () => {
     ]);
     const docs = (await call("GET", `/work-items/${id}/documents`)).body.documents;
     expect(docs.map((d: any) => d.attachment_kind)).toEqual(["spec"]);
-    // No worktree until the walk first enters a node: no diff to show, and no comparison (`deps.worktree_missing`).
+    // No worktree and no base commit until the walk first enters a node: the server's empty diff, and its 409 for a
+    // comparison, which it answers before it looks for a worktree.
     expect(detail.worktree_exists).toBe(false);
     expect((await call("GET", `/work-items/${id}/diff`)).body).toMatchObject({ base_ref: null, files: [], landed: { files: [] } });
-    expect(await call("GET", `/work-items/${id}/compare`)).toMatchObject({ status: 404 });
+    expect(await call("GET", `/work-items/${id}/compare`)).toEqual({ status: 409, body: { detail: "this work item has no base commit to compare against" } });
   });
 
   it("is not made from a sample item, so an edit to one never reaches it", async () => {
