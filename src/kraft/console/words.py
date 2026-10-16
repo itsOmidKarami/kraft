@@ -307,3 +307,141 @@ def banner_of(item: dict) -> dict | None:
         return {"kind": "limit", "node": node, "text": text, "way": way}
     text = sentence(reason) if (reason := _or(stop.get("reason"), "")) else ""
     return {"kind": "stop", "node": node, "text": text, "way": ""}
+
+
+#: `events.ts`'s `QUIET`: bookkeeping that would drown the run's story.
+QUIET = frozenset(
+    {
+        "worker_session_created",
+        "worker_session_exited",
+        "chain_loaded",
+        "plan_progress",
+        "worktree_prepared",
+        "steer_context_set",
+        "permission_decision",
+        "external_wait_observed",
+        "findings_measured",
+    }
+)
+
+
+def _s(value: object) -> str:
+    """`events.ts`'s `s`: JavaScript's `String(v)`, null and undefined as ""."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _cut(text: str, n: int = 70) -> str:
+    # shortcut: counts code points where JavaScript counts UTF-16 units; they
+    # differ only past the Basic Multilingual Plane, at the cut.
+    return f"{text[: n - 1]}…" if len(text) > n else text
+
+
+def task_name(path: str) -> str:
+    """`taskName`: a task path's last part, `verification.review.code_review` → `code_review`."""
+    return path.split(".")[-1]
+
+
+def event_line(event: dict) -> str | None:
+    """`eventLine`: one event as one line, or None for bookkeeping. A type
+    not listed reads as its own name."""
+    kind = event.get("type") or ""
+    if kind in QUIET:
+        return None
+    p = event.get("payload") or {}
+    node = _s(_or(event.get("node_id"), p.get("node_id")))
+    on = f" on {node}" if node else ""
+    gate = _s(p.get("gate")) or node
+    match kind:
+        case "work_item_created":
+            return "filed"
+        case "node_started":
+            return f"{node} started"
+        case "node_completed":
+            return f"{node} finished"
+        case "node_skipped":
+            return f"{node} skipped"
+        case "worker_session_started":
+            hook = p.get("hook_point")
+            task = task_name(_s(hook)) if hook else "a session"
+            return f"{task} started on {node}"
+        case "gate_requested":
+            return f"{gate} is waiting for you"
+        case "gate_approved":
+            by = "passed on its own" if p.get("by") in ("agent", "kraft") else "approved by you"
+            return f"{gate} · {by}"
+        case "gate_rejected":
+            note = f": {_cut(_s(p.get('note')), 50)}" if p.get("note") else ""
+            return f"{gate} · rejected{note}"
+        case "fix_cycle_started":
+            return f"{node} · fix loop round {int(_or(p.get('cycle'), 0)) + 1}"
+        case "fix_cycle_finished":
+            # `=== true` and `=== false`: None means git could not say.
+            committed = p.get("committed")
+            did = ""
+            if committed is True:
+                did = " · the fix committed a change"
+            elif committed is False:
+                did = " · the fix changed nothing"
+            return f"{node} · fix loop round {int(_or(p.get('cycle'), 0)) + 1}{did}"
+        case "work_item_needs_human":
+            reason = re.sub(r"^needs_context:\s*", "", _s(p.get("reason")))
+            return f"stopped{' at ' + node if node else ''}: {_cut(reason, 240)}"
+        case "escalation_message":
+            return f"escalation{on}: {_cut(_s(p.get('message')), 240)}"
+        case "pause_requested":
+            return "paused"
+        case "work_item_resumed":
+            return "resumed"
+        case "work_item_retried":
+            return f"retried{' ' + node if node else ''}"
+        case "work_item_rate_limited":
+            return f"{node} hit a rate limit"
+        case "work_item_waiting":
+            return f"{node} is waiting"
+        case "work_item_cancelled":
+            return "cancelled"
+        case "work_item_completed":
+            return "finished"
+        case "work_item_archived":
+            if not p.get("kept_branch"):
+                return "archived"
+            commits = p.get("unpushed_commits")
+            plural = "" if commits == 1 else "s"
+            kept = f"kept {_s(p['kept_branch'])}: {_s(commits)} unpushed commit{plural}"
+            return f"archived · {kept}"
+        case "work_item_restored":
+            return "restored"
+        case "mr_opened":
+            return f"MR !{_s(p.get('number'))} opened"
+        case "mr_closed":
+            by = p.get("by")
+            closer = f" by {_s(by)}" if by and by != "cancel" else ""
+            return f"MR !{_s(p.get('ref'))} closed{closer}"
+        case "mr_reopened":
+            return f"MR !{_s(p.get('ref'))} reopened"
+        case "budget_raised" | "budget_changed":
+            return f"budget set to ${_s(p.get('budget_usd'))}"
+        case "work_item_title_edited":
+            return "title edited"
+        case "work_item_description_edited":
+            return "brief edited"
+        case _:
+            return kind.replace("_", " ")
+
+
+def event_age(iso: str | None, now: float) -> str:
+    """`events.ts`'s `age`: "now", "6m", "1h 10m", "2h"."""
+    then = _seconds(iso)
+    if then is None or now - then < 60:
+        return "now"
+    minutes = math.floor((now - then) / 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours}h {rest:02d}m" if rest else f"{hours}h"
