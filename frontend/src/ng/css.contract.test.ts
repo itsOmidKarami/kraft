@@ -70,6 +70,7 @@ describe("ng CSS", () => {
   it("lays the document drawer over the theme's scrim, black at 40%", () => {
     expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain(":root { --scrim: rgb(0 0 0 / 40%); }");
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
+    expect(readFileSync(join(here, "ui/ui.css"), "utf-8")).toMatch(/\.dialog-backdrop\s*{[^}]*background:\s*var\(--scrim\)/);
   });
 
   it("scrolls a pane's log in its own <pre>, which fills the pane body, so follow has something to move", () => {

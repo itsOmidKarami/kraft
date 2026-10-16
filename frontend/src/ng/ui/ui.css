@@ -70,7 +70,7 @@
 .popover[data-notch][data-align="end"]::before { left: auto; right: 22px; }
 .popover[data-notch][data-side="below"]::before { top: -6px; border-right: 0; border-bottom: 0; }
 .popover[data-notch][data-side="above"]::before { bottom: -6px; border-left: 0; border-top: 0; }
-.dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: color-mix(in oklab, var(--side) 70%, transparent); }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: var(--scrim); }
 .dialog { width: min(480px, 100%); padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .dialog:focus-visible { outline: none; }
 .dialog-title { margin: 0 0 12px; font-size: var(--fs-h3); font-weight: 500; }

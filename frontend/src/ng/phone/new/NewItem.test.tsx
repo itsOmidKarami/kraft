@@ -63,7 +63,8 @@ describe("the new work item screen (G)", () => {
     const calls = mount({ "POST /work-items": [201, { id: "abcdef0123456789abcdef0123456789", bead_id: "kraft-a1c7" }] });
     await userEvent.type(title(), "Add retry budget");
     await userEvent.type(screen.getByRole("textbox", { name: "Brief" }), "Give the poller a budget.");
-    await screen.findByRole("option", { name: /default · 15 nodes · 5 gates \(repo default\)/ });
+    await screen.findByRole("option", { name: "default · 15 nodes" });
+    expect(screen.getByRole("combobox", { name: "Chain" })).toHaveAccessibleDescription("default is the repo's default chain");
     await userEvent.click(screen.getByRole("button", { name: "Create paused" }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
     expect(await screen.findByText("Created kraft-a1c7. Created paused.")).toBeInTheDocument();

@@ -25,6 +25,14 @@ describe("Repos list (M.2)", () => {
     expect(within(screen.getByRole("region", { name: "Detected" })).getByText("/src/plugins")).toBeInTheDocument();
   });
 
+  it("shows a long path by its tail and keeps the whole of it as the hint's title", async () => {
+    const long = "/home/ana/work/clients/billing-reconciliation/monorepo-checkout-main";
+    const v = reposView();
+    list(ans({ ...v, result: { ...v.result, resolved: { repos: [{ ...repo("monorepo-checkout-main"), path: long }], detected: [] } as never } }));
+    const hint = within(await screen.findByRole("link", { name: /^monorepo-checkout-main/ })).getByText("…/billing-reconciliation/monorepo-checkout-main");
+    expect(hint).toHaveAttribute("title", long);
+  });
+
   it("connects a detected repo with connect_detected", async () => {
     const { calls } = list();
     await userEvent.click(await screen.findByRole("button", { name: /^plugins/ }));
