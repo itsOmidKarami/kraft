@@ -62,8 +62,9 @@ FLOORS = {
 #: Status colours are both a fill on the ground and text on a card.
 STATUS = ("ok", "warn", "bad", "info")
 STATUS_FLOORS = ((3.0, "bg"), (4.5, "surface"))
-#: A status chip tints its ground with 9% of its own colour, which lowers the contrast of the text on it by about
-#: 0.5 in light mode (dark mode's tint raises it): this floor on --surface-2 keeps the chip's text at 4.5.
+#: A status chip tints its ground with 9% of its own colour, which lowers the contrast
+#: of the text on it by about 0.5 in light mode (dark mode's tint raises it): this floor
+#: on --surface-2 keeps the chip's text at 4.5.
 CHIP_FLOOR = (5.1, "surface-2")
 ACCENT_FLOOR = (4.5, ("bg", "surface"))
 
