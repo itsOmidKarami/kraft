@@ -10,10 +10,11 @@ from __future__ import annotations
 import time
 
 from textual.app import App
+from textual.binding import Binding
 
 from kraft import answers, client
-from kraft.console import words
-from kraft.console.dialogs import Dialog, Note
+from kraft.console import moments, words
+from kraft.console.dialogs import Dialog, Note, reject_asks
 from kraft.vocab import ThreadLabel
 
 #: The keys that act on an item, and the doors (`actions`) that open each: a
@@ -38,9 +39,41 @@ async def approve_waits(work_item_id: str) -> str | None:
     return f"Approve waits on {must} open must-fix thread{'s' if must != 1 else ''}."
 
 
-def opens(action: str, row: dict | None) -> bool:
-    """Whether the server lists a door that `action`'s key goes through."""
+def opens(action: str, row: dict | None, parameters: tuple[object, ...] = ()) -> bool:
+    """Whether the server lists a door that `action`'s key goes through. `p`
+    is bound once per word it can have (`P_KEYS`): only the binding for what
+    it does now is open, so the footer names that."""
+    if action == "pause_or_resume" and parameters:
+        return p_word(row) == parameters[0]
     return bool(row) and any(door in (row.get("actions") or []) for door in DOORS[action])
+
+
+def p_word(row: dict | None) -> str | None:
+    """What `p` does for `row` now, as the footer says it: an agent's question
+    takes an answer, a paused item resumes, a running one pauses."""
+    doors = (row or {}).get("actions") or []
+    if "resume" in doors:
+        return "answer" if ((row or {}).get("stop") or {}).get("kind") == "question" else "resume"
+    return "pause" if "pause" in doors else None
+
+
+#: `p` on the Board and the Item, one binding per word: one action, so one key
+#: still does one thing.
+P_KEYS = [
+    Binding("p", f"pause_or_resume('{word}')", word) for word in ("pause", "resume", "answer")
+]
+
+
+def way_on(item: dict) -> list[str]:
+    """The keys that move a stopped or paused item on, a sentence each: the
+    peek's and the Item's Overview's, from one place."""
+    doors = item.get("actions") or []
+    lines = {"answer": ["p answers it."], "resume": ["p resumes it."]}.get(p_word(item) or "", [])
+    if "retry" in doors:
+        lines.append("t retries it.")
+    if "raise_budget" in doors:
+        lines.append(f"/item raise-budget {item['id']} --usd N raises its budget.")
+    return lines
 
 
 async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None:
@@ -49,7 +82,7 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
     gate = row.get("pending_gate") or "the gate"
     asked = note_dialog or Note(
         f"Reject {gate} on {row['id'][:8]}",
-        ["Say what is wrong: the note goes to the agent that redoes it."],
+        [reject_asks((row.get("fix_target") or {}).get("node"))],
         required=True,
     )
     answer = await app.push_screen_wait(asked)
@@ -62,6 +95,7 @@ async def reject(app: App, row: dict, note_dialog: Dialog | None = None) -> None
             note, row.get("pending_gate"), row["id"], **({"node": node} if node else {})
         ),
         answers.item_action(f"rejected {gate} on {{id}}"),
+        decided=True,
     )
 
 
@@ -117,16 +151,20 @@ async def may_steer(app: App, row: dict) -> bool | None:
     return item.get("steerable") is not False
 
 
-async def act(app: App, call, said) -> bool:
+async def act(app: App, call, said, *, decided: bool = False) -> bool:
     """Send one action and toast what the server answered, in the CLI's
-    sentence (`kraft.answers`). A refusal is toasted in the server's words
-    and the board read again (spec §8), which every view hears as a reread.
-    True when the server took it."""
+    sentence (`kraft.answers`); a gate `decided` leads it with the mark
+    (`moments.marked`). A refusal is toasted in the server's words and the
+    board read again (spec §8), which every view hears as a reread. True
+    when the server took it."""
     try:
         result = await call
     except client.ClientError as exc:
         app.notify_refusal(exc)
         app.live.reread()
         return False
-    app.notify(said(result), markup=False)
+    if decided:
+        app.notify(moments.marked(said(result)))
+    else:
+        app.notify(said(result), markup=False)
     return True

@@ -6,9 +6,11 @@ panel, restart and update after the console's own confirm."""
 from __future__ import annotations
 
 import collections
+import re
 from functools import partial
 from typing import ClassVar
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -27,6 +29,27 @@ BACKLOG = 200
 FOLLOWING = "following · f filter"
 #: And while the reader has scrolled up, which holds it where it is.
 HELD = "paused · End follows · f filter"
+
+
+#: A `server.log` record's level word: after Rich's time column, or the blank
+#: it leaves when the second is the last record's. Continuation lines have none.
+LEVEL = re.compile(r"^(?:\[[^\]]*\]\s+|\s+)(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
+#: The `file.py:123` a record's first line ends on.
+SOURCE = re.compile(r"\S+\.py:\d+\s*$")
+#: The level words drawn in a colour; the word stays, so colour is not alone.
+LEVEL_COLOUR = {"WARNING": "warning", "ERROR": "error", "CRITICAL": "error"}
+
+
+def log_line(line: str, colours: dict[str, str]) -> Text:
+    """One line of `server.log` as written (never markup), its level word in
+    its colour and its source dimmed. Rich wrapped the record when it wrote
+    it; the console does not unwrap it."""
+    text = Text(line)
+    if (level := LEVEL.match(line)) and (colour := LEVEL_COLOUR.get(level[1])):
+        text.stylize(colours[colour], level.start(1), level.end(1))
+    if source := SOURCE.search(line):
+        text.stylize(colours["kraft-faint"], source.start(), source.end())
+    return text
 
 
 def held(health: dict | None) -> set[str]:
@@ -198,7 +221,8 @@ class Server(View):
             self.lines.append(line)
             if self._shows(line):
                 # To the end only from the end: a reader scrolled up stays there.
-                log.write(line, scroll_end=log.is_vertical_scroll_end)
+                drawn = log_line(line, self.app.theme_variables)
+                log.write(drawn, scroll_end=log.is_vertical_scroll_end)
 
     def _shows(self, line: str) -> bool:
         return self.filter_text.strip().lower() in line.lower()
@@ -220,7 +244,7 @@ class Server(View):
         log.clear()
         for line in self.lines:
             if self._shows(line):
-                log.write(line, scroll_end=not held)
+                log.write(log_line(line, self.app.theme_variables), scroll_end=not held)
         self._draw_rule()
 
     def back(self) -> bool:

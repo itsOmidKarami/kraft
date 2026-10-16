@@ -10,11 +10,12 @@ import asyncio
 
 import pytest
 from support.console_board import _text
-from textual.widgets import RichLog
+from textual.widgets import Button, RichLog
 
 from kraft import client, update
 from kraft.console import tail
 from kraft.console.dialogs import Confirm
+from kraft.console.screens import server as server_view
 
 ECHO = "import sys; print(' '.join(sys.argv[1:]))"
 HEALTH = {
@@ -194,6 +195,7 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
             question = (
                 str(app.screen.query_one("#question").render()),
                 "Fix the [/] parser" in listing,
+                str(app.screen.query_one("#yes", Button).label),
             )
             await pilot.press(*keys[1:])
             await console.until(pilot, lambda: not isinstance(app.screen, Confirm))
@@ -202,7 +204,9 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
         await pilot.pause()
         return question, console.output(app)
 
-    assert console.run(scenario) == ((asked, True) if asked else None, ran)
+    # The button that goes on names the verb (`runner.CONFIRMS`), never "Go on".
+    verb = {"kraft admin restart": "Restart", "kraft admin update --restart": "Update"}
+    assert console.run(scenario) == ((asked, True, verb[asked]) if asked else None, ran)
 
 
 @pytest.mark.parametrize(
@@ -349,6 +353,30 @@ def test_the_log_follows_until_scrolled_up_and_end_follows_again(console, monkey
         return following, stayed, log.is_vertical_scroll_end
 
     assert console.run(scenario) == ("server.log · following · f filter", True, True)
+
+
+def test_the_log_draws_its_level_words_coloured_as_it_follows_and_filters(console, monkeypatch):
+    """`log_line` is how every line reaches the pane: followed, and drawn
+    again through the filter."""
+    monkeypatch.setattr(tail, "POLL_S", 0.01)
+    _quiet(monkeypatch)
+    _write("[10/16/26 12:05:13] WARNING  embedding unavailable    embed.py:114")
+
+    def warning_colour(app) -> str | None:
+        log = app.query_one("#server-log", RichLog)
+        found = [seg for strip in log.lines for seg in strip if seg.text == "WARNING"]
+        return found[0].style.color.triplet.hex if found and found[0].style.color else None
+
+    async def scenario(app, pilot):
+        await pilot.press("2")
+        await console.until(pilot, lambda: len(_log(app)) == 1)
+        followed = warning_colour(app)
+        await pilot.press("f", *"embed")
+        await pilot.pause()
+        return app.theme_variables["warning"], followed, warning_colour(app)
+
+    want, followed, filtered = console.run(scenario)
+    assert followed == filtered == want.lower()
 
 
 def test_f_filters_the_log_and_esc_brings_every_line_back(console, monkeypatch):
@@ -557,3 +585,42 @@ def test_a_failed_read_after_an_update_forgets_the_old_release(console, kraft_is
         return app.release, app.update_waiting
 
     assert console.run(scenario) == (None, False)
+
+
+COLOURS = {"warning": "W", "error": "E", "kraft-faint": "F"}
+
+
+@pytest.mark.parametrize(
+    ("line", "styled"),
+    [
+        (
+            "[10/16/26 12:05:13] WARNING  embedding unavailable: the 'vector'    embed.py:114",
+            [("W", "WARNING"), ("F", "embed.py:114")],
+        ),
+        (
+            "                    ERROR    the store is gone [/]        store.py:9",
+            [("E", "ERROR"), ("F", "store.py:9")],
+        ),
+        ("[10/16/26 12:05:13] CRITICAL out of disk", [("E", "CRITICAL")]),
+        (
+            "[10/16/26 12:05:11] INFO     StreamableHTTP       streamable_http_manager.py:162",
+            [("F", "streamable_http_manager.py:162")],
+        ),
+        ("                             extra is not installed ERROR", []),
+        ("kraft: http://127.0.0.1:8766", []),
+    ],
+    ids=[
+        "warning",
+        "error-under-a-shown-second",
+        "critical",
+        "info-stays-plain",
+        "continuation",
+        "plain",
+    ],
+)
+def test_server_log_colours_its_level_word_and_dims_the_source(line, styled):
+    """The level word keeps its word and gains a colour, so colour is never
+    alone; only a record's own level, not the word inside a wrapped line."""
+    drawn = server_view.log_line(line, COLOURS)
+    assert drawn.plain == line
+    assert [(span.style, line[span.start : span.end]) for span in drawn.spans] == styled

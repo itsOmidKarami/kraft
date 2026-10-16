@@ -12,6 +12,7 @@ from support.console_board import (
     FAILED,
     FILED,
     GATE,
+    PAUSED,
     QUESTION,
     RUNNING,
     _detail,
@@ -29,6 +30,7 @@ from kraft.console import words
 from kraft.console.dialogs import Note, Reject
 from kraft.console.screens import item as item_view
 
+AT = "What is wrong? The agent at {} gets this note and redoes it."
 OVER_BUDGET = FAILED | {
     "id": "u1u1u1u1",
     "title": "Cap [/] it",
@@ -168,21 +170,38 @@ def test_the_header_says_where_the_item_stands(
 
 
 @pytest.mark.parametrize(
-    ("row", "first"),
-    [(QUESTION, "Chain"), (FAILED, "Chain"), (RUNNING, "implement")],
-    ids=["question", "failed", "running-keeps-its-line"],
+    ("row", "sessions", "first", "p"),
+    [
+        (
+            QUESTION,
+            [],
+            ["The agent asks:", "keep [/] in titles?", "", "p answers it.", ""],
+            "answer",
+        ),
+        (FAILED, [], ["t retries it.", "", "Chain"], None),
+        (FAILED, [{"id": "s1"}], ["t retries it.", item_view.LOG_POINTER, "", "Chain"], None),
+        (PAUSED, [], ["paused at implement", "", "p resumes it.", ""], "resume"),
+        (RUNNING, [], ["implement", "", "Chain"], "pause"),
+    ],
+    ids=["question", "failed", "failed-with-a-session", "paused", "running-keeps-its-line"],
 )
-def test_the_overview_does_not_repeat_the_stop_banner(board, monkeypatch, row, first):
-    """The banner says why a stopped item stopped, whole; the body starts at
-    the chain. An item with no banner keeps its one line of where it stands."""
-    _serve(monkeypatch, _detail(row), calls=[])
+def test_a_stopped_item_says_the_way_on_and_p_says_what_it_does(
+    board, monkeypatch, row, sessions, first, p
+):
+    """The banner says why a stopped item stopped; the body says what moves it
+    on, in the peek's own sentences (`acts.way_on`): an agent's question
+    whole and `p` to answer it, `t` and the Log for a failed one, `p` for a
+    paused one. The footer's `p` names what it does now."""
+    _serve(monkeypatch, _detail(row, worker_sessions=sessions), calls=[])
     console = board([row])
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, row["id"])
-        return _overview(app)[0]
+        await pilot.pause()
+        shown = app.screen.active_bindings.get("p")
+        return _overview(app)[: len(first)], shown and shown.binding.description
 
-    assert console.run(scenario).startswith(first)
+    assert console.run(scenario) == (first, p)
 
 
 @pytest.mark.parametrize("keys", [["enter"], ["a"]], ids=["enter", "a"])
@@ -295,36 +314,40 @@ def test_a_key_on_the_item_acts_through_the_shared_flow(
 
 
 @pytest.mark.parametrize(
-    ("fix", "keys", "sent", "picker"),
+    ("fix", "keys", "sent", "picker", "said"),
     [
         (
             {"node": "plan"},
             ["w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "plan"})],
             True,
+            AT.format("plan"),
         ),
         (
             {"node": "plan"},
             ["shift+tab", "down", "up", "enter", "tab", "w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {"node": "spec"})],
             True,
+            AT.format("spec"),
         ),
-        ({"node": "plan"}, ["w", "h", "y", "escape"], [], True),
+        ({"node": "plan"}, ["w", "h", "y", "escape"], [], True, AT.format("plan")),
         (
             None,
             ["w", "h", "y", "enter"],
             [("reject_gate", ("why", "spec_approval", "a91c03fe"), {})],
             False,
+            "What is wrong? The agent that redoes it gets this note.",
         ),
     ],
     ids=["to-the-fix-target", "to-a-node-picked", "esc-sends-nothing", "no-fix-target"],
 )
 def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
-    board, monkeypatch, fix, keys, sent, picker
+    board, monkeypatch, fix, keys, sent, picker, said
 ):
     """Spec §7.2: the reject note's node starts on the gate's fix target (not
     the first node) and can be any node before the gate; with no fix target
-    the plain note is asked and the server's own target applies."""
+    the plain note is asked and the server's own target applies. The note
+    names the node whose agent gets it, and follows the pick."""
     calls: list[tuple] = []
     chain = CHAIN | {
         "nodes": [*CHAIN["nodes"][:1], {"id": "plan", "kind": "exec"}, *CHAIN["nodes"][1:2]]
@@ -338,14 +361,16 @@ def test_reject_on_the_item_sends_the_work_back_where_it_was_picked(
         await pilot.press("r")
         await console.until(pilot, lambda: isinstance(app.screen, Note))
         asked = isinstance(app.screen, Reject)
-        for key in keys:
+        for key in keys[:-1]:
             await pilot.press(key)
+        asks = str(app.screen.query_one("#note-lines").render())
+        await pilot.press(keys[-1])
         if sent:
             await console.until(pilot, lambda: calls)
         await console.until(pilot, lambda: not isinstance(app.screen, Note))
-        return calls, asked
+        return calls, asked, asks
 
-    assert console.run(scenario) == (sent, picker)
+    assert console.run(scenario) == (sent, picker, said)
 
 
 def test_an_item_that_goes_away_while_open_says_so(board, monkeypatch):

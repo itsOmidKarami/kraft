@@ -13,13 +13,13 @@ from support.console_board import _text
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher, Footer, HelpPanel, Input
+from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
+from kraft.console import acts, live
 from kraft.console import app as console_app
-from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
-from kraft.console.dialogs import Confirm, Note
+from kraft.console.dialogs import EVERYWHERE, Confirm, Keys, Note
 from kraft.console.live import Link
 from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
@@ -288,14 +288,49 @@ def test_the_keys_move_between_views(console, start, keys, view, running):
     assert console.run(scenario) == (view, True, running)
 
 
-def test_question_mark_opens_and_closes_every_key(console):
-    async def scenario(app, pilot):
-        await pilot.press("question_mark")
-        opened = bool(app.screen.query(HelpPanel))
-        await pilot.press("question_mark")
-        return opened, bool(app.screen.query(HelpPanel))
+@pytest.mark.parametrize(
+    ("view", "close", "here", "shut"),
+    [
+        ("board", "question_mark", ["f filter", "v peek", "↓ j down"], ["a approve", "r reject"]),
+        ("server", "escape", ["d doctor", "R restart", "f filter", "↓ j down"], []),
+        ("repos", "question_mark", ["c connect", "↓ j down"], ["d disconnect"]),
+    ],
+    ids=["board-closes-on-?", "server-closes-on-esc", "repos"],
+)
+def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, close, here, shut):
+    """`?` is Kraft's dialog, not Textual's panel: the shown view's keys that
+    act now (none to approve on an empty Board), then the frame's, in the
+    footer's words, with none of Textual's own (focus next, copy text). It
+    squeezes nothing, fits the window, and `?` or Esc closes it."""
 
-    assert console.run(scenario) == (True, False)
+    async def scenario(app, pilot):
+        app.show(view)
+        await pilot.pause()
+        width = app.view.size.width
+        await pilot.press("question_mark")
+        await console.until(pilot, lambda: isinstance(app.screen, Keys))
+        listed = [
+            [
+                " ".join(line.split())
+                for line in str(app.screen.query_one(f"#keys-{part}").render()).split("\n")
+            ]
+            for part in ("here", "everywhere")
+        ]
+        squeezed = app.view.size.width != width
+        fits = app.screen.region.contains_region(app.screen.query_one("#keys").region) and (
+            view != "board" or app.screen.query_one("#keys-scroll").max_scroll_y > 0
+        )
+        await pilot.press(close)
+        await pilot.pause()
+        return listed, squeezed, fits, isinstance(app.screen, Keys)
+
+    (mine, everywhere), squeezed, fits, still = console.run(scenario)
+    assert set(here) <= set(mine)
+    assert not set(shut) & set(mine)
+    assert {"^p palette", "? keys", "esc back"} <= set(everywhere)
+    assert not any("Focus" in line or "Copy" in line for line in mine + everywhere)
+    # At 80x24 it scrolls rather than run off the screen (the Board's keys need to).
+    assert (squeezed, fits, still) == (False, True, False)
 
 
 @pytest.mark.parametrize(
@@ -356,13 +391,26 @@ def test_the_palette_switches_kraft_looks_not_textuals(console):
 def test_no_key_does_two_things_on_one_view(name):
     """Spec §6: no key means two things on one view, and no upper and lower
     pair (`R` and `r`) shares one. `R,shift+r` is one binding: kitty's name
-    for the same key."""
+    for the same key. `p`'s three words (pause, resume, answer: `acts.P_KEYS`)
+    are one thing; any other binding's parameters still count."""
     actions: dict[str, set[str]] = {}
     for owner in (App, KraftConsole, VIEWS[name]):
         for binding in Binding.make_bindings(owner.BINDINGS):
             key = binding.key.removeprefix("shift+").lower()
-            actions.setdefault(key, set()).add(binding.action)
+            one = "pause_or_resume" if binding in acts.P_KEYS else binding.action
+            actions.setdefault(key, set()).add(one)
     assert {key: found for key, found in actions.items() if len(found) > 1} == {}
+
+
+def test_question_marks_everywhere_lists_every_key_the_frame_binds():
+    """`dialogs.EVERYWHERE` is written by hand: a new frame key must be added
+    there too, or `?` never shows it."""
+    listed = {key for keys, _ in EVERYWHERE for key in keys.split()}
+    bound = {
+        KraftConsole().get_key_display(binding)
+        for binding in Binding.make_bindings(KraftConsole.BINDINGS)
+    }
+    assert bound <= listed
 
 
 @pytest.mark.parametrize(

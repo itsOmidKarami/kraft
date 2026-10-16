@@ -40,7 +40,7 @@ LISTED = "\n".join(
 def test_a_confirm_lists_what_a_restart_ends_and_goes_on_only_when_told(
     console, monkeypatch, server, keys, answer, listed
 ):
-    """Cancel has the focus, so a stray Enter never restarts a server. A
+    """Back has the focus, so a stray Enter never restarts a server. A
     server that does not answer the listing, or never replies, still gets
     the question rather than a console that hangs."""
 
@@ -103,7 +103,7 @@ def test_a_required_note_that_is_blank_says_so_and_keeps_asking(console):
 
 def test_a_long_review_scrolls_and_keeps_its_buttons_on_screen(console):
     """An add-on's review can run past the window (spec §7.4): the listing
-    scrolls, Apply and Cancel stay in sight at 80x24, and `[/]` in it is
+    scrolls, Apply and Back stay in sight at 80x24, and `[/]` in it is
     drawn as written."""
     lines = [f"  - component tasks.t{n} added [/]" for n in range(40)]
 

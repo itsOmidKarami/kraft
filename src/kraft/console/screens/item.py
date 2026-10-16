@@ -18,7 +18,7 @@ from textual.widgets import ContentSwitcher, RichLog, Static
 
 from kraft import answers, client, logs, render
 from kraft.console import acts, words
-from kraft.console.dialogs import Menu, Note, Reject
+from kraft.console.dialogs import Menu, Note, Reject, reject_asks
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 
@@ -30,12 +30,14 @@ PAGE = 50
 NEWEST = 2**63 - 1
 #: What the view says once its item is gone (spec §7.2).
 GONE = "This item no longer exists. Esc goes back."
-#: A diff line's colour by how it starts, the first match winning: the web's
-#: add and delete colours, git's bold headers and hunk colour.
+#: A diff line's colour by how it starts, the first match winning: git's file
+#: headers muted, so the change outweighs them; the web's add and delete
+#: colours; the hunk colour.
 DIFF_STYLE = (
-    ("+++", "bold"),
-    ("---", "bold"),
-    ("diff --git", "bold"),
+    ("+++", "kraft-muted"),
+    ("---", "kraft-muted"),
+    ("diff --git", "kraft-muted"),
+    ("index ", "kraft-muted"),
     ("+", "success"),
     ("-", "error"),
     ("@@", "kraft-info"),
@@ -48,7 +50,7 @@ MENU = (
     ("raise_budget", "Raise budget…"),
     ("escalate", "Escalate…"),
     ("complete", "Complete…"),
-    ("cancel", "Cancel…"),
+    ("cancel", "Cancel item…"),
     ("archive", "Archive…"),
 )
 #: What each of the menu's dialogs asks.
@@ -56,6 +58,10 @@ SKIP = "A note for the record, or Enter for none."
 ESCALATE = "What the agent should look into: it gets the item's stop and this."
 REASON = "Why: the reason goes in the run log."
 RAISE = "The new cap in dollars, or none for no cap. It must be above what the item has spent."
+#: How long the node an approve moved the item to stays lit.
+LIT_S = 1.5
+#: A failed item's Overview, after its keys: where to read what happened.
+LOG_POINTER = "The Log tab holds the session it failed in."
 #: A chain node's mark in the Overview's list, by its state.
 MARK = {"done": "✓", "current": "●", "hot": "●", "todo": " "}
 
@@ -127,7 +133,7 @@ class Item(View):
         Binding("right_square_bracket", "tab(1)", "tab", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
-        Binding("p", "pause_or_resume", "pause/resume"),
+        *acts.P_KEYS,
         Binding("t", "retry", "retry"),
         Binding("s", "session", "session"),
         Binding("m", "menu", "menu"),
@@ -156,6 +162,10 @@ class Item(View):
         self.more = False
         #: The session the Log shows; None picks as `kraft view logs -f` does.
         self.session_id: str | None = None
+        #: `(id, gate)` just approved, until a read shows the item past it.
+        self._approved: tuple[str, str] | None = None
+        #: The chain's new place drawn lit, for `LIT_S` after that read.
+        self._lit = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="item-top"):
@@ -192,7 +202,7 @@ class Item(View):
         for group in ("read", "tab", "older", "log"):
             self.workers.cancel_group(self, group)
         self.work_item_id, self.item, self._key = work_item_id, None, None
-        self._dead = False
+        self._dead, self._approved = False, None
         # Where it was opened from: the top view showing, never a guess.
         from kraft.console.screens import VIEWS  # defined after this module loads
 
@@ -288,6 +298,9 @@ class Item(View):
             return
         self.item = item
         self._key = (item.get("updated_at"), tuple(item.get("actions") or ()))
+        if self._approved and self._approved != (item["id"], item.get("pending_gate")):
+            self._approved = None
+            self._light()
         self._draw_head(item)
         try:
             await self._overview(item)
@@ -348,7 +361,20 @@ class Item(View):
         # The frame's width: this view fills it, and may not be laid out yet.
         if self.item is not None:
             marks = words.chain_marks(self.item)
-            self.query_one("#item-chain", Static).update(chain_line(marks, self.app.size.width - 2))
+            line = chain_line(marks, self.app.size.width - 2, lit=self._lit)
+            self.query_one("#item-chain", Static).update(line)
+
+    def _light(self) -> None:
+        """Deciding (D2): the node an approve moved the item to, in the accent
+        for a moment; one highlight, drawn with the read that shows it."""
+        self._lit = True
+        self.query_one("#item-chain").add_class("-lit")
+        self.set_timer(LIT_S, self._unlight)
+
+    def _unlight(self) -> None:
+        self._lit = False
+        self.query_one("#item-chain").remove_class("-lit")
+        self._draw_chain()
 
     def on_resize(self) -> None:
         self._draw_chain()
@@ -389,8 +415,8 @@ class Item(View):
                     lines += ["", Text(warning, style=self.app.theme_variables["warning"])]
                 self.digest = document.get("digest")
             self.read_gate = gate
-        elif words.banner_of(item) is None:  # a stopped item's banner already says why
-            lines.append(words.reason_tail(item, time.time()))
+        else:
+            lines += self._stopped(item)
         if lines:
             lines.append("")
         lines.append(Text("Chain", style=f"bold {muted}"))
@@ -409,6 +435,23 @@ class Item(View):
             )
         self._lines = lines
         self._write_overview()
+
+    def _stopped(self, item: dict) -> list[str]:
+        """Where an item with no gate pending stands, and the way on: an
+        agent's question whole, the keys that move it on (`acts.way_on`, the
+        peek's own sentences), and for a failed one where its session is. A
+        stop's reason is the banner's, not repeated here."""
+        banner = words.banner_of(item)
+        if banner is None:
+            said = [words.reason_tail(item, time.time())]
+        elif banner["kind"] == "question":
+            said = ["The agent asks:", banner["text"]]
+        else:
+            said = []
+        way = acts.way_on(item)
+        if item.get("display_status") == "failed" and item.get("worker_sessions"):
+            way.append(LOG_POINTER)
+        return said + ([""] if said and way else []) + way
 
     def _write_overview(self) -> None:
         """Draw the Overview's lines, once its pane is on screen: kept until
@@ -585,7 +628,7 @@ class Item(View):
                 self.tab != "overview" or self.read_gate == item.get("pending_gate")
             )
         if action in acts.DOORS:
-            return acts.opens(action, self.item)
+            return acts.opens(action, self.item, parameters)
         if action == "menu":
             return bool(self._menu_entries())
         if action == "session":
@@ -615,11 +658,14 @@ class Item(View):
 
     async def _approve(self, item: dict, digest: str | None) -> None:
         gate = item["pending_gate"]
-        await acts.act(
+        if await acts.act(
             self.app,
             client.approve_gate(gate, item["id"], digest),
             answers.item_action(f"approved {gate} on {{id}}"),
-        )
+            decided=True,
+        ):
+            # The read that shows the item past this gate lights where it went.
+            self._approved = (item["id"], gate)
 
     def action_reject(self) -> None:
         if item := self.item:
@@ -640,7 +686,7 @@ class Item(View):
             return None
         return Reject(
             f"Reject {gate} on {item['id'][:8]}",
-            ["Say what is wrong: the note goes to the agent that redoes it, at the node below."],
+            [reject_asks(to)],
             nodes=before,
             to=to,
         )
@@ -737,7 +783,7 @@ class Item(View):
             self.app.notify(answers.raised_budget(usd_)(result), markup=False)
             return
 
-    def action_pause_or_resume(self) -> None:
+    def action_pause_or_resume(self, _word: str = "") -> None:
         if item := self.item:
             self.run_worker(partial(acts.pause_or_resume, self.app, item), group="act")
 

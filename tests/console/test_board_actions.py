@@ -23,7 +23,8 @@ PAUSED_STEER = PAUSED | {"actions": ["resume", "steer"]}
             ["r", *"vague", "enter"],
             GATE | WHOLE,
             ("reject_gate", ("vague", "spec_approval", "a91c03fe")),
-            "rejected spec_approval on a91c03fe; the item is now running",
+            # A decision's toast leads with the mark (D2), then the CLI's words.
+            "✓ rejected spec_approval on a91c03fe; the item is now running",
         ),
         (GATE, ["r", "enter"], None, None, None),
         (GATE, ["r", *"vague", "escape"], None, None, None),

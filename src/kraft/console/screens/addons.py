@@ -25,8 +25,19 @@ from kraft.console.dialogs import Confirm, Menu, Note
 from kraft.console.screens import View
 from kraft.console.screens.server import held
 
-#: The list with no collection added.
-EMPTY = "No collection is added. m adds one."
+#: The list with no collection added: what add-ons are, in the reference
+#: page's words (`12.addons.md`), and the key that adds one.
+EMPTY = Content.assemble(
+    ("Add-ons", "bold"),
+    "\n\n",
+    (
+        "An add-on is a directory of chains, library components, skills and agent "
+        "profiles. A collection is a git repository or a directory that lists add-ons.",
+        "$kraft-muted",
+    ),
+    "\n\n",
+    ("m adds a collection.", "$kraft-muted"),
+)
 #: What a collection never fetched says.
 NOT_FETCHED = "not fetched yet · m fetches it"
 #: The list before its first read answers.
@@ -219,7 +230,7 @@ class Addons(View):
         elif self.collections is None:
             said = Content.styled(READING, "$kraft-muted")
         else:
-            said = Content.styled(EMPTY, "$kraft-muted")
+            said = EMPTY
         said_only = self.refused is not None or not found
         if said_only:
             found = [Option(said, disabled=True)]
@@ -317,7 +328,7 @@ class Addons(View):
     def on_review_asked(self, message: ReviewAsked) -> None:
         reviewed = message.reviewed
         lines = review.render(reviewed).splitlines()
-        # As the CLI asks it ("Apply X? [y/N]"); Cancel has the focus.
+        # As the CLI asks it ("Apply X? [y/N]"); Back has the focus.
         dialog = Confirm(f"Apply {reviewed.addon_id}?", lines, yes="Apply")
         self.app.push_screen(dialog, message.waiting.give)
 

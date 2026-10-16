@@ -5,6 +5,25 @@ Screen {
     background: $background;
 }
 
+/* A dialog keeps the screen it was opened over in sight, dimmed: the spec
+ * you reject stays readable while you say why. After `Screen`, which a
+ * ModalScreen also is. */
+ModalScreen {
+    background: $background 60%;
+}
+
+/* One cell, in the faint colour (the theme's `scrollbar`): never louder than
+ * what it scrolls. */
+* {
+    scrollbar-size-vertical: 1;
+}
+
+#peek-body, #output-log, #confirm-scroll {
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+}
+
 #top {
     height: 1;
     background: $kraft-side;
@@ -26,6 +45,18 @@ Screen {
 
 Screen.-narrow #where {
     display: none;
+}
+
+/* What moved since the console was last closed (moments.since_line): for the
+ * first minute, or until a key. */
+#since {
+    display: none;
+    height: 1;
+    color: $kraft-muted;
+}
+
+Screen.-since #since {
+    display: block;
 }
 
 /* After an update installed another version: until the console restarts. */
@@ -97,6 +128,7 @@ Screen.-tiny > * {
 }
 
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
+Screen.-tiny #since,
 Screen.-tiny #updated,
 Screen.-tiny #down,
 Screen.-tiny #start,
@@ -187,17 +219,40 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm, Note, Menu, Connect, NewItem {
+Confirm, Note, Menu, Connect, NewItem, Keys {
     align: center middle;
 }
 
-#confirm, #note, #menu, #connect, #new-item {
+.keys-head {
+    text-style: bold;
+}
+
+#keys-here {
+    margin-bottom: 1;
+}
+
+#confirm, #note, #menu, #connect, #new-item, #keys {
     width: 72;
     max-width: 100%;
     height: auto;
     padding: 1 2;
     background: $surface;
     border: solid $kraft-line;
+}
+
+/* After the dialogs' shared width: the keys need less, and scroll in a
+ * window too short for them. */
+#keys {
+    width: 52;
+}
+
+/* Its frame and padding take 4 rows: three quarters leaves them room down to 16. */
+#keys-scroll {
+    height: auto;
+    max-height: 75vh;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
 }
 
 #listing, #note-lines {
@@ -318,12 +373,13 @@ Confirm, Note, Menu, Connect, NewItem {
     border-title-color: $foreground;
 }
 
-#connect Checkbox > .toggle--button {
+/* The mark is `✓` or `·` (`Toggle`); its colour only repeats it. */
+Toggle > .toggle--button {
     color: $kraft-muted;
     background: $surface;
 }
 
-#connect Checkbox.-on > .toggle--button {
+Toggle.-on > .toggle--button {
     color: $success;
 }
 

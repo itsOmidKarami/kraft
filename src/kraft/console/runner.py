@@ -39,20 +39,29 @@ FOLLOWED = {("view", "logs"), ("view", "events")}
 FOLLOW_LATER = "Following arrives with the Item screen; leave out -f to print what is there now."
 
 #: The typed verbs the console asks about before they run (spec §7.8): what
-#: going on does, and the word for what ends the agents of running items, for
-#: the ones that do.
+#: going on does, the word for what ends the agents of running items (for
+#: the ones that do), and the confirm's button, which names the verb.
 CONFIRMS = {
-    ("admin", "restart"): ("This stops the server and starts it again.", "restarting"),
-    ("admin", "stop"): ("This stops the server.", "stopping"),
-    ("admin", "update"): ("This installs the newest Kraft release.", None),
-    ("repo", "disconnect"): ("This disconnects the repo from Kraft.", None),
-    ("item", "cancel"): ("This cancels the item; its worktree and branch stay.", None),
-    ("item", "archive"): ("This deletes the worktrees; uncommitted changes are lost.", None),
+    ("admin", "restart"): ("This stops the server and starts it again.", "restarting", "Restart"),
+    ("admin", "stop"): ("This stops the server.", "stopping", "Stop"),
+    ("admin", "update"): ("This installs the newest Kraft release.", None, "Update"),
+    ("repo", "disconnect"): ("This disconnects the repo from Kraft.", None, "Disconnect"),
+    ("item", "cancel"): (
+        "This cancels the item; its worktree and branch stay.",
+        None,
+        "Cancel item",
+    ),
+    ("item", "archive"): (
+        "This deletes the worktrees; uncommitted changes are lost.",
+        None,
+        "Archive",
+    ),
     ("item", "abandon"): (
         "This deletes the worktree and branch; uncommitted work and unpushed commits are lost.",
         None,
+        "Abandon",
     ),
-    ("admin", "addon", "uninstall"): ("This uninstalls the add-on.", None),
+    ("admin", "addon", "uninstall"): ("This uninstalls the add-on.", None, "Uninstall"),
 }
 
 
@@ -114,19 +123,19 @@ def route(line: str) -> tuple[str, str | list[str]]:
     return "run", words
 
 
-def ask(argv: list[str]) -> tuple[str, str | None] | None:
-    """What the console asks before running `kraft <argv>`: the sentence, and
-    the word for a stop that ends running agents (None: lists no items). None
-    when it runs without asking."""
+def ask(argv: list[str]) -> tuple[str, str | None, str] | None:
+    """What the console asks before running `kraft <argv>`: the sentence, the
+    word for a stop that ends running agents (None: lists no items), and the
+    button that goes on. None when it runs without asking."""
     found = next((v for k, v in CONFIRMS.items() if tuple(argv[: len(k)]) == k), None)
     if found is None:
         return None
-    sentence, doing = found
+    sentence, doing, verb = found
     if argv[:2] in (["item", "archive"], ["item", "abandon"]) and not _given(argv, "--yes"):
         return None  # without --yes the CLI only previews; nothing is lost
     if argv[:2] == ["admin", "update"] and _given(argv, "--restart"):
         doing = "restarting"
-    return sentence, doing
+    return sentence, doing, verb
 
 
 class Run:

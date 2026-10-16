@@ -20,8 +20,9 @@ from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
 from kraft import client, logs
-from kraft.console import acts, tail, words
+from kraft.console import acts, moments, tail, words
 from kraft.console.screens import View
+from kraft.console.screens.server import log_line
 
 #: A row's columns besides the title and the tail: the repo-and-chain column
 #: and the age. The bar, the id and the gaps take 1 + 8 + 2 + 2 more.
@@ -98,11 +99,11 @@ def row_line(row: dict, width: int, now: float, *, everywhere: bool, narrow: boo
     return Content.assemble(*parts)
 
 
-def chain_line(marks: list[dict], width: int) -> Content:
+def chain_line(marks: list[dict], width: int, *, lit: bool = False) -> Content:
     """The chain as a window around where the item stands (spec §6): what fits
     on either side, `+N …` and `… +N` counting what is hidden. An ended chain
     shows its end, one not started its start. The item's place is `●` in the
-    accent (spec §5.2); done nodes are faint."""
+    accent (spec §5.2), on it when `lit` (just moved there); done nodes are faint."""
     if not marks:
         return Content("")
     names = [m["node"] + (" ●" if m["state"] in ("current", "hot") else "") for m in marks]
@@ -126,7 +127,8 @@ def chain_line(marks: list[dict], width: int) -> Content:
             hi, grown = hi + 1, True
         if lo > 0 and size(lo - 1, hi) <= width:
             lo, grown = lo - 1, True
-    style = {"done": "$kraft-faint", "current": "bold $primary", "hot": "bold $primary", "todo": ""}
+    here = "bold $background on $primary" if lit else "bold $primary"
+    style = {"done": "$kraft-faint", "current": here, "hot": here, "todo": ""}
     parts: list[str | tuple[str, str]] = [(f"+{lo} … ", "$kraft-faint")] if lo else []
     for k in range(lo, hi + 1):
         parts += [(" → ", "$kraft-faint")] if k > lo else []
@@ -149,7 +151,7 @@ class Board(View):
         Binding("pagedown", "rows('page_down')", "page down", show=False),
         Binding("a", "approve", "approve"),
         Binding("r", "reject", "reject"),
-        Binding("p", "pause_or_resume", "pause/resume"),
+        *acts.P_KEYS,
         Binding("t", "retry", "retry"),
         Binding("v", "peek", "peek"),
         Binding("s", "scope", "this repo or all"),
@@ -255,12 +257,18 @@ class Board(View):
         for key, label in words.GROUPS:
             members = grouped[key]
             folded = key == "done" and not self.done_open
-            heading = f"{label.upper()} {len(members)}" + (" ›" if folded and members else "")
-            options.append(Option(Content.styled(heading, "bold $kraft-muted"), id=f"group:{key}"))
+            # Muted caps and the count in the group's colour: the rows outweigh it.
+            heading = Content.assemble(
+                (label.upper(), "$kraft-muted"),
+                " ",
+                (str(len(members)), BAR[key] if members else "$kraft-faint"),
+                (" ›" if folded and members else "", "$kraft-muted"),
+            )
+            options.append(Option(heading, id=f"group:{key}"))
             if key == "needs" and not members:
-                options.append(
-                    Option(Content.styled("Nothing needs you", "$success"), disabled=True)
-                )
+                # One calm line, the quit line's own sentence (moments.at_rest).
+                calm = moments.empty_needs_you(len(grouped["running"]))
+                options.append(Option(Content.styled(calm, "$kraft-muted"), disabled=True))
             if not folded:
                 everywhere = self.app.repo is None
                 options += [
@@ -300,7 +308,7 @@ class Board(View):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in acts.DOORS:
-            return acts.opens(action, self.selected)
+            return acts.opens(action, self.selected, parameters)
         # `s` only where there is a repo to come back to.
         if action == "open":  # folds Done, or opens the item
             option = self.query_one("#rows", OptionList).highlighted_option
@@ -362,7 +370,7 @@ class Board(View):
         if row := self.selected:
             self.run_worker(partial(acts.reject, self.app, row), group="act")
 
-    def action_pause_or_resume(self) -> None:
+    def action_pause_or_resume(self, _word: str = "") -> None:
         if row := self.selected:
             self.run_worker(partial(acts.pause_or_resume, self.app, row), group="act")
 
@@ -408,7 +416,7 @@ class Board(View):
         if row is None:
             head.update(Content.styled("server.log", "$kraft-muted"))
             async for line in tail.follow(tail.server_log()):
-                body.write(line)
+                body.write(log_line(line, self.app.theme_variables))
             return
         now = time.time()
         bead = f" · {row['bead_id']}" if row.get("bead_id") else ""
@@ -432,6 +440,7 @@ class Board(View):
                 body.write(line, scroll_end=False)
 
         tail_words = words.reason_tail(item, now)
+        way = ["", *found] if (found := acts.way_on(item)) else []
         if status == "needs_you" and stop.get("kind") == "gate":
             chain = self.query_one("#peek-chain", Static)
             chain.update(chain_line(words.chain_marks(item), self.size.width - 2))
@@ -448,19 +457,11 @@ class Board(View):
                 return
             say("", *(document.get("content") or "").splitlines()[:PEEK_DOC_LINES])
         elif status == "needs_you" and stop.get("kind") == "question":
-            say("The agent asks:", item.get("needs_context_question") or tail_words)
-            if "resume" in doors:
-                say("", "p answers it.")
+            say("The agent asks:", item.get("needs_context_question") or tail_words, *way)
         elif status in ("failed", "needs_you"):
-            say(stop.get("reason") or tail_words)
-            if "retry" in doors:
-                say("", "t retries it.")
-            if "raise_budget" in doors:
-                say(f"/item raise-budget {work_item_id} --usd N raises its budget.")
+            say(stop.get("reason") or tail_words, *way)
         elif status == "paused":
-            say(f"{tail_words} · {words.ago(item.get('updated_at'), now)}")
-            if "resume" in doors:
-                say("", "p resumes it.")
+            say(f"{tail_words} · {words.ago(item.get('updated_at'), now)}", *way)
         elif status in ("blocked", "queued"):
             waits = [d for d in item.get("dependencies") or [] if not d.get("met")]
             say(tail_words, *(["It comes after:"] if waits else []))

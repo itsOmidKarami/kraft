@@ -11,24 +11,27 @@ import os
 import shlex
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from typing import ClassVar
 from urllib.parse import urlsplit
 
 from textual import events, on
+from textual.actions import parse
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
+from textual.color import Color
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
+from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
-from kraft.console import runner, theme, words
-from kraft.console.dialogs import Confirm, Dialog
+from kraft.console import moments, runner, theme, words
+from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt, commands
@@ -73,6 +76,19 @@ def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
             "kraft-info": tokens["info"],
             "kraft-muted": tokens["text-muted"],
             "kraft-faint": tokens["text-faint"],
+            # A field's frame: the accent at half strength when focused, so the
+            # field is not the loudest thing in a dialog; the web's border else,
+            # so a field not focused still reads as one to type in.
+            "border": Color.parse(tokens["surface"]).blend(Color.parse(tokens["accent"]), 0.5).hex,
+            "border-blurred": tokens["border"],
+            # Scrollbars stay quieter than what they scroll.
+            "scrollbar": tokens["text-faint"],
+            "scrollbar-hover": tokens["text-muted"],
+            "scrollbar-active": tokens["text-muted"],
+            "scrollbar-background": tokens["bg"],
+            # A focused button's label tinted and underlined, not inverted: an
+            # inverted pill inside the button read as a drawing glitch.
+            "button-focus-text-style": "bold underline",
         },
     )
 
@@ -179,11 +195,21 @@ class KraftConsole(App):
         self.live = Live(
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
+        #: The console's last quit (`moments.read_seen`); None the first time.
+        self.seen = moments.read_seen()
+        #: Whether the board has been read once: the moments speak only after it.
+        self._read_once = False
+        #: The items a finished toast has named: each is named once.
+        self._toasted: set[str] = set()
+        #: The line the terminal keeps after the console quits; None until it
+        #: quits, and when it never read the board.
+        self.farewell: str | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="top"):
             yield Static(id="tabs")
             yield Static(id="where")
+        yield Static(id="since")
         yield Static(Content(UPDATED), id="updated")
         yield Static(id="down")
         if starts_here():
@@ -340,11 +366,17 @@ class KraftConsole(App):
             run.stop()
 
     async def confirm(
-        self, question: str, lines: Sequence[str] = (), *, running: str | None = None
+        self,
+        question: str,
+        lines: Sequence[str] = (),
+        *,
+        running: str | None = None,
+        yes: str = "Go on",
     ) -> bool:
-        """Ask before what cannot be undone (spec §7.8). With `running`, the
-        word for what ends the agents ("restarting"), the running items are
-        listed too. Await it from a worker: it waits for the answer."""
+        """Ask before what cannot be undone (spec §7.8), `yes` on the button
+        that goes on. With `running`, the word for what ends the agents
+        ("restarting"), the running items are listed too. Await it from a
+        worker: it waits for the answer."""
         lines = list(lines)
         if running is not None:
             try:
@@ -353,12 +385,44 @@ class KraftConsole(App):
             except (client.ClientError, TimeoutError):
                 items = []  # a server that does not answer has none to list
             lines += answers.running_agents_warning(running, items)
-        return await self.push_screen_wait(Confirm(question, lines))
+        return await self.push_screen_wait(Confirm(question, lines, yes=yes))
 
     async def on_unmount(self) -> None:
         # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.
         if self.command is not None:
             await self.command.end()
+        if self._read_once:  # a console that never read the board saw nothing
+            moments.write_seen(time.time(), self.rows)
+            self.farewell = moments.leaving(self._in_scope(self.rows))
+
+    async def on_event(self, event: events.Event) -> None:
+        # The since line goes at the first key, whatever it does.
+        if isinstance(event, events.Key):
+            self._since_off()
+        await super().on_event(event)
+
+    def _in_scope(self, rows: list[dict]) -> list[dict]:
+        """The rows the Board shows: in its repo, archived ones left out."""
+        return [
+            row
+            for row in rows
+            if self.repo in (None, row.get("repo")) and row.get("display_status") != "archived"
+        ]
+
+    def _since_on(self) -> None:
+        """Opening (D1): after the first read, if the console was here before,
+        what moved meanwhile, for `SINCE_S` or until a key."""
+        if self.seen is not None:
+            self.default_screen.add_class("-since")
+            self.set_timer(moments.SINCE_S, self._since_off)
+
+    def _since_off(self) -> None:
+        self.default_screen.remove_class("-since")
+
+    def _draw_since(self) -> None:
+        if self.seen is not None and self.default_screen.has_class("-since"):
+            line = moments.since_line(self._in_scope(self.rows), self.seen, time.time())
+            self.query_one("#since", Static).update(Content.styled(line, "$kraft-muted"))
 
     def action_prompt(self) -> None:
         prompt = self.query_one(Prompt)
@@ -407,8 +471,9 @@ class KraftConsole(App):
             return
         asked = runner.ask(argv)
         if asked is not None:
-            sentence, doing = asked
-            if not await self.confirm(f"kraft {shlex.join(argv)}", [sentence], running=doing):
+            sentence, doing, verb = asked
+            question = f"kraft {shlex.join(argv)}"
+            if not await self.confirm(question, [sentence], running=doing, yes=verb):
                 return
         await self.run_command(argv)
 
@@ -433,10 +498,27 @@ class KraftConsole(App):
             self.exit()
 
     def action_keys(self) -> None:
-        if self.screen.query(HelpPanel):
-            self.action_hide_help_panel()
-        else:
-            self.action_show_help_panel()
+        """`?`: Kraft's own list of keys, not Textual's panel (which squeezes
+        the screen and lists the framework's bindings in its own words). Over
+        the frame only: a dialog's keys are its own."""
+        if self.screen is self.default_screen:
+            self.push_screen(Keys(self.screen_keys()))
+
+    def screen_keys(self) -> list[tuple[str, str]]:
+        """The shown view's keys that act now, `(keys, label)`, one row per
+        label: `j ↓ down`. Kitty's `shift+R` name for `R` is left out."""
+        found: dict[str, list[str]] = {}
+        for binding in Binding.make_bindings(self.view.BINDINGS):
+            _, name, parameters = parse(binding.action)
+            if (
+                binding.key.startswith("shift+")
+                or self.view.check_action(name, parameters) is False
+            ):
+                continue
+            shown = found.setdefault(binding.description, [])
+            if (key := self.get_key_display(binding)) not in shown:
+                shown.append(key)
+        return [(" ".join(keys), label) for label, keys in found.items()]
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         # Textual's own theme picker lists its themes; Kraft has two.
@@ -457,7 +539,18 @@ class KraftConsole(App):
         self._draw_top(width)
 
     def _live_event(self, rows: list[dict], events: list[dict]) -> None:
-        self.rows = rows
+        before, first = self.rows, not self._read_once
+        self.rows, self._read_once = rows, True
+        if first:
+            self._since_on()
+        if done := [
+            row
+            for row in self._in_scope(moments.finished(before, rows))
+            if row["id"] not in self._toasted
+        ]:
+            # Work finishing (D3): never on the first read, whose done items were done before.
+            self._toasted |= {row["id"] for row in done}
+            self.notify(moments.finished_toast(done, time.time()))
         self._draw_top()
         for view in self.query(View):
             view.rows_changed(rows, events)
@@ -540,6 +633,7 @@ class KraftConsole(App):
         self.run_worker(self.check_update, name="update")
 
     def _draw_top(self, width: int | None = None) -> None:
+        self._draw_since()
         live = self.link is Link.LIVE
         tabs: list[str | tuple[str, str]] = []
         for name, count in self._tabs():
@@ -603,4 +697,9 @@ def main() -> None:
             raise
     app = KraftConsole()
     app.run()
+    if not app.return_code and app.farewell:
+        # Leaving (D4): one plain line stays in the terminal, never on an error;
+        # a terminal already gone (an SSH drop) must not change the exit code.
+        with contextlib.suppress(OSError):
+            print(app.farewell, flush=True)
     raise SystemExit(app.return_code or 0)

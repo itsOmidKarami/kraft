@@ -39,7 +39,7 @@ REPOS = [
     },
 ]
 PROBED = {"path": "/r", "test_command": "uv run pytest", "setup_command": "uv sync"}
-PROPOSED = "Kraft proposes these for r. Keep or change them."
+PROPOSED = "Proposed for r: keep or change them."
 NOT_GIT = client.status_error(400, "/x is not a git repository [/]")
 
 
@@ -86,9 +86,10 @@ def test_the_list_shows_each_repo_with_its_commands(board, monkeypatch, listed, 
         await _settled(console, app, pilot)
         await pilot.press("4")
         await console.until(pilot, lambda: len(_rows(app)) == len(lines))
-        return _rows(app)
+        return _rows(app), _text(app, "#repos-head")
 
-    assert console.run(scenario) == lines
+    # The heading says what the list is and how to add to it, with repos or none.
+    assert console.run(scenario) == (lines, "Connected repos · c connects one")
 
 
 @pytest.mark.parametrize(
@@ -182,13 +183,13 @@ def test_c_connects_through_a_form_the_probe_fills(
         (
             {"path": "/ot\x1bher", "test_command": "a\x1b[2K", "setup_command": ""},
             ("a\\x1b[2K", ""),
-            "Kraft proposes these for ot\\x1bher. Keep or change them.",
+            "Proposed for ot\\x1bher: keep or change them.",
         ),
         # A probe that found nothing says so, naming the repo by its last component.
         (
             {"path": "/src/empty-repo/", "test_command": None, "setup_command": ""},
             ("", ""),
-            "Kraft found no test or setup command in empty-repo; type them, or leave them empty.",
+            "No test or setup command found in empty-repo: type them, or leave them empty.",
         ),
         # A refused second probe leaves no command of the first path behind.
         (NOT_GIT, ("", ""), "400: /x is not a git repository [/]"),
@@ -443,9 +444,11 @@ def test_the_connect_form_fits_a_window_or_scrolls_to_the_focused_button(
             )
             for b in buttons
         }
-        return inside, app.focused.id
+        path = app.screen.query_one("#connect-path", Input)
+        return inside, app.focused.id, path.has_focus or path.cursor_position == 0
 
-    assert console.run(scenario, size=size) == ({b: True for b in buttons}, focus)
+    # Left, the path shows its start, not the end the cursor scrolled it to.
+    assert console.run(scenario, size=size) == ({b: True for b in buttons}, focus, True)
 
 
 def test_a_hidden_repos_view_stops_a_read_in_flight(board, monkeypatch):
