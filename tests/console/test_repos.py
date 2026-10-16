@@ -61,7 +61,8 @@ def _said(app) -> str:
             [
                 "* kraft  /r\n    test: just test [/] · setup: just setup",
                 "  web  /src/web · disabled\n    test: not set · setup: none",
-                "  mono  /src/mono · detected, not managed\n    test: 2 scopes · setup: make\\x1b[2K",
+                "  mono  /src/mono · detected, not managed\n"
+                "    test: 2 scopes · setup: make\\x1b[2K",
             ],
         ),
         ([], [repos_view.EMPTY]),
@@ -173,10 +174,16 @@ def test_c_connects_through_a_form_the_probe_fills(
     [
         # The first path's answer lands after the box holds another path: dropped.
         ({"path": "/other", "test_command": "new", "setup_command": "s2"}, ("new", "s2"), "/other"),
+        # What the repo's own files propose is written out, never obeyed.
+        (
+            {"path": "/ot\x1bher", "test_command": "a\x1b[2K", "setup_command": ""},
+            ("a\\x1b[2K", ""),
+            "/ot\\x1bher",
+        ),
         # A refused second probe leaves no command of the first path behind.
         (NOT_GIT, ("", ""), "400: /x is not a git repository [/]"),
     ],
-    ids=["stale-answer-dropped", "each-probe-empties-the-fields"],
+    ids=["stale-answer-dropped", "proposal-written-out", "each-probe-empties-the-fields"],
 )
 def test_the_probe_answers_only_for_the_path_in_the_box(
     board, monkeypatch, tmp_path, second, fields, said
@@ -197,7 +204,7 @@ def test_the_probe_answers_only_for_the_path_in_the_box(
         try:
             await release.wait()
         except asyncio.CancelledError:
-            pass  # the reply is already on its way: a cancel does not recall it
+            await release.wait()  # the reply is already on its way: a cancel does not recall it
         return PROBED
 
     async def repos():

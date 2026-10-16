@@ -50,8 +50,8 @@ class Addons(_Placeholder):
 # After `View`, which each view's module builds on.
 from kraft.console.screens.board import Board  # noqa: E402
 from kraft.console.screens.item import Item  # noqa: E402
-from kraft.console.screens.server import Server  # noqa: E402
 from kraft.console.screens.repos import Repos  # noqa: E402
+from kraft.console.screens.server import Server  # noqa: E402
 
 #: Every view, by the name `KraftConsole.show` takes.
 VIEWS: dict[str, type[View]] = {
