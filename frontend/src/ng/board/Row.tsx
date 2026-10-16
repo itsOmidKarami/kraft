@@ -40,7 +40,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   const hot = groupOf(item) === "needs";
   const cue = hot ? stopCueOf(item) : null;
   const Cue = cue ? CUE_ICON[cue] : null;
-  // A row's action is named by what it does ("Review to approve") and described by its item:
+  // A row's action is named by what it does ("Review") and described by its item:
   // five alike in a row read the same to a screen reader without it (R8b-11).
   const titleId = `board-title-${item.id}`;
   const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : onSelect(item.id));
