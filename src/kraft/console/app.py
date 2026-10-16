@@ -33,6 +33,7 @@ from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt, commands
 from kraft.console.screens import VIEWS, Board, Item, View
+from kraft.console.screens.server import updates_waiting
 from kraft.vocab import WorkItemStatus
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
@@ -45,6 +46,8 @@ NARROW = 80
 #: How long a confirm waits for the server to list its running items before
 #: it asks without them, as `kraft admin stop` does (`cli.admin._LIST_TIMEOUT`).
 CONFIRM_LIST_S = 2.0
+#: Said after `kraft admin update` installed a version the console did not start on.
+UPDATED = "Kraft was updated; restart the console to use the new version."
 
 
 def _theme(name: str, tokens: dict[str, str], *, dark: bool) -> Theme:
@@ -159,6 +162,10 @@ class KraftConsole(App):
         self.everywhere = False
         self.link = Link.RECONNECTING
         self.update_waiting = False
+        #: `update_available()`'s last answer: the Server names the release.
+        self.release: dict | None = None
+        #: An update installed another version than this console runs (spec §3, §7.3).
+        self.updated = False
         self._scoped = False
         self._last_top = "board"
         #: The command running in the output panel; one at a time.
@@ -173,6 +180,7 @@ class KraftConsole(App):
         with Horizontal(id="top"):
             yield Static(id="tabs")
             yield Static(id="where")
+        yield Static(Content(UPDATED), id="updated")
         yield Static(id="down")
         if starts_here():
             yield Button("Start server", id="start")
@@ -196,7 +204,7 @@ class KraftConsole(App):
             for sig in (signal.SIGHUP, signal.SIGTERM):
                 loop.add_signal_handler(sig, self.exit)
         # After the first paint: a cold cache reads the release feed over the network.
-        self.call_after_refresh(self.run_worker, self._check_update, name="update")
+        self.call_after_refresh(self.run_worker, self.check_update, name="update")
 
     @property
     def view(self) -> View:
@@ -289,6 +297,8 @@ class KraftConsole(App):
         self.command = None
         panel.end(code)
         done.set_result(code)
+        if run.argv[:2] == ["admin", "update"]:  # a key's or a typed one
+            self._after_update()
 
     async def _show_panel(self) -> None:
         """The panel on top, once: Ctrl+P can open over it. A dialog is never
@@ -466,13 +476,26 @@ class KraftConsole(App):
         self._draw_top()
         self.query_one("#board", Board).draw()
 
-    async def _check_update(self) -> None:
+    async def check_update(self) -> None:
+        """Read the release feed through the server, keeping the answer for
+        the Server view; a failure leaves the last one (the Server reads
+        again when shown)."""
         try:
-            found = await client.update_available()
+            self.release = await client.update_available()
         except client.ClientError:
-            return  # the top line just does not say; the Server view reads it again
-        self.update_waiting = bool(found.get("behind"))
+            return
+        self.update_waiting = bool(self.release.get("behind"))
         self._draw_top()
+
+    def _after_update(self) -> None:
+        """After `kraft admin update` (spec §7.3): a new install is said until
+        the console restarts, since it runs the modules it started on, and
+        `updated` closes native add-on install and update (spec §3). The feed
+        is read again: "update available" may be over."""
+        if update.installed() != self.version:
+            self.updated = True
+            self.default_screen.add_class("-updated")
+        self.run_worker(self.check_update, name="update")
 
     def _draw_top(self) -> None:
         live = self.link is Link.LIVE
@@ -501,10 +524,7 @@ class KraftConsole(App):
             words.group_of(row) == "needs" and self.repo in (None, row.get("repo"))
             for row in self.rows
         )
-        held = sum(
-            entry.get("outcome") == "held"
-            for entry in ((self.health or {}).get("addon_updates") or {}).values()
-        )
+        held = updates_waiting(self.health)
         status = (self.health or {}).get("status", "down")
         counts = {
             "board": (str(needs_you), "$warning") if needs_you else "",

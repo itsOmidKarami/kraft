@@ -508,7 +508,9 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
         monkeypatch.setattr(
             owner, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
         )
-    monkeypatch.setattr(View, "health_changed", lambda self, health: seen.add(("health", self.id)))
+        monkeypatch.setattr(
+            owner, "health_changed", lambda self, health: seen.add(("health", self.id))
+        )
 
     async def scenario(app, pilot):
         DIALOGS[dialog](app)

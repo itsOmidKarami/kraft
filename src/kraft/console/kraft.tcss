@@ -27,6 +27,19 @@ Screen.-narrow #where {
     display: none;
 }
 
+/* After an update installed another version: until the console restarts. */
+#updated {
+    display: none;
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+    color: $warning;
+}
+
+Screen.-updated #updated {
+    display: block;
+}
+
 ContentSwitcher {
     height: 1fr;
 }
@@ -83,6 +96,7 @@ Screen.-tiny > * {
 }
 
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
+Screen.-tiny #updated,
 Screen.-tiny #down,
 Screen.-tiny #start,
 Screen.-tiny #prompt,
@@ -95,7 +109,8 @@ Screen.-tiny #tiny {
 }
 
 /* The Board: a filter line when asked for, and the rows. */
-#board-filter {
+#board-filter,
+#server-filter {
     height: 1;
     border: none;
     padding: 0 1;
@@ -257,4 +272,23 @@ Confirm, Note, Menu {
     height: auto;
     margin-top: 1;
     border: none;
+}
+
+/* The Server: how it is, then `server.log` under a rule. */
+#server-summary {
+    height: auto;
+    padding: 0 1;
+}
+
+#server-rule {
+    height: 2;
+    padding: 0 1;
+    border-top: solid $kraft-line;
+    color: $kraft-muted;
+}
+
+#server-log {
+    height: 1fr;
+    padding: 0 1;
+    background: $background;
 }
