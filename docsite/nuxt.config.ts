@@ -107,7 +107,10 @@ const missingPage = `<style>
 // puts back before the router reads it. Before anything else in the head, so
 // the 404 never paints.
 const demoBases = (versions.length ? versions.map(v => v.base) : ['/']).map(b => `${b}demo/`)
-const demoReturn = `<script>(function(l){${JSON.stringify(demoBases)}.some(function(b){if(l.pathname.indexOf(b)!==0)return false;if(l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash));return true})})(location)</script>`
+// JSON inside a <script>: < > / and the two JS line separators as \u escapes,
+// so no value can close the element or the string it sits in.
+const scriptJson = (value: unknown) => JSON.stringify(value).replace(/[<>\/\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+const demoReturn = `<script>(function(l){${scriptJson(demoBases)}.some(function(b){if(l.pathname.indexOf(b)!==0)return false;if(l.pathname!==b)l.replace(b+'?to='+encodeURIComponent(l.pathname.slice(b.length-1)+l.search+l.hash));return true})})(location)</script>`
 
 // A browser breaks a line after a space or a hyphen and after nothing else in
 // `POST /api/work-items/{id}/gates/{gate}/approve`, so an "On this page" entry
