@@ -3,6 +3,7 @@ the console draws it (spec §4.3). Plain text, no colour, no terminal."""
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from kraft.vocab import WorkItemStatus
@@ -155,9 +156,12 @@ def dollars(raw: str) -> float | None:
     if raw.lower() == "none":
         return None
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
-        raise ValueError(f"dollars or `none`, not {raw!r}") from None
+        value = math.nan
+    if not math.isfinite(value):  # inf and nan cannot go in the JSON body
+        raise ValueError(f"dollars or `none`, not {raw!r}")
+    return value
 
 
 def raised_budget(usd: float | None) -> Callable[[dict], str]:

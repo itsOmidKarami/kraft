@@ -78,9 +78,9 @@ def cancel_lines(preview: dict) -> list[str]:
     `stopsNow`), from `client.cancel_preview`."""
     run = preview.get("running")
     if run:
-        what = words.task_name(run["task"]) if run.get("task") else run.get("node") or ""
-        attempt = f", attempt {run['attempt']}" if run.get("attempt") else ""
-        stops = f"{what}{attempt}. That attempt's work is lost."
+        name = words.task_name(run["task"]) if run.get("task") else run.get("node")
+        attempt = f"attempt {run['attempt']}" if run.get("attempt") else ""
+        stops = f"{', '.join(p for p in (name, attempt) if p)}. That attempt's work is lost."
     else:
         stops = "Nothing is running."
     kept = preview.get("kept") or {}
@@ -694,6 +694,7 @@ class Item(View):
             preview = await client.cancel_preview(item["id"])
         except client.ClientError as exc:
             self.app.notify_refusal(exc)
+            self.app.live.reread()
             return
         lines = [*cancel_lines(preview), "", REASON]
         reason = await self._ask(f"Cancel {item['id'][:8]}?", lines, required=True)

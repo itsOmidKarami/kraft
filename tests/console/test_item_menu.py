@@ -12,7 +12,8 @@ from kraft import client
 from kraft.console.dialogs import Confirm, Menu, Note
 from kraft.console.screens import item as item_view
 
-ITEM = FAILED | {"actions": ["retry", *(door for door, _ in item_view.MENU)]}
+DOORS = ["retry", *(door for door, _ in item_view.MENU)]
+ITEM = FAILED | {"title": "Tidy [/] up", "actions": DOORS}
 PREVIEW = {
     "running": {"node": "verification", "task": "verification.review.code_review", "attempt": 2},
     "kept": {"branch": "kraft/x", "worktree": "/w", "findings": 3, "threads": 0},
@@ -24,6 +25,19 @@ PREVIEW = {
 
 async def _preview(work_item_id=None) -> dict:
     return PREVIEW
+
+
+def _rereads(monkeypatch) -> list[int]:
+    """Counts the board reads from here on: one more is a reread."""
+    reads: list[int] = []
+    was = client.board_rows
+
+    async def board_rows(**kwargs):
+        reads.append(1)
+        return await was(**kwargs)
+
+    monkeypatch.setattr(client, "board_rows", board_rows)
+    return reads
 
 
 def _toasts(app) -> list[str]:
@@ -62,9 +76,10 @@ def _record(monkeypatch, name: str, answer) -> list[tuple]:
 )
 def test_m_lists_only_the_doors_the_server_opens(board, monkeypatch, actions, entries):
     """Spec §6: a key appears only when its action is open; so does an entry."""
-    detail = _detail(FAILED, actions=actions)
+    detail = _detail(FAILED, actions=actions, title=ITEM["title"])
     _serve(monkeypatch, detail)
     console = board([detail])
+    titles: list[str] = []
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, detail["id"])
@@ -72,9 +87,12 @@ def test_m_lists_only_the_doors_the_server_opens(board, monkeypatch, actions, en
             return None
         await pilot.press("m")
         await console.until(pilot, lambda: isinstance(app.screen, Menu))
+        titles.append(str(app.screen.query_one("#menu-title").render()))
         return [o.prompt.plain for o in app.screen.query_one(OptionList).options]
 
     assert console.run(scenario) == entries
+    # The item's title is drawn as written, a `[/]` and all.
+    assert titles == ([] if entries is None else ["m03d77b1  Tidy [/] up"])
 
 
 @pytest.mark.parametrize(
@@ -177,7 +195,7 @@ def test_cancel_says_what_it_stops_and_keeps_above_its_reason(board, monkeypatch
     ]
 
 
-SPENT = "the item has already spent $5.1; a cap of $5 would stop it again at once"
+SPENT = "the item has already spent $5.1; a cap of $5 [/] would stop it again at once"
 PARTLY = "the cap was raised to $9, but the retry was refused: a walk is already running"
 
 
@@ -199,15 +217,24 @@ PARTLY = "the cap was raised to $9, but the retry was refused: a walk is already
             client.reason_of(str(client.status_error(409, PARTLY))),
         ),
         ([], [*"abc", "enter", "escape"], [], "dollars or `none`, not 'abc'", None),
+        ([], [*"inf", "enter", "escape"], [], "dollars or `none`, not 'inf'", None),
+        ([], [*"nan", "enter", "escape"], [], "dollars or `none`, not 'nan'", None),
         (
-            [{"id": "m03d77b1", "node_id": "implement"}],
+            [{"id": "m03d77b1", "node_id": "implement [/]"}],
             [*"none", "enter"],
             [(None, "m03d77b1")],
             None,
-            "raised the cap on m03d77b1 to no cap; retried at implement",
+            "raised the cap on m03d77b1 to no cap; retried at implement [/]",
         ),
     ],
-    ids=["at-or-below-spend-asks-again", "raised-but-not-retried", "not-dollars", "no-cap"],
+    ids=[
+        "at-or-below-spend-asks-again",
+        "raised-but-not-retried",
+        "not-dollars",
+        "inf",
+        "nan",
+        "no-cap",
+    ],
 )
 def test_raise_budget_refuses_in_its_dialog_and_says_a_partial_raise(
     board, monkeypatch, answers, typed, sent, error, said
@@ -228,9 +255,13 @@ def test_raise_budget_refuses_in_its_dialog_and_says_a_partial_raise(
 
     monkeypatch.setattr(client, "raise_budget", raise_budget)
     console = board([ITEM])
+    reads = _rereads(monkeypatch)
+    # A refusal other than the 422 leaves the row stale: it is read again.
+    reread = any(isinstance(a, client.ClientError) and a.status != 422 for a in answers)
 
     async def scenario(app, pilot):
         await _opened(console, app, pilot, ITEM["id"])
+        before = len(reads)
         await _pick(console, pilot, app, "raise_budget")
         await console.until(pilot, lambda: isinstance(app.screen, Note))
         shown = []
@@ -248,12 +279,15 @@ def test_raise_budget_refuses_in_its_dialog_and_says_a_partial_raise(
         if said:
             await console.until(pilot, lambda: _toasts(app))
         await console.until(pilot, lambda: app.screen is app.default_screen)
-        return calls, shown, _toasts(app)
+        if reread:
+            await console.until(pilot, lambda: len(reads) > before)
+        return calls, shown, _toasts(app), len(reads) > before
 
     assert console.run(scenario, notifications=True) == (
         sent,
         [error] if error else [],
         [said] if said else [],
+        reread,
     )
 
 
@@ -277,3 +311,81 @@ def test_archive_runs_the_cli_verb_after_the_consoles_confirm(board, monkeypatch
         "kraft item archive m03d77b1 --yes",
         ["ran item archive m03d77b1 --yes"],
     )
+
+
+def test_a_cancel_preview_that_fails_says_so_and_reads_the_item_again(board, monkeypatch):
+    """The preview can answer 404 (archived meanwhile): the toast, and the
+    item read again, as every refused action does."""
+    _serve(monkeypatch, _detail(ITEM))
+
+    async def refused(work_item_id=None):
+        raise client.status_error(404, "gone [/]")
+
+    monkeypatch.setattr(client, "cancel_preview", refused)
+    console = board([ITEM])
+    reads = _rereads(monkeypatch)
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, ITEM["id"])
+        before = len(reads)
+        await _pick(console, pilot, app, "cancel")
+        await console.until(pilot, lambda: len(reads) > before and _toasts(app))
+        return _toasts(app), isinstance(app.screen, Note)
+
+    toasts, asked = console.run(scenario, notifications=True)
+    assert toasts == [client.reason_of(str(client.status_error(404, "gone [/]")))]
+    assert not asked
+
+
+@pytest.mark.parametrize(
+    ("running", "stops"),
+    [
+        ({"attempt": 2}, "attempt 2. That attempt's work is lost."),
+        ({"node": "implement"}, "implement. That attempt's work is lost."),
+        ({"node": "implement", "attempt": 2}, "implement, attempt 2. That attempt's work is lost."),
+        (None, "Nothing is running."),
+    ],
+    ids=["attempt-only", "node-only", "node-and-attempt", "nothing"],
+)
+def test_cancel_lines_join_what_runs_as_the_web_does(running, stops):
+    """`stopsNow` joins the parts it has with ", ": no leading comma."""
+    lines = item_view.cancel_lines(PREVIEW | {"running": running})
+    assert lines[0] == f"Stops now: {stops}"
+
+
+@pytest.mark.parametrize("how", ["switched", "gone"])
+def test_a_menu_left_open_acts_on_nothing_once_the_item_moved_on(board, monkeypatch, how):
+    """The Menu is modal: while it is open the Item may show another item or
+    answer 404. A pick then asks nothing and sends nothing."""
+    reads = {"detail": _detail(ITEM)}
+
+    async def get_work_item(work_item_id=None, *, full=False):
+        if isinstance(reads["detail"], Exception):
+            raise reads["detail"]
+        return reads["detail"]
+
+    _serve(monkeypatch, _detail(ITEM))
+    monkeypatch.setattr(client, "get_work_item", get_work_item)
+    asked: list[bool] = []
+    original = Note.on_mount
+    monkeypatch.setattr(Note, "on_mount", lambda self: (asked.append(True), original(self))[1])
+    console = board([ITEM, ITEM | {"id": "b2b2b2b2"}])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, ITEM["id"])
+        await pilot.press("m")
+        await console.until(pilot, lambda: isinstance(app.screen, Menu))
+        if how == "switched":
+            app.open_item("b2b2b2b2")
+        else:
+            reads["detail"] = client.status_error(404, "gone")
+            app.live.reread()
+            await console.until(pilot, lambda: app.view._dead)
+        listed = app.screen.query_one(OptionList)
+        listed.highlighted = [o.id for o in listed.options].index("complete")
+        await pilot.press("enter")
+        await console.until(pilot, lambda: not isinstance(app.screen, Menu))
+        await pilot.pause()
+        return asked
+
+    assert console.run(scenario) == []
