@@ -162,3 +162,20 @@
 .not-found code { font: inherit; font-family: ui-monospace, Menlo, monospace; }
 .not-found p { margin: 0 0 10px; }
 .not-found a { color: var(--text); text-decoration: underline; }
+
+/* Badge: a read-only label, 5px. Chip: a toggle you press, fully round. Tones are the item header's. */
+.badge { flex: none; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; font-size: var(--fs-label); line-height: 1.5; color: var(--text-sub); white-space: nowrap; }
+.badge.is-mono { font-family: ui-monospace, Menlo, monospace; font-weight: 600; letter-spacing: .04em; }
+.badge.is-neutral { border-color: transparent; background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
+.badge.is-info { border-color: var(--info); color: var(--info); }
+.badge.is-warn { border-color: transparent; background: color-mix(in oklab, var(--warn) 9%, transparent); color: var(--warn); }
+.badge.is-bad { border-color: transparent; background: color-mix(in oklab, var(--bad) 9%, transparent); color: var(--bad); }
+.badge.is-ok { border-color: transparent; background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
+.badge.is-muted { border-color: transparent; background: var(--surface-2); color: var(--text-sub); }
+.badge.is-change { border-color: transparent; background: color-mix(in oklab, var(--mark-change) 9%, transparent); color: var(--mark-change); }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font: inherit; font-size: var(--fs-label); color: var(--text-sub); white-space: nowrap; }
+button.chip { cursor: pointer; }
+button.chip:not([aria-pressed="true"], [aria-checked="true"]):is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--surface-2); color: var(--text); }
+.chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.chip[aria-pressed="true"], .chip[aria-checked="true"] { border-color: var(--text); background: var(--text); color: var(--bg); font-weight: 600; }
+.chip.is-changed { border-color: var(--mark-change-line); }

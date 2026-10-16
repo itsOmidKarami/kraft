@@ -8,6 +8,7 @@ import type { Row } from "./rows";
 import type { Use } from "./types";
 import { STEERING_NOTE } from "./sharedWords";
 import { Select } from "../ui/Select";
+import { Badge } from "../ui/Badge";
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
@@ -121,7 +122,7 @@ export function SteeringCanvas({ row, uses, reserve, draft }: { row: Row; uses: 
                 <ChevronRight size={12} aria-hidden className="lib-section-chev" />
                 <span className="lib-section-kind">{s.kind}</span>
                 <span className="lib-section-source">{s.source}</span>
-                {mine(s) && <span className="lib-chip">this profile</span>}
+                {mine(s) && <Badge>this profile</Badge>}
               </button>
               {open.has(i) && <pre className="lib-section-text">{s.text}</pre>}
             </li>

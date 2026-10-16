@@ -11,12 +11,14 @@ import { termsOf } from "../item/DocViewer";
 import { gateName, reasonTail } from "../board/rowText";
 import { headerState, neverStarted } from "../item/status";
 import { Kbd } from "../ui/Kbd";
+import { chipClass } from "../ui/Chip";
 import { NoMatch } from "../ui/NoMatch";
 import { SEARCH_MODES, type SearchMode } from "../ui/searchModes";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
 import "./search.css";
 import { Select } from "../ui/Select";
+import { Badge } from "../ui/Badge";
 
 type Tab = "all" | "items" | "docs" | "beads";
 type Load = "idle" | "loading" | "ok" | "error";
@@ -236,7 +238,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
                     {r.sub && <span className="ng-search-sub">{r.sub}</span>}
                     {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
                   </span>
-                  {r.tag && <span className="ng-search-tag">{r.tag}</span>}
+                  {r.tag && <Badge mono>{r.tag}</Badge>}
                   {r.where && <span className="ng-search-where">{r.where}</span>}
                   {r === row && <span className="ng-search-key" aria-hidden>⏎</span>}
                 </>
@@ -297,8 +299,8 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
         </div>
         {(filters || filtersOn > 0) && (
           <div className="ng-search-filters">
-            <label className="ng-search-fchip"><span>source</span><Select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></Select></label>
-            <label className="ng-search-fchip"><span>kind</span><input value={kind} placeholder="any" size={8} onChange={(e) => setKind(e.target.value)} /></label>
+            <label className={chipClass()}><span>source</span><Select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></Select></label>
+            <label className={chipClass()}><span>kind</span><input value={kind} placeholder="any" size={8} onChange={(e) => setKind(e.target.value)} /></label>
             <span className="ng-search-fnote">Filters narrow Documents only</span>
           </div>
         )}

@@ -24,6 +24,8 @@ import "../../item/item.css";
 import { sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
 import { DISCARD_THIS_DRAFT } from "../sharedWords";
+import { Badge } from "../../ui/Badge";
+import { chipClass } from "../../ui/Chip";
 
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
@@ -189,7 +191,7 @@ export function DraftItemPage() {
   return (
     <div className="draft-page" ref={page}>
       <HeaderActions>
-        <span id={tagId} className={`draft-tag${d.title.trim() ? " is-ok" : ""}`}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</span>
+        <Badge id={tagId} mono tone={d.title.trim() ? "muted" : "change"}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</Badge>
         <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
         <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} onCreate={create} />
       </HeaderActions>
@@ -207,7 +209,7 @@ export function DraftItemPage() {
         <span>Repo</span>
         <Menu
           label="Repo"
-          triggerClass="composer-chip"
+          triggerClass={chipClass()}
           trigger={<>{d.repo ? repoName(d.repo) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
           items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, skip: [], members: [], spec: "", plan: "" }) }))}
         />
@@ -224,10 +226,10 @@ export function DraftItemPage() {
             <span className="draft-gap" />
             <span>Comes after</span>
             {d.after.map((id) => (
-              <span key={id} className="composer-chip composer-attached" title={afterName(id)}>
+              <Badge key={id} mono className="composer-attached" title={afterName(id)}>
                 <span className="composer-path">{afterName(id)}</span>
                 <button type="button" className="composer-x" {...tip(`Do not come after ${afterName(id)}`)} onClick={() => set({ after: d.after.filter((x) => x !== id) })}>✕</button>
-              </span>
+              </Badge>
             ))}
             {afterOpen.length > 0 && (
               <Menu
@@ -241,7 +243,7 @@ export function DraftItemPage() {
           </>
         )}
         {ws && memberRows.length > 0 && (
-          <button type="button" className={d.members.length ? "composer-chip" : "composer-add"} onClick={() => { setSel(null); setTab("overview"); setPaneOpen(true); setAddOpen(true); }}>
+          <button type="button" className={d.members.length ? chipClass() : "composer-add"} onClick={() => { setSel(null); setTab("overview"); setPaneOpen(true); setAddOpen(true); }}>
             {d.members.length ? `${d.members.length} member${d.members.length === 1 ? "" : "s"} · chosen in the chain pane` : "+ members"}
           </button>
         )}
@@ -266,7 +268,7 @@ export function DraftItemPage() {
           <Menu
             label="Chain"
             description={repos.find((r) => r.path === d.repo)?.default_chain ? defaultChainNote(repos.find((r) => r.path === d.repo)!.default_chain!) : undefined}
-            triggerClass="composer-chip composer-mono draft-chain-btn"
+            triggerClass={chipClass("composer-mono draft-chain-btn")}
             trigger={<>{d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
             items={chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
           />

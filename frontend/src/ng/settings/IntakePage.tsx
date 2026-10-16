@@ -23,6 +23,7 @@ import "./intake/intake.css";
 import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "./sharedWords";
 import { Select } from "../ui/Select";
 import { LinkButton } from "../ui/LinkButton";
+import { Badge } from "../ui/Badge";
 
 const CHECKS_EVERY_MS = 30_000;
 
@@ -121,7 +122,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                     <div className="ink-status">
                       <span className="ink-dot" aria-hidden />
                       <span>{data.enabled ? `On${next ? ` · ${next}` : ""}` : "Off"}</span>
-                      {changes.has("intake.yaml|enabled") && <span className="ink-chip is-changed">changed</span>}
+                      {changes.has("intake.yaml|enabled") && <Badge tone="change">changed</Badge>}
                       <span className="ink-gap" />
                       <Switch label="enabled" checked={data.enabled} onChange={(on) => void send(draft, { op: "set_intake", patch: { enabled: on } })} />
                     </div>
@@ -203,7 +204,7 @@ function Row({ k, children, note, changed }: { k: string; children: React.ReactN
     <div className="ink-row">
       <span className="ink-k">{k}</span>
       <span className="ink-v">{children}</span>
-      {changed && <span className="ink-chip is-changed">changed</span>}
+      {changed && <Badge tone="change">changed</Badge>}
       {note && <span className="ink-rownote">{note}</span>}
     </div>
   );

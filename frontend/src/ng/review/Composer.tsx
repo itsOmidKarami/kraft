@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ReviewThread, ThreadLabel } from "../../types";
+import { Chip } from "../ui/Chip";
 import { Button } from "../ui/Button";
 import { useReason } from "../ui/Reason";
 import { COMMENT_NEEDS_TEXT } from "../ui/reasons";
@@ -129,10 +130,10 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
           chips.current[to]?.focus();
         }}>
           {LABELS.map(([k, text], i) => (
-            <button key={text} ref={(el) => void (chips.current[i] = el)} type="button" role="radio" aria-checked={d.label === k} tabIndex={d.label === k ? 0 : -1} className={`rv-chip${d.label === k ? " is-on" : ""}`} onClick={() => set({ label: k })}>
+            <Chip key={text} ref={(el) => void (chips.current[i] = el)} role="radio" pressed={d.label === k} tabIndex={d.label === k ? 0 : -1} onClick={() => set({ label: k })}>
               {d.label === k && <Check size={12} aria-hidden />}
               {text}
-            </button>
+            </Chip>
           ))}
         </span>
         <span className="rv-spacer" />

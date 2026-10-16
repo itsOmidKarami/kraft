@@ -3,7 +3,9 @@ import { FileText, NodeIcon } from "../icons";
 import { NodeGlyph } from "./NodeGlyph";
 import { accessibleName, type GlyphState } from "./types";
 import "./graph.css";
+import { Badge } from "../ui/Badge";
 
+const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;
 type Reviewer = { id?: string; icon?: string; state?: GlyphState; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean };
 type Props = {
   gate: { id: string; state?: GlyphState; mark?: "add" | "change"; prob?: boolean; sel?: boolean };
@@ -36,7 +38,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
               <button type="button" className={`gateview-item${r.sel ? " is-sel" : ""}`} aria-label={accessibleName({ ...r, id: r.id ?? "auto_review" }, "reviewer task")} {...hint("The gate's auto_review task · runs before you decide")} onClick={onReviewer}>
                 <NodeGlyph size="gv" icon={r.icon ?? "bot"} state={r.state} mark={r.mark} prob={r.prob} sel={r.sel} running={r.state === "current"} />
                 <span className={`gateview-label${r.mark === "add" ? " is-add" : ""}`}>{r.id ?? "auto_review"}</span>
-                <span className={r.chipTone ? `gateview-chip tone-${r.chipTone}` : "gateview-chip"}>{r.chip ?? "runs first, before you"}</span>
+                <Badge tone={r.chipTone && CHIP_TONE[r.chipTone]}>{r.chip ?? "runs first, before you"}</Badge>
               </button>
               <span className={`gateview-line${ran ? " is-ran" : ""}`} aria-hidden="true" />
             </>
@@ -46,7 +48,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
               <button type="button" className="gateview-item is-add" {...hint("Add an agent task that reviews this gate before you do")} onClick={onAdd}>
                 <NodeGlyph kind="slot" size="gv" />
                 <span className="gateview-label is-add">add a reviewer</span>
-                <span className="gateview-chip">optional · agent task</span>
+                <Badge>optional · agent task</Badge>
               </button>
               <span className="gateview-line" aria-hidden="true" />
             </>
@@ -54,7 +56,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
           <button type="button" className={`gateview-item${gate.sel ? " is-sel" : ""}`} aria-label={accessibleName({ ...gate, id: gateLabel }, "gate")} onClick={onGate}>
             <NodeGlyph kind="gate" size="gv" state={gate.state} mark={gate.mark} prob={gate.prob} sel={gate.sel} />
             <span className="gateview-label is-gate">{gateLabel}</span>
-            <span className="gateview-chip">{youSub ?? (r ? "decides after the agent" : "decides")}</span>
+            <Badge>{youSub ?? (r ? "decides after the agent" : "decides")}</Badge>
           </button>
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>

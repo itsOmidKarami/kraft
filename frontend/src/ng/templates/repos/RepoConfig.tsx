@@ -14,6 +14,7 @@ import { Fold, Head } from "../panes/controls";
 import { problemsOf, repoName, type RepoView } from "./types";
 import { showToast } from "../../ui/Toast";
 import { LinkButton } from "../../ui/LinkButton";
+import { Badge } from "../../ui/Badge";
 
 const key = (p: Problem) => `${p.repo}|${p.field}|${p.message}`;
 
@@ -132,7 +133,7 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
         {(problem || (f.choice && refused) || noneRefused) && <span className="adr-err" role="alert">{(f.choice && refused) || noneRefused || problem!.message}</span>}
       </span>
       <span className="rp-src">
-        <span className={`rp-chip${changed ? " is-changed" : source === "this repo" ? " is-own" : ""}`}>{changed ? "changed" : source}</span>
+        <Badge tone={changed ? "change" : source === "this repo" ? "muted" : undefined}>{changed ? "changed" : source}</Badge>
         {set && source === "this repo" && f.key !== "default_chain" && (
           <LinkButton inline aria-label={`Reset ${f.label}`} onClick={() => void send(null)}>Reset</LinkButton>
         )}

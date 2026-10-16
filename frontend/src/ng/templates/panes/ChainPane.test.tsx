@@ -78,7 +78,7 @@ describe("Config tab", () => {
     await configTab();
     expect(rowLabels().filter((l) => l !== "model")).toEqual(before);
     expect(rowLabels()).toContain("model");
-    expect(within(rowOf("model")).getByText("this chain")).toHaveClass("is-own");
+    expect(within(rowOf("model")).getByText("this chain")).toHaveClass("is-muted");
     expect(rowOf("model").querySelector(".cfg-dot")).not.toBeNull();
   });
 

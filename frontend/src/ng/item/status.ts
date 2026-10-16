@@ -4,7 +4,8 @@ import { elapsed, usd } from "../../format";
 /** What the header shows for an item. Read from the server's `display_status`
  *  and `stop` only (R16, R27, R28): never derived from sessions or events. */
 export type Main = "pause" | "resume" | "start" | "raise" | "retry" | "archive" | "restore" | "gate" | "answer" | "conflicts" | "reopen";
-export type Tone = "neutral" | "info" | "warn" | "bad" | "ok" | "muted";
+import type { Tone } from "../ui/tone";
+export type { Tone };
 export type PanelItem = "escalate" | "complete" | "archive" | "cancel";
 
 export interface HeaderState {

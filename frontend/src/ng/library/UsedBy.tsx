@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Head, Note } from "../templates/panes/controls";
 import type { Use } from "./types";
+import { Badge } from "../ui/Badge";
 
 /** A chain's node view: the node is the path's first segment (W10 selects by node only, Decided 10). */
 export const useUrl = (u: Use) => `/templates/chains/${encodeURIComponent(u.chain)}/nodes/${encodeURIComponent(u.path.split(".")[0])}`;
@@ -16,8 +17,8 @@ export function UsedBy({ uses }: { uses: Use[] | null | undefined }) {
         <div key={`${u.chain}|${u.path}`} className="lib-use">
           <Link className="lib-use-chain" to={useUrl(u)}>{u.chain}</Link>
           <span className="lib-use-path">{u.path}</span>
-          {u.overrides && <span className="lib-chip">overrides</span>}
-          {u.via && <span className="lib-chip">via {u.via}</span>}
+          {u.overrides && <Badge>overrides</Badge>}
+          {u.via && <Badge>via {u.via}</Badge>}
         </div>
       ))}
     </>

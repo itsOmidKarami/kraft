@@ -78,8 +78,7 @@ describe("ng AccessPage", () => {
 
   it("adds a host and will not remove the one this browser is on", async () => {
     const put = setup();
-    await userEvent.click(await screen.findByRole("button", { name: "add" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Add a host or IP" }), "10.0.0.5{Enter}");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Add to Allowed hosts" }), "10.0.0.5{Enter}");
     await waitFor(() => expect(put).toHaveBeenCalledWith({ allowed_hosts: ["localhost", "kraft.local", "10.0.0.5"] }));
     await userEvent.click(screen.getByRole("button", { name: "Remove localhost" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("can't remove the host you're connected as");

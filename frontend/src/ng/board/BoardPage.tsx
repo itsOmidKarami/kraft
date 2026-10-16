@@ -33,6 +33,7 @@ import { isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow }
 import { Skeleton } from "./Skeleton";
 import { LinkButton } from "../ui/LinkButton";
 import { Empty } from "../ui/Empty";
+import { Badge } from "../ui/Badge";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -271,8 +272,8 @@ export function BoardPage() {
         />
       </HeaderTail>
       <HeaderActions>
-        {needsN > 0 && load.state !== "loading" && <span className="board-tag is-warn">{needsN} NEED YOU</span>}
-        {offline && <span className="board-tag is-bad">OFFLINE</span>}
+        {needsN > 0 && load.state !== "loading" && <Badge tone="warn" mono>{needsN} NEED YOU</Badge>}
+        {offline && <Badge tone="bad" mono>OFFLINE</Badge>}
         <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
       </HeaderActions>
 

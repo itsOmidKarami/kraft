@@ -8,6 +8,7 @@ import { sendOnModEnter } from "../keys";
 import { lineRef, rangeName, threadRange } from "./range";
 import { LINES_COMMENTED_ON } from "./sharedWords";
 import { LinkButton } from "../ui/LinkButton";
+import { Badge, type Tone } from "../ui/Badge";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -21,6 +22,7 @@ export function codeBlock(text: string, lang: string | undefined): ReactNode {
 const Body = ({ text }: { text: string }) => <Markdown text={text} code={codeBlock} />;
 
 export const LABELS: [ThreadLabel | null, string][] = [[null, "No label"], ["must_fix", "Must fix"], ["question", "Question"], ["nit", "Nit"]];
+export const LABEL_TONE: Record<ThreadLabel, Tone> = { must_fix: "bad", question: "info", nit: "muted" };
 const TAG: Record<ThreadLabel, string> = { must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" };
 const CLAIM: Record<NonNullable<ReviewComment["claim"]>, string> = { fixed: "✓ claimed fixed", answered: "✓ answered", should_fix: "should fix" };
 const STATUS = (t: ReviewThread) => (t.draft ? "pending" : t.state);
@@ -99,7 +101,7 @@ export function Thread({ thread, oldLines, quote, onChanged, onEdit }: {
     <article className={`rv-thread${thread.state === "resolved" ? " is-resolved" : ""}`} aria-label={`Thread on ${thread.file_path ?? "the item"}`}>
       <div className="rv-thread-head">
         <span className="rv-who">{first ? who(first) : "You"}</span>
-        {thread.label && <span className={`rv-tag is-${thread.label}`}>{TAG[thread.label]}</span>}
+        {thread.label && <Badge tone={LABEL_TONE[thread.label]} mono>{TAG[thread.label]}</Badge>}
         <span className="rv-status">{STATUS(thread)}</span>
         {range && <span className="rv-status">· {rangeName(range)}</span>}
       </div>

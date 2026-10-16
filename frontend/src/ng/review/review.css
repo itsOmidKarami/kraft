@@ -138,10 +138,6 @@
 .rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
 .rv-who { color: var(--text); font-weight: 500; }
 .rv-status { color: var(--text-muted); }
-.rv-tag { padding: 1px 7px; border-radius: 5px; font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
-.rv-tag.is-must_fix { background: color-mix(in oklab, var(--bad) 12%, transparent); color: color-mix(in oklab, var(--bad) 80%, var(--text)); }
-.rv-tag.is-question { background: color-mix(in oklab, var(--info) 12%, transparent); color: color-mix(in oklab, var(--info) 80%, var(--text)); }
-.rv-tag.is-nit { background: var(--surface-2); color: var(--text-muted); }
 .rv-claim { padding: 1px 7px; border-radius: 5px; font-size: var(--fs-meta); background: var(--surface-2); color: var(--text-sub); }
 .rv-claim.is-fixed, .rv-claim.is-answered { color: var(--ok); }
 .rv-reply { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0 12px; border-left: 2px solid var(--line); }
@@ -151,10 +147,6 @@
 .rv-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
 .rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); resize: vertical; }
 .rv-textarea.rv-mono { font: var(--fs-label)/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }
-.rv-chips { display: inline-flex; gap: 4px; }
-.rv-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: var(--fs-meta); cursor: pointer; }
-.rv-chip.is-on { border-color: var(--text); background: var(--text); color: var(--bg); font-weight: 600; }
-.rv-chip:not(.is-on):is(:hover, :focus-visible) { background: var(--line); }
 .rv-preview { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .rv-suggest { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; }
 .rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: var(--fs-label) var(--font-sans); }
@@ -196,9 +188,9 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
 /* Gate review overlay (prototype 292–321): a layer over the review page. */
 .rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
 .rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
+.rv-chips { display: inline-flex; gap: 4px; }
 .rv-gate-title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .rv-gate-next { flex: none; margin: 0; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-sub); }
-.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: color-mix(in oklab, var(--warn) 80%, var(--text)); font: 600 var(--fs-label)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
 .rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
 .rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: var(--fs-meta); line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }
