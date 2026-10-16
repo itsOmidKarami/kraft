@@ -47,7 +47,7 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
   return (
     <Popover anchor={anchor} open notch onClose={onClose} role="dialog" label={CANCEL_THIS_ITEM} dirty={!!reason.trim()}>
       <div className="item-card-pop">
-        <h2 className="item-pop-title">Cancel this item?</h2>
+        <h2 className="item-pop-title">{CANCEL_THIS_ITEM}</h2>
         {preview ? (
           <EndFacts rows={rows} />
         ) : !error && <p className="item-muted">Reading what cancelling would do…</p>}

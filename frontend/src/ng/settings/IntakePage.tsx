@@ -22,6 +22,7 @@ import "./settings.css";
 import "./intake/intake.css";
 import { SCHEDULED_ITEM, CANNOT_BE_EMPTY } from "./sharedWords";
 import { Select } from "../ui/Select";
+import { LinkButton } from "../ui/LinkButton";
 
 const CHECKS_EVERY_MS = 30_000;
 
@@ -125,7 +126,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                       <Switch label="enabled" checked={data.enabled} onChange={(on) => void send(draft, { op: "set_intake", patch: { enabled: on } })} />
                     </div>
                     <p className="ink-sentence">{pickup(data)}</p>
-                    <p className="ink-note">Issues come from <a className="ink-link" href={BEADS_DOCS} target="_blank" rel="noopener noreferrer">beads</a>, the optional bd tracker; a repo without one has nothing to pick up.</p>
+                    <p className="ink-note">Issues come from <LinkButton inline href={BEADS_DOCS} target="_blank" rel="noopener noreferrer">beads</LinkButton>, the optional bd tracker; a repo without one has nothing to pick up.</p>
                     <PickupRows draft={draft} i={data} repos={repos} changes={changes} />
                   </section>
 

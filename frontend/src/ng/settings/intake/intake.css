@@ -33,4 +33,3 @@
 .ink-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--fs-label); color: var(--text-muted); }
 .ink-chip.is-changed { border-color: var(--mark-change-line); color: var(--mark-change); }
 .ink-rownote { grid-column: 2 / -1; font-size: var(--fs-meta); line-height: 1.45; color: var(--text-muted); }
-.ink-link { color: var(--text); text-decoration: underline; }

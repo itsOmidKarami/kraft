@@ -5,6 +5,7 @@
 .board-list { position: absolute; inset: 0; overflow: auto; }
 .board-list-inner { max-width: 1180px; margin: 0 auto; padding: 0 6px 90px; }
 
+.board-group-head .link-btn { font-weight: 400; }
 .board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: var(--fs-label); }
 .board-empty.empty { padding: 6px 14px 6px 54px; }
@@ -139,8 +140,7 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .peek-events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; }
 .peek-events li { display: flex; gap: 10px; padding: 5px 0; font-size: var(--fs-label); line-height: 1.45; color: var(--text-sub); }
 .peek-ev-t { flex: none; width: 52px; font: var(--fs-label)/1.7 ui-monospace, Menlo, monospace; color: var(--text-muted); }
-.peek-ev-link { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
-.peek-ev-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.peek-events .link-btn { text-align: left; }
 .peek-earlier { margin: 8px 0 0; }
 .peek-error { font-size: var(--fs-meta); }
 

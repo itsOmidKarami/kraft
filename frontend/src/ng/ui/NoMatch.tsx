@@ -8,7 +8,7 @@ export function NoMatch({ query, onClear, className }: { query?: string; onClear
   return (
     <Empty className={`no-match${className ? ` ${className}` : ""}`} role="status">
       {q ? <>No match for “{q}”.</> : "Nothing matches this filter."}{" "}
-      <LinkButton strong onClick={onClear}>Clear</LinkButton>
+      <LinkButton strong inline onClick={onClear}>Clear</LinkButton>
     </Empty>
   );
 }

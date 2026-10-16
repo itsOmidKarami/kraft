@@ -302,7 +302,7 @@ export function DraftItemPage() {
       </div>
       {ask && (
         <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>
-          <b>Discard this draft?</b>
+          <b>{DISCARD_THIS_DRAFT}</b>
           <span>Nothing has been created. The title, brief and settings you entered are lost.</span>
           <div className="item-actions">
             <button type="button" className="btn btn-danger" onClick={() => { const to = ask.to; setAsk(null); go(to); }}>Discard</button>

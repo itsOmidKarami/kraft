@@ -150,7 +150,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
         {compare.state === "error" && !hasDoc && <p className="ph-error" role="alert">{compare.error}</p>}
         {whole.length > 0 && (
           <section aria-label={ON_THE_WHOLE_CHANGE} className="ph-list">
-            <h2 className="ph-review-group">On the whole change</h2>
+            <h2 className="ph-review-group">{ON_THE_WHOLE_CHANGE}</h2>
             {whole.map((t) => <ThreadNote key={t.id} thread={t} />)}
           </section>
         )}

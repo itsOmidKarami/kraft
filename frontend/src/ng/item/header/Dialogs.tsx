@@ -9,6 +9,7 @@ import { sendOnModEnter } from "../../keys";
 import type { CancelPreview } from "../../../types";
 import { EndFacts, stopsNow } from "./EndFacts";
 import { GOES_IN_THE_RUN_LOG } from "../sharedWords";
+import { PAUSE_THIS_ITEM } from "../../board/sharedWords";
 
 function useSubmit(send: () => Promise<Done>, onDone: () => void) {
   const [busy, setBusy] = useState(false);
@@ -96,7 +97,7 @@ export function PauseConfirm({ busy, error, onPause, onClose }: { busy: boolean;
   const first = useFocusSoon<HTMLButtonElement>();
   return (
     <div className="item-card-pop">
-      <h2 className="item-pop-title">Pause this item?</h2>
+      <h2 className="item-pop-title">{PAUSE_THIS_ITEM}</h2>
       <p className="item-muted">The running task stops where it is. Resume starts it again, with a steer if you leave one.</p>
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">

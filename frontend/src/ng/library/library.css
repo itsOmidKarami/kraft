@@ -36,9 +36,6 @@
 .lib-group-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lib-count { font-weight: 400; color: var(--text-muted); }
 .lib-only { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 4px 14px 6px; font-size: var(--fs-label); color: var(--text-muted); }
-.lib-only-all { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; color: var(--text-sub); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.lib-only-all:hover { color: var(--text); }
-.lib-only-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .lib-empty.empty { margin: 10px 8px; }
 .lib-row { min-height: 24px; display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text-sub); cursor: pointer; }
 .lib-row:hover { background: var(--surface-2); }

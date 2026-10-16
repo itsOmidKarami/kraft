@@ -166,7 +166,7 @@ function Activity({ id, nodes, version }: { id: string; nodes: ItemDetail["chain
           return (
             <li key={e.seq}>
               <span className="peek-ev-t">{age(e.created_at, now)}</span>
-              {e.node_id ? <button type="button" className="peek-ev-link" onClick={() => navigate(placeUrl(id, { sel: { kind: "node", node: e.node_id! } }))}>{text}</button> : <span>{text}</span>}
+              {e.node_id ? <LinkButton inline onClick={() => navigate(placeUrl(id, { sel: { kind: "node", node: e.node_id! } }))}>{text}</LinkButton> : <span>{text}</span>}
             </li>
           );
         })}

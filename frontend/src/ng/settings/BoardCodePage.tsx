@@ -80,7 +80,7 @@ export function BoardCodePage() {
             <div className="set-diff-controls">
               <h3 className="set-sub">Layout</h3>
               <Segmented label="Layout" options={LAYOUTS} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
-              <h3 className="set-sub">Added and removed colours</h3>
+              <h3 className="set-sub">{ADDED_AND_REMOVED_COLOURS}</h3>
               <div className="set-cards" role="group" aria-label={ADDED_AND_REMOVED_COLOURS}>
                 {DIFF_COLOURS.map((c) => (
                   <button key={c.value} type="button" className="set-card" aria-label={`Diff colours: ${c.label}`} aria-pressed={diff.colours === c.value} onClick={() => setDiff({ colours: c.value })}>

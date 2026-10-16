@@ -28,6 +28,7 @@
 .link-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .link-btn:disabled { opacity: .5; cursor: default; }
 .link-btn.is-strong { color: var(--text); text-decoration: underline; }
+.link-btn.is-inline, .empty .link-btn { font-size: inherit; }
 .link-btn.is-inline { text-decoration: underline; }
 .link-btn.is-mono { font-size: var(--fs-meta); }
 
