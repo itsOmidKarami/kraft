@@ -7,7 +7,7 @@
 .ph-filters { padding-top: 0; }
 .ph-filters .ph-pill { flex: none; }
 .ph-pill.ph-is-set { border-color: var(--text-muted); color: var(--text); }
-.ph-chip-n { font-size: var(--fs-label); opacity: .7; }
+.ph-chip-n { font-size: var(--fs-label); opacity: .8; }
 .ph-board { gap: 6px; padding-top: 0; }
 .ph-group { display: flex; flex-direction: column; gap: 6px; }
 .ph-group-head { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 12px 2px 2px; font-size: var(--fs-label); font-weight: 500; color: var(--text-sub); }

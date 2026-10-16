@@ -127,7 +127,7 @@
 /* The selection bar (AreaBoard 92–94), floating over the list's bottom. */
 body:has(.bulk-bar) { --toast-bottom: 88px; }
 .bulk-wrap { position: absolute; left: 0; right: 0; bottom: 18px; z-index: 8; display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
-.bulk-bar { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 100%; box-sizing: border-box; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px color-mix(in oklab, var(--side) 60%, transparent); font-size: var(--fs-label); color: var(--text); }
+.bulk-bar { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 100%; box-sizing: border-box; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px var(--side-shade); font-size: var(--fs-label); color: var(--text); }
 .bulk-confirm-text { max-width: 340px; line-height: 1.45; color: var(--bad); }
 .bulk-reason { width: 200px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: var(--fs-label); color: var(--text); }
 .bulk-reason:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -153,7 +153,7 @@ body:has(.bulk-bar) { --toast-bottom: 88px; }
 .peek-error { font-size: var(--fs-meta); }
 
 /* The composer (AreaBoard 37–62): where the new row will appear. */
-.composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--stroke); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 30px color-mix(in oklab, var(--side) 50%, transparent); }
+.composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--stroke); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 30px var(--side-shade); }
 .composer-row { display: flex; align-items: center; gap: 12px; }
 .composer-title { all: unset; flex: 1; min-width: 0; font: 500 var(--fs-h3)/1.3 var(--font-sans); color: var(--text); border-radius: 4px; }
 .composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
@@ -236,6 +236,6 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .draft-input:focus-visible, .draft-add-list input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .draft-amber { color: var(--mark-change); }
 .draft-yaml { margin: 0; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); font: var(--fs-label)/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
-.draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px color-mix(in oklab, var(--side) 60%, transparent); }
+.draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); box-shadow: 0 14px 36px var(--side-shade); }
 .draft-ask b { font-weight: 500; color: var(--text); }
 @media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }

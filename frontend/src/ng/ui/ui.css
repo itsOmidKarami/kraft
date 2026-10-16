@@ -42,7 +42,7 @@
 .tab:hover { color: var(--text-sub); }
 .tab[aria-selected="true"] { border-bottom-color: var(--text); color: var(--text); }
 
-.popover { position: fixed; z-index: 65; min-width: 160px; max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--side) 60%, transparent); }
+.popover { position: fixed; z-index: 65; min-width: 160px; max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px var(--side-shade); }
 .menu { display: flex; flex-direction: column; }
 .menu-item { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; font-size: var(--fs-meta); color: var(--text); text-align: left; cursor: pointer; }
 .menu-item:not(:disabled):is(:hover, :focus-visible) { background: var(--line); }
@@ -114,7 +114,7 @@
 
 /* A field with a list of its values (Combobox): the list floats under it, styled as a menu. */
 .cbx { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.cbx-list, .cbx-none { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50; box-sizing: border-box; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--side) 60%, transparent); }
+.cbx-list, .cbx-none { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50; box-sizing: border-box; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px var(--side-shade); }
 .cbx-list { display: flex; flex-direction: column; max-height: 240px; overflow: auto; padding: 4px; list-style: none; }
 .cbx-list[hidden] { display: none; }
 .cbx-opt { display: flex; align-items: flex-start; }
@@ -125,7 +125,7 @@
 .cbx.is-above > .cbx-list, .cbx.is-above > .cbx-none { top: auto; bottom: calc(100% + 4px); }
 .cbx.is-inline > .cbx-list, .cbx.is-inline > .cbx-none { position: static; margin-top: 4px; box-shadow: none; }
 
-.tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px color-mix(in oklab, var(--side) 50%, transparent); }
+.tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px var(--side-shade); }
 
 .no-match-clear { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-decoration: underline; cursor: pointer; }
 
