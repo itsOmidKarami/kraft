@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { findByRole, ring } from "./ring";
+import { findByRole, ring, ringWhenFound } from "./ring";
 
 /** `html` in the page; every element marked `data-box` laid out on screen (jsdom lays nothing out). */
 const page = (html: string) => {
@@ -45,5 +45,48 @@ describe("ring", () => {
     at(60, 0); // gone from the layout
     vi.advanceTimersByTime(20);
     expect([first, moved, el()]).toEqual(["96px", "56px", null]);
+  });
+});
+
+describe("ring, as the page moves", () => {
+  const button = (top: number) => {
+    const el = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Pause" }));
+    const at = (t: number) => (el.getBoundingClientRect = () => ({ x: 10, y: t, left: 10, top: t, width: 80, height: 24, right: 90, bottom: t + 24, toJSON: () => ({}) }));
+    at(top);
+    return { el, at };
+  };
+  const shown = () => {
+    const r = document.querySelector<HTMLElement>(".kd-ring");
+    return r ? r.style.visibility !== "hidden" : null;
+  };
+
+  it("goes when the person presses anywhere", () => {
+    vi.useFakeTimers();
+    ring(button(100).el);
+    const before = shown();
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect([before, shown()]).toEqual([true, null]);
+  });
+
+  it("hides, not goes, while its target is scrolled out of the window, and shows again when it is back", () => {
+    vi.useFakeTimers();
+    const { el, at } = button(100);
+    ring(el);
+    at(-200);
+    vi.advanceTimersByTime(20);
+    const away = shown();
+    at(100);
+    vi.advanceTimersByTime(20);
+    expect([away, shown()]).toEqual([false, true]);
+  });
+
+  it("scrolls a target below the window into view before ringing it", () => {
+    vi.useFakeTimers();
+    const { el } = button(5000);
+    const scroll = vi.fn();
+    el.scrollIntoView = scroll;
+    ringWhenFound(document, "button", "Pause");
+    vi.advanceTimersByTime(150);
+    expect([scroll.mock.calls, !!document.querySelector(".kd-ring")]).toEqual([[[{ block: "nearest", inline: "nearest" }]], true]);
   });
 });

@@ -6,8 +6,10 @@ import { TRIES, type Look, type Spot, type Tries, type TryId } from "./tries";
 /**
  * The demo's one addition to the page: a corner badge that says the data is sample data
  * and nothing is saved, links to the install guide, and opens a list of things to try.
- * Bottom left on a desktop, clear of the main actions (the review page keeps Request changes
- * and Approve bottom right); above the bottom bar on a phone.
+ * Bottom left of the page on a desktop, past the sidebar and lifted over a bottom bar as the
+ * toasts are (`--toast-bottom`), clear of the actions kept bottom right (the review page's
+ * Request changes and Approve); above the bottom navigation on a phone. Only its cards take
+ * clicks: the box around them lets them through to the page.
  * Outside the React tree, so the app renders exactly as it ships; the × hides it all for
  * the rest of the visit. The list opens by itself once, on a first visit on a desktop;
  * after that it stays as the visitor last left it.
@@ -16,8 +18,10 @@ const HIDDEN = "kraft.demo.badge.hidden";
 const OPEN = "kraft.demo.tries";
 
 const CSS = `
-.kd-badge { position: fixed; z-index: 2147483000; left: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
-  max-width: calc(100vw - 32px); box-sizing: border-box; color: var(--text-sub); font: 12px/1.4 var(--font-sans, system-ui, sans-serif); }
+.kd-badge { position: fixed; z-index: 2147483000; left: calc(var(--ng-side-w, 0px) + 16px); bottom: var(--toast-bottom, 16px);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: calc(100vw - var(--ng-side-w, 0px) - 32px); box-sizing: border-box;
+  color: var(--text-sub); font: 12px/1.4 var(--font-sans, system-ui, sans-serif); pointer-events: none; }
+.kd-badge > * { pointer-events: auto; }
 .kd-badge * { box-sizing: border-box; }
 .kd-pill { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 999px;
   background: var(--surface); box-shadow: 0 6px 24px rgb(0 0 0 / 0.28); }
@@ -33,7 +37,7 @@ const CSS = `
 .kd-toggle .kd-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .kd-toggle .kd-chev { color: var(--text-muted); transition: transform 120ms; }
 .kd-toggle[aria-expanded="true"] .kd-chev { transform: rotate(180deg); }
-.kd-tries { width: 340px; max-width: 100%; max-height: calc(100vh - 96px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--border); border-radius: 12px;
+.kd-tries { width: 340px; max-width: 100%; max-height: calc(100vh - var(--toast-bottom, 16px) - 64px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); box-shadow: 0 10px 32px rgb(0 0 0 / 0.32); }
 .kd-tries[hidden] { display: none; }
 .kd-tries h2 { margin: 0 0 4px; color: var(--text); font-size: 13px; font-weight: 600; }
@@ -57,6 +61,7 @@ const CSS = `
   .kd-badge { right: 8px; left: 8px; max-width: none; align-items: flex-end; bottom: calc(72px + env(safe-area-inset-bottom)); }
   .kd-tries { width: 100%; max-height: calc(100vh - 160px - env(safe-area-inset-bottom)); }
   .kd-pill .kd-note { display: none; }
+  .kd-try-go { grid-row: 1 / 3; display: inline-flex; align-items: center; min-height: 32px; padding: 0 4px; }
 }
 @media (min-width: 768px) { .kd-tries .kd-phone { display: none; } }
 `;
@@ -88,7 +93,7 @@ const remember = (open: boolean) => {
 /**
  * A Show me's click: the in-app address by the router (pushState, then the popstate BrowserRouter
  * follows), not by loading the page, which would start the demo over. A click something else already
- * took (the draft page's leave guard) or one asking for a new tab is left to it.
+ * took (the item page's leave guard, for an unapplied chain draft) or one asking for a new tab is left to it.
  */
 export function showMe(e: MouseEvent, a: HTMLAnchorElement, spot: Spot | undefined, skip: Element): (() => void) | null {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
@@ -127,6 +132,7 @@ export function showBadge(installUrl: string, tries: Tries, look: Look, doc: Doc
         </li>`).join("")}
       </ol>
     </section>
+    <p class="kd-sr" role="status"></p>
     <div class="kd-pill">
       <span><b>DEMO</b><span class="kd-note"> · sample data, nothing is saved</span></span>
       <button type="button" class="kd-toggle" aria-expanded="false" aria-controls="kd-tries">Things to try <span class="kd-count"></span><span class="kd-chev" aria-hidden="true">▴</span></button>
@@ -136,6 +142,8 @@ export function showBadge(installUrl: string, tries: Tries, look: Look, doc: Doc
   const list = badge.querySelector<HTMLElement>(".kd-tries")!;
   const toggle = badge.querySelector<HTMLButtonElement>(".kd-toggle")!;
   const count = badge.querySelector<HTMLElement>(".kd-count")!;
+  const status = badge.querySelector<HTMLElement>("[role=status]")!;
+  const said = new Set<TryId>(tries.done);
   const spots = new Map<TryId, Spot | null>();
   let cancelRing: (() => void) | null = null;
 
@@ -205,14 +213,23 @@ export function showBadge(installUrl: string, tries: Tries, look: Look, doc: Doc
       }
     });
   }
+  // A tick is said once, politely: "Done: Approve a gate. 2 of 5."
+  const announce = () => {
+    const fresh = TRIES.filter((t) => tries.done.has(t.id) && !said.has(t.id));
+    if (!fresh.length) return;
+    for (const t of fresh) said.add(t.id);
+    status.textContent = `Done: ${fresh.map((t) => t.title).join(", ")}. ${tries.done.size} of ${TRIES.length}.`;
+  };
+  const unlisten = tries.onChange((moved) => {
+    draw();
+    announce();
+    if (moved && !list.hidden) refresh();
+  });
   badge.querySelector<HTMLButtonElement>(".kd-x")!.addEventListener("click", () => {
     cancelRing?.();
+    unlisten();
     badge.remove();
     try { sessionStorage.setItem(HIDDEN, "1"); } catch { /* a private window: it comes back on the next load */ }
-  });
-  tries.onChange((moved) => {
-    draw();
-    if (moved && !list.hidden) refresh();
   });
   list.addEventListener("pointerenter", refresh);
   list.addEventListener("focusin", refresh);

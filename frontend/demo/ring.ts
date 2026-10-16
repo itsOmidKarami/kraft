@@ -41,21 +41,25 @@ export function nameOf(el: Element): string {
   return squash([...el.childNodes].map(textOf).join(""));
 }
 
-/** On screen: laid out, not hidden, and at least partly inside the window. */
-function onScreen(el: Element): boolean {
+/** Laid out and not hidden: a box of its own. The phone layout draws other pages, and a control it lacks has none. */
+function laidOut(el: Element): boolean {
   const r = el.getBoundingClientRect();
-  const win = el.ownerDocument.defaultView!;
-  if (r.width <= 0 || r.height <= 0) return false;
-  if (r.bottom <= 0 || r.right <= 0 || r.top >= win.innerHeight || r.left >= win.innerWidth) return false;
-  return win.getComputedStyle(el).visibility !== "hidden";
+  return r.width > 0 && r.height > 0 && el.ownerDocument.defaultView!.getComputedStyle(el).visibility !== "hidden";
 }
 
-/** The first control on screen with this role and name, outside `skip` (the list's own controls). */
+/** At least partly inside the window, where a ring can be seen. */
+function inView(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  const win = el.ownerDocument.defaultView!;
+  return r.bottom > 0 && r.right > 0 && r.top < win.innerHeight && r.left < win.innerWidth;
+}
+
+/** The first laid-out control with this role and name, outside `skip` (the list's own controls). */
 export function findByRole(doc: Document, role: string, name: string | RegExp, skip?: Element | null): HTMLElement | null {
   for (const el of doc.querySelectorAll<HTMLElement>("button, a[href], textarea, input, [role]")) {
     if (skip?.contains(el) || roleOf(el) !== role) continue;
     const n = nameOf(el);
-    if ((typeof name === "string" ? n === name : name.test(n)) && onScreen(el)) return el;
+    if ((typeof name === "string" ? n === name : name.test(n)) && laidOut(el)) return el;
   }
   return null;
 }
@@ -66,7 +70,8 @@ export const WAIT_MS = 4000;
 
 /**
  * A ring around `target`, kept on it frame by frame (so it follows scroll, resize and the page moving
- * under it) until RING_MS pass, the target goes, or the person presses anywhere. Returns its remover.
+ * under it), hidden while the target is scrolled out of the window, until RING_MS pass, the target
+ * goes, or the person presses anywhere. Returns its remover.
  */
 export function ring(target: HTMLElement): () => void {
   const doc = target.ownerDocument;
@@ -77,7 +82,8 @@ export function ring(target: HTMLElement): () => void {
   doc.body.append(el);
   let frame = 0;
   const place = () => {
-    if (!target.isConnected || !onScreen(target)) return stop();
+    if (!target.isConnected || !laidOut(target)) return stop();
+    el.style.visibility = inView(target) ? "" : "hidden";
     const r = target.getBoundingClientRect();
     Object.assign(el.style, { left: `${r.left - 4}px`, top: `${r.top - 4}px`, width: `${r.width + 8}px`, height: `${r.height + 8}px` });
     frame = win.requestAnimationFrame(place);
@@ -95,8 +101,9 @@ export function ring(target: HTMLElement): () => void {
 }
 
 /**
- * Wait for the target to be drawn on screen, then ring it. One that never shows (the phone layout
- * draws another page) gets no ring. Returns a cancel, which also takes a ring already drawn away.
+ * Wait for the target to be drawn, scroll it into view if it is not, then ring it. One that is never
+ * laid out (the phone layout draws another page) gets no ring. Returns a cancel, which also takes a
+ * ring already drawn away.
  */
 export function ringWhenFound(doc: Document, role: string, name: string | RegExp, skip?: Element | null): () => void {
   const win = doc.defaultView!;
@@ -105,7 +112,10 @@ export function ringWhenFound(doc: Document, role: string, name: string | RegExp
   let timer = 0;
   const look = () => {
     const el = findByRole(doc, role, name, skip);
-    if (el) off = ring(el);
+    if (el) {
+      el.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      off = ring(el);
+    }
     else if (Date.now() < until) timer = win.setTimeout(look, 100);
   };
   // Not at once: the router draws the new page after the popstate that asked for it, and the old one may hold a match.

@@ -78,11 +78,13 @@ that stays as the visitor left it (`localStorage`). Phones start with it shut.
   item waits at a gate. The page is found by reading the mock directly, so the
   look itself ticks nothing.
 - A Show me's click goes by `pushState` and a `popstate`, so the demo is not
-  reloaded. A click already handled, such as the draft page's leave guard, is
-  left alone, and so is a click asking for a new tab.
+  reloaded. A click already handled is left alone, and so is a click asking
+  for a new tab. One such click is the item page's leave guard, for an
+  unapplied chain draft: its dialog then goes on to the page with no ring.
 - `demo/ring.ts` then finds the target by role and accessible name, as
-  Playwright does, and rings it. On the phone layout, where the target is not
-  on screen, there is no ring.
+  Playwright does, scrolls it into view, and rings it. The ring hides while
+  the target is scrolled away. On the phone layout, which draws no such
+  control, there is no ring.
 
 `e2e/demo/` is the demo's smoke suite: the built demo on `vite preview`, booted,
 and every Show me followed to its target on the desktop layout. A rename that

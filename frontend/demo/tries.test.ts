@@ -8,6 +8,12 @@ const req = (method: string, path: string, body: unknown = null) => ({ method, u
 const answer = (body: unknown = {}, status = 200): Reply => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const at = (pathname: string, search = "") => ({ pathname, search });
 const BOARD = at("/");
+/** An item's detail as the mock answers it while an agent runs on its current node. */
+const RUNNING = {
+  status: "active", current_node_id: "implement",
+  chain_definition: { nodes: [{ id: "spec_approval", kind: "gate" }, { id: "implement", kind: "exec" }] },
+  worker_sessions: [{ node_id: "implement", status: "running" }],
+};
 
 /** The demo's own sample data, answered by the mock it runs on. */
 const sample = () => {
@@ -29,13 +35,15 @@ describe("tickOf", () => {
     ["a resume with no steer", req("POST", "/work-items/w1/resume", { steer: null }), answer(), BOARD, []],
     ["a resume with a blank steer", req("POST", "/work-items/w1/resume", { steer: "  " }), answer(), BOARD, []],
     ["a pause", req("POST", "/work-items/w1/pause"), answer(), BOARD, []],
-    ["a running item's page reading it", req("GET", "/work-items/w1"), answer({ status: "active" }), at("/work-items/w1"), ["open"]],
-    ["a running item's node page reading it", req("GET", "/work-items/w1"), answer({ status: "active" }), at("/work-items/w1/nodes/verification"), ["open"]],
-    ["its peek on the board reading it", req("GET", "/work-items/w1"), answer({ status: "active" }), at("/", "?sel=w1"), ["open"]],
-    ["a read of it while another page shows", req("GET", "/work-items/w1"), answer({ status: "active" }), at("/work-items/w2"), []],
-    ["a read of it from the board with no peek", req("GET", "/work-items/w1"), answer({ status: "active" }), BOARD, []],
-    ["its review page reading it", req("GET", "/work-items/w1"), answer({ status: "active" }), at("/work-items/w1/review"), []],
-    ["a paused item's page reading it", req("GET", "/work-items/w1"), answer({ status: "paused" }), at("/work-items/w1"), []],
+    ["a running item's page reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w1"), ["open"]],
+    ["a running item's node page reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w1/nodes/verification"), ["open"]],
+    ["its peek on the board reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/", "?sel=w1"), ["open"]],
+    ["a read of it while another page shows", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w2"), []],
+    ["a read of it from the board with no peek", req("GET", "/work-items/w1"), answer(RUNNING), BOARD, []],
+    ["its review page reading it", req("GET", "/work-items/w1"), answer(RUNNING), at("/work-items/w1/review"), []],
+    ["a paused item's page reading it", req("GET", "/work-items/w1"), answer({ ...RUNNING, status: "paused" }), at("/work-items/w1"), []],
+    ["an item just past its gate, still standing on it", req("GET", "/work-items/w1"), answer({ ...RUNNING, current_node_id: "spec_approval", worker_sessions: [{ node_id: "spec_approval", status: "running" }] }), at("/work-items/w1"), []],
+    ["an active item with no session running", req("GET", "/work-items/w1"), answer({ ...RUNNING, worker_sessions: [{ node_id: "implement", status: "done" }] }), at("/work-items/w1"), []],
     ["the Chains editor's read", req("GET", "/drafts/chains/default"), answer(), at("/templates/chains"), ["shape"]],
     ["the Library's read", req("GET", "/drafts/library/library"), answer(), at("/templates/library"), ["shape"]],
     ["the composer's list of chains", req("GET", "/templates/chains"), answer(), at("/work-items/new"), []],
@@ -72,6 +80,14 @@ describe("TRIES' Show me", () => {
     await serve(req("POST", `${spot!.path}/gates/final_review/approve`));
     expect(await where("gate", look)).toBeNull();
     expect(TRIES.find((t) => t.id === "gate")!.none).toMatch(/one is on its way/);
+  });
+
+  it("once the gate is approved, Open and Review go to an item that is really running, not the one still on its gate", async () => {
+    const { serve, look } = sample();
+    const gate = (await where("gate", look))!.path;
+    await serve(req("POST", `${gate}/gates/final_review/approve`));
+    const [open, review] = [await where("open", look), await where("review", look)];
+    expect([open?.path === gate, open?.name, review?.path === `${gate}/review`, review?.name]).toEqual([false, /, node, running\b/, false, "Comment on this file"]);
   });
 
   it.each<[TryId, RegExp, string, string | RegExp]>([

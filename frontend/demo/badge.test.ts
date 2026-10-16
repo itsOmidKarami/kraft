@@ -8,6 +8,16 @@ import { Tries, type Look } from "./tries";
 const lookAt = (item: Record<string, unknown>): Look => ({ list: async () => [{ id: "w1" }], item: async () => ({ id: "w1", ...item }) });
 const AT_GATE = lookAt({ status: "needs_human", display_status: "needs_you", pending_gate: "spec_approval" });
 
+const post = (path: string, body: unknown = null) => ({ method: "POST", url: `${location.origin}/api${path}`, json: () => body });
+/** A board whose one item, at a gate, can be swapped for another: `board.at = "w2"`. */
+const movable = () => {
+  const board = { at: "w1", reads: 0 };
+  const look: Look = { list: async () => (board.reads++, [{ id: board.at }]), item: async (id) => ({ id, pending_gate: "spec_approval" }) };
+  return { board, look };
+};
+const boxed = (el: HTMLElement, top = 50) =>
+  (el.getBoundingClientRect = () => ({ x: 40, y: top, left: 40, top, width: 120, height: 30, right: 160, bottom: top + 30, toJSON: () => ({}) }));
+
 const width = (phone: boolean) =>
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === PHONE_QUERY, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
 
@@ -51,6 +61,16 @@ describe("the list's first-visit memory", () => {
     const shut = localStorage.getItem("kraft.demo.tries");
     toggle.click();
     expect([shut, localStorage.getItem("kraft.demo.tries")]).toEqual(["closed", "open"]);
+  });
+
+  it("stops listening after the ×: a later tick or request touches nothing", () => {
+    width(false);
+    const { board, look } = movable();
+    const { q, tries, toggle } = show(look);
+    const reads = board.reads;
+    q<HTMLButtonElement>(".kd-x").click();
+    tries.see(post("/work-items/w1/gates/spec_approval/approve"), { status: 200 });
+    expect([toggle.getAttribute("aria-label"), board.reads]).toEqual(["Things to try, 0 of 5 done", reads]);
   });
 
   it("goes away with the badge's × for the rest of the visit", () => {
@@ -107,6 +127,47 @@ describe("Show me", () => {
     expect([location.pathname, popped.mock.calls.length, ours]).toEqual([path, pops, taken || pops > 0]);
   });
 
+  it("pushes the router's own kind of entry, one index on, so Back and the phone's trail stay right", async () => {
+    width(false);
+    window.history.replaceState({ usr: null, key: "start", idx: 3 }, "", "/");
+    const { go } = show();
+    await ready(go("gate"));
+    go("gate").click();
+    expect(window.history.state).toEqual({ usr: null, key: expect.stringMatching(/^[0-9a-z]+$/), idx: 4 });
+  });
+
+  it("on the page it already names, pushes nothing and only rings", async () => {
+    width(false);
+    window.history.replaceState({ idx: 2 }, "", "/work-items/w1");
+    const { go } = show();
+    await ready(go("gate"));
+    const [length, popped] = [window.history.length, vi.fn()];
+    window.addEventListener("popstate", popped);
+    vi.useFakeTimers();
+    go("gate").click();
+    const target = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Review and decide" }));
+    boxed(target);
+    vi.advanceTimersByTime(150);
+    window.removeEventListener("popstate", popped);
+    expect([window.history.length - length, popped.mock.calls.length, window.history.state, !!document.querySelector(".kd-ring")]).toEqual([0, 0, { idx: 2 }, true]);
+  });
+
+  it.each([
+    ["while the list is open, a request that may move things reads where each Show me goes again", "open", "/work-items/w2"],
+    ["while it is shut, nothing is read until it opens", "closed", "/"],
+  ])("%s", async (_, state, href) => {
+    width(false);
+    localStorage.setItem("kraft.demo.tries", state);
+    const { board, look } = movable();
+    const { go, tries } = show(look);
+    if (state === "open") await ready(go("gate"));
+    const reads = board.reads;
+    board.at = "w2";
+    tries.see(post("/work-items/w9/pause"), { status: 200 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect([go("gate").getAttribute("href"), board.reads > reads]).toEqual([href, state === "open"]);
+  });
+
   it.each([
     ["rings its target once the page draws it, then lets it go", true],
     ["draws no ring when the page never lays it out (the phone layout)", false],
@@ -152,8 +213,22 @@ describe("the ticks", () => {
   it("tick the entry the shim saw done, and count it on the toggle", () => {
     width(false);
     const { tries, toggle, q } = show();
-    tries.see({ method: "POST", url: `${location.origin}/api/work-items/w1/resume`, json: () => ({ steer: "look at the cache" }) }, { status: 200 });
+    tries.see(post("/work-items/w1/resume", { steer: "look at the cache" }), { status: 200 });
     expect([q('[data-try="steer"]').classList.contains("is-done"), q('[data-try="gate"]').classList.contains("is-done"), toggle.getAttribute("aria-label")])
       .toEqual([true, false, "Things to try, 1 of 5 done"]);
+  });
+
+  it("say each new tick once, politely, outside the list so a shut one is heard too", () => {
+    width(false);
+    localStorage.setItem("kraft.demo.tries", "closed");
+    const { tries, q } = show();
+    const status = q("[role=status]");
+    tries.see(post("/work-items/w1/resume", { steer: "look at the cache" }), { status: 200 });
+    const first = status.textContent;
+    tries.see(post("/work-items/w1/pause"), { status: 200 });
+    const unchanged = status.textContent;
+    tries.see(post("/work-items/w1/gates/spec_approval/approve"), { status: 200 });
+    expect([first, unchanged, status.textContent, q(".kd-tries").contains(status)])
+      .toEqual(["Done: Steer an agent. 1 of 5.", "Done: Steer an agent. 1 of 5.", "Done: Approve a gate. 2 of 5.", false]);
   });
 });

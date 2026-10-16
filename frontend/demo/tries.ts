@@ -13,7 +13,11 @@ export interface Spot { path: string; role: string; name: string | RegExp }
 
 /** What the entries read to find their item: the board's rows, and one item's detail. */
 export interface Look { list(): Promise<{ id: string }[]>; item(id: string): Promise<Item | null> }
-type Item = { id: string; status?: string; display_status?: string; pending_gate?: string | null; current_node_id?: string | null };
+type Item = {
+  id: string; status?: string; display_status?: string; pending_gate?: string | null; current_node_id?: string | null;
+  chain_definition?: { nodes?: { id: string; kind?: string }[] };
+  worker_sessions?: { node_id?: string | null; status?: string }[];
+};
 
 export interface Try {
   id: TryId;
@@ -47,8 +51,15 @@ async function first(look: Look, ...tests: ((i: Item) => boolean)[]): Promise<It
   return null;
 }
 
-const running = (i: Item) => i.display_status === "running";
-const active = (i: Item) => i.status === "active";
+/**
+ * Really running: active, on a node that is not a gate, with a session running there. An item whose
+ * gate was just approved is active but still stands on the gate, and its page draws no running node.
+ */
+export const running = (i: Item) =>
+  i.status === "active" &&
+  !!i.current_node_id &&
+  i.chain_definition?.nodes?.find((n) => n.id === i.current_node_id)?.kind !== "gate" &&
+  !!i.worker_sessions?.some((s) => s.node_id === i.current_node_id && s.status === "running");
 const atGate = (i: Item) => !!i.pending_gate;
 const begunPause = (i: Item) => i.status === "paused" && !!i.current_node_id;
 const page = (i: Item) => `/work-items/${encodeURIComponent(i.id)}`;
@@ -58,7 +69,7 @@ export const TRIES: Try[] = [
   {
     id: "open", title: "Open a running item", detail: "Its chain, and the node it is on.", none: `Nothing is running right now; ${ON_ITS_WAY}.`,
     where: async (look) => {
-      const i = await first(look, running, active);
+      const i = await first(look, running);
       return i && { path: page(i), role: "button", name: /, node, running\b/ };
     },
   },
@@ -71,9 +82,12 @@ export const TRIES: Try[] = [
   },
   {
     id: "review", title: "Review the changes", detail: "The diff, a comment, request changes.", none: `Nothing has changes to review right now; ${ON_ITS_WAY}.`,
+    // At a gate the review page's bar has Request changes; with none waiting, a running item's diff still
+    // takes a comment, which ticks it too (the bar only draws Request changes at a gate).
     where: async (look) => {
-      const i = await first(look, atGate, running, active);
-      return i && { path: `${page(i)}/review`, role: "button", name: "Request changes" };
+      const i = await first(look, atGate, running);
+      if (!i) return null;
+      return { path: `${page(i)}/review`, role: "button", name: atGate(i) ? "Request changes" : "Comment on this file" };
     },
   },
   {
@@ -111,7 +125,8 @@ export function tickOf(req: MockRequest, reply: Reply, here: { pathname: string;
       const id = decodeURIComponent(m[1]);
       const at = decodeURIComponent(here.pathname);
       const shown = at === `/work-items/${id}` || at.startsWith(`/work-items/${id}/nodes/`) || (at === "/" && new URLSearchParams(here.search).get("sel") === id);
-      return shown && parsed(reply.body)?.status === "active" ? ["open"] : [];
+      const item = parsed(reply.body);
+      return shown && item && running(item) ? ["open"] : [];
     }
     return /^\/drafts\/(chains|library)\/[^/]+$/.test(p) ? ["shape"] : [];
   }
