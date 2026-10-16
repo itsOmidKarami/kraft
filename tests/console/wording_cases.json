@@ -289,6 +289,30 @@
       "row": {"display_status": "waiting", "current_node_id": "merge_request", "stop": {"kind": "wait", "node": "merge_request", "resume_at": "2026-10-15T12:05:00+00:00"}, "retry_at": "2026-10-15T15:00:00+00:00"},
       "group": "running",
       "tail": "merge request \u00b7 next check in 5m"
+    },
+    {
+      "name": "gate-with-a-hyphenated-approval-id",
+      "row": {"display_status": "needs_you", "current_node_id": "code-approval", "pending_gate": "code-approval", "stop": {"kind": "gate", "node": "code-approval", "reason": null}},
+      "group": "needs",
+      "tail": "approve code"
+    },
+    {
+      "name": "cap-at-a-gate",
+      "row": {"display_status": "needs_you", "current_node_id": "spec_approval", "stop": {"kind": "cap", "node": "spec_approval", "reason": "Spent $0.04 of a $0.03 cap on approve spec. The other tasks were not interrupted."}},
+      "group": "needs",
+      "tail": "Spent $0.04 of a $0.03 cap on approve spec"
+    },
+    {
+      "name": "budget-at-a-gate",
+      "row": {"display_status": "needs_you", "current_node_id": "spec_approval", "stop": {"kind": "budget", "node": "spec_approval", "reason": null}},
+      "group": "needs",
+      "tail": "waiting for you at approve spec"
+    },
+    {
+      "name": "question-at-a-gate",
+      "row": {"display_status": "needs_you", "current_node_id": "sign_off", "stop": {"kind": "question", "node": "sign_off", "reason": "needs_context: is the plan's scope right?"}},
+      "group": "needs",
+      "tail": "agent asks: is the plan's scope right?"
     }
   ],
   "order": {
@@ -438,6 +462,36 @@
       "name": "stuck-without-a-reason",
       "item": { "display_status": "needs_you", "stop": { "kind": "stuck", "node": "verification", "reason": null } },
       "banner": { "kind": "stop", "node": "verification", "name": "verification", "text": "", "way": "" }
+    },
+    {
+      "name": "gate-with-a-hyphenated-approval-id",
+      "item": {"display_status": "needs_you", "pending_gate": "code-approval", "stop": {"kind": "gate", "node": "code-approval", "reason": null}},
+      "banner": {"kind": "gate", "node": "code-approval", "text": "", "way": "", "name": "approve code"}
+    },
+    {
+      "name": "gate-whose-artifact-is-empty",
+      "item": {"display_status": "needs_you", "pending_gate": "sign_off", "stop": {"kind": "gate", "node": "sign_off", "reason": null}, "chain_definition": {"nodes": [{"id": "sign_off", "kind": "gate", "artifact": ""}]}},
+      "banner": {"kind": "gate", "node": "sign_off", "text": "", "way": "", "name": "approve sign off"}
+    },
+    {
+      "name": "gate-whose-artifact-is-null",
+      "item": {"display_status": "needs_you", "pending_gate": "sign_off", "stop": {"kind": "gate", "node": "sign_off", "reason": null}, "chain_definition": {"nodes": [{"id": "sign_off", "kind": "gate", "artifact": null}]}},
+      "banner": {"kind": "gate", "node": "sign_off", "text": "", "way": "", "name": "approve sign off"}
+    },
+    {
+      "name": "cap-at-a-gate",
+      "item": {"display_status": "needs_you", "actions": ["retry"], "stop": {"kind": "cap", "node": "spec_approval", "reason": null}, "chain_definition": {"nodes": [{"id": "spec_approval", "kind": "gate"}]}},
+      "banner": {"kind": "limit", "node": "spec_approval", "text": "A limit was reached.", "way": "", "name": "approve spec"}
+    },
+    {
+      "name": "budget-at-a-gate",
+      "item": {"display_status": "needs_you", "actions": ["raise_budget"], "stop": {"kind": "budget", "node": "spec_approval", "reason": null, "scope": "work_item"}, "chain_definition": {"nodes": [{"id": "spec_approval", "kind": "gate"}]}},
+      "banner": {"kind": "limit", "node": "spec_approval", "text": "The budget ran out.", "way": "", "name": "approve spec"}
+    },
+    {
+      "name": "question-at-a-gate",
+      "item": {"display_status": "needs_you", "needs_context_question": "Is the plan's scope right?", "stop": {"kind": "question", "node": "sign_off", "reason": "needs_context: is the plan's scope right?"}, "chain_definition": {"nodes": [{"id": "sign_off", "kind": "gate", "artifact": "plan"}]}},
+      "banner": {"kind": "question", "node": "sign_off", "text": "Is the plan's scope right?", "way": "", "name": "approve plan"}
     }
   ],
   "events": [
@@ -497,7 +551,17 @@
     { "name": "budget-raised", "event": { "type": "budget_raised", "node_id": null, "payload": { "budget_usd": 5.0 } }, "line": "budget set to $5" },
     { "name": "budget-changed", "event": { "type": "budget_changed", "node_id": null, "payload": { "budget_usd": 7.5 } }, "line": "budget set to $7.5" },
     { "name": "title-edited", "event": { "type": "work_item_title_edited", "node_id": null, "payload": {} }, "line": "title edited" },
-    { "name": "brief-edited", "event": { "type": "work_item_description_edited", "node_id": null, "payload": {} }, "line": "brief edited" }
+    { "name": "brief-edited", "event": { "type": "work_item_description_edited", "node_id": null, "payload": {} }, "line": "brief edited" },
+    { "name": "node-started-named", "event": {"type": "node_started", "node_id": "spec_approval", "payload": {}}, "line": "approve spec started" },
+    { "name": "node-completed-named", "event": {"type": "node_completed", "node_id": "sign_off", "payload": {}}, "line": "approve plan finished" },
+    { "name": "session-started-named", "event": {"type": "worker_session_started", "node_id": "merge_request", "payload": {}}, "line": "a session started on merge request" },
+    { "name": "fix-round-named", "event": {"type": "fix_cycle_started", "node_id": "merge_request_feedback", "payload": {"cycle": 0}}, "line": "merge request feedback · fix loop round 1" },
+    { "name": "fix-round-finished-named", "event": {"type": "fix_cycle_finished", "node_id": "merge_request_feedback", "payload": {"cycle": 1, "committed": false}}, "line": "merge request feedback · fix loop round 2 · the fix changed nothing" },
+    { "name": "needs-you-named", "event": {"type": "work_item_needs_human", "node_id": "spec_approval", "payload": {"reason": "the gate's check failed"}}, "line": "stopped at approve spec: the gate's check failed" },
+    { "name": "escalation-named", "event": {"type": "escalation_message", "node_id": "sign_off", "payload": {"message": "why was this approved?"}}, "line": "escalation on approve plan: why was this approved?" },
+    { "name": "retried-named", "event": {"type": "work_item_retried", "node_id": "merge_request", "payload": {}}, "line": "retried merge request" },
+    { "name": "rate-limited-named", "event": {"type": "work_item_rate_limited", "node_id": "merge_request_feedback", "payload": {}}, "line": "merge request feedback hit a rate limit" },
+    { "name": "gate-with-a-hyphenated-approval-id", "event": {"type": "gate_requested", "node_id": "code-approval", "payload": {"gate": "code-approval"}}, "line": "approve code is waiting for you" }
   ],
   "event_ages": [
     [null, "now"],
