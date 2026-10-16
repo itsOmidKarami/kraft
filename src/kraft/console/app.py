@@ -17,6 +17,7 @@ from typing import ClassVar
 from urllib.parse import urlsplit
 
 from textual import events, on
+from textual.actions import parse
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
 from textual.color import Color
@@ -25,11 +26,11 @@ from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Input, Static
+from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
 from kraft.console import runner, theme, words
-from kraft.console.dialogs import Confirm, Dialog
+from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
 from kraft.console.output import OutputPanel
 from kraft.console.prompt import Prompt, commands
@@ -451,10 +452,27 @@ class KraftConsole(App):
             self.exit()
 
     def action_keys(self) -> None:
-        if self.screen.query(HelpPanel):
-            self.action_hide_help_panel()
-        else:
-            self.action_show_help_panel()
+        """`?`: Kraft's own list of keys, not Textual's panel (which squeezes
+        the screen and lists the framework's bindings in its own words). Over
+        the frame only: a dialog's keys are its own."""
+        if self.screen is self.default_screen:
+            self.push_screen(Keys(self.screen_keys()))
+
+    def screen_keys(self) -> list[tuple[str, str]]:
+        """The shown view's keys that act now, `(keys, label)`, one row per
+        label: `j ↓ down`. Kitty's `shift+R` name for `R` is left out."""
+        found: dict[str, list[str]] = {}
+        for binding in Binding.make_bindings(self.view.BINDINGS):
+            _, name, parameters = parse(binding.action)
+            if (
+                binding.key.startswith("shift+")
+                or self.view.check_action(name, parameters) is False
+            ):
+                continue
+            shown = found.setdefault(binding.description, [])
+            if (key := self.get_key_display(binding)) not in shown:
+                shown.append(key)
+        return [(" ".join(keys), label) for label, keys in found.items()]
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         # Textual's own theme picker lists its themes; Kraft has two.

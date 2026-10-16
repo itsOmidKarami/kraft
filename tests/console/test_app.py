@@ -13,13 +13,13 @@ from support.console_board import _text
 from support.harness import connected_repo
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher, Footer, HelpPanel, Input
+from textual.widgets import ContentSwitcher, Footer, Input
 
 from kraft import cli, client
 from kraft.console import app as console_app
 from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
-from kraft.console.dialogs import Confirm, Note
+from kraft.console.dialogs import Confirm, Keys, Note
 from kraft.console.live import Link
 from kraft.console.prompt import Prompt
 from kraft.console.screens import VIEWS, View
@@ -288,14 +288,43 @@ def test_the_keys_move_between_views(console, start, keys, view, running):
     assert console.run(scenario) == (view, True, running)
 
 
-def test_question_mark_opens_and_closes_every_key(console):
-    async def scenario(app, pilot):
-        await pilot.press("question_mark")
-        opened = bool(app.screen.query(HelpPanel))
-        await pilot.press("question_mark")
-        return opened, bool(app.screen.query(HelpPanel))
+@pytest.mark.parametrize(
+    ("view", "close", "here"),
+    [
+        ("board", "question_mark", ["f filter", "v peek", "↓ j down"]),
+        ("server", "escape", ["d doctor", "R restart", "f filter", "↓ j down"]),
+        ("repos", "question_mark", ["c connect", "↓ j down"]),
+    ],
+    ids=["board-closes-on-?", "server-closes-on-esc", "repos"],
+)
+def test_question_mark_lists_this_screens_keys_and_kraft_s_own(console, view, close, here):
+    """`?` is Kraft's dialog, not Textual's panel: the shown view's keys that
+    act now, then the frame's, in the footer's words, with none of Textual's
+    own (focus next, copy text). It squeezes nothing, and `?` or Esc closes it."""
 
-    assert console.run(scenario) == (True, False)
+    async def scenario(app, pilot):
+        app.show(view)
+        await pilot.pause()
+        width = app.view.size.width
+        await pilot.press("question_mark")
+        await console.until(pilot, lambda: isinstance(app.screen, Keys))
+        listed = [
+            [
+                " ".join(line.split())
+                for line in str(app.screen.query_one(f"#keys-{part}").render()).split("\n")
+            ]
+            for part in ("here", "everywhere")
+        ]
+        squeezed = app.view.size.width != width
+        await pilot.press(close)
+        await pilot.pause()
+        return listed, squeezed, isinstance(app.screen, Keys)
+
+    (mine, everywhere), squeezed, still = console.run(scenario)
+    assert set(here) <= set(mine)
+    assert {"^p palette", "? keys", "esc back"} <= set(everywhere)
+    assert not any("Focus" in line or "Copy" in line for line in mine + everywhere)
+    assert (squeezed, still) == (False, False)
 
 
 @pytest.mark.parametrize(

@@ -206,17 +206,30 @@ OutputPanel {
     color: $kraft-muted;
 }
 
-Confirm, Note, Menu, Connect, NewItem {
+Confirm, Note, Menu, Connect, NewItem, Keys {
     align: center middle;
 }
 
-#confirm, #note, #menu, #connect, #new-item {
+.keys-head {
+    text-style: bold;
+}
+
+#keys-here {
+    margin-bottom: 1;
+}
+
+#confirm, #note, #menu, #connect, #new-item, #keys {
     width: 72;
     max-width: 100%;
     height: auto;
     padding: 1 2;
     background: $surface;
     border: solid $kraft-line;
+}
+
+/* After the dialogs' shared width: the keys need less. */
+#keys {
+    width: 52;
 }
 
 #listing, #note-lines {

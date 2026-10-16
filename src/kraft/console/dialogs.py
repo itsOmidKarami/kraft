@@ -86,6 +86,51 @@ class Confirm(Dialog[bool]):
         self._answer(event.button.id == "yes")
 
 
+#: What `?` lists under "Everywhere": the frame's keys, as the footer words a key.
+EVERYWHERE = (
+    ("1 2 3 4", "board, server, add-ons, repos"),
+    ("/", "command"),
+    ("n", "new item"),
+    ("^p", "palette"),
+    ("^o", "output"),
+    ("esc", "back"),
+    ("q", "back or quit"),
+    ("^q", "quit"),
+    ("?", "keys"),
+)
+
+
+class Keys(Dialog[None]):
+    """`?` (spec §6): the keys of the screen it was opened on, `(keys,
+    label)`, then the ones every screen has, in the footer's words. Esc or
+    `?` closes it."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("question_mark", "cancel", "close")]
+
+    def __init__(self, here: Sequence[tuple[str, str]]) -> None:
+        super().__init__()
+        self.here = here
+
+    def compose(self) -> ComposeResult:
+        width = max(len(keys) for keys, _ in (*self.here, *EVERYWHERE)) + 2
+
+        def listed(rows: Sequence[tuple[str, str]]) -> Content:
+            return Content("\n").join(
+                Content.assemble((keys.ljust(width), "bold"), (label, "$kraft-muted"))
+                for keys, label in rows
+            )
+
+        with Vertical(id="keys"):
+            if self.here:
+                yield Static("This screen", classes="keys-head")
+                yield Static(listed(self.here), id="keys-here")
+            yield Static("Everywhere", classes="keys-head")
+            yield Static(listed(EVERYWHERE), id="keys-everywhere")
+
+    def action_cancel(self) -> None:
+        self._answer(None)
+
+
 class Note(Dialog[str | None]):
     """A line for the server (spec §7.2): a reject's note, a steer, the answer
     to an agent's question. Enter sends it; an empty one only when it is not
