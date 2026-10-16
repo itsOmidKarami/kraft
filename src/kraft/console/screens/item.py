@@ -20,7 +20,7 @@ from textual.widgets import ContentSwitcher, RichLog, Static
 from kraft import answers, client, logs, render
 from kraft.console import acts, words
 from kraft.console.dialogs import Reject, reject_asks
-from kraft.console.pulse import Working
+from kraft.console.pulse import Working, spins
 from kraft.console.screens import View
 from kraft.console.screens.board import bar_of, chain_line
 from kraft.console.screens.item_menu import MenuActions
@@ -281,12 +281,10 @@ class Item(MenuActions, View):
         )
         now = time.time()
         colour = bar_of(item)
+        # A running item's working line says where it is, with its time and spend.
+        where = "" if spins(item) else f" · {words.reason_tail(item, now)}"
         self.query_one("#item-status", Static).update(
-            Content.assemble(
-                ("● ", colour),
-                (status_words(item), colour),
-                (f" · {words.reason_tail(item, now)}", "$kraft-muted"),
-            )
+            Content.assemble(("● ", colour), (status_words(item), colour), (where, "$kraft-muted"))
         )
         cap = item.get("budget_cap") or {}
         money = ""

@@ -91,7 +91,7 @@ async def _read_done(console, app, pilot) -> None:
         (
             RUNNING,
             "Board › k7f2e9a0  Docs per major",
-            "● Running · implement",
+            "● Running",  # the working line carries where it is
             None,
             None,
             "4m",
