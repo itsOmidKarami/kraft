@@ -19,6 +19,7 @@ import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
+import { Select } from "../ui/Select";
 
 type Handlers = {
   reload: () => void;
@@ -340,10 +341,10 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       {steerable && paused.length > 1 && (
         <label className="item-check">
           steer goes to
-          <select className="item-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+          <Select className="item-select" value={target} onChange={(e) => setTarget(e.target.value)}>
             <option value="">every paused task</option>
             {paused.map((s) => <option key={s.id} value={s.hook_point}>{taskName(s.hook_point)}</option>)}
-          </select>
+          </Select>
         </label>
       )}
       {error && <p className="item-error" role="alert">{error}</p>}

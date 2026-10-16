@@ -83,8 +83,7 @@
 .lib-preview-title { margin: 0 0 10px; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
 .lib-preview-pick { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; font-size: var(--fs-meta); color: var(--text-muted); }
 .lib-preview-pick label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; max-width: 100%; }
-.lib-preview-pick select { max-width: min(280px, 100%); min-width: 0; min-height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: var(--fs-label) ui-monospace, Menlo, monospace; }
-.lib-preview-pick select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.lib-preview-pick .ui-select { max-width: min(280px, 100%); min-width: 0; }
 .lib-preview-note { margin: 4px 0 10px; font-size: var(--fs-label); color: var(--text-muted); }
 .lib-preview-note.is-bad { color: var(--bad); }
 .lib-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-width: 720px; }

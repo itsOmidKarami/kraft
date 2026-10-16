@@ -103,7 +103,6 @@
 .item-tail { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .item-tail-lines { align-self: stretch; margin: 0; padding: 6px 8px; list-style: none; border-radius: 6px; background: var(--bg); font: var(--fs-label)/1.45 ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .item-tail-lines li { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
-.item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }
 @media (max-height: 719px) { .item-card-facts { max-height: 64px; overflow-y: auto; } }
 
 /* The chain pane (Decisions §3, §5). */
@@ -255,3 +254,4 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 /* The cap stop's limit editor (RaiseLimit). */
 .rl-dialog.dialog { box-sizing: border-box; width: min(420px, 100%); }
 .rl-form { display: flex; flex-direction: column; gap: 12px; }
+.item-select { margin-left: 6px; }
