@@ -756,3 +756,34 @@ def test_end_after_coming_back_does_not_page_from_the_last_visits_boundary(board
         return seqs(app)
 
     assert console.run(scenario) == [8, 7]
+
+
+def test_the_overview_shows_the_new_version_of_the_document_on_return(board, monkeypatch):
+    """A new version of the gate's document that lands while another tab is
+    shown is what the Overview draws on return, and `a` approves its digest."""
+    detail, calls = _detail(GATE), []
+    _serve(monkeypatch, detail, calls=calls)
+    _serve_events(monkeypatch, [])
+    hold, done = _held_reads(monkeypatch, detail)
+    version = {"content": "new line 0 [/]\nnew line 1", "digest": "n3wd1g"}
+
+    async def artifact(work_item_id=None):
+        return version
+
+    console = board([GATE])
+    moved = GATE | {"updated_at": "2026-10-16T00:00:00+00:00"}
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, GATE["id"])
+        await pilot.press("right_square_bracket")
+        monkeypatch.setattr(client, "artifact", artifact)
+        app.view.rows_changed([moved], [{"seq": 1}])
+        await console.until(pilot, lambda: len(done) > 1)
+        await pilot.pause()
+        await pilot.press("left_square_bracket")
+        await console.until(pilot, lambda: _overview(app)[:1] == ["new line 0 [/]"])
+        await pilot.press("a")
+        await console.until(pilot, lambda: calls)
+        return calls
+
+    assert console.run(scenario) == [("approve_gate", ("spec_approval", "a91c03fe", "n3wd1g"), {})]
