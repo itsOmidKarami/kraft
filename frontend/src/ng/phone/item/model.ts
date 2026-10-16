@@ -11,7 +11,7 @@ import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
 import { gateName, nameOf } from "../../board/rowText";
-import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, REMOVE_FROM_QUEUE } from "../../item/sharedWords";
+import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, REMOVE_FROM_QUEUE, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -143,7 +143,10 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
     case "cancelled": {
       const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
       const at = str(ev?.payload.node_id) ?? item.current_node_id;
-      return { tone: "muted", title: "Cancelled", where: at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined, text: "The run stopped. Everything it produced is kept.", facts: [["reason", str(ev?.payload.reason) || "no reason given"], ...spent(item)] };
+      const where = at ? `at ${nameOf(item.chain_definition.nodes, at)}` : undefined;
+      const reason = item.ended_reason || str(ev?.payload.reason) || NO_REASON_GIVEN;
+      if (!ev && events.some((e) => e.type === "work_item_abandoned")) return { tone: "muted", title: ABANDONED, where, text: ABANDONED_TEXT, facts: [["reason", reason], ...spent(item)] };
+      return { tone: "muted", title: "Cancelled", where, text: "The run stopped. Everything it produced is kept.", facts: [["reason", reason], ...spent(item)] };
     }
     case "archived": return { tone: "muted", title: "Archived", text: "Restore it to bring it back to the board.", facts: [] };
     default: return null;

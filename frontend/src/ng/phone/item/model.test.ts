@@ -148,6 +148,9 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     const ev = (type: EventType, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
     expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
     expect(cardOf(mk("cancelled"), [ev("work_item_cancelled", { reason: "wrong repo" })])?.facts).toContainEqual(["reason", "wrong repo"]);
+    expect(cardOf(mk("cancelled", null, { ended_reason: "refiled as w9" }), [ev("work_item_abandoned", { reason: "refiled as w9" })]))
+      .toMatchObject({ title: "Abandoned", facts: [["reason", "refiled as w9"]] });
+    expect(cardOf(mk("cancelled"), [ev("work_item_abandoned", {})])?.facts).toContainEqual(["reason", "no reason given"]);
   });
 });
 

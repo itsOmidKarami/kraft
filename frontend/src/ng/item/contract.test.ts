@@ -14,9 +14,10 @@ describe("item page contract", () => {
   // R16, R27, R28, that the badge and tone read the server's display_status
   // and not the raw status, is pinned on headerState itself in status.test.ts.
 
-  // R17: cancelling keeps the branch and worktree; abandon deletes them and stays CLI-only.
+  // R17: cancelling keeps the branch and worktree; abandon deletes them and stays CLI-only. The page may
+  // say an item was abandoned (the card reads the event and the reason it kept); it never does it.
   it("never calls /abandon", () => {
-    const bad = sources(here).filter((f) => /abandon/i.test(readFileSync(f, "utf-8")));
+    const bad = sources(here).filter((f) => /\/abandon\b|abandonWorkItem/.test(readFileSync(f, "utf-8")));
     expect(bad.map((f) => relative(here, f))).toEqual([]);
   });
 });

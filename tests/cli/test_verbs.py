@@ -667,7 +667,7 @@ def test_every_grouped_verb_parses_to_a_handler(group, verb):
         args.append("a title")
     if verb == "reject":
         args += ["--note", "why"]
-    if verb in ("complete", "cancel"):
+    if verb in ("complete", "cancel", "abandon"):
         args += ["--reason", "why"]
     ns = cli.build_parser().parse_args(args)
     assert callable(ns.func)

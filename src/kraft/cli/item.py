@@ -147,6 +147,8 @@ def _is_cancelled(item_id: str | None) -> bool:
 
 
 def _cmd_abandon(ns: argparse.Namespace) -> None:
+    if not ns.reason.strip():
+        raise ValueError("an abandon reason is required: say why it is being dropped")
     if not ns.yes:
         # Cancel is already done for an item in `abandoned`, so "cancel it
         # instead" would be advice to do what is done; abandoning it can only
@@ -160,7 +162,9 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
             "abandon deletes the worktree and the item's branch: uncommitted work and "
             f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
-    common.emit(asyncio.run(client.abandon(ns.id)), common.item_action("abandoned {id}"), ns.json)
+    common.emit(
+        asyncio.run(client.abandon(ns.reason, ns.id)), common.item_action("abandoned {id}"), ns.json
+    )
 
 
 #: What the preview and bulk archive routes accept in one call.
@@ -853,6 +857,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "abandon", parents=[common], help="drop an item, deleting its worktree and branch"
     )
     abandon.add_argument("id", nargs="?")
+    abandon.add_argument(
+        "--reason",
+        required=True,
+        help="why it is being dropped; kept on the event and written to the item's bead",
+    )
     abandon.add_argument(
         "--yes",
         action="store_true",

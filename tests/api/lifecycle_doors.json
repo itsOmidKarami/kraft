@@ -403,7 +403,9 @@
     },
     "abandon": {
       "path": "abandon",
-      "body": {},
+      "body": {
+        "reason": "r"
+      },
       "takes": [
         "waiting_ci",
         "rate_limited",

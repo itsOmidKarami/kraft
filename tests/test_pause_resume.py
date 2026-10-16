@@ -566,7 +566,7 @@ def test_abandoning_a_waiting_item_is_accepted(monkeypatch, repo, client):
     """abandon refuses only 'active' (kraft.api.routes.lifecycle) -- a waiting item has no session
     to stop, so it can go straight to abandoned and reclaim its worktree."""
     _seed_waiting(client, repo)
-    r = client.post("/api/work-items/w1/abandon", json={})
+    r = client.post("/api/work-items/w1/abandon", json={"reason": "test"})
     assert r.status_code == 200
     assert client.get("/api/work-items/w1").json()["status"] == "abandoned"
 

@@ -697,7 +697,8 @@ async def remove_repo(request: Request, path: str):
         raise HTTPException(
             409,
             f"{entry['path']} has {live} open item(s), paused ones included; complete, "
-            "cancel or abandon them first (kraft item complete, cancel, or abandon --yes)",
+            "cancel or abandon them first "
+            "(kraft item complete, cancel, or abandon --reason '...' --yes)",
         )
     kept = [r for r in repos if r["path"] != entry["path"]]
     repo_id = entry.get("id")

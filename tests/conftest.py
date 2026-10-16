@@ -226,7 +226,7 @@ def fake_beads(request, monkeypatch):
     import kraft.adapters.beads as beads_mod
 
     fake = FakeBeads()
-    for name in ("intake", "complete", "search", "ready", "blocked_by"):
+    for name in ("intake", "complete", "annotate", "search", "ready", "blocked_by"):
         monkeypatch.setattr(beads_mod, name, getattr(fake, name))
 
     # Refused here and re-raised at teardown: Kraft swallows a failed intake

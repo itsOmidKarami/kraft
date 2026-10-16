@@ -97,7 +97,7 @@ describe("Api", () => {
   it.each([
     ["previews with dry_run=1 and the create body", (a: Api) => a.preview(filed), "/work-items?dry_run=1", filed],
     ["files to /work-items", (a: Api) => a.create(filed), "/work-items", filed],
-    ["abandons by id", (a: Api) => a.abandon("W 1"), "/work-items/W%201/abandon", {}],
+    ["abandons by id, with its reason", (a: Api) => a.abandon("W 1", "why"), "/work-items/W%201/abandon", { reason: "why" }],
   ])("%s", async (_, call, path, body) => {
     const f = fakeFetch(200, {});
     await call(new Api("http://h:1", undefined, f as any));

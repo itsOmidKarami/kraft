@@ -66,7 +66,7 @@ kraft item raise-budget [ID] --usd N|none   # raise the dollar cap that stopped 
 kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
-kraft item abandon [ID] --yes               # drop an item, deleting its worktree and branch
+kraft item abandon [ID] --reason "..." --yes  # drop an item, deleting its worktree and branch; the reason is kept and closes its bead
 kraft item archive [ID ...] [--reclaimable] [--yes]  # archive finished items, deleting their worktrees; previews, then needs --yes
 kraft item restore [ID]                     # put an archived item back under Done
 kraft item set-chain [ID] --chain C      # a not-yet-started item's chain

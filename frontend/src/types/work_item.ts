@@ -293,6 +293,8 @@ export interface WorkItem {
   queued?: { verb: string; since: string; storage: { used_bytes: number; limit_bytes: number } | null } | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
+  /** Why a person cancelled or abandoned it, from the reason on that event. Null for any other item, and for an abandon from before reasons were kept. */
+  ended_reason?: string | null;
   /** The latest changed-test-scope verification run, one entry per scope that
    *  finished; null when there is no run. Only on the detail endpoint. */
   test_result?: TestResult | null;

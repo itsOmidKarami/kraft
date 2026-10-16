@@ -200,7 +200,8 @@ def escalated(result: dict) -> str:
 
 #: cancel's sentence: what stays, and the verb that deletes it.
 CANCELLED = (
-    "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes deletes them)"
+    "cancelled {id}; its worktree and branch stay "
+    "(kraft item abandon {id} --reason '...' --yes deletes them)"
 )
 #: complete's sentence.
 COMPLETED = "marked {id} complete"

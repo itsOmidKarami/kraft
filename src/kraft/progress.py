@@ -323,7 +323,8 @@ def for_detail(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
     None until the node has started, while the item stands before it (the plan
     is not being followed yet, or is being rewritten after a rejection), and
     for a plan with no `## Task N` headings. A completed node, or a rework run
-    after a gate rejection, reads as every task done."""
+    after a gate rejection, reads as every task done, and so does a skipped
+    one."""
     node_id = chain_implementation_node(row)
     if node_id is None:
         return None
@@ -350,7 +351,11 @@ def for_detail(db, row, worktree: Path, run_dirs) -> ProgressReport | None:
     if not tasks:
         return None
     log = branch_log(row, worktree)
-    if last(ChainEvent.NODE_COMPLETED) > started or is_rework(evs, node_id):
+    # A skipped node moved the item on without its plan being done: settled all
+    # the same, as the board's other readers treat a skipped node as passed.
+    if max(last(ChainEvent.NODE_COMPLETED), last(ChainEvent.NODE_SKIPPED)) > started or is_rework(
+        evs, node_id
+    ):
         report = ProgressReport(
             current=len(tasks),
             total=len(tasks),

@@ -568,7 +568,7 @@ def test_abandon_refuses_without_yes(monkeypatch):
     """The worktree and branch go with the item, so the destructive verb asks
     first, and says unpushed commits go too: archive keeps those, abandon
     does not."""
-    ns = cli.build_parser().parse_args(["item", "abandon", "w1"])
+    ns = cli.build_parser().parse_args(["item", "abandon", "w1", "--reason", "why"])
     assert ns.yes is False
     with pytest.raises(ValueError, match="--yes") as refused:
         ns.func(ns)

@@ -50,7 +50,7 @@ def _progress_text(p: dict) -> str:
 
 
 #: The one command each `suggested_action` names (Kraft-s7c04.27).
-_SUGGESTED_VERBS = {"skip": "skip", "retry": "retry", "abandon": "abandon --yes"}
+_SUGGESTED_VERBS = {"skip": "skip", "retry": "retry", "abandon": 'abandon --reason "..." --yes'}
 
 
 def _suggestion_text(item: dict) -> str:

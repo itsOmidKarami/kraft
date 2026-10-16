@@ -45,10 +45,22 @@ async def intake(title: str, *, description: str | None = None, cwd: str | None 
     return json.loads(out[out.index("{") :])["id"]
 
 
-async def complete(bead_id: str, *, cwd: str | None = None) -> None:
+async def complete(bead_id: str, *, cwd: str | None = None, reason: str | None = None) -> None:
     await asyncio.to_thread(
         subprocess.run,
-        ["bd", "close", bead_id],
+        ["bd", "close", bead_id, *(["--reason", reason] if reason else [])],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+async def annotate(bead_id: str, text: str, *, cwd: str | None = None) -> None:
+    """Append a comment to a bead, leaving it open."""
+    await asyncio.to_thread(
+        subprocess.run,
+        ["bd", "comments", "add", bead_id, text],
         cwd=cwd,
         capture_output=True,
         text=True,
