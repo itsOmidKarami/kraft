@@ -188,10 +188,6 @@
 .gateview-label.is-gate, .gateview-item.is-sel .gateview-label { color: var(--text); }
 .gateview-item.is-sel .gateview-label { font-weight: 600; }
 .gateview-label.is-add { color: var(--ok); }
-.gateview-chip { padding: 1px 8px; border-radius: 999px; background: var(--bg); font-size: var(--fs-label); color: var(--text-muted); text-align: center; }
-.gateview-chip.tone-green { background: color-mix(in srgb, var(--ok) 18%, var(--bg)); color: var(--ok); }
-.gateview-chip.tone-red { background: color-mix(in srgb, var(--bad) 20%, var(--bg)); color: var(--bad); }
-.gateview-chip.tone-amber { background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); }
 .gateview-line { width: 56px; flex: none; margin-top: 27px; height: 0; border-top: 2px dashed var(--stroke); }
 .gateview-line.is-ran { border-top-style: solid; }
 .gateview-msg { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-sub); text-wrap: pretty; }

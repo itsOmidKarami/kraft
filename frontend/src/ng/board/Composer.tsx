@@ -20,6 +20,8 @@ import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip, hint } from "../ui/Tooltip";
 import { BRIEF_HINT } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
+import { Badge } from "../ui/Badge";
+import { chipClass } from "../ui/Chip";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -198,14 +200,14 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
       <div className="composer-indent composer-chips">
         <Menu
           label="Repo"
-          triggerClass="composer-chip"
+          triggerClass={chipClass()}
           trigger={<>{repo ? repoName(repo.path) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
           items={(repos ?? []).map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, spec: "", plan: "" }) }))}
         />
         <Menu
           label="Chain"
           description={repo?.default_chain ? defaultChainNote(repo.default_chain) : undefined}
-          triggerClass="composer-chip composer-mono"
+          triggerClass={chipClass("composer-mono")}
           trigger={<>{d.chain || "chain"} <span className="composer-muted">{full.length} nodes</span> <span aria-hidden className="board-caret">▾</span></>}
           items={chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => ({
             label: chainOptionText(c),
@@ -323,10 +325,10 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
   };
   if (path)
     return (
-      <span className="composer-chip composer-mono composer-attached" title={path}>
+      <Badge mono className="composer-attached" title={path}>
         <span className="composer-path">{kind} · {path}</span>
         <button type="button" className="composer-x" {...tip(`Remove the ${kind}`)} onClick={() => onPath("")}>✕</button>
-      </span>
+      </Badge>
     );
   return (
     <>

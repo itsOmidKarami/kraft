@@ -87,10 +87,9 @@
 .set-row-body { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .set-input { box-sizing: border-box; min-width: 120px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-label); }
 .set-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.set-value, .set-chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-label); cursor: pointer; }
-.set-value:hover, .set-chip:hover { background: var(--line); }
-.set-value:focus-visible, .set-chip:focus-visible, .set-mode:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.set-chips { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.set-value { padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-label); cursor: pointer; }
+.set-value:hover { background: var(--line); }
+.set-value:focus-visible, .set-mode:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .set-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .set-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .set-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
@@ -153,8 +152,6 @@
 .set-block.is-card > .set-hint, .set-block.is-card > .set-error { padding: 2px 8px; }
 .set-pencil { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); cursor: pointer; }
 .set-pencil:is(:hover, :focus-visible) { background: var(--line); }
-.set-chip.is-add { display: inline-flex; align-items: center; gap: 4px; border-style: dashed; color: var(--text-sub); }
-.set-chip { border-radius: 12px; }
 .set-modes.is-cards { gap: 10px; }
 .set-mode.is-card { flex-direction: row; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bg); }
 .set-mode.is-card:hover { background: var(--surface); }

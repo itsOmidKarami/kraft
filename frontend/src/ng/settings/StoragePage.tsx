@@ -11,6 +11,7 @@ import { CATEGORIES, CLEAN_SELECTED, CLEANABLE, cleanAll, HOUSEKEEPING, NOTHING_
 import { Block } from "./parts";
 import "./settings.css";
 import "./storage.css";
+import { Badge } from "../ui/Badge";
 
 /** Settings › Storage: what the worktrees use against the quota and limit, and
  *  which of them a clean-up may take. The figure is the server's cached
@@ -149,7 +150,7 @@ export function StoragePage() {
                     <tr key={i.id}>
                       <td><input type="checkbox" className="board-check" checked={checked.has(i.id)} disabled={!i.reclaimable} onChange={() => toggle(i.id)} aria-label={i.reclaimable ? `Select ${i.title}` : `${i.title}, cannot be cleaned up yet`} /></td>
                       <td><Link className="set-st-title" to={`/work-items/${encodeURIComponent(i.id)}`}>{i.title}</Link></td>
-                      <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <span className="set-st-tag"> {CLEANABLE}</span>}</td>
+                      <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <> <Badge>{CLEANABLE}</Badge></>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>
                       <td className="is-num">{i.documents_bytes ? humanSize(i.documents_bytes) : ""}</td>
                       <td>{ago(i.updated_at)}</td>

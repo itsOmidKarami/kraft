@@ -42,9 +42,6 @@
 .rp-k { padding-top: 2px; color: var(--text-muted); }
 .rp-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .rp-src { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
-.rp-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--fs-label); color: var(--text-muted); }
-.rp-chip.is-own { color: var(--text-sub); }
-.rp-chip.is-changed { border-color: var(--mark-change-line); color: var(--text); }
 .rp-v .segmented { flex-wrap: wrap; max-width: 100%; }
 .rp-none { display: inline-flex; align-items: center; gap: 6px; color: var(--text-sub); cursor: pointer; }
 

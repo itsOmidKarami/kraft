@@ -34,10 +34,7 @@
 .cfg-v.is-unset { color: var(--text-muted); }
 .cfg-row.is-own .cfg-v, .cfg-row.is-own .cfg-k { color: var(--text); }
 .cfg-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
-.cfg-chip { flex: none; padding: 0 6px; border-radius: 4px; font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
-.cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
 /* An own value only the item's draft holds, until Review & apply applies it. */
-.cfg-chip.is-draft { border: 1px solid var(--mark-change-line); color: var(--mark-change); }
 /* A value the chain's draft changes: the changed-value mark, on the value and a line at the row's edge. */
 .cfg-row.is-changed { box-shadow: inset 2px 0 0 var(--mark-change-line); }
 .cfg-row.is-changed .cfg-v { color: var(--mark-change); }

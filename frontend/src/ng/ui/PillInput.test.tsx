@@ -63,6 +63,20 @@ describe("PillInput", () => {
   });
 });
 
+describe("PillInput with a locked value", () => {
+  it("keeps it, says why on its ×, and says so when removal is tried", async () => {
+    const onChange = vi.fn();
+    render(<PillInput label="hosts" values={["localhost", "kraft.local"]} locked={{ localhost: { note: "You are connected as this host", refusal: "can't remove that" } }} onChange={onChange} />);
+    const x = screen.getByRole("button", { name: "Remove localhost" });
+    expect(x).toHaveAttribute("data-tip", "You are connected as this host");
+    await userEvent.click(x);
+    expect(screen.getByRole("alert")).toHaveTextContent("can't remove that");
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Remove kraft.local" }));
+    expect(onChange).toHaveBeenCalledWith(["localhost"]);
+  });
+});
+
 describe("PillInput with a closed set", () => {
   const GRANTS = [{ value: "git-commit", summary: "A plain git commit" }, { value: "git-rebase" }, { value: "git-push" }];
   function Grants({ onChange = vi.fn() }) {

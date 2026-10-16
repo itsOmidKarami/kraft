@@ -15,6 +15,7 @@ import { capitalise, gateName } from "../board/rowText";
 import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
+import { Badge } from "../ui/Badge";
 
 /** The gate review overlay (prototype 292–321, `openGateReview`): the gate's
  *  document beside the list of what changed, with the gate's decision. A
@@ -58,7 +59,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
       <div className="rv-gate-head">
         <h2 className="rv-gate-title">{capitalise(gateName(item.chain_definition.nodes, gate))}</h2>
         <span className="rv-mono rv-muted">{gate}</span>
-        <span className="rv-gate-tag">WAITING FOR YOU</span>
+        <Badge tone="warn" mono>WAITING FOR YOU</Badge>
         {pending > 0 && <span className="rv-muted">{pending} {pending === 1 ? "comment" : "comments"} pending</span>}
         {error && <span className="rv-error" role="alert">{error}</span>}
         <span className="rv-spacer" />

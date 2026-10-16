@@ -7,6 +7,7 @@ import { parseUserAgent } from "../../ua";
 import { SELF_RESTART, afterRestart, bindHost, useApply } from "../apply/store";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { PillInput } from "../ui/PillInput";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import { ACCESS_LEDE, EMPTY_HOSTS, REACHES, hostSuggestion } from "./accessWords";
@@ -40,7 +41,7 @@ export function AccessPage() {
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [notifyHost, setNotifyHost] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string | null>>({});
-  const [editing, setEditing] = useState<"port" | "password" | "host" | "lan" | null>(null);
+  const [editing, setEditing] = useState<"port" | "password" | "lan" | null>(null);
   const [draft, setDraft] = useState("");
   /** Local network's second field: the name the phone will use, saved to Allowed hosts with the bind. */
   const [lanHost, setLanHost] = useState("");
@@ -91,13 +92,13 @@ export function AccessPage() {
   const address = `${location.protocol}//${bindHost(back.bind)}:${back.port}`;
   const suggested = hostSuggestion(access);
   // Local network's password prompt reports under the Reach cards, as the bind it saves with.
-  const errKey = (what: "port" | "password" | "host" | "lan") => (what === "lan" ? "bind" : what);
+  const errKey = (what: "port" | "password" | "lan") => (what === "lan" ? "bind" : what);
   const closeEdit = () => {
     if (editing) err(errKey(editing), null);
     setEditing(null);
     setDraft("");
   };
-  const edit = (what: "port" | "password" | "host" | "lan", initial = "") => {
+  const edit = (what: "port" | "password" | "lan", initial = "") => {
     setEditing(what);
     setDraft(initial);
     err(errKey(what), null);
@@ -127,16 +128,6 @@ export function AccessPage() {
     const hosts = host && !access.allowed_hosts.includes(host) ? { allowed_hosts: [...access.allowed_hosts, host] } : {};
     if (await put("bind", { bind: "0.0.0.0", ...(draft && { password: draft }), ...hosts })) closeEdit();
   };
-  const addHost = async () => {
-    const h = draft.trim().replace(/,$/, "");
-    if (!h || access.allowed_hosts.includes(h)) return closeEdit();
-    if (await put("host", { allowed_hosts: [...access.allowed_hosts, h] })) closeEdit();
-  };
-  const removeHost = (h: string) => {
-    // The host this browser is on: removing it would refuse the very next request.
-    if (h === location.hostname) return err("host", "can't remove the host you're connected as");
-    void put("host", { allowed_hosts: access.allowed_hosts.filter((x) => x !== h) });
-  };
   // Undo takes back what waits on a restart, and only that: each key with a
   // restart item goes back to what is running. A key with none is already
   // what runs, or is held by KRAFT_HOST / KRAFT_PORT, whose value must never
@@ -161,7 +152,7 @@ export function AccessPage() {
     }
   };
   const keys = (save: () => void) => (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || (e.key === "," && editing === "host")) {
+    if (e.key === "Enter") {
       e.preventDefault();
       save();
     } else if (e.key === "Escape") {
@@ -254,23 +245,19 @@ export function AccessPage() {
           <>
             <Block id="set-hosts" title="Allowed hosts" card>
               <SetRow label="hosts" error={errors.host} hint="Off loopback, another device's browser is refused (403) unless the Host it sends is on this list: the DNS-rebinding guard. A browser on this machine is let in at 127.0.0.1, localhost or [::1]. On 127.0.0.1 the list is ignored.">
-                <ul className="set-chips">
-                  {access.allowed_hosts.map((h) => (
-                    <li key={h}><button type="button" className="set-chip" aria-label={`Remove ${h}`} title={h === location.hostname ? "You are connected as this host" : `Remove ${h}`} onClick={() => removeHost(h)}>{h} <span aria-hidden>×</span></button></li>
-                  ))}
-                  <li>
-                    {editing === "host" ? (
-                      <input ref={field} className="set-input" aria-label="Add a host or IP" placeholder="host or IP" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void addHost())} onBlur={() => void addHost()} />
-                    ) : (
-                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={12} aria-hidden /> add</button>
-                    )}
-                  </li>
-                </ul>
+                <PillInput
+                  label="Allowed hosts"
+                  values={access.allowed_hosts}
+                  placeholder="host or IP"
+                  noun="host"
+                  locked={{ [location.hostname]: { note: "You are connected as this host", refusal: "can't remove the host you're connected as" } }}
+                  onChange={(next) => void put("host", { allowed_hosts: next })}
+                />
               </SetRow>
               {access.allowed_hosts.length === 0 && (
                 <span className="set-hint is-warn">
                   {EMPTY_HOSTS}
-                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={12} aria-hidden /> add {suggested}</button></>}
+                  {suggested && <> <Button onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={12} aria-hidden /> add {suggested}</Button></>}
                 </span>
               )}
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}

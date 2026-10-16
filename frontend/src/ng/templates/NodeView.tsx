@@ -16,6 +16,7 @@ import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { ReadOnly } from "./addon";
 import { problemWord } from "./problems";
 import type { TSel } from "./sel";
+import { Badge } from "../ui/Badge";
 
 type Menu =
   | { t: "task"; step: string | null; at?: number; title: string }
@@ -208,7 +209,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
             </p>
           </div>
         )}
-        {extend && steps.length > 0 && <span className="tpl-extends-pill">extends {extend}</span>}
+        {extend && steps.length > 0 && <Badge className="tpl-extends">extends {extend}</Badge>}
       </div>
       {menu?.t === "task" && <TaskMenu anchor={anchor} title={menu.title} onClose={close} onPick={addTask} />}
       {menu?.t === "extend" && (

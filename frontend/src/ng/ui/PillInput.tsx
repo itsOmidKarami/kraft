@@ -8,7 +8,7 @@ import { Empty } from "./Empty";
  *  press Enter or comma to add; × or Backspace on an empty input removes one;
  *  Delete or Backspace on a focused pill's × removes it. `added` marks the pills
  *  that are new in the draft (green). The list is announced as it changes. */
-export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", empty, choices, noun = "value" }: {
+export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", empty, choices, noun = "value", locked }: {
   label: string;
   values: string[];
   added?: string[];
@@ -20,6 +20,8 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
   choices?: Choice[];
   /** What one value is, for the refusal ("grant"). */
   noun?: string;
+  /** Values that cannot be removed: why (the × tip) and what is said when one is tried. */
+  locked?: Record<string, { note: string; refusal: string }>;
 }) {
   const [text, setText] = useState("");
   const [said, setSaid] = useState("");
@@ -37,6 +39,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
     setSaid(`Added ${v}`);
   };
   const remove = (v: string) => {
+    if (locked?.[v]) return setRefused(locked[v].refusal);
     onChange(values.filter((x) => x !== v));
     setSaid(`Removed ${v}`);
     input.current?.focus();
@@ -64,7 +67,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
             }}
           >
             <span>{v}</span>
-            <button type="button" className="pill-x" {...tip(`Remove ${v}`)} onClick={() => remove(v)}>×</button>
+            <button type="button" className="pill-x" {...tip(`Remove ${v}`, locked?.[v]?.note)} onClick={() => remove(v)}>×</button>
           </li>
         ))}
         <li className="pill-add">
@@ -94,7 +97,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
               aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
               placeholder={values.length ? "add…" : placeholder}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => { setText(e.target.value); setRefused(null); }}
               onKeyDown={onKey}
               onBlur={() => add(text)}
             />

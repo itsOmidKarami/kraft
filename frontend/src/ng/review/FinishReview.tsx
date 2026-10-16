@@ -10,8 +10,9 @@ import { ADD_NOTE, ADD_TO_SUBMIT } from "../ui/reasons";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
 import { REQUEST_CHANGES, approveBlock, barText, drafts, outcomes } from "./finish";
-import { rangeName, threadRange } from "./Thread";
+import { LABEL_TONE, rangeName, threadRange } from "./Thread";
 import { sendOnModEnter } from "../keys";
+import { Badge } from "../ui/Badge";
 
 type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_target" | "chain_definition">;
 const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } as const;
@@ -154,7 +155,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
         {(toSend.length > 0 || !focused) && <ul className="rv-finish-list" aria-label="To send">
           {toSend.map(({ thread: t, comment: c }) => (
             <li key={c.id}>
-              {t.label && <span className={`rv-tag is-${t.label}`}>{{ must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" }[t.label]}</span>}
+              {t.label && <Badge tone={LABEL_TONE[t.label]} mono>{{ must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" }[t.label]}</Badge>}
               {/* A thread on no file is "on the whole change", as the page heads it (R10b-06). */}
               <span className="rv-mono rv-muted">{t.file_path ?? "the whole change"}{where(t)}</span>
               <span className="rv-finish-text">{c.body}</span>
