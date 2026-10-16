@@ -21,6 +21,15 @@ const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [
 export const offlineWords = (loadError: string | null) =>
   `Offline: ${loadError ? bannerError(loadError) : "the live connection dropped"}. What is shown may be out of date; changes are off until it reconnects.`;
 
+/** What a write answers while offline: the banner's promise, kept by the call itself. */
+export const OFFLINE_REFUSAL = "Offline: changes are off until it reconnects.";
+
+/** Whether the app is offline right now, for a write that has no hook to read it with. */
+export const isOffline = () => {
+  const s = useStore.getState();
+  return s.loadError !== null || s.connection === "reconnecting";
+};
+
 /** Reads the list again. */
 export const reload = () => useStore.getState().bootstrap();
 

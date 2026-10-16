@@ -1,9 +1,11 @@
 import { detailOf, jsonBody, request } from "../http";
+import { isOffline, OFFLINE_REFUSAL } from "../offline";
 
 /** An action's outcome: ok, or the server's own words for why not (rule 0.5). */
 export type Done<T = unknown> = { ok: true; body: T } | { ok: false; error: string };
 
 async function post<T = unknown>(path: string, body?: unknown, method = "POST"): Promise<Done<T>> {
+  if (isOffline()) return { ok: false, error: OFFLINE_REFUSAL };
   const r = await request<T>(path, jsonBody(method, body ?? {}));
   return r.status >= 200 && r.status < 300 ? { ok: true, body: r.body } : { ok: false, error: detailOf(r.body) };
 }

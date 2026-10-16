@@ -12,7 +12,7 @@
 
 .ph-header { flex: none; display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 2px 8px 0; }
 .ph-back { max-width: 50vw; display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px 0 4px; border: 0; background: transparent; font-size: var(--fs-body); color: var(--text-sub); cursor: pointer; }
-.ph-back-label { overflow-wrap: anywhere; text-align: left; }
+.ph-back-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; text-align: left; }
 .ph-header-id { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-root-header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px 6px; }
 
