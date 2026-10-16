@@ -31,6 +31,9 @@ proposes, and rehearses them with `--verify`.
 [What's new in 2.0](https://kraft-sdlc.dev/next/get-started/whats-new)
 has the rest, and what to check before you upgrade from 1.4.
 
+Want to look around first? [Try the dashboard demo](https://kraft-sdlc.dev/next/demo/):
+the web UI on sample data, in your browser, with nothing to install.
+
 ![The Kraft board in the dark graphite look: filters for chain, gate and stop reason above work items grouped by Needs you (a paused item with Resume, a failed one with Retry, and two waiting at a gate, each with its one button), Running and Not started, the unstarted items marked created paused, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge

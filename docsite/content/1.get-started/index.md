@@ -5,7 +5,7 @@ navigation:
 description: Decide whether Kraft fits, install it, and run your first work item.
 ---
 
-Still deciding whether Kraft is for you? Read [Why Kraft](/get-started/why-kraft)
+Want to see the interface first? Open the [demo](/demo/). Still deciding whether Kraft is for you? Read [Why Kraft](/get-started/why-kraft)
 and the [FAQ](/get-started/faq). Ready to try it? [Install](/get-started/install)
 Kraft, then run [your first work item](/get-started/first-work-item), and after
 it [the real chain](/get-started/the-real-chain) through its gates to a merged
