@@ -547,20 +547,27 @@ class KraftConsole(App):
             if count:
                 tabs += [" ", count]
             tabs.append(" · ")
-        self.query_one("#tabs", Static).update(
-            Content.assemble(
-                ("Kraft ", "bold"),
-                ("● live", "$success") if live else ("● reconnecting", "$kraft-muted"),
-                "   ",
-                *tabs[:-1],
-            )
+        head = Content.assemble(
+            ("Kraft ", "bold"),
+            ("● live", "$success") if live else ("● reconnecting", "$kraft-muted"),
+            "   ",
+            *tabs[:-1],
         )
+        self.query_one("#tabs", Static).update(head)
         where = home_relative(self.repo) if self.repo else "all repos"
         # `width` from a resize: inside one, `self.size` is still the old size.
-        wide = (width or self.size.width) >= WIDE
-        version = f" · v{self.version}" if wide else ""
+        total = width or self.size.width
+        version = f" · v{self.version}" if total >= WIDE else ""
         update_note = " · update available" if self.update_waiting else ""
-        self.query_one("#where", Static).update(Content(f"{where}{version}{update_note}"))
+        tail = version + update_note
+        # The scope gives way from the left, so the repo's own name stays
+        # (#where has padding-left 2).
+        room = total - head.cell_length - 2 - len(tail)
+        parts = where.split("/")
+        while len(where) > room and len(parts) > 1:
+            parts.pop(0)
+            where = "…/" + "/".join(parts)
+        self.query_one("#where", Static).update(Content(f"{where}{tail}"))
 
     def _tabs(self) -> list[tuple[str, str | tuple[str, str]]]:
         """Each top view's tab with its count (spec §5.4): how many need you
