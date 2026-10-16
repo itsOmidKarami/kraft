@@ -75,7 +75,9 @@ describe("Composer", () => {
     await settle();
     const listed = () => screen.getAllByRole("menuitemradio").map((m) => m.textContent ?? "");
     fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^plugins:ship/)]);
+    expect(listed().filter((t) => t.includes(":ship"))).toEqual([expect.stringMatching(/^plugins:ship · 1 nodes$/)]);
+    expect(listed()).toContain("✓default · 4 nodes");
+    expect(screen.getByRole("button", { name: /^default/ })).toHaveAccessibleDescription("default is the repo's default chain");
     fireEvent.click(screen.getByRole("button", { name: /^default/ }));
     fireEvent.click(screen.getByRole("button", { name: /^kraft-plugins/ }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /kraft-docs/ }));

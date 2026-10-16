@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
+import { useStore } from "./store";
+import { OFFLINE_REFUSAL } from "./writeGuard";
 
 function mockFetch(status: number, body: unknown) {
   return vi.fn().mockResolvedValue({
@@ -12,7 +14,10 @@ function mockFetch(status: number, body: unknown) {
   });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  useStore.setState({ connection: "connecting", loadError: null });
+  vi.restoreAllMocks();
+});
 
 describe("api", () => {
   it("listWorkItems GETs /work-items with include_abandoned and returns items + cursor", async () => {
@@ -28,6 +33,16 @@ describe("api", () => {
   it("throws with the server detail on non-2xx", async () => {
     vi.stubGlobal("fetch", mockFetch(422, { detail: "bad repo" }));
     await expect(api.getWorkItem("nope")).rejects.toThrow("bad repo");
+  });
+
+  it("refuses a write while offline without sending it, and still reads", async () => {
+    useStore.setState({ connection: "reconnecting" });
+    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "x", json: async () => ({}) });
+    vi.stubGlobal("fetch", f);
+    await expect(api.probeRepo("/r")).rejects.toThrow(OFFLINE_REFUSAL);
+    expect(f).not.toHaveBeenCalled();
+    await api.getWorkItem("w1");
+    expect(f).toHaveBeenCalledTimes(1);
   });
 
   it("throws a validation list's messages, not [object Object]", async () => {

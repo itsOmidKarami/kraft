@@ -5,7 +5,7 @@ import { repoName } from "../../format";
 import { countedAgainst } from "../settings/storageWords";
 import { useStore } from "../../store";
 import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
-import { chainsForRepo } from "../library/types";
+import { chainOptionText, chainsForRepo, defaultChainNote } from "../library/types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf, jsonBody, request } from "../http";
 import { useFocusSoon } from "../item/useFocusSoon";
@@ -202,12 +202,12 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         />
         <Menu
           label="Chain"
+          description={repo?.default_chain ? defaultChainNote(repo.default_chain) : undefined}
           triggerClass="composer-chip composer-mono"
           trigger={<>{d.chain || "chain"} <span className="composer-muted">{full.length} nodes</span> <span aria-hidden className="board-caret">▾</span></>}
           items={chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => ({
-            label: c.id,
+            label: chainOptionText(c),
             checked: c.id === d.chain,
-            hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " · repo default" : ""}`,
             onSelect: () => set({ chain: c.id }),
           }))}
         />

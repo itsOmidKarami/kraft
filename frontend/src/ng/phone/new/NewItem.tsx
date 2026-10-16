@@ -5,7 +5,7 @@ import { repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Repo, SearchResult, TemplateSummary } from "../../../types";
 import { FILED_PAUSED, KEEP_EDITING } from "../../board/newWords";
-import { chainsForRepo } from "../../library/types";
+import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import { useReason } from "../../ui/Reason";
@@ -110,10 +110,10 @@ export function NewItem() {
         <label className="ph-field">
           <span>Chain</span>
           <select className="ph-input ph-select" value={d.chain} aria-describedby={repo?.default_chain ? chainHint : undefined} onChange={(e) => set({ chain: e.target.value })}>
-            {chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes`}</option>)}
+            {chainsForRepo(chains, repo?.id).filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{chainOptionText(c)}</option>)}
           </select>
         </label>
-        {repo?.default_chain && <p className="ph-note" id={chainHint}>{repo.default_chain} is the repo's default chain</p>}
+        {repo?.default_chain && <p className="ph-note" id={chainHint}>{defaultChainNote(repo.default_chain)}</p>}
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>
         {error && !sheet.openId && <p className="ph-error" role="alert">{error}</p>}
         <p className="ph-note">{FILED_PAUSED}</p>
