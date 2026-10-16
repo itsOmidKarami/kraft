@@ -15,6 +15,7 @@ from kraft.console.live import Link
 GONE = client.ClientError("no Kraft server at http://127.0.0.1:1", kind=client.Failure.UNREACHABLE)
 DROPPED = client.ClientError("closed the event stream", kind=client.Failure.INTERRUPTED)
 TOKEN = client.ClientError("kraft 403: refused", kind=client.Failure.UNAUTHORIZED, status=403)
+BROKEN = client.status_error(500, "database disk image is malformed")
 #: In a scripted stream: it stays open, quiet, from here on.
 OPEN = object()
 
@@ -144,13 +145,29 @@ async def test_a_stream_that_ends_reconnects_from_the_last_event_seen(monkeypatc
         ([GONE], [], 15.0, [Link.DOWN]),
         ([([], 7), GONE], [[]], 15.0, [Link.LIVE, Link.RECONNECTING, Link.RECONNECTING]),
         ([([], 7), GONE], [[]], 0.0, [Link.LIVE, Link.RECONNECTING, Link.DOWN]),
+        ([BROKEN] * 3, [], 15.0, [Link.RECONNECTING, Link.RECONNECTING, Link.DOWN]),
+        (
+            [BROKEN, BROKEN, ([], 7), BROKEN],
+            [[]],
+            15.0,
+            [Link.RECONNECTING] * 2 + [Link.LIVE] + [Link.RECONNECTING] * 2,
+        ),
     ],
-    ids=["token-refused", "never-up", "restarting", "gone-past-grace"],
+    ids=[
+        "token-refused",
+        "never-up",
+        "restarting",
+        "gone-past-grace",
+        "server-error-stuck",
+        "server-error-passes",
+    ],
 )
 async def test_what_the_dot_says_after_a_failure(monkeypatch, boards, streams, grace, links):
     """A refused token is down at once, never "reconnecting" to a server that
     will refuse again. A server that was live and stops answering reads as
-    reconnecting for the grace a restart needs, then as down."""
+    reconnecting for the grace a restart needs, then as down. A server that
+    answers every board read with an error is down after a few, so its words
+    are shown; one that recovers between errors starts the count over."""
     _script(monkeypatch, boards, streams)
     monkeypatch.setattr(live, "GRACE_S", grace)
     watched, seen = _recording()
@@ -184,16 +201,51 @@ async def test_the_backoff_grows_until_a_stream_has_worked(monkeypatch, stream, 
     _script(monkeypatch, [([], 7)] * 12, [stream] * 6)
     monkeypatch.setattr(live, "BACKOFF_S", (0.011, 0.022, 0.033))
     seen_waits: list[float] = []
-    sleep = asyncio.sleep
+    rest = live.Live._rest
 
-    async def spy(delay, *args):
-        seen_waits.append(delay)
-        await sleep(delay, *args)
+    async def spy(self, seconds):
+        seen_waits.append(seconds)
+        await rest(self, seconds)
 
-    monkeypatch.setattr(live.asyncio, "sleep", spy)
+    monkeypatch.setattr(live.Live, "_rest", spy)
     watched, seen = _recording()
     await _run_until(watched, lambda: len(seen["links"]) >= 8)
-    assert [w for w in seen_waits if w in (0.011, 0.022, 0.033)][:4] == waits
+    assert seen_waits[:4] == waits
+
+
+async def test_a_server_that_answers_again_is_followed_at_once(monkeypatch):
+    """The health poll hearing the server back cuts the backoff short, so "No
+    server" clears when the server is up, not up to a backoff later."""
+    _script(monkeypatch, [GONE, ([], 7)], [])
+    monkeypatch.setattr(live, "BACKOFF_S", (60.0,))
+    monkeypatch.setattr(live, "HEALTH_EVERY_S", 0.05)
+    answers = iter([GONE])
+
+    async def health():
+        if next(answers, None) is not None:
+            raise GONE
+        return {"status": "ok"}
+
+    monkeypatch.setattr(client, "health", health)
+    watched, seen = _recording()
+    await _run_until(watched, lambda: Link.LIVE in seen["links"])
+    assert seen["links"][:2] == [Link.DOWN, Link.LIVE]
+
+
+async def test_a_retry_asked_for_before_the_first_read_does_not_skip_a_backoff(monkeypatch):
+    """The health poll can hear the server while the first board read is still
+    in flight; that retry is spent by the read, not kept for the first drop."""
+    _script(monkeypatch, [([], 7), ([], 8)], [[]])
+    monkeypatch.setattr(live, "BACKOFF_S", (60.0,))
+
+    async def health():
+        raise GONE
+
+    monkeypatch.setattr(client, "health", health)
+    watched, seen = _recording()
+    watched.retry()
+    await _run_until(watched, lambda: len(seen["links"]) >= 2)
+    assert seen["links"] == [Link.LIVE, Link.RECONNECTING]
 
 
 async def test_a_view_that_fails_ends_the_run_not_just_a_task(monkeypatch):

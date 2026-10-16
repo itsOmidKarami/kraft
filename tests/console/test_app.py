@@ -16,9 +16,10 @@ from textual.widgets import ContentSwitcher, Footer, HelpPanel
 
 from kraft import cli, client
 from kraft.console import app as console_app
+from kraft.console import live
 from kraft.console.app import TABS, KraftConsole
 from kraft.console.live import Link
-from kraft.console.screens import VIEWS
+from kraft.console.screens import VIEWS, View
 
 OTHER_INSTANCE = client.ClientError(
     "kraft: the server at x is a different instance", kind=client.Failure.OTHER_INSTANCE
@@ -51,25 +52,41 @@ def test_an_event_reads_the_board_again(console, stream, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("refusal", "said"),
+    ("refusal", "host", "said", "start"),
     [
-        (client.transport._unreachable, "No server at 127.0.0.1:"),
+        (client.transport._unreachable, None, "No server at 127.0.0.1:", True),
         (
             lambda: client.status_error(401, "a token this server does not know"),
+            None,
             "The server refused this machine's token (run/mcp-token).",
+            False,
         ),
+        (
+            lambda: client.status_error(500, "database disk image is malformed"),
+            None,
+            "The server could not show the board: 500: database disk image is malformed",
+            False,
+        ),
+        (client.transport._unreachable, "10.1.2.3", "No server at 10.1.2.3:", False),
     ],
-    ids=["no-server", "token-refused"],
+    ids=["no-server", "token-refused", "server-error", "no-server-elsewhere"],
 )
-def test_a_server_the_console_cannot_use_is_said_on_every_view(console, monkeypatch, refusal, said):
+def test_a_server_the_console_cannot_use_is_said_on_every_view(
+    console, monkeypatch, refusal, host, said, start
+):
     """No view is drawn over a server that is not there, and a refused token
     is never reported as no server: one sends a person to start a server that
-    is already running."""
+    is already running. A server that answers every board read with an error
+    is said in its own words, not "reconnecting" forever. "Start server" is
+    offered only for a server this machine can start."""
 
     async def board_rows(**kwargs):
         raise refusal()
 
     monkeypatch.setattr(client, "board_rows", board_rows)
+    monkeypatch.setattr(live, "BACKOFF_S", (0.1,))
+    if host:
+        monkeypatch.setenv("KRAFT_HOST", host)
 
     async def scenario(app, pilot):
         seen = []
@@ -77,13 +94,80 @@ def test_a_server_the_console_cannot_use_is_said_on_every_view(console, monkeypa
             app.show(name)
             await pilot.pause()
             seen.append((app.query_one("#down").display, app.query_one(ContentSwitcher).display))
-        return app.link, _text(app, "#down"), _text(app, "#tabs"), seen
+        button = app.query_one_optional("#start")
+        return (
+            app.link,
+            _text(app, "#down"),
+            _text(app, "#tabs"),
+            seen,
+            bool(button and button.display),
+        )
 
-    link, down, tabs, seen = console.run(scenario)
+    link, down, tabs, seen, offered = console.run(scenario)
     assert link is Link.DOWN
     assert down.startswith(said)
     assert "reconnecting" in tabs
     assert seen == [(True, False)] * len(TABS)
+    assert offered is start
+
+
+@pytest.mark.parametrize(
+    "live_first", [True, False], ids=["live-under-the-open-panel", "live-as-it-closes"]
+)
+def test_enter_on_no_server_starts_one_on_its_own(console, kraft_is, monkeypatch, live_first):
+    """Spec §7.3: the focused button runs `kraft admin start --detach` in the
+    output panel, which returns once the server answers; the console then
+    reconnects at once rather than at the end of its backoff."""
+    kraft_is("import sys; print(' '.join(sys.argv[1:]))")
+
+    async def gone(**kwargs):
+        raise client.transport._unreachable()
+
+    # The server is up once the scenario says so: the live loop's next read,
+    # due 0.5s after the first, must find it there, or it says DOWN again.
+    up, reads = [], []
+
+    async def board_rows(**kwargs):
+        reads.append(bool(up))
+        if not up:
+            raise client.transport._unreachable()
+        return [], 0
+
+    monkeypatch.setattr(client, "board_rows", board_rows)
+    monkeypatch.setattr(client, "health", gone)
+    retried = []
+    wake = live.Live.retry
+    monkeypatch.setattr(live.Live, "retry", lambda self: retried.append(True))
+
+    async def scenario(app, pilot):
+        def server_back() -> None:
+            up.append(True)
+            app._live_link(Link.LIVE, None)
+
+        await pilot.pause()
+        focused = app.focused.id
+        await pilot.press("enter")
+        await console.until(pilot, lambda: console.output(app)[-1:] == ["exit 0"])
+        # The server answers before the panel closes, or as it does: either way
+        # the frame's remembered focus must not be the button that is gone.
+        if live_first:
+            server_back()
+        await pilot.press("escape")
+        if not live_first:
+            server_back()
+        # The loop reads again now, not whenever its backoff ends.
+        wake(app.live)
+        await console.until(pilot, lambda: True in reads)
+        await pilot.pause()
+        return focused, console.output(app), retried, app.focused is app.view
+
+    assert console.run(scenario) == (
+        "start",
+        ["kraft admin start --detach", "admin start --detach", "exit 0"],
+        [True],
+        # The button is gone once the server is: the view's keys work again.
+        True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -211,7 +295,7 @@ def test_question_mark_opens_and_closes_every_key(console):
 @pytest.mark.parametrize(
     ("size", "no_server", "shown"),
     [
-        # (the tiny message, the narrow `? keys`, the no-server message)
+        # (the tiny message, the narrow `? keys`, the no-server message or its button)
         ((59, 24), False, (True, False, False)),
         ((80, 15), False, (True, False, False)),
         ((60, 16), False, (False, True, False)),
@@ -241,7 +325,7 @@ def test_a_small_window_asks_to_be_larger_and_a_narrow_one_keeps_one_key(
         return (
             app.query_one("#tiny").display and app.query_one("#tiny").region.area > 0,
             app.query_one("#narrow-keys").display and not app.query_one(Footer).display,
-            app.query_one("#down").display,
+            app.query_one("#down").display or app.query_one("#start").display,
         )
 
     assert console.run(scenario) == shown
@@ -399,3 +483,37 @@ def test_a_link_change_under_the_palette_still_marks_the_frame(console):
         return app.query_one("#down").display, app.query_one(ContentSwitcher).display
 
     assert console.run(scenario) == (True, False)
+
+
+#: Each dialog the console pushes over its frame, opened.
+DIALOGS = {"output": lambda app: app.action_output()}
+
+
+@pytest.mark.parametrize("dialog", list(DIALOGS))
+def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialog):
+    """A dialog is a pushed screen. The board, health and the no-server state
+    belong to the frame underneath it, and reach it all the same."""
+    seen = set()
+    monkeypatch.setattr(
+        View, "rows_changed", lambda self, rows, events: seen.add(("rows", self.id))
+    )
+    monkeypatch.setattr(View, "health_changed", lambda self, health: seen.add(("health", self.id)))
+
+    async def scenario(app, pilot):
+        DIALOGS[dialog](app)
+        await pilot.pause()
+        seen.clear()
+        app._live_event([{"id": "a1", "display_status": "needs_you"}], [])
+        app._live_health({"status": "degraded"})
+        app._live_link(Link.DOWN, None)
+        on_top = app.screen is not app.default_screen
+        await pilot.press("escape")
+        await pilot.pause()
+        return on_top, _text(app, "#tabs"), app.query_one("#down").display
+
+    on_top, tabs, down = console.run(scenario)
+    assert on_top
+    assert seen == {(hook, name) for hook in ("rows", "health") for name in VIEWS}
+    assert "Board 1" in tabs
+    assert "Server degraded" in tabs
+    assert down

@@ -6,23 +6,27 @@ line (and, from PR 2b, the prompt) stays on every view."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 import sys
 from collections.abc import Iterable
 from typing import ClassVar
+from urllib.parse import urlsplit
 
-from textual import events
+from textual import events, on
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal
 from textual.content import Content
 from textual.screen import Screen
 from textual.theme import Theme
-from textual.widgets import ContentSwitcher, Footer, HelpPanel, Static
+from textual.widgets import Button, ContentSwitcher, Footer, HelpPanel, Static
 
-from kraft import client, update
-from kraft.console import theme
+from kraft import client, config, update
+from kraft.console import runner, theme
 from kraft.console.live import Link, Live
+from kraft.console.output import OutputPanel
 from kraft.console.screens import VIEWS, View
 
 #: The top views, in tab order: the number keys `1`-`4` follow it.
@@ -78,12 +82,22 @@ def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
         return "The server refused this machine's token (run/mcp-token)."
+    if error is not None and error.kind != client.Failure.UNREACHABLE:
+        # A server that answers, but not with the board: its own words.
+        return f"The server could not show the board: {client.reason_of(str(error))}"
     return f"No server at {client.base_url().removeprefix('http://')}."
+
+
+def starts_here() -> bool:
+    """Whether "Start server" can start the server the console reads: only
+    one on this machine (spec §7.3)."""
+    return urlsplit(client.base_url()).hostname in config.LOOPBACK
 
 
 class KraftConsole(App):
     CSS_PATH = "kraft.tcss"
     TITLE = "Kraft"
+    SCREENS: ClassVar[dict] = {"output": OutputPanel}
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("1", "show('board')", "Board", show=False),
         Binding("2", "show('server')", "Server", show=False),
@@ -92,6 +106,7 @@ class KraftConsole(App):
         Binding("escape", "back", "back", show=False),
         Binding("q", "back(True)", "back or quit", show=False),
         Binding("question_mark", "keys", "keys"),
+        Binding("ctrl+o", "output", "output", show=False),
     ]
 
     def __init__(self) -> None:
@@ -111,6 +126,10 @@ class KraftConsole(App):
         self.update_waiting = False
         self._scoped = False
         self._last_top = "board"
+        #: The command running in the output panel; one at a time.
+        self.command: runner.Run | None = None
+        #: The command a first stop was sent to: a second one kills it.
+        self._stopping: runner.Run | None = None
         self.live = Live(
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
@@ -120,6 +139,8 @@ class KraftConsole(App):
             yield Static(id="tabs")
             yield Static(id="where")
         yield Static(id="down")
+        if starts_here():
+            yield Button("Start server", id="start")
         yield Static("make the window larger", id="tiny")
         with ContentSwitcher(initial="board"):
             for name, view in VIEWS.items():
@@ -131,6 +152,13 @@ class KraftConsole(App):
     def on_mount(self) -> None:
         self.show("board")
         self.run_worker(self.live.run, name="live")
+        # The child is in its own session, so a closed terminal or a `kill` never
+        # reaches it; leaving through `exit()` runs `on_unmount`, which ends it.
+        # Not the main thread, or no signals here: nothing to hand over.
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGHUP, signal.SIGTERM):
+                loop.add_signal_handler(sig, self.exit)
         # After the first paint: a cold cache reads the release feed over the network.
         self.call_after_refresh(self.run_worker, self._check_update, name="update")
 
@@ -159,6 +187,66 @@ class KraftConsole(App):
             return
         # markup=False: the server's words may hold `[/]`, which markup reads as a tag.
         self.notify(client.reason_of(str(error)), severity="error", markup=False)
+
+    async def run_command(self, argv: list[str]) -> int | None:
+        """Run `kraft <argv>` in the output panel, opening it (spec §4.7), and
+        return its exit code; None, and a toast, while another is running.
+        Await it from a worker."""
+        if self.command is not None:
+            self.notify("A command is still running: Ctrl+O shows it, x stops it.", markup=False)
+            return None
+        panel = self.get_screen("output", OutputPanel)
+        run = self.command = runner.Run(argv, panel.write_line)
+        # An app worker owns the bookkeeping: the caller's worker dies with the
+        # screen it ran on, and must then only stop waiting. Quitting cancels
+        # this one too, and `on_unmount` ends the command then.
+        done = asyncio.Future[int]()
+        self.run_worker(self._run(run, panel, done), group="command")
+        return await asyncio.shield(done)
+
+    async def _run(self, run: runner.Run, panel: OutputPanel, done: asyncio.Future[int]) -> None:
+        await self._show_panel()
+        panel.begin(run.argv)
+        code = await run.finish()
+        self.command = None
+        panel.end(code)
+        done.set_result(code)
+
+    async def _show_panel(self) -> None:
+        """The panel on top, once: Ctrl+P can open over it."""
+        panel = self.get_screen("output", OutputPanel)
+        if panel not in self.screen_stack:
+            await self.push_screen(panel)
+        while self.screen is not panel:
+            await self.pop_screen()
+
+    def stop_command(self) -> None:
+        """SIGINT; pressed again while the same command runs, the kill."""
+        run = self.command
+        if run is None:
+            return
+        if run is self._stopping:
+            self.run_worker(run.end())
+        else:
+            self._stopping = run
+            run.stop()
+
+    async def on_unmount(self) -> None:
+        # Quitting with a command running (spec §8): SIGINT, a bounded wait, SIGKILL.
+        if self.command is not None:
+            await self.command.end()
+
+    def action_output(self) -> None:
+        self.run_worker(self._show_panel())
+
+    @on(Button.Pressed, "#start")
+    def _start(self) -> None:
+        self.run_worker(self._start_server(), group="typed")
+
+    async def _start_server(self) -> None:
+        if await self.run_command(["admin", "start", "--detach"]) == 0:
+            # It returns once the server answers: follow it now, not after the backoff.
+            self.live.retry()
 
     def action_show(self, name: str) -> None:
         self.show(name)
@@ -208,10 +296,23 @@ class KraftConsole(App):
             view.health_changed(health)
 
     def _live_link(self, link: Link, error: client.ClientError | None) -> None:
+        was_down = self.link is Link.DOWN
         self.link = link
-        self.default_screen.set_class(link is Link.DOWN, "-down")
+        frame = self.default_screen
+        frame.set_class(link is Link.DOWN, "-down")
+        no_server = link is Link.DOWN and (
+            error is None or error.kind == client.Failure.UNREACHABLE
+        )
+        frame.set_class(no_server, "-no-server")
+        start = self.query_one_optional("#start", Button)
         if link is Link.DOWN:
             self.query_one("#down", Static).update(Content(down_sentence(error)))
+            # Focused once, on the way down: Enter presses it (spec §6).
+            if no_server and not was_down and start is not None:
+                start.focus()
+        elif was_down and frame.focused in (None, start):
+            # The frame's own focus, which the output panel may be covering.
+            frame.set_focus(self.view)
         if link is Link.LIVE and not self._scoped:
             self.run_worker(self._resolve_scope, name="scope", group="scope", exclusive=True)
         self._draw_top()

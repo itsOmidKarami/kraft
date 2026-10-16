@@ -42,8 +42,18 @@ Screen.-down ContentSwitcher {
 
 Screen.-down #down {
     display: block;
-    height: 1fr;
+    height: auto;
     padding: 1 2;
+}
+
+/* Only when nothing answers, and only for a server on this machine. */
+#start {
+    display: none;
+    margin: 0 2;
+}
+
+Screen.-no-server #start {
+    display: block;
 }
 
 Screen.-narrow Footer {
@@ -64,10 +74,44 @@ Screen.-tiny > * {
 
 /* Ids outrank the bare `> *`, and `-down` and `-narrow` name ids too. */
 Screen.-tiny #down,
+Screen.-tiny #start,
 Screen.-tiny #narrow-keys {
     display: none;
 }
 
 Screen.-tiny #tiny {
     display: block;
+}
+
+/* The output panel: above the prompt and footer, which stay in sight. */
+OutputPanel {
+    align: center bottom;
+}
+
+#output {
+    height: 70%;
+    margin-bottom: 2;
+    background: $surface;
+    border-top: solid $kraft-line;
+}
+
+#output-log {
+    height: 1fr;
+    background: $surface;
+}
+
+#output-bar {
+    height: 1;
+}
+
+#output-bar Button {
+    height: 1;
+    min-width: 8;
+    border: none;
+}
+
+#output-keys {
+    width: 1fr;
+    padding: 0 2;
+    color: $kraft-muted;
 }

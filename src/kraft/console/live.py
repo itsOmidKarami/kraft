@@ -7,6 +7,7 @@ as a worker, so each callback runs on the app's own loop."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import time
 from collections.abc import Callable
@@ -27,6 +28,10 @@ GRACE_S = 15.0
 #: How long a stream must stay open, without an event, to count as having
 #: worked: only then does the backoff start over.
 STABLE_S = 5.0
+#: How many board reads in a row the server may answer with an error (a 5xx,
+#: a 404, a refusal, an answer that is not JSON, no answer in time) before the
+#: views stop saying "reconnecting" and show the server's own words instead.
+STUCK_AFTER = 3
 
 
 class Link(enum.StrEnum):
@@ -58,6 +63,7 @@ class Live:
         self._dropped_at: float | None = None
         self._pending: list[dict] = []
         self._wake = asyncio.Event()
+        self._retry = asyncio.Event()
 
     async def run(self) -> None:
         # A TaskGroup, so a failure in any of the three ends the others and
@@ -66,11 +72,22 @@ class Live:
             for work in (self._follow, self._flusher, self._poll):
                 group.create_task(work())
 
+    def retry(self) -> None:
+        """Reconnect now rather than at the end of the backoff: the server is
+        known to answer again."""
+        self._retry.set()
+
     async def _follow(self) -> None:
         failures = 0
+        # Failures in a row from a server that answered, which a retry is not
+        # going to fix by itself.
+        stuck = 0
         while True:
             try:
                 rows, cursor = await client.board_rows()
+                stuck = 0
+                # A retry asked for before this read answered is spent.
+                self._retry.clear()
                 # From the cursor, not 0, so the stream does not replay history.
                 self.seq = cursor if self.seq is None else self.seq
                 self._connected, self._dropped_at = True, None
@@ -90,23 +107,30 @@ class Live:
                     if time.monotonic() - opened >= STABLE_S:
                         failures = 0
             except client.ClientError as exc:
+                stuck = 0 if exc.kind == client.Failure.UNREACHABLE else stuck + 1
                 self._dropped()
-                self.on_link(self._link_after(exc), exc)
-            await asyncio.sleep(BACKOFF_S[min(failures, len(BACKOFF_S) - 1)])
+                self.on_link(self._link_after(exc, stuck), exc)
+            await self._rest(BACKOFF_S[min(failures, len(BACKOFF_S) - 1)])
             failures += 1
+
+    async def _rest(self, seconds: float) -> None:
+        """The backoff's wait, cut short by `retry()`."""
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(seconds):
+                await self._retry.wait()
+        self._retry.clear()
 
     def _dropped(self) -> None:
         if self._connected:
             self._connected, self._dropped_at = False, time.monotonic()
 
-    def _link_after(self, exc: client.ClientError) -> Link:
+    def _link_after(self, exc: client.ClientError, stuck: int) -> Link:
         if exc.kind == client.Failure.UNAUTHORIZED:
             return Link.DOWN
-        if exc.kind == client.Failure.UNREACHABLE and (
-            self._dropped_at is None or time.monotonic() - self._dropped_at > GRACE_S
-        ):
-            return Link.DOWN
-        return Link.RECONNECTING
+        if exc.kind == client.Failure.UNREACHABLE:
+            gone = self._dropped_at is None or time.monotonic() - self._dropped_at > GRACE_S
+            return Link.DOWN if gone else Link.RECONNECTING
+        return Link.DOWN if stuck >= STUCK_AFTER else Link.RECONNECTING
 
     async def _flusher(self) -> None:
         while True:
@@ -130,4 +154,6 @@ class Live:
             except client.ClientError:
                 health = None
             self.on_health(health)
+            if health is not None and not self._connected:
+                self.retry()
             await asyncio.sleep(HEALTH_EVERY_S)
